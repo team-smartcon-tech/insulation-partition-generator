@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 1) .env 계열 파일 차단 (단, .env.example / *.example 예시 파일은 허용 — 값이 없는 템플릿)
+env_files="$(git diff --cached --name-only | grep -E '(^|/)\.env($|\.)' | grep -vE '\.example$' || true)"
+if [ -n "$env_files" ]; then
+  echo "ERROR: .env 파일은 커밋할 수 없습니다:"
+  echo "$env_files"
+  exit 1
+fi
+
+# 2) 고엔트로피 시크릿 휴리스틱 (AWS, GitHub, 일반 토큰)
+if git diff --cached -U0 | grep -E '(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' >/dev/null; then
+  echo "ERROR: 시크릿으로 보이는 문자열이 감지되었습니다."
+  exit 1
+fi
+
+exit 0

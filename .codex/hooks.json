@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync(0,'utf8'));const p=(i.tool_input&&i.tool_input.file_path)||'';if(/(^|[\\\\/])\\.env($|\\.)|\\.pem$|secret/i.test(p)){console.error('BLOCK: 민감 파일 수정 금지: '+p);process.exit(2);}\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync(0,'utf8'));const c=(i.tool_input&&i.tool_input.command)||'';if(/git\\s+push[^|&;]*\\bmain\\b/.test(c)){console.error('BLOCK: main 브랜치 직접 푸시 금지');process.exit(2);}\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync(0,'utf8'));const p=(i.tool_input&&i.tool_input.file_path)||'';if(p.includes('.agents/')){console.log('REMINDER: .agents/ 문서를 변경했습니다. 관련 Command/Skill도 갱신이 필요한지 확인하세요.');}\""
+          }
+        ]
+      }
+    ]
+  }
+}

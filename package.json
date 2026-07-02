@@ -1,0 +1,17 @@
+{
+  "name": "insulation-partition-generator",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SSX '단열재 나누기도' 기능을 독립 이관한 프로젝트 (Vite+React+wouter / Hono Cloudflare Worker / Supabase)",
+  "packageManager": "pnpm@10.33.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "dev:worker": "pnpm --filter worker dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  }
+}

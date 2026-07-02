@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+protected_branch="main"
+current_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo '')"
+
+if [ "$current_branch" = "$protected_branch" ]; then
+  echo "ERROR: $protected_branch 브랜치 직접 푸시는 금지되어 있습니다. PR을 통해 병합하세요."
+  exit 1
+fi
+
+exit 0
