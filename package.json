@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "dev": "pnpm --filter web dev",
     "dev:worker": "pnpm --filter worker dev",
     "build": "pnpm -r build",
