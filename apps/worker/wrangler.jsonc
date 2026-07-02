@@ -2,6 +2,9 @@
   // 단열재 나누기도 생성기 Worker — 프론트엔드(SPA) + 저장/불러오기 API 를 한 Worker 가 서빙.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "insulation-partition-generator",
+  // smarttech(team-smartcon-tech) Cloudflare 계정. 계정 ID는 시크릿이 아님(SSX도 커밋됨).
+  // GitHub 연결 빌드/CLI 가 이 계정으로 확정 배포되도록 명시.
+  "account_id": "2b025f536a98444871b3306efbfd6b2a",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-02",
   "compatibility_flags": ["nodejs_compat"],
