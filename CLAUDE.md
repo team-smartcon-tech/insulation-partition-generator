@@ -40,7 +40,7 @@ pnpm -r typecheck
 **인증 (DCR 통합로그인 · 회원)**
 
 - 앱 전체 로그인 벽. `apps/web/src/features/auth/*`(AuthContext·AuthGate·LoginPage), worker `apps/worker/src/auth.ts` + `/api/auth/{login,logout,me}` + `app.use('/api/*', authMiddleware)`.
-- worker가 **배포 dcr-app 의 member/login**(이름+회사명+비번)을 서버-투-서버 호출 → **자체 시크릿 `IPG_JWT_SECRET`** 으로 12h 세션 토큰 재발급(HttpOnly `ipg_session`). DCR JWT_SECRET 미공유.
+- worker가 **배포 dcr-app 의 `/auth/login`**(이메일+비번, SSX 로그인과 동일)을 서버-투-서버 호출 → **자체 시크릿 `IPG_JWT_SECRET`** 으로 12h 세션 토큰 재발급(HttpOnly `ipg_session`). DCR JWT_SECRET 미공유. 허용 role: super_admin/system_admin/site_admin/member.
 - 백엔드 URL: `DCR_BASE_URL`(prod=`dcr-app.jogh.workers.dev`, dev=`dcr-app-dev.jogh.workers.dev`, 로컬은 `.dev.vars`). 시크릿 `IPG_JWT_SECRET` 필수.
 
 **함정 (Gotchas)**

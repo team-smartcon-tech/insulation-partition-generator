@@ -11,7 +11,7 @@ const ME_KEY = ["auth", "me"] as const;
 interface AuthContextValue {
   user: AuthUser | null;
   isLoading: boolean;
-  login: (body: { name: string; company_name: string; password: string }) => Promise<void>;
+  login: (body: { email: string; password: string }) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [qc]);
 
   const loginMut = useMutation({
-    mutationFn: (body: { name: string; company_name: string; password: string }) =>
+    mutationFn: (body: { email: string; password: string }) =>
       postLogin(body).then((r) => r.user),
     onSuccess: (u) => {
       qc.setQueryData(ME_KEY, u);

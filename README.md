@@ -57,7 +57,7 @@ SUPABASE_URL=https://yzercziwazfrjsjnmbhr.supabase.co          # 저장/불러�
 SUPABASE_SERVICE_ROLE_KEY=<대시보드 service_role 키>           # 로그인만 볼 땐 비워도 됨
 ```
 
-→ `pnpm dev` 후 http://localhost:5173 에서 **DCR 회원 계정(이름·회사명·비밀번호)** 으로 로그인.
+→ `pnpm dev` 후 http://localhost:5173 에서 **DCR 계정(이메일·비밀번호, SSX 로그인과 동일)** 으로 로그인.
 
 ---
 

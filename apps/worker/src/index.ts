@@ -13,11 +13,12 @@ import {
   type Env,
   type SessionUser,
   authMiddleware,
+  isAllowedRole,
   signSession,
   verifySession,
   buildSessionCookie,
   buildLogoutCookie,
-  callDcrMemberLogin,
+  callDcrLogin,
   checkLoginRateLimit,
   parseCookie,
 } from "./auth";
@@ -116,40 +117,39 @@ const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(er
 
 app.get("/health", (c) => c.json({ ok: true, service: "insulation-partition-generator" }));
 
-// ─── 인증 (DCR 통합로그인 · 회원) ───────────────────────────
-// member/login 으로 자격증명 검증 위임 → 자체 시크릿으로 세션 토큰 재발급(HttpOnly 쿠키).
+// ─── 인증 (DCR 통합로그인 · SSX 로그인과 동일: 이메일+비밀번호) ─────
+// DCR /auth/login 으로 자격증명 검증 위임 → 자체 시크릿으로 세션 토큰 재발급(HttpOnly 쿠키).
 // 미들웨어보다 먼저 등록되어야 게이트에 걸리지 않는다.
 
-/** POST /api/auth/login — 회원 로그인(이름+회사명+비밀번호) */
+/** POST /api/auth/login — 로그인(이메일+비밀번호, SSX 동일) */
 app.post("/api/auth/login", async (c) => {
   const ip = c.req.header("CF-Connecting-IP") || "unknown";
   if (!(await checkLoginRateLimit(c.env, ip))) {
     return c.json({ error: "시도가 너무 많습니다. 잠시 후 다시 시도하세요." }, 429);
   }
   const body = (await c.req.json().catch(() => null)) as
-    | { name?: unknown; company_name?: unknown; password?: unknown }
+    | { email?: unknown; password?: unknown }
     | null;
-  const name = typeof body?.name === "string" ? body.name.trim() : "";
-  const company_name = typeof body?.company_name === "string" ? body.company_name.trim() : "";
+  const email = typeof body?.email === "string" ? body.email.trim() : "";
   const password = typeof body?.password === "string" ? body.password : "";
-  if (!name || !company_name || !password) {
-    return c.json({ error: "이름·회사명·비밀번호를 입력하세요." }, 400);
+  if (!email || !password) {
+    return c.json({ error: "이메일·비밀번호를 입력하세요." }, 400);
   }
 
-  const r = await callDcrMemberLogin(c.env, { name, company_name, password });
-  if (!r.ok || !r.person) {
+  const r = await callDcrLogin(c.env, { email, password });
+  if (!r.ok || !r.user) {
     const status = r.status === 429 ? 429 : r.status >= 500 ? 502 : 401;
     return c.json({ error: r.error || "로그인 실패" }, status as 401);
   }
-  if (r.person.kind !== "member") {
-    return c.json({ error: "회원 계정이 아닙니다." }, 403);
+  if (!isAllowedRole(r.user.role)) {
+    return c.json({ error: "접근 권한이 없습니다." }, 403);
   }
 
   const user: SessionUser = {
-    id: r.person.id,
-    name: r.person.name,
-    companyName: r.person.company_name,
-    role: "member",
+    id: r.user.id,
+    name: r.user.name,
+    email: r.user.email,
+    role: r.user.role,
   };
   let token: string;
   try {
@@ -159,8 +159,7 @@ app.post("/api/auth/login", async (c) => {
     return c.json({ error: "서버 설정 오류(IPG_JWT_SECRET)" }, 500);
   }
   c.header("Set-Cookie", buildSessionCookie(c.env, token));
-  // PII(phone 등)는 응답에 담지 않는다.
-  return c.json({ ok: true, user: { id: user.id, name: user.name, companyName: user.companyName } });
+  return c.json({ ok: true, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
 });
 
 /** POST /api/auth/logout — 세션 쿠키 만료 */
@@ -174,7 +173,7 @@ app.get("/api/auth/me", async (c) => {
   const token = parseCookie(c.req.header("Cookie") ?? null, c.env.COOKIE_NAME || "ipg_session");
   const user = token ? await verifySession(c.env, token) : null;
   if (!user) return c.json({ error: "인증이 필요합니다." }, 401);
-  return c.json({ user: { id: user.id, name: user.name, companyName: user.companyName, role: user.role } });
+  return c.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
 });
 
 // 이하 /api/* 는 로그인 필수 (/health, /api/auth/* 는 미들웨어 내부에서 통과)

@@ -1,5 +1,5 @@
 /**
- * 로그인 화면 — DCR 회원 로그인(이름 + 회사명 + 비밀번호).
+ * 로그인 화면 — DCR 로그인(이메일 + 비밀번호, SSX 동일).
  * 성공 시 홈("/")으로 이동. 이미 로그인 상태면 홈으로 리다이렉트.
  */
 import { useEffect, useState } from "react";
@@ -12,8 +12,7 @@ import { AuthError } from "./authApi";
 export default function LoginPage() {
   const { user, isLoading, login } = useAuth();
   const [, setLocation] = useLocation();
-  const [name, setName] = useState("");
-  const [companyName, setCompanyName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,13 +22,13 @@ export default function LoginPage() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !companyName.trim() || !password) {
-      toast.error("이름·회사명·비밀번호를 모두 입력하세요.");
+    if (!email.trim() || !password) {
+      toast.error("이메일·비밀번호를 입력하세요.");
       return;
     }
     setSubmitting(true);
     try {
-      await login({ name: name.trim(), company_name: companyName.trim(), password });
+      await login({ email: email.trim(), password });
       toast.success("로그인되었습니다.");
       setLocation("/", { replace: true });
     } catch (err) {
@@ -56,16 +55,12 @@ export default function LoginPage() {
       >
         <div className="mb-6 text-center">
           <h1 className="text-lg font-bold text-slate-800">단열재 나누기도 생성기</h1>
-          <p className="mt-1 text-xs text-slate-400">회원 로그인 (이름 · 회사명 · 비밀번호)</p>
+          <p className="mt-1 text-xs text-slate-400">DCR 계정으로 로그인 (이메일 · 비밀번호)</p>
         </div>
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-500">이름</label>
-            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} autoComplete="username" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-500">회사명</label>
-            <input className={inputCls} value={companyName} onChange={(e) => setCompanyName(e.target.value)} autoComplete="organization" />
+            <label className="mb-1 block text-xs font-semibold text-slate-500">이메일</label>
+            <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" autoFocus />
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-500">비밀번호</label>
