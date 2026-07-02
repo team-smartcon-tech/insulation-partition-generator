@@ -40,10 +40,14 @@ async function elevFetch<T = unknown>(
   // FormData 는 Content-Type 을 브라우저가 boundary 포함해 설정하므로 지정하지 않는다.
   if (!isForm) headers["Content-Type"] = "application/json";
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${BASE}${path}`, { ...options, credentials: "include", headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    // 세션 만료/미인증 → 인증 컨텍스트에 알려 /login 으로 유도
+    if (res.status === 401) {
+      window.dispatchEvent(new CustomEvent("ipg-auth-expired"));
+    }
     throw new ElevApiError(
       (body as { error?: string })?.error || `프로젝트 API 오류 (${res.status})`,
       res.status,

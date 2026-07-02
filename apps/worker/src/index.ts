@@ -9,15 +9,22 @@
  *     로그인 도입 시 이 파일의 라우트 앞단에 미들웨어로 추가한다.
  */
 import { Hono } from "hono";
+import {
+  type Env,
+  type SessionUser,
+  authMiddleware,
+  signSession,
+  verifySession,
+  buildSessionCookie,
+  buildLogoutCookie,
+  callDcrMemberLogin,
+  checkLoginRateLimit,
+  parseCookie,
+} from "./auth";
 
-export interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_SERVICE_ROLE_KEY: string;
-  /** DXF 저장 버킷 이름 (미설정 시 elev-dxf). 3-B에서 실제 버킷 생성 후 확정. */
-  ELEV_DXF_BUCKET?: string;
-}
+export type { Env };
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>();
 
 const dxfBucket = (env: Env) => env.ELEV_DXF_BUCKET || "elev-dxf";
 
@@ -109,6 +116,70 @@ const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(er
 
 app.get("/health", (c) => c.json({ ok: true, service: "insulation-partition-generator" }));
 
+// ─── 인증 (DCR 통합로그인 · 회원) ───────────────────────────
+// member/login 으로 자격증명 검증 위임 → 자체 시크릿으로 세션 토큰 재발급(HttpOnly 쿠키).
+// 미들웨어보다 먼저 등록되어야 게이트에 걸리지 않는다.
+
+/** POST /api/auth/login — 회원 로그인(이름+회사명+비밀번호) */
+app.post("/api/auth/login", async (c) => {
+  const ip = c.req.header("CF-Connecting-IP") || "unknown";
+  if (!(await checkLoginRateLimit(c.env, ip))) {
+    return c.json({ error: "시도가 너무 많습니다. 잠시 후 다시 시도하세요." }, 429);
+  }
+  const body = (await c.req.json().catch(() => null)) as
+    | { name?: unknown; company_name?: unknown; password?: unknown }
+    | null;
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const company_name = typeof body?.company_name === "string" ? body.company_name.trim() : "";
+  const password = typeof body?.password === "string" ? body.password : "";
+  if (!name || !company_name || !password) {
+    return c.json({ error: "이름·회사명·비밀번호를 입력하세요." }, 400);
+  }
+
+  const r = await callDcrMemberLogin(c.env, { name, company_name, password });
+  if (!r.ok || !r.person) {
+    const status = r.status === 429 ? 429 : r.status >= 500 ? 502 : 401;
+    return c.json({ error: r.error || "로그인 실패" }, status as 401);
+  }
+  if (r.person.kind !== "member") {
+    return c.json({ error: "회원 계정이 아닙니다." }, 403);
+  }
+
+  const user: SessionUser = {
+    id: r.person.id,
+    name: r.person.name,
+    companyName: r.person.company_name,
+    role: "member",
+  };
+  let token: string;
+  try {
+    token = await signSession(c.env, user);
+  } catch (e) {
+    console.error("[auth/login] 토큰 발급 실패:", e instanceof Error ? e.message : String(e));
+    return c.json({ error: "서버 설정 오류(IPG_JWT_SECRET)" }, 500);
+  }
+  c.header("Set-Cookie", buildSessionCookie(c.env, token));
+  // PII(phone 등)는 응답에 담지 않는다.
+  return c.json({ ok: true, user: { id: user.id, name: user.name, companyName: user.companyName } });
+});
+
+/** POST /api/auth/logout — 세션 쿠키 만료 */
+app.post("/api/auth/logout", (c) => {
+  c.header("Set-Cookie", buildLogoutCookie(c.env));
+  return c.json({ ok: true });
+});
+
+/** GET /api/auth/me — 현재 세션(쿠키 로컬 검증) */
+app.get("/api/auth/me", async (c) => {
+  const token = parseCookie(c.req.header("Cookie") ?? null, c.env.COOKIE_NAME || "ipg_session");
+  const user = token ? await verifySession(c.env, token) : null;
+  if (!user) return c.json({ error: "인증이 필요합니다." }, 401);
+  return c.json({ user: { id: user.id, name: user.name, companyName: user.companyName, role: user.role } });
+});
+
+// 이하 /api/* 는 로그인 필수 (/health, /api/auth/* 는 미들웨어 내부에서 통과)
+app.use("/api/*", authMiddleware());
+
 /** GET /api/elevation-projects — 프로젝트 목록 */
 app.get("/api/elevation-projects", async (c) => {
   try {
@@ -134,7 +205,7 @@ app.post("/api/elevation-projects", async (c) => {
     const row = {
       name,
       description: typeof body?.description === "string" ? body.description : null,
-      created_by: null,
+      created_by: c.get("user")?.id ?? null,
     };
     const res = await supabaseRest(c.env, "POST", `/elev_projects`, row);
     if (!res.ok) {
@@ -342,7 +413,7 @@ app.post("/api/elevation-projects/:projectId/revisions", async (c) => {
         dxf_name: dxfName,
         dxf_size: dxfSize,
         schema_ver: 1,
-        created_by: null,
+        created_by: c.get("user")?.id ?? null,
       });
 
     let nextNo = (project.latest_rev_no ?? 0) + 1;

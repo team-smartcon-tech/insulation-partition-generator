@@ -1,0 +1,25 @@
+# 로컬 개발용 Worker 시크릿/변수 — `wrangler dev`(= pnpm --filter worker dev)가 자동 로드.
+#
+# 사용법:
+#   cp apps/worker/.dev.vars.example apps/worker/.dev.vars
+#   # 값 채운 뒤, 터미널 2개로:
+#   #   터미널1: pnpm --filter worker dev   (로컬 Worker 8787)
+#   #   터미널2: pnpm --filter web dev      (화면 5173, /api → 8787 프록시)
+#
+# .dev.vars 는 .gitignore 로 커밋 차단됨. 실제 시크릿을 이 예시 파일(.example)에는 절대 넣지 말 것.
+
+# 신규 앱 자체 세션 토큰 서명 시크릿 (DCR 것과 무관 — 로컬은 아무 랜덤 문자열이면 됨).
+IPG_JWT_SECRET=local-dev-secret-change-me
+
+# 통합로그인 백엔드 = 배포된 dcr-app. 실제 회원 계정으로 로그인된다.
+#   운영 회원 DB(dcr-prod): https://dcr-app.jogh.workers.dev
+#   개발 회원 DB(dcr-dev)로 테스트: https://dcr-app-dev.jogh.workers.dev
+DCR_BASE_URL=https://dcr-app.jogh.workers.dev
+
+# 로컬은 http 이므로 Secure 쿠키를 부여하지 않는다(안 그러면 브라우저가 쿠키를 저장하지 않아 로그인 유지 안 됨).
+COOKIE_SECURE=false
+
+# 저장/불러오기(elev) API용 — 신규 Supabase(yzercziwazfrjsjnmbhr).
+# service_role 키는 Supabase 대시보드 Settings → API 에서 복사(커밋 금지). 로그인만 테스트할 땐 비워둬도 됨.
+SUPABASE_URL=https://yzercziwazfrjsjnmbhr.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=

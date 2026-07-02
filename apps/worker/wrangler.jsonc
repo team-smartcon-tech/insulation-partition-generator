@@ -10,6 +10,14 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
+  // DCR 통합로그인 백엔드(회원 로그인 프록시 대상). 이 값은 prod = dcr-app.
+  // 로컬/dev 는 apps/worker/.dev.vars 에서 DCR_BASE_URL=https://dcr-app-dev.jogh.workers.dev 로 덮어써 dcr-dev 로 향하게 한다.
+  // (서비스 바인딩을 쓰려면 아래 services 주석 해제 — 동일 계정이라 가능. 그 경우 DCR_APP 이 DCR_BASE_URL 보다 우선.)
+  "vars": {
+    "DCR_BASE_URL": "https://dcr-app.jogh.workers.dev"
+  },
+  // "services": [{ "binding": "DCR_APP", "service": "dcr-app" }],
+
   // 정적 자산: apps/web 의 Vite 빌드 결과(dist)를 서빙한다.
   //  - run_worker_first 에 해당하는 경로(/api/*, /health)만 Worker 스크립트가 먼저 처리
   //  - 그 외 경로는 자산에서 서빙하고, 매칭 없으면 SPA fallback 으로 index.html 반환
@@ -19,7 +27,9 @@
     "run_worker_first": ["/api/*", "/health"]
   }
 
-  // 주의: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 같은 비밀값은
-  // 이 파일이나 코드에 넣지 않는다. `wrangler secret put <NAME>` 또는
-  // Cloudflare 대시보드에서 관리한다.
+  // 주의: 비밀값(SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / IPG_JWT_SECRET)은
+  // 이 파일이나 코드에 넣지 않는다. `wrangler secret put <NAME>` 또는 Cloudflare 대시보드에서 관리한다.
+  //  - IPG_JWT_SECRET: 신규 앱 자체 세션 토큰용 시크릿(DCR 것과 별개, 강한 랜덤값). 필수.
+  //  - (선택) RATE_LIMIT: 로그인 rate-limit용 KV 네임스페이스. 없으면 제한 생략.
+  //      kv_namespaces 로 바인딩 후 사용: [{ "binding": "RATE_LIMIT", "id": "<kv-id>" }]
 }
