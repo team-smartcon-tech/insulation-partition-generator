@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* 원본(SSX)의 디자인 토큰을 이 기능이 쓰는 범위로 추린 것.
+   sidebar/chart/typography/PWA 토큰과 SUIT 웹폰트는 제외(시스템 폰트 폴백). */
+@theme inline {
+  --font-sans: "Pretendard", "Pretendard Variable", system-ui, -apple-system,
+    sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --primary: #004791;
+  --primary-foreground: #ffffff;
+  --radius: 0.5rem;
+  --background: oklch(1 0 0);
+  --foreground: #333333;
+  --card: oklch(1 0 0);
+  --card-foreground: #333333;
+  --popover: oklch(1 0 0);
+  --popover-foreground: #333333;
+  --secondary: #f4f5f7;
+  --secondary-foreground: #004791;
+  --muted: #f4f5f7;
+  --muted-foreground: #767676;
+  --accent: #f4f5f7;
+  --accent-foreground: #004791;
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: #e5e7eb;
+  --input: #e5e7eb;
+  --ring: #004791;
+}
+
+.dark {
+  --primary: #004791;
+  --primary-foreground: #ffffff;
+  --background: #1a1a1a;
+  --foreground: #ffffff;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Pretendard", "Pretendard Variable", system-ui, -apple-system,
+      sans-serif;
+  }
+}
