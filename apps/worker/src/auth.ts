@@ -2,8 +2,9 @@
  * DCR 통합로그인(회원) — 인증 모듈
  *
  * 방식(신뢰 경계 최소화):
- *   1) 신규 Worker가 자격증명을 받아 DCR member/login 을 서버-투-서버로 호출(검증 위임).
- *   2) DCR 응답 {ok, person} 만 신뢰하고, **신규 앱 자체 시크릿(IPG_JWT_SECRET)** 으로
+ *   1) 신규 Worker가 자격증명(이메일+비밀번호, SSX 로그인과 동일)을 받아 DCR /auth/login 을
+ *      서버-투-서버로 호출(검증 위임).
+ *   2) DCR 응답 {ok, user} 만 신뢰하고, **신규 앱 자체 시크릿(IPG_JWT_SECRET)** 으로
  *      audience/issuer='insulation-partition-generator' + 짧은 만료의 **자체 세션 토큰**을 재발급.
  *      → DCR 의 JWT_SECRET 을 공유하지 않으므로, 이 토큰이 유출돼도 DCR 본체엔 통하지 않음.
  *   3) 이후 /api/* 요청은 HttpOnly 쿠키(ipg_session)의 자체 토큰을 로컬 검증.
@@ -42,7 +43,7 @@ export interface Env {
 export interface SessionUser {
   id: string;
   name: string;
-  companyName: string;
+  email: string;
   role: string;
 }
 
@@ -50,8 +51,8 @@ export interface SessionUser {
 const AUD = "insulation-partition-generator";
 /** 세션 수명(초) — 짧게 유지(폐기 불가 완화). 12시간 */
 const SESSION_TTL_SEC = 12 * 60 * 60;
-/** 허용 role 화이트리스트(회원 전용) */
-const ALLOWED_ROLES = new Set(["member"]);
+/** 허용 role 화이트리스트 — DCR /auth/login 이 발급하는 계정 유형(직원/회원). */
+const ALLOWED_ROLES = new Set(["super_admin", "system_admin", "site_admin", "member"]);
 
 const cookieName = (env: Env) => env.COOKIE_NAME || "ipg_session";
 
@@ -72,7 +73,7 @@ export function parseCookie(header: string | null, name: string): string | null 
 
 /** 자체 세션 토큰 발급(HS256, IPG_JWT_SECRET) */
 export async function signSession(env: Env, user: SessionUser): Promise<string> {
-  return new SignJWT({ name: user.name, companyName: user.companyName, role: user.role })
+  return new SignJWT({ name: user.name, email: user.email, role: user.role })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setSubject(user.id)
     .setIssuer(AUD)
@@ -93,7 +94,7 @@ export async function verifySession(env: Env, token: string): Promise<SessionUse
     return {
       id: String(payload.sub),
       name: typeof payload.name === "string" ? payload.name : "",
-      companyName: typeof payload.companyName === "string" ? payload.companyName : "",
+      email: typeof payload.email === "string" ? payload.email : "",
       // role 클레임이 없으면 빈 문자열 → isAllowedRole 에서 거부(fail-closed).
       role: typeof payload.role === "string" ? payload.role : "",
     };
@@ -112,27 +113,27 @@ export function buildLogoutCookie(env: Env): string {
   return `${cookieName(env)}=; HttpOnly;${secure} SameSite=Lax; Path=/; Max-Age=0`;
 }
 
-export interface DcrMemberLoginResult {
+export interface DcrLoginResult {
   ok: boolean;
   status: number;
-  person?: { id: string; name: string; company_name: string; kind: string };
+  user?: { id: string; name: string; email: string; role: string };
   error?: string;
 }
 
 /**
- * DCR member/login 서버-투-서버 호출(서비스 바인딩 우선 → 공개 URL 폴백).
+ * DCR /auth/login 서버-투-서버 호출(서비스 바인딩 우선 → 공개 URL 폴백). SSX 로그인과 동일(이메일+비밀번호).
  * 브라우저가 아니라 Worker가 호출하므로 CORS 무관.
- * 응답에서 id/name/company_name/kind 만 취하고 token·phone 등은 버린다(PII 미보관).
+ * 응답에서 id/name/email/role 만 취하고 token 등은 버린다(자체 토큰 재발급 사용).
  */
-export async function callDcrMemberLogin(
+export async function callDcrLogin(
   env: Env,
-  body: { name: string; company_name: string; password: string },
-): Promise<DcrMemberLoginResult> {
-  const path = "/api/auth/member/login";
+  body: { email: string; password: string },
+): Promise<DcrLoginResult> {
+  const path = "/api/auth/login";
   const init: RequestInit = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ email: body.email, password: body.password, remember: true }),
   };
 
   let res: Response;
@@ -152,20 +153,20 @@ export async function callDcrMemberLogin(
   const data = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
     error?: string;
-    person?: { id?: string; name?: string; company_name?: string; kind?: string };
+    user?: { id?: string; name?: string; email?: string; role?: string; kind?: string };
   };
-  if (!res.ok || !data?.ok || !data.person?.id) {
+  if (!res.ok || !data?.ok || !data.user?.id) {
     return { ok: false, status: res.status || 401, error: data?.error || "로그인 실패" };
   }
-  const p = data.person;
+  const u = data.user;
   return {
     ok: true,
     status: 200,
-    person: {
-      id: String(p.id),
-      name: String(p.name ?? ""),
-      company_name: String(p.company_name ?? ""),
-      kind: String(p.kind ?? ""),
+    user: {
+      id: String(u.id),
+      name: String(u.name ?? ""),
+      email: String(u.email ?? ""),
+      role: String(u.role ?? u.kind ?? ""),
     },
   };
 }

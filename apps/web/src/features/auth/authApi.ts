@@ -17,7 +17,7 @@ export class AuthError extends Error {
 export interface AuthUser {
   id: string;
   name: string;
-  companyName: string;
+  email: string;
   role?: string;
 }
 
@@ -34,10 +34,9 @@ async function j<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-/** 회원 로그인 (이름 + 회사명 + 비밀번호) */
+/** 로그인 (이메일 + 비밀번호, SSX 동일) */
 export function postLogin(body: {
-  name: string;
-  company_name: string;
+  email: string;
   password: string;
 }): Promise<{ ok: true; user: AuthUser }> {
   return j("/login", { method: "POST", body: JSON.stringify(body) });
