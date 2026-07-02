@@ -16,8 +16,9 @@
 
 ```bash
 pnpm install
-pnpm --filter web dev        # 화면 5173 (/api → 로컬 worker 8787 프록시)
-pnpm --filter worker dev     # 저장/불러오기 Worker 8787
+cp apps/worker/.dev.vars.example apps/worker/.dev.vars   # 로컬 시크릿(로그인/저장) — 값 채우기
+pnpm dev                     # worker(8787)+web(5173) 동시 기동. http://localhost:5173
+pnpm dev:web / pnpm dev:worker   # 개별 실행
 pnpm --filter web build      # 프로덕션 빌드(타입체크 포함)
 pnpm -r typecheck
 ```
@@ -36,8 +37,15 @@ pnpm -r typecheck
 - Cloudflare 계정: Smarttech `2b025f536a98444871b3306efbfd6b2a` (wrangler.jsonc `account_id`)
 - Worker 시크릿: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Cloudflare Secrets)
 
+**인증 (DCR 통합로그인 · 회원)**
+
+- 앱 전체 로그인 벽. `apps/web/src/features/auth/*`(AuthContext·AuthGate·LoginPage), worker `apps/worker/src/auth.ts` + `/api/auth/{login,logout,me}` + `app.use('/api/*', authMiddleware)`.
+- worker가 **배포 dcr-app 의 member/login**(이름+회사명+비번)을 서버-투-서버 호출 → **자체 시크릿 `IPG_JWT_SECRET`** 으로 12h 세션 토큰 재발급(HttpOnly `ipg_session`). DCR JWT_SECRET 미공유.
+- 백엔드 URL: `DCR_BASE_URL`(prod=`dcr-app.jogh.workers.dev`, dev=`dcr-app-dev.jogh.workers.dev`, 로컬은 `.dev.vars`). 시크릿 `IPG_JWT_SECRET` 필수.
+
 **함정 (Gotchas)**
 
+- **로컬 로그인**: `apps/worker/.dev.vars` 에 `COOKIE_SECURE=false` 없으면 http 로컬에서 쿠키 저장 안 돼 로그인 유지 실패. `IPG_JWT_SECRET` 없으면 로그인 500.
 - **단일 Worker가 SPA+API 서빙** — `wrangler.jsonc`의 `assets`(`run_worker_first: ["/api/*","/health"]` + SPA fallback). `run_worker_first` 배열형은 **wrangler v4+** 필요.
 - Supabase 마이그레이션/쿼리는 **이 프로젝트 전용 MCP(`supabase`, ref `yzercziwazfrjsjnmbhr`)에만**. SSX MCP(`supabase-dev` `kejieugtzuksqpgtxbwg` / `supabase-prod`)에는 **절대 적용 금지**.
 - 로컬 `wrangler` 사용 시 셸에 남은 무효 `CLOUDFLARE_API_TOKEN` 있으면 `unset` 후 `wrangler login`(OAuth). 계정이 여러 개라 `account_id` 명시로 Smarttech 고정됨.

@@ -28,15 +28,36 @@ SSX(`smart-schedule-X`)의 본사 "세대 단열재 나누기도" 기능을 **�
 # 사전: Node 20+, pnpm 10.x
 pnpm install                 # 워크스페이스 전체
 
-pnpm --filter web dev        # 화면 개발 서버 → http://localhost:5173 (/api 는 로컬 worker(8787)로 프록시)
-pnpm --filter worker dev     # 저장/불러오기 Worker → http://127.0.0.1:8787
+# 1) 로컬 시크릿/변수 준비 (로그인·저장 동작에 필요)
+cp apps/worker/.dev.vars.example apps/worker/.dev.vars   # 값 채우기 (아래 "로컬 로그인" 참고)
+
+# 2) 로컬 개발환경 실행 — worker(8787) + web(5173) 동시 기동
+pnpm dev                     # → http://localhost:5173 (로그인 화면부터). /api 는 로컬 worker(8787)로 프록시
+
+# 개별 실행이 필요하면:
+pnpm dev:web                 # 화면만 (Vite 5173)
+pnpm dev:worker              # Worker만 (wrangler 8787)
+
 pnpm --filter web build      # 프로덕션 빌드(타입체크 포함)
 pnpm -r typecheck            # 전체 타입 검사
 
-# /api 프록시 타깃 변경(예: 배포된 Worker 로):  IPG_API_TARGET=<url> pnpm --filter web dev
+# /api 프록시 타깃 변경(예: 배포된 Worker 로):  IPG_API_TARGET=<url> pnpm dev:web
 ```
 
-- 로컬에서 Supabase 실호출까지 보려면 `apps/worker/.dev.vars` 에 `SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY` 를 넣습니다(커밋 금지).
+### 로컬 로그인 (배포된 dcr-app 회원 인증 사용)
+
+앱 전체가 로그인 뒤에 있으므로, 로컬에서도 로그인이 필요합니다. `apps/worker/.dev.vars` 를 만들면 로컬 Worker가 **배포된 dcr-app 의 회원 로그인**을 그대로 호출합니다.
+
+```bash
+# apps/worker/.dev.vars  (예시는 .dev.vars.example, .gitignore 로 커밋 차단)
+IPG_JWT_SECRET=아무_랜덤_문자열            # 로컬 세션 서명용(DCR 것과 무관)
+DCR_BASE_URL=https://dcr-app.jogh.workers.dev        # 운영 회원 DB. dev DB는 https://dcr-app-dev.jogh.workers.dev
+COOKIE_SECURE=false                        # 로컬 http 이므로 필수(안 하면 쿠키 저장 안 됨)
+SUPABASE_URL=https://yzercziwazfrjsjnmbhr.supabase.co          # 저장/불러오기용
+SUPABASE_SERVICE_ROLE_KEY=<대시보드 service_role 키>           # 로그인만 볼 땐 비워도 됨
+```
+
+→ `pnpm dev` 후 http://localhost:5173 에서 **DCR 회원 계정(이름·회사명·비밀번호)** 으로 로그인.
 
 ---
 
