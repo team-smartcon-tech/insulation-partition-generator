@@ -35,6 +35,11 @@ import {
   Check,
   FileSpreadsheet,
   ChevronDown,
+  FilePlus2,
+  Save,
+  History,
+  FolderOpen,
+  Loader2,
 } from "lucide-react";
 import {
   developPly,
@@ -59,7 +64,17 @@ import type {
   ElevBuildingDef,
   ElevTypeDef,
   ElevUnitCounts,
+  ElevState,
 } from "./types";
+import {
+  useElevProjects,
+  useElevProject,
+  useCreateElevProject,
+  useSaveElevRevision,
+  useDeleteElevRevision,
+  useDeleteElevProject,
+} from "./hooks";
+import { getElevRevision } from "./api";
 import OutputPanel from "./components/OutputPanel";
 import type { WallSummaryInput } from "./utils/elevationAggregate";
 import { toast } from "sonner";
@@ -233,6 +248,47 @@ const EMPTY_MATRIX: ElevTypeMatrix = { buildings: [], types: [], cells: {} };
 const cellKey = (buildingId: string, typeId: string) => `${buildingId}::${typeId}`;
 let _idSeq = 0;
 const genId = (p: string) => `${p}_${Date.now().toString(36)}_${_idSeq++}`;
+
+/**
+ * 구 REV(typeMatrix 없는 state) 로드 시 레거시 필드(building/core/units)에서
+ * 동·타입 매트릭스를 복원하고, 각 입면에 붙일 typeId/buildingId 태그를 만든다.
+ */
+function migrateLegacyMatrix(walls: WallChain[]): {
+  matrix: ElevTypeMatrix;
+  tagById: Record<string, { typeId?: string; buildingId?: string }>;
+} {
+  const buildings: ElevBuildingDef[] = [];
+  const types: ElevTypeDef[] = [];
+  const bIdByName = new Map<string, string>();
+  const tIdByName = new Map<string, string>();
+  const cells: Record<string, ElevUnitCounts> = {};
+  const tagById: Record<string, { typeId?: string; buildingId?: string }> = {};
+  for (const w of walls) {
+    const bName = (w.building ?? "").trim();
+    const tName = (w.core ?? "").trim() || (w.name ?? "").trim();
+    let bId: string | undefined;
+    let tId: string | undefined;
+    if (tName) {
+      tId = tIdByName.get(tName);
+      if (!tId) {
+        tId = genId("t");
+        tIdByName.set(tName, tId);
+        types.push({ id: tId, name: tName });
+      }
+    }
+    if (bName) {
+      bId = bIdByName.get(bName);
+      if (!bId) {
+        bId = genId("b");
+        bIdByName.set(bName, bId);
+        buildings.push({ id: bId, name: bName });
+      }
+    }
+    if (bId && tId) cells[cellKey(bId, tId)] = { ...(w.units ?? {}) };
+    tagById[w.id] = { typeId: tId, buildingId: bId };
+  }
+  return { matrix: { buildings, types, cells }, tagById };
+}
 
 /** "401~405" / "401동~405동" → ["401동","402동",...] 동 이름 배열 */
 function expandBuildingRange(input: string): string[] {
@@ -603,6 +659,171 @@ export default function ElevationGeneratorPage() {
 
   const [outputOpen, setOutputOpen] = useState(false);
 
+  // ── 프로젝트 저장 / REV(리비전) ──
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  // 마지막으로 업로드한 DXF 원본(저장 시 첨부). 복원으로 열면 null + loadedDxfMeta 사용.
+  const [lastDxfFile, setLastDxfFile] = useState<File | null>(null);
+  const [loadedDxfMeta, setLoadedDxfMeta] = useState<{
+    path: string;
+    name: string | null;
+    size: number | null;
+  } | null>(null);
+  const [revPanelOpen, setRevPanelOpen] = useState(false);
+
+  const { data: elevProjects = [] } = useElevProjects();
+  const { data: activeProjectData } = useElevProject(activeProjectId);
+  const createProjectMut = useCreateElevProject();
+  const saveRevMut = useSaveElevRevision();
+  const deleteRevMut = useDeleteElevRevision();
+  const deleteProjectMut = useDeleteElevProject();
+
+  /** 현재 화면 상태 → 직렬화(복원용) */
+  const buildElevState = useCallback(
+    (): ElevState => ({
+      schemaVer: 1,
+      fileName: fileName || null,
+      boardSpec: { boardLength, boardHeight, boardThickness },
+      policy: {
+        insulOn,
+        placement,
+        optimizeSP,
+        discardWidth,
+        minJointGap,
+        minPieceWidth,
+        plyInward,
+      },
+      ui: {
+        defaultFloorHeight,
+        defaultSill,
+        autoExtract,
+        hiddenLayers: Array.from(hiddenLayers),
+      },
+      presets: [],
+      walls,
+      openings,
+      buildings: [],
+      typeMatrix,
+    }),
+    [
+      fileName, boardLength, boardHeight, boardThickness, insulOn, placement,
+      optimizeSP, discardWidth, minJointGap, minPieceWidth, plyInward, defaultFloorHeight,
+      defaultSill, autoExtract, hiddenLayers, walls, openings, typeMatrix,
+    ]
+  );
+
+  /** 직렬화 상태 → 화면 setter 일괄 적용 (DXF 재파싱은 별도) */
+  const applyElevState = useCallback((st: ElevState) => {
+    setBoardLength(st.boardSpec.boardLength);
+    setBoardHeight(st.boardSpec.boardHeight);
+    setBoardThickness(st.boardSpec.boardThickness);
+    setInsulOn(st.policy.insulOn);
+    setPlacement(st.policy.placement);
+    setOptimizeSP(st.policy.optimizeSP);
+    setDiscardWidth(st.policy.discardWidth);
+    setMinJointGap(st.policy.minJointGap);
+    setMinPieceWidth(st.policy.minPieceWidth);
+    setPlyInward(st.policy.plyInward ?? true);
+    setDefaultFloorHeight(st.ui.defaultFloorHeight);
+    setDefaultSill(st.ui.defaultSill);
+    setAutoExtract(st.ui.autoExtract);
+    setHiddenLayers(new Set(st.ui.hiddenLayers ?? []));
+    {
+      // 옛 REV 마이그레이션: 수동 2P 입면(refChainId 보유)은 이제 1P 체인이
+      // 1P·2P를 자동 생성하므로 중복(물량 2배) → 로드 시 제거하고 안내.
+      const loaded = (st.walls as WallChain[]) ?? [];
+      const cleaned = loaded.filter(w => !w.refChainId);
+      if (cleaned.length !== loaded.length) {
+        toast.info(
+          `옛 수동 2P 입면 ${loaded.length - cleaned.length}개는 자동 1P/2P로 대체되어 제외했습니다. 세그먼트 두께를 확인하세요.`
+        );
+      }
+      // 동·타입 매트릭스: 있으면 그대로, 없으면(구 REV) 레거시 building/core/units 에서 복원
+      if (st.typeMatrix && st.typeMatrix.types) {
+        setTypeMatrix(st.typeMatrix);
+        setWalls(cleaned);
+      } else {
+        const { matrix, tagById } = migrateLegacyMatrix(cleaned);
+        setTypeMatrix(matrix);
+        setWalls(
+          cleaned.map(w => {
+            const tag = tagById[w.id];
+            return tag ? { ...w, typeId: tag.typeId, buildingId: tag.buildingId } : w;
+          })
+        );
+      }
+    }
+    setOpenings((st.openings as Opening[]) ?? []);
+    setActiveWallId(null);
+    setDraft([]);
+    setSelectedOpeningId(null);
+    setMode("view");
+  }, []);
+
+  const handleNewProject = useCallback(async () => {
+    const name = window.prompt("새 프로젝트 이름")?.trim();
+    if (!name) return;
+    try {
+      const { project } = await createProjectMut.mutateAsync({ name });
+      setActiveProjectId(project.id);
+      toast.success(`프로젝트 '${project.name}' 생성됨`);
+    } catch (e) {
+      toast.error(`생성 실패: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [createProjectMut]);
+
+  const handleSaveRev = useCallback(async () => {
+    if (!activeProjectId) {
+      toast.error("먼저 프로젝트를 선택하거나 새로 만드세요.");
+      return;
+    }
+    try {
+      await saveRevMut.mutateAsync({
+        projectId: activeProjectId,
+        state: buildElevState(),
+        summary: { wallCount: walls.length },
+        dxfFile: lastDxfFile ?? undefined,
+        reuse:
+          !lastDxfFile && loadedDxfMeta
+            ? {
+                dxfPath: loadedDxfMeta.path,
+                dxfName: loadedDxfMeta.name,
+                dxfSize: loadedDxfMeta.size,
+              }
+            : null,
+      });
+      toast.success("저장됨 (새 REV)");
+    } catch (e) {
+      toast.error(`저장 실패: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [activeProjectId, saveRevMut, buildElevState, walls.length, lastDxfFile, loadedDxfMeta]);
+
+  const handleLoadRev = useCallback(
+    async (revId: string) => {
+      if (!activeProjectId) return;
+      try {
+        const { revision, dxfSignedUrl } = await getElevRevision(activeProjectId, revId);
+        applyElevState(revision.state);
+        setFileName(revision.dxf_name || revision.state.fileName || "");
+        setLoadedDxfMeta(
+          revision.dxf_path
+            ? { path: revision.dxf_path, name: revision.dxf_name, size: revision.dxf_size }
+            : null
+        );
+        setLastDxfFile(null);
+        if (dxfSignedUrl) {
+          const text = await fetch(dxfSignedUrl).then(r => r.text());
+          const raw = new DxfParser().parseSync(text);
+          setParsed(normalizeDxf(raw));
+        }
+        setRevPanelOpen(false);
+        toast.success(`REV ${revision.rev_no} 불러옴`);
+      } catch (e) {
+        toast.error(`불러오기 실패: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [activeProjectId, applyElevState]
+  );
+
   // ── 체인별 측정값 ──
   const wallMetricsById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof cumWallLengths>>();
@@ -787,6 +1008,8 @@ export default function ElevationGeneratorPage() {
     setIsParsing(true);
     setParseError("");
     setFileName(file.name);
+    setLastDxfFile(file); // 저장(REV) 시 첨부할 원본 보관
+    setLoadedDxfMeta(null);
     try {
       const text = await file.text();
       const parser = new DxfParser();
@@ -2677,8 +2900,135 @@ export default function ElevationGeneratorPage() {
           </div>
         </div>
 
-        {/* 작업 모드 · 층고 바 */}
+        {/* 프로젝트 / REV(리비전) 바 — 저장·복원 + 작업 모드 · 층고 */}
         <div className="shrink-0 flex items-center gap-2 flex-wrap border-b border-slate-200 bg-white px-3.5 py-1">
+          <span className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-slate-600 pr-1">
+            <span className="w-1.5 h-4 rounded-sm bg-[#3b82f6] inline-block" />
+            프로젝트
+          </span>
+          <select
+            value={activeProjectId ?? ""}
+            onChange={e => setActiveProjectId(e.target.value || null)}
+            className="h-8 text-[12.5px] rounded-md border border-slate-300 bg-white text-slate-800 px-2 min-w-[200px] focus:outline-none focus:ring-1 focus:ring-[#004791]/30 [&>option]:text-slate-900"
+          >
+            <option value="">— 선택 —</option>
+            {elevProjects.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name} (REV {p.latest_rev_no})
+              </option>
+            ))}
+          </select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleNewProject}
+            className="gap-1"
+          >
+            <FilePlus2 className="w-3.5 h-3.5" /> 새 프로젝트
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSaveRev}
+            disabled={!activeProjectId || saveRevMut.isPending}
+            className="gap-1 bg-[#004791] hover:bg-[#003a78]"
+          >
+            {saveRevMut.isPending ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Save className="w-3.5 h-3.5" />
+            )}
+            저장(새 REV)
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRevPanelOpen(o => !o)}
+            disabled={!activeProjectId}
+            className="gap-1"
+          >
+            <History className="w-3.5 h-3.5" /> REV 목록
+            {activeProjectData ? ` (${activeProjectData.revisions.length})` : ""}
+          </Button>
+          {activeProjectId && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!window.confirm("이 프로젝트(모든 REV)를 삭제할까요?")) return;
+                try {
+                  await deleteProjectMut.mutateAsync(activeProjectId);
+                  setActiveProjectId(null);
+                  toast.success("프로젝트 삭제됨");
+                } catch (e) {
+                  toast.error(`삭제 실패: ${e instanceof Error ? e.message : String(e)}`);
+                }
+              }}
+              className="gap-1 text-rose-600 border-rose-200 hover:bg-rose-50"
+              title="프로젝트 삭제"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          {loadedDxfMeta && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+              <FolderOpen className="w-3 h-3" /> 불러온 REV · DXF 재사용
+            </span>
+          )}
+
+          {/* REV 목록 패널 */}
+          {revPanelOpen && activeProjectData && (
+            <div className="w-full mt-1 rounded-md border border-slate-200 bg-white divide-y divide-slate-100 max-h-56 overflow-auto">
+              {activeProjectData.revisions.length === 0 && (
+                <div className="px-3 py-2 text-[12px] text-slate-400">
+                  저장된 REV가 없습니다.
+                </div>
+              )}
+              {activeProjectData.revisions.map(r => (
+                <div
+                  key={r.id}
+                  className="flex items-center gap-2 px-3 py-1.5 text-[12px]"
+                >
+                  <span className="font-semibold text-slate-700 w-14 shrink-0">
+                    REV {r.rev_no}
+                  </span>
+                  <span className="text-slate-400 shrink-0 tabular-nums">
+                    {new Date(r.created_at).toLocaleString("ko-KR")}
+                  </span>
+                  <span className="flex-1 truncate text-slate-500">
+                    {r.dxf_name ?? "-"}
+                    {r.memo ? ` · ${r.memo}` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleLoadRev(r.id)}
+                    className="px-2 py-0.5 rounded border border-[#004791] text-[#004791] hover:bg-blue-50 font-semibold shrink-0"
+                  >
+                    불러오기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!window.confirm(`REV ${r.rev_no} 삭제?`)) return;
+                      try {
+                        await deleteRevMut.mutateAsync({
+                          projectId: activeProjectId!,
+                          revId: r.id,
+                        });
+                        toast.success("삭제됨");
+                      } catch (e) {
+                        toast.error(`삭제 실패: ${e instanceof Error ? e.message : String(e)}`);
+                      }
+                    }}
+                    className="px-1.5 py-0.5 rounded text-rose-500 hover:bg-rose-50 shrink-0"
+                    title="REV 삭제"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="w-px h-6 bg-slate-200 mx-2" />
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase mr-0.5">
               작업

@@ -1,3 +1,102 @@
-// web(화면)과 worker(서버)가 함께 쓸 공용 타입 자리입니다.
-// 다음 단계에서 원본(SSX)의 저장 포맷 타입(ElevState / BoardSummary 등)을 이곳으로 이식합니다.
-export {};
+// web(화면)과 worker(서버)가 함께 쓰는 공용 타입.
+// 원본(SSX) elevationProjectApi.ts 의 저장 포맷 타입을 이식한 것 — 필드 변경 시
+// 저장된 REV(state jsonb)와의 호환(fallback)을 반드시 함께 고려한다.
+
+// ─── 동·타입 매트릭스 (프로젝트 단위 동/타입/세대수) ───
+export interface ElevTypeDef {
+  id: string;
+  name: string;
+}
+export interface ElevBuildingDef {
+  id: string;
+  name: string;
+}
+export interface ElevUnitCounts {
+  /** 1~3F */
+  low?: number;
+  /** 지붕층 */
+  roof?: number;
+  /** 기준층 */
+  base?: number;
+}
+/**
+ * 동×타입×세대수 매트릭스. 현장식 산출서를 이 매트릭스로 구동한다.
+ * 입면은 typeId(+선택적 buildingId)로 태깅되고, (동,타입) 셀 물량 = 그 타입 대표
+ * 입면(또는 동 전용 입면) 1세대 물량 × 세대수.
+ */
+export interface ElevTypeMatrix {
+  buildings: ElevBuildingDef[];
+  types: ElevTypeDef[];
+  /** 배분+세대수. key = `${buildingId}::${typeId}`. 키 존재 = 그 동에 그 타입 배분됨. */
+  cells: Record<string, ElevUnitCounts>;
+}
+
+/** 복원용 직렬화 상태(schema_ver=1). walls/openings/presets/buildings 는 페이지 타입을 느슨히 담는다. */
+export interface ElevState {
+  schemaVer: number;
+  fileName: string | null;
+  boardSpec: { boardLength: number; boardHeight: number; boardThickness: number };
+  policy: {
+    insulOn: boolean;
+    placement: "min-waste" | "constructability";
+    optimizeSP: boolean;
+    discardWidth: number;
+    minJointGap: number;
+    minPieceWidth: number;
+    /** 겹 방향 — true=안쪽(2P 짧게), false=바깥(2P 길게). 미지정 시 안쪽. */
+    plyInward?: boolean;
+  };
+  ui: {
+    defaultFloorHeight: number;
+    defaultSill: number;
+    autoExtract: boolean;
+    hiddenLayers: string[];
+  };
+  presets: unknown[];
+  walls: unknown[];
+  openings: unknown[];
+  /** 동·코어/층 구성 (Phase 4). 없으면 빈 배열. */
+  buildings: unknown[];
+  /** 동·타입·세대수 매트릭스. 없으면(구 REV) 로드 시 빈 값 또는 레거시 필드에서 마이그레이션. */
+  typeMatrix?: ElevTypeMatrix;
+}
+
+/** 리비전 표시용 요약(목록/트리 빠른 렌더) */
+export interface ElevSummary {
+  totalAreaM2?: number;
+  orderBoardCount?: number;
+  buildingCount?: number;
+  coreCount?: number;
+  wallCount?: number;
+}
+
+// ─── DB row 타입 (elev_projects / elev_revisions) ───
+export interface DbElevProject {
+  id: string;
+  name: string;
+  description: string | null;
+  latest_rev_no: number;
+  latest_rev_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbElevRevisionMeta {
+  id: string;
+  rev_no: number;
+  memo: string | null;
+  dxf_name: string | null;
+  dxf_size: number | null;
+  dxf_path: string | null;
+  summary: ElevSummary | null;
+  schema_ver: number;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface DbElevRevisionFull extends DbElevRevisionMeta {
+  project_id: string;
+  state: ElevState;
+  dxf_bucket: string | null;
+}

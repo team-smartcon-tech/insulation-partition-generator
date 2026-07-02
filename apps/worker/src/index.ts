@@ -1,18 +1,436 @@
+/**
+ * 단열재 나누기도 생성기 — 저장/불러오기 Worker (Hono)
+ *
+ * 원본(SSX worker/index.ts)의 handle*ElevProject* / *ElevRevision* 핸들러를
+ * 독립 Supabase 프로젝트용으로 이식한 것.
+ *   - 테이블: public.elev_projects / public.elev_revisions (supabase/migrations 참조)
+ *   - DXF 원본: Storage {ELEV_DXF_BUCKET}/elevation/{projectId}/{revId}.dxf
+ *   - 접근 제어: 현재 없음(열린 결정 §6-1 추천안 — 사내 도구, service_role 은 서버에만 보관).
+ *     로그인 도입 시 이 파일의 라우트 앞단에 미들웨어로 추가한다.
+ */
 import { Hono } from "hono";
 
-// 뼈대 단계: /health 만 응답합니다.
-// 저장/불러오기 API(elevation-projects)와 Supabase/Storage 연동은 다음 단계에서 이식합니다.
 export interface Env {
-  // 다음 단계에서 채움 (Cloudflare Secrets):
-  // SUPABASE_URL: string;
-  // SUPABASE_SERVICE_ROLE_KEY: string;
-  // JWT_SECRET: string;
+  SUPABASE_URL: string;
+  SUPABASE_SERVICE_ROLE_KEY: string;
+  /** DXF 저장 버킷 이름 (미설정 시 elev-dxf). 3-B에서 실제 버킷 생성 후 확정. */
+  ELEV_DXF_BUCKET?: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.get("/health", (c) =>
-  c.json({ ok: true, service: "insulation-partition-generator" }),
-);
+const dxfBucket = (env: Env) => env.ELEV_DXF_BUCKET || "elev-dxf";
+
+// ─── Supabase REST / Storage 헬퍼 ───────────────────────────
+
+async function supabaseRest(
+  env: Env,
+  method: string,
+  path: string,
+  body?: Record<string, unknown>,
+  prefer = "return=representation",
+): Promise<Response> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Supabase 환경 설정 누락 (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)");
+  }
+  const apiKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  return fetch(`${env.SUPABASE_URL}/rest/v1${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      apikey: apiKey,
+      Prefer: prefer,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+async function storageUpload(
+  env: Env,
+  bucket: string,
+  objectPath: string,
+  fileBuffer: ArrayBuffer,
+  mimeType: string,
+): Promise<void> {
+  const apiKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  const res = await fetch(`${env.SUPABASE_URL}/storage/v1/object/${bucket}/${objectPath}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      apikey: apiKey,
+      "Content-Type": mimeType,
+      "x-upsert": "true",
+    },
+    body: fileBuffer,
+  });
+  if (!res.ok) throw new Error(`Storage 업로드 실패 (${res.status}): ${await res.text()}`);
+}
+
+async function storageDelete(env: Env, bucket: string, objectPaths: string[]): Promise<void> {
+  const apiKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  const res = await fetch(`${env.SUPABASE_URL}/storage/v1/object/${bucket}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      apikey: apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ prefixes: objectPaths }),
+  });
+  if (!res.ok) throw new Error(`Storage 삭제 실패 (${res.status}): ${await res.text()}`);
+}
+
+/** 비공개 버킷 파일의 임시 다운로드 URL (TTL 기본 1시간) */
+async function storageSignedUrl(
+  env: Env,
+  bucket: string,
+  objectPath: string,
+  expiresIn = 3600,
+): Promise<string> {
+  const apiKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  const res = await fetch(`${env.SUPABASE_URL}/storage/v1/object/sign/${bucket}/${objectPath}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      apikey: apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ expiresIn }),
+  });
+  if (!res.ok) throw new Error(`Signed URL 생성 실패 (${res.status}): ${await res.text()}`);
+  const data = (await res.json()) as { signedURL: string };
+  return `${env.SUPABASE_URL}/storage/v1${data.signedURL}`;
+}
+
+const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+// ─── 라우트 ─────────────────────────────────────────────────
+
+app.get("/health", (c) => c.json({ ok: true, service: "insulation-partition-generator" }));
+
+/** GET /api/elevation-projects — 프로젝트 목록 */
+app.get("/api/elevation-projects", async (c) => {
+  try {
+    const res = await supabaseRest(c.env, "GET", `/elev_projects?select=*&order=updated_at.desc`);
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[elev-projects/GET]", errText);
+      return c.json({ error: `조회 실패: ${errText}` }, res.status as 500);
+    }
+    return c.json({ projects: await res.json() });
+  } catch (err) {
+    console.error("[elev-projects/GET]", errMsg(err));
+    return c.json({ error: `조회 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/** POST /api/elevation-projects — 신규 프로젝트 생성 (JSON: {name, description?}) */
+app.post("/api/elevation-projects", async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => null)) as { name?: unknown; description?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name) return c.json({ error: "프로젝트 이름이 필요합니다." }, 400);
+    const row = {
+      name,
+      description: typeof body?.description === "string" ? body.description : null,
+      created_by: null,
+    };
+    const res = await supabaseRest(c.env, "POST", `/elev_projects`, row);
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[elev-projects/POST]", errText);
+      return c.json({ error: `생성 실패: ${errText}` }, res.status as 500);
+    }
+    const inserted = (await res.json()) as unknown[];
+    return c.json({ project: inserted[0] ?? null });
+  } catch (err) {
+    console.error("[elev-projects/POST]", errMsg(err));
+    return c.json({ error: `생성 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/** GET /api/elevation-projects/:projectId — 프로젝트 + 리비전 메타 목록(state 제외 경량) */
+app.get("/api/elevation-projects/:projectId", async (c) => {
+  const projectId = c.req.param("projectId");
+  try {
+    const pRes = await supabaseRest(
+      c.env, "GET", `/elev_projects?id=eq.${encodeURIComponent(projectId)}&select=*&limit=1`,
+    );
+    if (!pRes.ok) return c.json({ error: "조회 실패" }, pRes.status as 500);
+    const project = ((await pRes.json()) as unknown[])[0] ?? null;
+    if (!project) return c.json({ error: "프로젝트를 찾을 수 없습니다." }, 404);
+    const rRes = await supabaseRest(
+      c.env, "GET",
+      `/elev_revisions?project_id=eq.${encodeURIComponent(projectId)}` +
+        `&select=id,rev_no,memo,dxf_name,dxf_size,dxf_path,summary,schema_ver,created_by,created_at` +
+        `&order=rev_no.desc`,
+    );
+    const revisions = rRes.ok ? await rRes.json() : [];
+    return c.json({ project, revisions });
+  } catch (err) {
+    console.error("[elev-project/GET]", errMsg(err));
+    return c.json({ error: `조회 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/** PATCH /api/elevation-projects/:projectId — 이름/설명 수정 */
+app.patch("/api/elevation-projects/:projectId", async (c) => {
+  const projectId = c.req.param("projectId");
+  try {
+    const body = (await c.req.json().catch(() => null)) as { name?: unknown; description?: unknown } | null;
+    const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (typeof body?.name === "string" && body.name.trim()) row.name = body.name.trim();
+    if (typeof body?.description === "string") row.description = body.description;
+    const res = await supabaseRest(
+      c.env, "PATCH", `/elev_projects?id=eq.${encodeURIComponent(projectId)}`, row,
+    );
+    if (!res.ok) {
+      const errText = await res.text();
+      return c.json({ error: `저장 실패: ${errText}` }, res.status as 500);
+    }
+    const updated = ((await res.json()) as unknown[])[0] ?? null;
+    return c.json({ project: updated });
+  } catch (err) {
+    return c.json({ error: `저장 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/** DELETE /api/elevation-projects/:projectId — 프로젝트 + 리비전 + Storage 정리 */
+app.delete("/api/elevation-projects/:projectId", async (c) => {
+  const projectId = c.req.param("projectId");
+  try {
+    // 해당 프로젝트의 DXF 경로 수집 후 Storage 삭제
+    const rRes = await supabaseRest(
+      c.env, "GET", `/elev_revisions?project_id=eq.${encodeURIComponent(projectId)}&select=dxf_path`,
+    );
+    if (rRes.ok) {
+      const paths = ((await rRes.json()) as { dxf_path: unknown }[])
+        .map((r) => r.dxf_path)
+        .filter((p): p is string => typeof p === "string" && !!p);
+      if (paths.length > 0) {
+        try { await storageDelete(c.env, dxfBucket(c.env), paths); } catch { /* ignore */ }
+      }
+    }
+    // cascade 로 revisions 도 삭제됨
+    const res = await supabaseRest(
+      c.env, "DELETE", `/elev_projects?id=eq.${encodeURIComponent(projectId)}`, undefined, "return=minimal",
+    );
+    if (!res.ok && res.status !== 404) {
+      const errText = await res.text();
+      return c.json({ error: `삭제 실패: ${errText}` }, res.status as 500);
+    }
+    return c.json({ success: true });
+  } catch (err) {
+    return c.json({ error: `삭제 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/** GET /api/elevation-projects/:projectId/revisions/:revId — 단일 REV 전체 + DXF signed URL */
+app.get("/api/elevation-projects/:projectId/revisions/:revId", async (c) => {
+  const revId = c.req.param("revId");
+  try {
+    const res = await supabaseRest(
+      c.env, "GET", `/elev_revisions?id=eq.${encodeURIComponent(revId)}&select=*&limit=1`,
+    );
+    if (!res.ok) return c.json({ error: "조회 실패" }, res.status as 500);
+    const rev = ((await res.json()) as Record<string, unknown>[])[0] ?? null;
+    if (!rev) return c.json({ error: "리비전을 찾을 수 없습니다." }, 404);
+    let dxfSignedUrl: string | null = null;
+    if (typeof rev.dxf_path === "string" && rev.dxf_path) {
+      try {
+        dxfSignedUrl = await storageSignedUrl(
+          c.env,
+          (typeof rev.dxf_bucket === "string" && rev.dxf_bucket) || dxfBucket(c.env),
+          rev.dxf_path,
+          3600,
+        );
+      } catch (e) {
+        console.error("[elev-rev/GET] signed URL 실패:", e);
+      }
+    }
+    return c.json({ revision: rev, dxfSignedUrl });
+  } catch (err) {
+    console.error("[elev-rev/GET]", errMsg(err));
+    return c.json({ error: `조회 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/**
+ * POST /api/elevation-projects/:projectId/revisions — 새 REV 저장
+ * Body: multipart/form-data
+ *   - state : JSON 문자열(복원용 앱 상태)  [필수]
+ *   - summary : JSON 문자열(표시용 요약)    [선택]
+ *   - memo : 문자열                         [선택]
+ *   - file : DXF 파일                       [선택 — 없으면 dxfPath 재사용]
+ *   - dxfPath/dxfName/dxfSize : 직전 REV DXF 재사용 시 전달(파일 미첨부)
+ */
+app.post("/api/elevation-projects/:projectId/revisions", async (c) => {
+  const projectId = c.req.param("projectId");
+  const bucket = dxfBucket(c.env);
+  try {
+    const form = await c.req.raw.formData();
+    const stateRaw = form.get("state");
+    if (typeof stateRaw !== "string") {
+      return c.json({ error: "state(JSON)가 필요합니다." }, 400);
+    }
+    let state: unknown;
+    try {
+      state = JSON.parse(stateRaw);
+    } catch {
+      return c.json({ error: "state JSON 파싱 오류" }, 400);
+    }
+    let summary: unknown = null;
+    const summaryRaw = form.get("summary");
+    if (typeof summaryRaw === "string") {
+      try { summary = JSON.parse(summaryRaw); } catch { summary = null; }
+    }
+    const memoRaw = form.get("memo");
+    const memo = typeof memoRaw === "string" ? memoRaw : null;
+
+    // 프로젝트 확인 + 다음 rev_no
+    const pRes = await supabaseRest(
+      c.env, "GET", `/elev_projects?id=eq.${encodeURIComponent(projectId)}&select=id,latest_rev_no&limit=1`,
+    );
+    const project = pRes.ok
+      ? (((await pRes.json()) as { latest_rev_no?: number }[])[0] ?? null)
+      : null;
+    if (!project) return c.json({ error: "프로젝트를 찾을 수 없습니다." }, 404);
+
+    const revId = crypto.randomUUID();
+
+    // DXF: 신규 파일 업로드 또는 직전 경로 재사용
+    let dxfPath: string | null = null;
+    let dxfBucketCol: string | null = null;
+    let dxfName: string | null = null;
+    let dxfSize: number | null = null;
+    // workers-types 의 FormData.get 은 string|null 로 선언되어 있어 File 여부를 typeof 로 판별
+    const fileEntry = form.get("file");
+    const file =
+      fileEntry && typeof fileEntry !== "string" ? (fileEntry as unknown as File) : null;
+    if (file && file.size > 0) {
+      if (file.size > 90 * 1024 * 1024) {
+        return c.json({ error: "DXF 파일은 90MB 이하여야 합니다." }, 413);
+      }
+      const objectPath = `elevation/${projectId}/${revId}.dxf`;
+      const buf = await file.arrayBuffer();
+      await storageUpload(c.env, bucket, objectPath, buf, file.type || "application/dxf");
+      dxfPath = objectPath;
+      dxfBucketCol = bucket;
+      dxfName = file.name;
+      dxfSize = file.size;
+    } else if (typeof form.get("dxfPath") === "string" && (form.get("dxfPath") as string)) {
+      // 직전 REV DXF 재사용(변경 없음)
+      dxfPath = form.get("dxfPath") as string;
+      dxfBucketCol = bucket;
+      dxfName = typeof form.get("dxfName") === "string" ? (form.get("dxfName") as string) : null;
+      const ds = form.get("dxfSize");
+      dxfSize = typeof ds === "string" && ds ? Number(ds) : null;
+    }
+
+    // insert (rev_no 동시성 충돌 시 1회 재시도)
+    const insertRev = (revNo: number) =>
+      supabaseRest(c.env, "POST", `/elev_revisions`, {
+        id: revId,
+        project_id: projectId,
+        rev_no: revNo,
+        memo,
+        state,
+        summary,
+        dxf_bucket: dxfBucketCol,
+        dxf_path: dxfPath,
+        dxf_name: dxfName,
+        dxf_size: dxfSize,
+        schema_ver: 1,
+        created_by: null,
+      });
+
+    let nextNo = (project.latest_rev_no ?? 0) + 1;
+    let res = await insertRev(nextNo);
+    if (res.status === 409) {
+      // unique(project_id,rev_no) 충돌 → 최신 재조회 후 1회 재시도
+      const reRes = await supabaseRest(
+        c.env, "GET",
+        `/elev_revisions?project_id=eq.${encodeURIComponent(projectId)}&select=rev_no&order=rev_no.desc&limit=1`,
+      );
+      const top = reRes.ok ? (((await reRes.json()) as { rev_no?: number }[])[0] ?? null) : null;
+      nextNo = (top?.rev_no ?? nextNo) + 1;
+      res = await insertRev(nextNo);
+    }
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[elev-rev/POST]", errText);
+      // Storage 롤백(신규 업로드분만)
+      if (file && dxfPath) {
+        try { await storageDelete(c.env, bucket, [dxfPath]); } catch { /* ignore */ }
+      }
+      return c.json({ error: `저장 실패: ${errText}` }, res.status as 500);
+    }
+    const inserted = ((await res.json()) as unknown[])[0] ?? null;
+
+    // 프로젝트 latest 갱신
+    await supabaseRest(
+      c.env, "PATCH", `/elev_projects?id=eq.${encodeURIComponent(projectId)}`,
+      { latest_rev_no: nextNo, latest_rev_id: revId, updated_at: new Date().toISOString() },
+      "return=minimal",
+    );
+
+    return c.json({ revision: inserted });
+  } catch (err) {
+    console.error("[elev-rev/POST]", errMsg(err));
+    return c.json({ error: `저장 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/** DELETE /api/elevation-projects/:projectId/revisions/:revId — 특정 REV 삭제 */
+app.delete("/api/elevation-projects/:projectId/revisions/:revId", async (c) => {
+  const projectId = c.req.param("projectId");
+  const revId = c.req.param("revId");
+  const bucket = dxfBucket(c.env);
+  try {
+    // DXF 경로 조회(다른 REV가 같은 경로 재사용 중이면 삭제 보류)
+    const rRes = await supabaseRest(
+      c.env, "GET", `/elev_revisions?id=eq.${encodeURIComponent(revId)}&select=dxf_path`,
+    );
+    const target = rRes.ok ? (((await rRes.json()) as { dxf_path?: string | null }[])[0] ?? null) : null;
+    const dxfPath: string | null = target?.dxf_path ?? null;
+
+    const res = await supabaseRest(
+      c.env, "DELETE", `/elev_revisions?id=eq.${encodeURIComponent(revId)}`, undefined, "return=minimal",
+    );
+    if (!res.ok && res.status !== 404) {
+      const errText = await res.text();
+      return c.json({ error: `삭제 실패: ${errText}` }, res.status as 500);
+    }
+
+    // 같은 dxf_path 를 다른 REV가 쓰는지 확인 후 미사용이면 Storage 삭제
+    if (dxfPath) {
+      const useRes = await supabaseRest(
+        c.env, "GET", `/elev_revisions?dxf_path=eq.${encodeURIComponent(dxfPath)}&select=id&limit=1`,
+      );
+      const stillUsed = useRes.ok && ((await useRes.json()) as unknown[]).length > 0;
+      if (!stillUsed) {
+        try { await storageDelete(c.env, bucket, [dxfPath]); } catch { /* ignore */ }
+      }
+    }
+
+    // latest 재계산
+    const topRes = await supabaseRest(
+      c.env, "GET",
+      `/elev_revisions?project_id=eq.${encodeURIComponent(projectId)}&select=id,rev_no&order=rev_no.desc&limit=1`,
+    );
+    const top = topRes.ok
+      ? (((await topRes.json()) as { id?: string; rev_no?: number }[])[0] ?? null)
+      : null;
+    await supabaseRest(
+      c.env, "PATCH", `/elev_projects?id=eq.${encodeURIComponent(projectId)}`,
+      { latest_rev_no: top?.rev_no ?? 0, latest_rev_id: top?.id ?? null, updated_at: new Date().toISOString() },
+      "return=minimal",
+    );
+    return c.json({ success: true });
+  } catch (err) {
+    return c.json({ error: `삭제 실패: ${errMsg(err)}` }, 500);
+  }
+});
 
 export default app;
