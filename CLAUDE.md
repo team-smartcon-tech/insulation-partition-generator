@@ -6,6 +6,47 @@
 
 ---
 
+## 0. 프로젝트 빠른 참조 (세션 즉시 참조용)
+
+> 상세는 [`README.md`](./README.md) / [`docs/2026-07-02-단열재나누기도-핸드오프.md`](./docs/2026-07-02-단열재나누기도-핸드오프.md).
+
+**무엇**: DXF 도면 → 단열재 나누기도 + 물량 산출서(DXF/SVG/CSV/XLSX/ZIP) 웹 앱. SSX "세대 단열재 나누기도"를 독립 이관. **라이브**: https://insulation-partition-generator.jogh.workers.dev
+
+**명령 (pnpm 모노레포, Node 20+)**
+
+```bash
+pnpm install
+pnpm --filter web dev        # 화면 5173 (/api → 로컬 worker 8787 프록시)
+pnpm --filter worker dev     # 저장/불러오기 Worker 8787
+pnpm --filter web build      # 프로덕션 빌드(타입체크 포함)
+pnpm -r typecheck
+```
+
+**핵심 경로**
+
+- 화면: `apps/web/src/features/elevation/ElevationGeneratorPage.tsx`
+- 저장: 같은 폴더 `api.ts`(REST 클라) · `hooks.ts`(react-query)
+- 계산·도면: `apps/web/src/features/elevation/utils/*`
+- Worker: `apps/worker/src/index.ts`(`/api/elevation-projects*`), 설정 `apps/worker/wrangler.jsonc`
+- 공용 타입: `packages/shared/src/index.ts`(`ElevState` 등) — web의 `features/elevation/types.ts`가 재수출
+
+**인프라**
+
+- Supabase(전용): ref `yzercziwazfrjsjnmbhr` · 테이블 `elev_projects`/`elev_revisions` · 버킷 `elev-dxf`(private)
+- Cloudflare 계정: Smarttech `2b025f536a98444871b3306efbfd6b2a` (wrangler.jsonc `account_id`)
+- Worker 시크릿: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Cloudflare Secrets)
+
+**함정 (Gotchas)**
+
+- **단일 Worker가 SPA+API 서빙** — `wrangler.jsonc`의 `assets`(`run_worker_first: ["/api/*","/health"]` + SPA fallback). `run_worker_first` 배열형은 **wrangler v4+** 필요.
+- Supabase 마이그레이션/쿼리는 **이 프로젝트 전용 MCP(`supabase`, ref `yzercziwazfrjsjnmbhr`)에만**. SSX MCP(`supabase-dev` `kejieugtzuksqpgtxbwg` / `supabase-prod`)에는 **절대 적용 금지**.
+- 로컬 `wrangler` 사용 시 셸에 남은 무효 `CLOUDFLARE_API_TOKEN` 있으면 `unset` 후 `wrangler login`(OAuth). 계정이 여러 개라 `account_id` 명시로 Smarttech 고정됨.
+- 저장 데이터 원천은 Supabase(DB+Storage) — `localStorage` 아님.
+- 접근 제어 없음(무인증). 도입 시 `apps/worker/src/index.ts` 라우트 앞단 미들웨어 한 곳.
+- 배포 정식 경로: GitHub 연결 Workers Builds(Root `apps/worker` / Build `pnpm --filter web build` / Deploy `npx wrangler deploy`). `main` 직접 push 금지(훅 차단).
+
+---
+
 ## 1. Reading Order
 
 Claude Code는 작업 시작 전 아래 순서로 확인한다.

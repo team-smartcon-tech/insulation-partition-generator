@@ -21,10 +21,10 @@ What it does: DXF 도면으로 외단열재 나누기도와 자재 물량을 자
 Main users: 단열재 물량·시공도면 담당자 (원래 SSX 본사 메뉴 기능)
 Core workflows: DXF 업로드 → 외벽 그리기 → 창/문 배치 → 보드 규격·정책 설정 → 나누기도 미리보기 → DXF/SVG/CSV/XLSX/ZIP 내보내기 → (선택) 프로젝트 저장/불러오기
 Important data: 저장한 프로젝트·리비전 (작업상태 JSON + 수량요약 + 업로드 DXF 파일) — 새 Supabase 테이블 2개 + Storage
-Admin roles: 미정 (저장기능 이식 단계에서 로그인 방식 결정). 원본은 본사 RBAC(hq-elevation-gen)
-External services: Cloudflare Workers(신규 프로젝트), Supabase(신규 프로젝트). 그 외 외부 연동 없음
-Launch target: 사내용 웹 도구, Cloudflare 배포. 시점 미정
-Do not touch: 원본 SSX 저장소는 읽기 전용(수정 금지). 계산 로직(insulation.ts/geometry.ts/exporter.ts 등) 동작은 그대로 유지
+Admin roles: 현재 무인증(접근 제어 없음, 사내 도구). 필요 시 worker 라우트 앞단 미들웨어로 추가. 원본은 본사 RBAC(hq-elevation-gen)
+External services: Cloudflare Worker(계정 Smarttech `2b025f536a98444871b3306efbfd6b2a`), Supabase(전용 ref `yzercziwazfrjsjnmbhr`). 그 외 외부 연동 없음
+Launch target: 사내용 웹 도구. **배포 완료(라이브)** — https://insulation-partition-generator.jogh.workers.dev
+Do not touch: 원본 SSX 저장소는 읽기 전용(수정 금지). 계산 로직(insulation.ts/geometry.ts/exporter.ts 등) 동작은 그대로 유지. Supabase 마이그레이션/쿼리는 전용 ref `yzercziwazfrjsjnmbhr` 에만(SSX MCP 금지)
 ```
 
 기술 항목은 에이전트가 실제 코드와 설정을 확인한 뒤 관련 `.agents/*` 문서 또는 `Project Override`에 반영한다.
@@ -228,15 +228,16 @@ Risk:
 
 - 이 저장소는 SSX(`smart-schedule-X`)의 "세대 단열재 나누기도" 화면 기능을 **동작 그대로 독립 이관**한 것이다.
 - 원본 SSX 저장소는 **읽기 전용 참조**이며 수정하지 않는다.
-- 호스팅은 SSX와 분리된 **신규 Cloudflare Worker**, 데이터는 분리된 **신규 Supabase 프로젝트**를 사용한다.
-- 상세 이관 계획: `docs/2026-07-02-단열재나누기도-이관계획.md`
+- 호스팅은 SSX와 분리된 **신규 Cloudflare Worker**(계정 Smarttech `2b025f536a98444871b3306efbfd6b2a`), 데이터는 분리된 **신규 Supabase 프로젝트**(ref `yzercziwazfrjsjnmbhr`)를 사용한다.
+- 상세 이관 계획: `docs/2026-07-02-단열재나누기도-이관계획.md` · 현재 상태: `docs/2026-07-02-단열재나누기도-핸드오프.md`
 
 ### 스택 오버라이드
 
 - 프론트엔드: 표준(React Router v7 Framework Mode) 대신 **Vite + React + wouter** (원본과 동일). 사유는 `.agents/STACK.md`의 Project Override 참조.
 - 그 외 표준 유지: TypeScript, TanStack Query, Zod, 서버=Hono/Cloudflare Worker, DB=Supabase, UI=Tailwind + shadcn/ui.
 
-### 저장/불러오기(persistence)는 단계적 이식
+### 저장/불러오기(persistence) — 이식 완료
 
 - 생성 기능(계산·화면)은 서버·DB 없이 순수 클라이언트로 동작한다.
-- 프로젝트 저장/불러오기 API(worker) + 새 Supabase 테이블 2개 + Storage + 로그인 방식은 이후 단계에서 이식/확정한다.
+- 저장/불러오기: worker `/api/elevation-projects*` + Supabase 테이블 `elev_projects`/`elev_revisions` + Storage 버킷 `elev-dxf`. 로그인은 현재 무인증(§ Project Overview).
+- SSX dev 기존 데이터(프로젝트 2·리비전 5)는 DB만 이관됨(DXF 원본 파일 제외). 상세: 핸드오프 문서 §3-D.
