@@ -41,6 +41,8 @@ export interface ElevState {
     placement: "min-waste" | "constructability";
     optimizeSP: boolean;
     discardWidth: number;
+    /** 시공성 우선: 최소 조각 폭(mm) — 미만 자투리는 옆 판과 재분할. 미지정/0=끔(구 REV 호환). */
+    constructMinPieceWidth?: number;
     minJointGap: number;
     minPieceWidth: number;
     /** 겹 방향 — true=안쪽(2P 짧게), false=바깥(2P 길게). 미지정 시 안쪽. */

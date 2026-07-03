@@ -561,6 +561,7 @@ export default function ElevationGeneratorPage() {
     "min-waste"
   );
   const [discardWidth, setDiscardWidth] = useState(200); // 시공성 우선: 버림 기준 폭(mm)
+  const [constructMinW, setConstructMinW] = useState(0); // 시공성 우선: 최소 조각 폭(재분할, 0=off)
   const [minJointGap, setMinJointGap] = useState(250); // 1P/2P 조인트 최소이격(결로방지)
   const [minPieceWidth, setMinPieceWidth] = useState(100); // 최소 조각 폭(시공성)
   // 노출 프리셋(직접/간접외기 → 두께) — 편집 가능
@@ -699,6 +700,7 @@ export default function ElevationGeneratorPage() {
         placement,
         optimizeSP,
         discardWidth,
+        constructMinPieceWidth: constructMinW,
         minJointGap,
         minPieceWidth,
         plyInward,
@@ -717,7 +719,7 @@ export default function ElevationGeneratorPage() {
     }),
     [
       fileName, boardLength, boardHeight, boardThickness, insulOn, placement,
-      optimizeSP, discardWidth, minJointGap, minPieceWidth, plyInward, defaultFloorHeight,
+      optimizeSP, discardWidth, constructMinW, minJointGap, minPieceWidth, plyInward, defaultFloorHeight,
       defaultSill, autoExtract, hiddenLayers, walls, openings, typeMatrix,
     ]
   );
@@ -731,6 +733,7 @@ export default function ElevationGeneratorPage() {
     setPlacement(st.policy.placement);
     setOptimizeSP(st.policy.optimizeSP);
     setDiscardWidth(st.policy.discardWidth);
+    setConstructMinW(st.policy.constructMinPieceWidth ?? 0); // 구 REV 폴백
     setMinJointGap(st.policy.minJointGap);
     setMinPieceWidth(st.policy.minPieceWidth);
     setPlyInward(st.policy.plyInward ?? true);
@@ -926,6 +929,7 @@ export default function ElevationGeneratorPage() {
       minPieceWidth,
       placement,
       discardWidth,
+      constructMinPieceWidth: constructMinW,
       openings: opsDevX,
     };
   };
@@ -1965,6 +1969,7 @@ export default function ElevationGeneratorPage() {
     exposurePresets,
     placement,
     discardWidth,
+    constructMinW,
     selectedSeg,
   ]);
 
@@ -2846,7 +2851,7 @@ export default function ElevationGeneratorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       walls, openings, boardLength, boardHeight, boardThickness, placement,
-      discardWidth, minPieceWidth, optimizeSP, minJointGap, defaultFloorHeight, insulOn, plyInward, exposurePresets, typeMatrix,
+      discardWidth, constructMinW, minPieceWidth, optimizeSP, minJointGap, defaultFloorHeight, insulOn, plyInward, exposurePresets, typeMatrix,
     ]
   );
 
@@ -3435,20 +3440,36 @@ export default function ElevationGeneratorPage() {
                       />
                     </>
                   ) : (
-                    <LabelInput
-                      label="버림 기준 폭 (이보다 좁은 자투리 폐기)"
-                      control={
-                        <NumberInput
-                          value={discardWidth}
-                          onChange={setDiscardWidth}
-                          suffix="mm"
-                          step={10}
-                          min={0}
-                          max={1000}
-                          compact
-                        />
-                      }
-                    />
+                    <>
+                      <LabelInput
+                        label="최소 조각 폭 (미만이면 옆 판과 재분할 · 0=끔)"
+                        control={
+                          <NumberInput
+                            value={constructMinW}
+                            onChange={setConstructMinW}
+                            suffix="mm"
+                            step={10}
+                            min={0}
+                            max={1000}
+                            compact
+                          />
+                        }
+                      />
+                      <LabelInput
+                        label="버림 기준 폭 (이보다 좁은 자투리 폐기)"
+                        control={
+                          <NumberInput
+                            value={discardWidth}
+                            onChange={setDiscardWidth}
+                            suffix="mm"
+                            step={10}
+                            min={0}
+                            max={1000}
+                            compact
+                          />
+                        }
+                      />
+                    </>
                   )}
                   </div>
                   <LabelInput

@@ -148,8 +148,11 @@ export default function HomePage() {
         {/* 헤딩 + 검색 */}
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-[30px] font-extrabold tracking-tight text-slate-900">
-              App Market
+            <h1
+              className="bg-gradient-to-r from-[#00274d] via-[#0a63b8] to-[#1478d6] bg-clip-text text-[34px] leading-tight text-transparent"
+              style={{ fontFamily: "'Black Han Sans', 'SUIT Variable', sans-serif" }}
+            >
+              시공상세도 자동화 TOOL
             </h1>
             <p className="mt-1.5 text-[14px] text-slate-500">
               시공 자동화 앱·도구 디렉터리
