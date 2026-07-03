@@ -5,8 +5,8 @@
 /* 원본(SSX)의 디자인 토큰을 이 기능이 쓰는 범위로 추린 것.
    sidebar/chart/typography/PWA 토큰과 SUIT 웹폰트는 제외(시스템 폰트 폴백). */
 @theme inline {
-  --font-sans: "Pretendard", "Pretendard Variable", system-ui, -apple-system,
-    sans-serif;
+  --font-sans: "SUIT Variable", "SUIT", "Pretendard", "Pretendard Variable",
+    system-ui, -apple-system, sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -68,7 +68,36 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: "Pretendard", "Pretendard Variable", system-ui, -apple-system,
-      sans-serif;
+    font-family: "SUIT Variable", "SUIT", "Pretendard", "Pretendard Variable",
+      system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+}
+
+/* ── 홈 배경 앰비언트 애니메이션 (은은하게 떠다니는 오로라) ── */
+@keyframes ambientFloatA {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(48px, -28px, 0) scale(1.14); }
+}
+@keyframes ambientFloatB {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-38px, 30px, 0) scale(1.12); }
+}
+@keyframes ambientFloatC {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(34px, 26px, 0) scale(1.16); }
+}
+@keyframes gridDrift {
+  from { background-position: 0 0; }
+  to { background-position: 46px 46px; }
+}
+@keyframes sheenSweep {
+  0% { transform: translateX(-40%) rotate(8deg); opacity: 0; }
+  35% { opacity: 0.55; }
+  65% { opacity: 0.55; }
+  100% { transform: translateX(140%) rotate(8deg); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ambient-anim { animation: none !important; }
 }

@@ -136,18 +136,28 @@ export async function callDcrLogin(
     body: JSON.stringify({ email: body.email, password: body.password, remember: true }),
   };
 
-  let res: Response;
-  try {
-    if (env.DCR_APP) {
-      res = await env.DCR_APP.fetch(new Request(`https://dcr-app${path}`, init));
-    } else if (env.DCR_BASE_URL) {
-      res = await fetch(`${env.DCR_BASE_URL.replace(/\/$/, "")}${path}`, init);
-    } else {
+  // 호출 경로: 1순위 서비스 바인딩(prod 에서 신뢰성 높음) → 실패 시 DCR_BASE_URL 공개 URL 폴백.
+  // 로컬 dev 는 DCR_APP 바인딩이 "not connected" 상태로 502 를 돌려주므로, 이때 DCR_BASE_URL 로 넘어가야 로그인이 된다.
+  let res: Response | null = null;
+  if (env.DCR_APP) {
+    try {
+      const bound = await env.DCR_APP.fetch(new Request(`https://dcr-app${path}`, init));
+      // 502/503 은 바인딩 미연결(로컬) 신호로 보고 폴백. 그 외(200/401 등)는 실제 응답이므로 그대로 사용.
+      if (bound.status !== 502 && bound.status !== 503) res = bound;
+    } catch (e) {
+      console.error("[auth] DCR 바인딩 호출 실패, 공개 URL 폴백:", e instanceof Error ? e.message : String(e));
+    }
+  }
+  if (!res) {
+    if (!env.DCR_BASE_URL) {
       return { ok: false, status: 500, error: "DCR 로그인 백엔드 미설정 (DCR_APP/DCR_BASE_URL)" };
     }
-  } catch (e) {
-    console.error("[auth] DCR 호출 실패:", e instanceof Error ? e.message : String(e));
-    return { ok: false, status: 502, error: "인증 서버 연결 실패" };
+    try {
+      res = await fetch(`${env.DCR_BASE_URL.replace(/\/$/, "")}${path}`, init);
+    } catch (e) {
+      console.error("[auth] DCR 호출 실패:", e instanceof Error ? e.message : String(e));
+      return { ok: false, status: 502, error: "인증 서버 연결 실패" };
+    }
   }
 
   const data = (await res.json().catch(() => ({}))) as {

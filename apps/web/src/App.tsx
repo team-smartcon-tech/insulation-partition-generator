@@ -3,13 +3,21 @@ import { Toaster } from "sonner";
 import ElevationGeneratorPage from "@/features/elevation/ElevationGeneratorPage";
 import LoginPage from "@/features/auth/LoginPage";
 import AuthGate from "@/features/auth/AuthGate";
+import HomePage from "@/features/home/HomePage";
 
 export default function App() {
   return (
     <>
       <Switch>
         <Route path="/login"><LoginPage /></Route>
+        {/* 메인 허브 — 도구 목록 */}
         <Route path="/">
+          <AuthGate>
+            <HomePage />
+          </AuthGate>
+        </Route>
+        {/* 도구: 단열재 나누기도 */}
+        <Route path="/tools/insulation">
           <AuthGate>
             <ElevationGeneratorPage />
           </AuthGate>
