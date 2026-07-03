@@ -102,9 +102,6 @@ export default function LoginPage() {
               <h1 className="mt-2.5 text-[22px] font-extrabold tracking-tight text-slate-900">
                 로그인
               </h1>
-              <p className="mt-1.5 text-[13px] text-slate-500">
-                DCR 계정(이메일 · 비밀번호)으로 로그인합니다.
-              </p>
             </div>
 
             <div className="space-y-4">
@@ -168,7 +165,7 @@ export default function LoginPage() {
             </Button>
 
             <p className="mt-5 text-center text-[11.5px] leading-relaxed text-slate-400">
-              DCR 회원 계정으로 로그인합니다. 계정 문의는 관리자에게 하세요.
+              계정 문의는 관리자에게 하세요.
             </p>
           </div>
         </form>

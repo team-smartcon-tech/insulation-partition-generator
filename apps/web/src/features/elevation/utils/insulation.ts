@@ -139,6 +139,12 @@ export interface DevelopPlyParams {
    */
   discardWidth?: number;
   /**
+   * 시공성 우선(constructability) 모드용 최소 조각 폭(mm) — 이보다 좁은 자투리가 생기면
+   * 옆 판과 합쳐 균등 재분할한다(조각 자체가 안 생김). 버림(discardWidth) 판정보다 먼저 적용.
+   * 코너/오프닝 경계는 넘지 않음. 기본 0(off — 기존 동작 유지).
+   */
+  constructMinPieceWidth?: number;
+  /**
    * 오프닝(창/문) 구간 — 단열재가 안 들어가는 영역. 전개면 좌표 {x0,x1,y0,y1}(mm).
    * 보드 셀에서 이 사각형들을 빼낸다(뽕뚫기). 보드는 오프닝 경계에 맞춰 잘림.
    */
@@ -448,6 +454,7 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     minPieceWidth = 0,
     placement = "min-waste",
     discardWidth = 0,
+    constructMinPieceWidth = 0,
     openings = [],
   } = params;
 
@@ -695,6 +702,10 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
 
   // ── 배치 정책별 자투리 처리 ──
   if (placement === "constructability") {
+    // (옵션) 최소 조각 폭 재분할 — 기준 미만 자투리를 옆 판과 합쳐 균등 분할(조각 자체가 안 생김).
+    if (constructMinPieceWidth > 0) {
+      cells = mergeSlivers(cells, L, constructMinPieceWidth, cornerXs);
+    }
     // 시공성 우선: 온장 유지, 기준치보다 좁은 절단 자투리는 '버림(폐기)' 표기.
     if (discardWidth > 0) {
       for (const c of cells) {
