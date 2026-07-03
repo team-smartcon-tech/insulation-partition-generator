@@ -52,7 +52,11 @@ import {
   type PlyDevelopment,
 } from "./utils/insulation";
 import { cn } from "@/lib/utils";
-import DxfParser from "dxf-parser";
+import {
+  parseDxfText,
+  type ParsedDxf,
+} from "./utils/dxfEngine";
+import PlanDxfCanvas from "./components/PlanDxfCanvas";
 import {
   buildElevationDxfMulti,
   buildElevationSvgMulti,
@@ -90,41 +94,7 @@ import {
 } from "./utils/geometry";
 
 // ─────────────────────────── 타입 ───────────────────────────
-
-type NormalizedEntity =
-  | { kind: "line"; layer: string; color: string; a: Point2D; b: Point2D }
-  | {
-      kind: "polyline";
-      layer: string;
-      color: string;
-      points: Point2D[];
-      closed: boolean;
-    }
-  | {
-      kind: "circle";
-      layer: string;
-      color: string;
-      center: Point2D;
-      radius: number;
-    }
-  | {
-      kind: "arc";
-      layer: string;
-      color: string;
-      center: Point2D;
-      radius: number;
-      start: number;
-      end: number;
-    }
-  | { kind: "text"; layer: string; color: string; pos: Point2D; text: string };
-
-interface ParsedDxf {
-  entities: NormalizedEntity[];
-  bounds: { minX: number; minY: number; maxX: number; maxY: number };
-  layers: string[];
-  warnings: string[];
-  snapPoints: Point2D[];
-}
+// NormalizedEntity / ParsedDxf 는 utils/dxfEngine.ts 로 이전
 
 type OpeningKind = "window" | "door" | "opening";
 
@@ -304,23 +274,6 @@ function expandBuildingRange(input: string): string[] {
   return out;
 }
 
-// ────────────────────── DXF 색상 ──────────────────────
-const ACI_COLORS: Record<number, string> = {
-  1: "#ef4444",
-  2: "#facc15",
-  3: "#22c55e",
-  4: "#06b6d4",
-  5: "#3b82f6",
-  6: "#a855f7",
-  7: "#e5e7eb",
-  8: "#94a3b8",
-  9: "#cbd5e1",
-};
-function aciToHex(aci: number | undefined, fallback = "#cbd5e1"): string {
-  if (!aci || aci === 256) return fallback;
-  return ACI_COLORS[aci] ?? fallback;
-}
-
 // 체인 색상 팔레트 (입면 1, 2, 3…)
 const CHAIN_COLORS = [
   "#fbbf24", // amber
@@ -330,138 +283,6 @@ const CHAIN_COLORS = [
   "#a78bfa", // violet
   "#fb923c", // orange
 ];
-
-// ────────────────────── DXF 정규화 ──────────────────────
-function normalizeDxf(raw: any): ParsedDxf {
-  const entities: NormalizedEntity[] = [];
-  const warnings: string[] = [];
-  const layerSet = new Set<string>();
-  const snapPoints: Point2D[] = [];
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
-  const addBound = (p: Point2D) => {
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
-    if (p.x < minX) minX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y > maxY) maxY = p.y;
-  };
-
-  const list = Array.isArray(raw?.entities) ? raw.entities : [];
-  for (const e of list) {
-    const layer = e.layer || "0";
-    layerSet.add(layer);
-    const color = aciToHex(e.color);
-    switch (e.type) {
-      case "LINE": {
-        const a = { x: e.vertices?.[0]?.x, y: e.vertices?.[0]?.y };
-        const b = { x: e.vertices?.[1]?.x, y: e.vertices?.[1]?.y };
-        if ([a.x, a.y, b.x, b.y].every(Number.isFinite)) {
-          addBound(a);
-          addBound(b);
-          // 끝점 + 중점(개구부 중앙 등 정밀 배치 보조)
-          snapPoints.push(a, b, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-          entities.push({ kind: "line", layer, color, a, b });
-        }
-        break;
-      }
-      case "LWPOLYLINE":
-      case "POLYLINE": {
-        const pts: Point2D[] = (e.vertices ?? [])
-          .map((v: any) => ({ x: v.x, y: v.y }))
-          .filter((p: Point2D) => Number.isFinite(p.x) && Number.isFinite(p.y));
-        if (pts.length >= 2) {
-          pts.forEach((p, i) => {
-            addBound(p);
-            snapPoints.push(p);
-            // 직전 정점과의 세그먼트 중점도 스냅 후보로 추가
-            if (i > 0) {
-              const prev = pts[i - 1];
-              snapPoints.push({
-                x: (prev.x + p.x) / 2,
-                y: (prev.y + p.y) / 2,
-              });
-            }
-          });
-          entities.push({
-            kind: "polyline",
-            layer,
-            color,
-            points: pts,
-            closed: !!e.shape,
-          });
-        }
-        break;
-      }
-      case "CIRCLE": {
-        const c = { x: e.center?.x, y: e.center?.y };
-        const r = e.radius;
-        if (Number.isFinite(c.x) && Number.isFinite(c.y) && Number.isFinite(r)) {
-          addBound({ x: c.x - r, y: c.y - r });
-          addBound({ x: c.x + r, y: c.y + r });
-          entities.push({ kind: "circle", layer, color, center: c, radius: r });
-        }
-        break;
-      }
-      case "ARC": {
-        const c = { x: e.center?.x, y: e.center?.y };
-        const r = e.radius;
-        const start = ((e.startAngle ?? 0) * Math.PI) / 180;
-        const end = ((e.endAngle ?? 0) * Math.PI) / 180;
-        if (Number.isFinite(c.x) && Number.isFinite(c.y) && Number.isFinite(r)) {
-          addBound({ x: c.x - r, y: c.y - r });
-          addBound({ x: c.x + r, y: c.y + r });
-          entities.push({
-            kind: "arc",
-            layer,
-            color,
-            center: c,
-            radius: r,
-            start,
-            end,
-          });
-        }
-        break;
-      }
-      case "TEXT":
-      case "MTEXT": {
-        const pos = {
-          x: e.startPoint?.x ?? e.position?.x,
-          y: e.startPoint?.y ?? e.position?.y,
-        };
-        if (Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
-          addBound(pos);
-          entities.push({
-            kind: "text",
-            layer,
-            color,
-            pos,
-            text: String(e.text ?? ""),
-          });
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  }
-  if (!Number.isFinite(minX)) {
-    warnings.push("도면에 표시 가능한 엔티티가 없습니다.");
-    minX = 0;
-    minY = 0;
-    maxX = 1;
-    maxY = 1;
-  }
-  return {
-    entities,
-    bounds: { minX, minY, maxX, maxY },
-    layers: Array.from(layerSet).sort(),
-    warnings,
-    snapPoints,
-  };
-}
 
 // ────────────────────── 프리셋 ──────────────────────
 const DEFAULT_PRESETS: OpeningPreset[] = [
@@ -895,8 +716,7 @@ export default function ElevationGeneratorPage() {
         if (dxfSignedUrl) {
           const text = await fetch(dxfSignedUrl).then(r => r.text());
           setRawDxfText(text); // 내보내기용 원본 DXF 보관
-          const raw = new DxfParser().parseSync(text);
-          setParsed(normalizeDxf(raw));
+          setParsed(parseDxfText(text));
         }
         setRevPanelOpen(false);
         toast.success(`REV ${revision.rev_no} 불러옴`);
@@ -1097,10 +917,7 @@ export default function ElevationGeneratorPage() {
     try {
       const text = await file.text();
       setRawDxfText(text); // 내보내기용 원본 DXF 보관
-      const parser = new DxfParser();
-      const raw = parser.parseSync(text);
-      const norm = normalizeDxf(raw);
-      setParsed(norm);
+      setParsed(parseDxfText(text));
       setHiddenLayers(new Set());
       setWalls([]);
       setDraft([]);
@@ -1133,7 +950,7 @@ export default function ElevationGeneratorPage() {
         if (dxf?.text) {
           const dxfName = dxf.name || data.state.fileName || "imported.dxf";
           setFileName(dxfName);
-          setParsed(normalizeDxf(new DxfParser().parseSync(dxf.text)));
+          setParsed(parseDxfText(dxf.text));
           setRawDxfText(dxf.text); // 다시 내보내기 가능하도록 보관
           // 이후 저장(REV) 시 첨부되도록 원본 File 재구성
           setLastDxfFile(new File([dxf.text], dxfName, { type: "application/dxf" }));
@@ -1230,13 +1047,7 @@ export default function ElevationGeneratorPage() {
     [scale, offset]
   );
 
-  // ─── 가시 엔티티 ───
-  const visibleEntities = useMemo(() => {
-    if (!parsed) return [];
-    return parsed.entities.filter(e => !hiddenLayers.has(e.layer));
-  }, [parsed, hiddenLayers]);
-
-  // ─── 평면 렌더 ───
+  // ─── 평면 오버레이 렌더 (체인/트레이싱/개구부/스냅 — DXF 는 PlanDxfCanvas 가 그림) ───
   useEffect(() => {
     const canvas = planCanvasRef.current;
     const container = planContainerRef.current;
@@ -1251,59 +1062,9 @@ export default function ElevationGeneratorPage() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#0b1220";
-    ctx.fillRect(0, 0, cw, ch);
+    // 투명 오버레이 — DXF 지오메트리는 아래 PlanDxfCanvas(Three.js)가 렌더
+    ctx.clearRect(0, 0, cw, ch);
     if (!parsed) return;
-
-    // DXF
-    ctx.lineWidth = 1;
-    for (const e of visibleEntities) {
-      ctx.strokeStyle = e.color;
-      ctx.fillStyle = e.color;
-      switch (e.kind) {
-        case "line": {
-          const a = toPx(e.a);
-          const b = toPx(e.b);
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.stroke();
-          break;
-        }
-        case "polyline": {
-          ctx.beginPath();
-          e.points.forEach((p, i) => {
-            const q = toPx(p);
-            if (i === 0) ctx.moveTo(q.x, q.y);
-            else ctx.lineTo(q.x, q.y);
-          });
-          if (e.closed) ctx.closePath();
-          ctx.stroke();
-          break;
-        }
-        case "circle": {
-          const c = toPx(e.center);
-          ctx.beginPath();
-          ctx.arc(c.x, c.y, e.radius * scale, 0, Math.PI * 2);
-          ctx.stroke();
-          break;
-        }
-        case "arc": {
-          const c = toPx(e.center);
-          ctx.beginPath();
-          ctx.arc(c.x, c.y, e.radius * scale, -e.end, -e.start, false);
-          ctx.stroke();
-          break;
-        }
-        case "text": {
-          if (!showText) break;
-          const p = toPx(e.pos);
-          ctx.font = "10px 'Noto Sans KR', sans-serif";
-          ctx.fillText(e.text, p.x, p.y);
-          break;
-        }
-      }
-    }
 
     // 확정된 체인들
     walls.forEach((w, idx) => {
@@ -1497,10 +1258,8 @@ export default function ElevationGeneratorPage() {
     }
   }, [
     parsed,
-    visibleEntities,
     scale,
     offset,
-    showText,
     walls,
     draft,
     activeWallId,
@@ -3390,6 +3149,15 @@ export default function ElevationGeneratorPage() {
                   : "opacity-0 pointer-events-none z-0"
               )}
             >
+              {/* DXF 지오메트리 — Three.js 렌더 (하단 레이어) */}
+              <PlanDxfCanvas
+                sceneEntities={parsed?.sceneEntities ?? null}
+                hiddenLayers={hiddenLayers}
+                showText={showText}
+                scale={scale}
+                offset={offset}
+              />
+              {/* 상호작용 오버레이 — 체인/트레이싱/개구부/스냅 (상단 레이어) */}
               <canvas
                 ref={planCanvasRef}
                 onMouseDown={onPlanMouseDown}
@@ -3402,7 +3170,10 @@ export default function ElevationGeneratorPage() {
                 }}
                 onClick={onPlanClick}
                 onDoubleClick={onPlanDoubleClick}
-                className={cn("block w-full h-full", cursorClass)}
+                className={cn(
+                  "absolute inset-0 block w-full h-full",
+                  cursorClass
+                )}
               />
               {!parsed && !isParsing && !parseError && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
