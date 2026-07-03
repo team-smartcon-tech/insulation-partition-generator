@@ -523,6 +523,14 @@ export default function ElevationGeneratorPage() {
   const [selectedPresetId, setSelectedPresetId] = useState<string>(
     DEFAULT_PRESETS[0].id
   );
+  // 오프닝 프리셋(폭·높이·SILL) — 사용자가 직접 수정 가능.
+  const [presets, setPresets] = useState<OpeningPreset[]>(DEFAULT_PRESETS);
+  const updatePreset = useCallback(
+    (id: string, patch: Partial<OpeningPreset>) => {
+      setPresets(prev => prev.map(p => (p.id === id ? { ...p, ...patch } : p)));
+    },
+    []
+  );
   const [twoPointAnchor, setTwoPointAnchor] = useState<{
     wallId: string;
     s: number;
@@ -538,6 +546,7 @@ export default function ElevationGeneratorPage() {
 
   // ── 캔버스 탭 (평면도 / 전개 입면) — 한 번에 하나만 전폭으로 표시 ──
   const [canvasTab, setCanvasTab] = useState<"plan" | "elev">("plan");
+  const [elevListOpen, setElevListOpen] = useState(false); // 입면 목록 팝업(모달)
 
   // ── 단열재 나누기도 (추가 기능 — OFF 면 기존 동작과 동일) ──
   // 수동 방식: 트레이싱한 각 선(체인)을 자기 길이 그대로 보드로 분할.
@@ -653,8 +662,8 @@ export default function ElevationGeneratorPage() {
   const [snapHit, setSnapHit] = useState<Point2D | null>(null);
 
   const preset = useMemo(
-    () => DEFAULT_PRESETS.find(p => p.id === selectedPresetId) ?? null,
-    [selectedPresetId]
+    () => presets.find(p => p.id === selectedPresetId) ?? null,
+    [presets, selectedPresetId]
   );
 
   const [outputOpen, setOutputOpen] = useState(false);
@@ -668,6 +677,8 @@ export default function ElevationGeneratorPage() {
     name: string | null;
     size: number | null;
   } | null>(null);
+  // 내보내기(.swelev.json)용 원본 DXF 텍스트 — 업로드/REV 로드/불러오기 시 보관.
+  const [rawDxfText, setRawDxfText] = useState<string | null>(null);
   const [revPanelOpen, setRevPanelOpen] = useState(false);
 
   const { data: elevProjects = [] } = useElevProjects();
@@ -810,8 +821,10 @@ export default function ElevationGeneratorPage() {
             : null
         );
         setLastDxfFile(null);
+        setRawDxfText(null);
         if (dxfSignedUrl) {
           const text = await fetch(dxfSignedUrl).then(r => r.text());
+          setRawDxfText(text); // 내보내기용 원본 DXF 보관
           const raw = new DxfParser().parseSync(text);
           setParsed(normalizeDxf(raw));
         }
@@ -1012,6 +1025,7 @@ export default function ElevationGeneratorPage() {
     setLoadedDxfMeta(null);
     try {
       const text = await file.text();
+      setRawDxfText(text); // 내보내기용 원본 DXF 보관
       const parser = new DxfParser();
       const raw = parser.parseSync(text);
       const norm = normalizeDxf(raw);
@@ -1030,6 +1044,84 @@ export default function ElevationGeneratorPage() {
       setIsParsing(false);
     }
   }, []);
+
+  /**
+   * 프로젝트 파일(.swelev.json) 불러오기 — Smart Works 등에서 내보낸 파일.
+   * state(설정·입면) 적용 + 내장 DXF 재파싱. (같은 ElevState 형식이라 호환)
+   */
+  const handleImportProjectFile = useCallback(
+    async (file: File) => {
+      try {
+        const data = JSON.parse(await file.text());
+        if (data?.format !== "smartworks-elev-project" || !data?.state) {
+          toast.error("올바른 프로젝트 파일(.swelev.json)이 아닙니다.");
+          return;
+        }
+        applyElevState(data.state as ElevState);
+        const dxf = data.dxf as { name?: string; text?: string } | null;
+        if (dxf?.text) {
+          const dxfName = dxf.name || data.state.fileName || "imported.dxf";
+          setFileName(dxfName);
+          setParsed(normalizeDxf(new DxfParser().parseSync(dxf.text)));
+          setRawDxfText(dxf.text); // 다시 내보내기 가능하도록 보관
+          // 이후 저장(REV) 시 첨부되도록 원본 File 재구성
+          setLastDxfFile(new File([dxf.text], dxfName, { type: "application/dxf" }));
+          setLoadedDxfMeta(null);
+        } else {
+          setParsed(null);
+          setRawDxfText(null);
+          setFileName(data.state.fileName || "");
+          toast.info("DXF가 포함되지 않은 파일입니다. 설정·입면만 불러왔습니다.");
+        }
+        toast.success(
+          `프로젝트를 불러왔습니다${data.projectName ? ` — ${data.projectName}` : ""}.`
+        );
+      } catch (e) {
+        toast.error(`불러오기 실패: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [applyElevState]
+  );
+
+  /**
+   * 프로젝트 내보내기 — 현재 상태(state) + 원본 DXF 를 한 파일(.swelev.json)로.
+   * Smart Works 단열재에서 그대로 불러올 수 있다(같은 ElevState 형식).
+   */
+  const handleExportProject = useCallback(() => {
+    if (!walls.length) {
+      toast.error("내보낼 입면이 없습니다. 먼저 트레이싱하거나 프로젝트를 불러오세요.");
+      return;
+    }
+    const state = buildElevState();
+    const projName = elevProjects.find(p => p.id === activeProjectId)?.name ?? null;
+    const dxfName = fileName || lastDxfFile?.name || loadedDxfMeta?.name || "drawing.dxf";
+    const bundle = {
+      format: "smartworks-elev-project",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      app: "insulation-partition-generator",
+      projectName: projName ?? (fileName || null),
+      state,
+      dxf: rawDxfText ? { name: dxfName, text: rawDxfText } : null,
+    };
+    const base =
+      (projName || fileName || "elev-project").replace(/\.dxf$/i, "") || "elev-project";
+    downloadText(`${base}.swelev.json`, JSON.stringify(bundle), "application/json");
+    if (rawDxfText) {
+      toast.success("프로젝트 파일을 내보냈습니다. (.swelev.json)");
+    } else {
+      toast.warning("원본 DXF를 찾지 못해 설정·입면만 내보냈습니다. (배경 도면 없이 열립니다)");
+    }
+  }, [
+    walls.length,
+    buildElevState,
+    elevProjects,
+    activeProjectId,
+    fileName,
+    lastDxfFile,
+    loadedDxfMeta,
+    rawDxfText,
+  ]);
 
   // ─── Fit ───
   const fitToScreen = useCallback(() => {
@@ -2796,18 +2888,13 @@ export default function ElevationGeneratorPage() {
             <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-[#1478d6] via-[#0a63b8] to-[#003a78] text-white shadow-lg shadow-blue-900/20 ring-1 ring-white/15 shrink-0">
               <Square className="w-[17px] h-[17px]" strokeWidth={2.2} />
             </span>
-            <div className="leading-none">
-              <div className="flex items-center gap-2">
-                <h1 className="text-[15.5px] font-extrabold leading-none tracking-tight text-slate-800">
-                  세대 단열재 나누기도
-                </h1>
-                <span className="text-[9px] font-black tracking-[0.28em] text-[#004791]/70 uppercase pt-0.5">
-                  Platform
-                </span>
-              </div>
-              <p className="mt-0.5 text-[10.5px] text-slate-400 tracking-wide">
-                외벽선을 트레이싱해 전개 입면을 만들고, 세대별 단열재·오프닝을 배치합니다.
-              </p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-[16px] font-extrabold tracking-tight text-slate-800">
+                세대 단열재 나누기도
+              </h1>
+              <span className="rounded-md bg-[#004791]/8 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[#004791]/75">
+                Platform
+              </span>
             </div>
           </div>
 
@@ -2822,6 +2909,23 @@ export default function ElevationGeneratorPage() {
                 onChange={ev => {
                   const f = ev.target.files?.[0];
                   if (f) handleFile(f);
+                  ev.target.value = "";
+                }}
+              />
+            </label>
+            <label
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#004791]/30 bg-white text-[#004791] text-[12.5px] font-semibold shadow-sm hover:bg-[#004791]/5 cursor-pointer transition-colors"
+              title="Smart Works 등에서 내보낸 프로젝트 파일(.swelev.json)을 불러옵니다"
+            >
+              <FolderOpen className="w-4 h-4" />
+              프로젝트 불러오기
+              <input
+                type="file"
+                accept=".json,.swelev.json,application/json"
+                className="hidden"
+                onChange={ev => {
+                  const f = ev.target.files?.[0];
+                  if (f) handleImportProjectFile(f);
                   ev.target.value = "";
                 }}
               />
@@ -2948,6 +3052,16 @@ export default function ElevationGeneratorPage() {
           >
             <History className="w-3.5 h-3.5" /> REV 목록
             {activeProjectData ? ` (${activeProjectData.revisions.length})` : ""}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportProject}
+            disabled={!walls.length}
+            className="gap-1"
+            title="현재 프로젝트(설정·입면·DXF)를 파일로 내보내기 — Smart Works에서 불러올 수 있음"
+          >
+            <Download className="w-3.5 h-3.5" /> 내보내기
           </Button>
           {activeProjectId && (
             <Button
@@ -3219,7 +3333,7 @@ export default function ElevationGeneratorPage() {
           {/* 우측 인스펙터 패널 */}
           <aside className="rounded-xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-200/60 flex flex-col overflow-y-auto self-stretch min-h-0 accent-[#004791] [&_option]:text-slate-900">
             {/* 단열재 나누기도 (추가 기능) */}
-            <Section icon={Square} title="단열재 나누기도" defaultOpen={false}>
+            <Section icon={Square} title="단열재 나누기도" defaultOpen={false} accent="#0a63b8">
             <div className="px-3 py-2 text-[11.5px] space-y-2">
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
@@ -3479,6 +3593,7 @@ export default function ElevationGeneratorPage() {
               icon={LayoutGrid}
               title={`동·타입 설정 (${typeMatrix.buildings.length}동 · ${typeMatrix.types.length}타입)`}
               defaultOpen={false}
+              accent="#7c3aed"
             >
               <div className="px-2 py-2 space-y-2.5 text-[11px]">
                 {/* 동 목록 */}
@@ -3702,8 +3817,51 @@ export default function ElevationGeneratorPage() {
             </Section>
 
             {/* 입면 목록 */}
-            <Section icon={Layers} title={`입면 목록 (${walls.length})`}>
-            <div className="px-2 py-1 space-y-1 max-h-56 overflow-y-auto">
+            <Section icon={Layers} title={`입면 목록 (${walls.length})`} accent="#0891b2">
+            <div className="px-2 py-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => setElevListOpen(true)}
+                className="w-full px-2 py-2 rounded-md border border-[#2a86e0] bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white text-[11.5px] font-semibold shadow-sm shadow-blue-900/20 hover:from-[#1a80e0] hover:to-[#0a63b8] flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                입면 목록 크게 보기{walls.length > 0 ? ` (${walls.length})` : ""}
+              </button>
+              {walls.length === 0 && (
+                <p className="px-2 py-1 text-[11px] text-slate-400 text-center">
+                  "트레이싱" 모드로 외벽을 그리세요.
+                </p>
+              )}
+            </div>
+            </Section>
+
+            {/* 입면 목록 팝업(모달) — 사이드바가 좁아 넓은 화면에서 편집 */}
+            {elevListOpen && (
+              <div
+                className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+                onClick={() => setElevListOpen(false)}
+              >
+                <div
+                  className="flex w-[min(1200px,96vw)] h-[90vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-[#004791]" />
+                      <h2 className="text-[15px] font-bold text-slate-800">
+                        입면 목록 ({walls.length})
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setElevListOpen(false)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      title="닫기"
+                    >
+                      <X className="w-[18px] h-[18px]" />
+                    </button>
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1">
               {walls.length === 0 && (
                 <p className="px-2 py-3 text-[11px] text-slate-400 text-center">
                   "트레이싱" 모드로 외벽을 그리세요.
@@ -4003,45 +4161,100 @@ export default function ElevationGeneratorPage() {
                   새 입면 트레이싱
                 </button>
               )}
-            </div>
-
-            </Section>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 프리셋 */}
-            <Section icon={Square} title="오프닝 프리셋">
+            <Section icon={Square} title="오프닝 프리셋" accent="#d97706">
             <div className="px-2 py-1.5 space-y-1">
-              {DEFAULT_PRESETS.map(p => {
+              {presets.map(p => {
                 const active = p.id === selectedPresetId;
                 return (
-                  <button
+                  <div
                     key={p.id}
-                    type="button"
-                    onClick={() => setSelectedPresetId(p.id)}
                     className={cn(
-                      "w-full text-left px-2 py-1.5 rounded-md border text-[11px] flex items-center justify-between gap-2",
+                      "rounded-md border transition-colors overflow-hidden",
                       active
-                        ? "border-[#004791] bg-[#004791]/8"
-                        : "border-slate-200 hover:bg-slate-100"
+                        ? "border-[#2a86e0] shadow-sm shadow-blue-900/20"
+                        : "border-slate-200"
                     )}
                   >
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className="w-2.5 h-2.5 rounded-sm border"
-                        style={{
-                          backgroundColor: KIND_COLOR[p.kind] + "44",
-                          borderColor: KIND_COLOR[p.kind],
-                        }}
-                      />
-                      <b>{p.label}</b>
-                      <span className="text-slate-400">
-                        ({KIND_LABEL[p.kind]})
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPresetId(p.id)}
+                      className={cn(
+                        "w-full text-left px-2 py-1.5 text-[11px] flex items-center justify-between gap-2 transition-colors",
+                        active
+                          ? "bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white"
+                          : "hover:bg-slate-100"
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm border"
+                          style={{
+                            backgroundColor: KIND_COLOR[p.kind] + "44",
+                            borderColor: KIND_COLOR[p.kind],
+                          }}
+                        />
+                        <b>{p.label}</b>
+                        <span className={active ? "text-blue-100" : "text-slate-400"}>
+                          ({KIND_LABEL[p.kind]})
+                        </span>
                       </span>
-                    </span>
-                    <span className="font-mono text-[10px] text-slate-500">
-                      {p.width}×{p.height}
-                      {p.sill ? ` ↑${p.sill}` : ""}
-                    </span>
-                  </button>
+                      <span
+                        className={cn(
+                          "font-mono text-[10px]",
+                          active ? "text-blue-100" : "text-slate-500"
+                        )}
+                      >
+                        {p.width}×{p.height}
+                        {p.sill ? ` ↑${p.sill}` : ""}
+                      </span>
+                    </button>
+                    {active && (
+                      <div className="grid grid-cols-3 gap-1.5 px-2 py-2 bg-white border-t border-slate-200">
+                        <LabelInput
+                          label="폭"
+                          control={
+                            <NumberInput
+                              value={p.width}
+                              onChange={v => updatePreset(p.id, { width: v })}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                        <LabelInput
+                          label="높이"
+                          control={
+                            <NumberInput
+                              value={p.height}
+                              onChange={v => updatePreset(p.id, { height: v })}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                        <LabelInput
+                          label="SILL"
+                          control={
+                            <NumberInput
+                              value={p.sill}
+                              onChange={v => updatePreset(p.id, { sill: v })}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -4084,7 +4297,7 @@ export default function ElevationGeneratorPage() {
             </Section>
 
             {/* 오프닝 목록 */}
-            <Section icon={Layers} title={`오프닝 (${openings.length})`}>
+            <Section icon={Layers} title={`오프닝 (${openings.length})`} accent="#059669">
             <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1 min-h-0">
               {openings.length === 0 && (
                 <p className="px-2 py-3 text-[11px] text-slate-400 text-center">
@@ -4340,6 +4553,7 @@ function Section({
   title,
   right,
   defaultOpen = true,
+  accent = "#004791",
   children,
 }: {
   icon: typeof MousePointer2;
@@ -4347,6 +4561,8 @@ function Section({
   /** 헤더 우측에 배치할 보조 요소(카운트 배지 등) */
   right?: React.ReactNode;
   defaultOpen?: boolean;
+  /** 섹션 구분용 강조 색(왼쪽 컬러 바 · 아이콘 · 옅은 행 배경). 기본 브랜드 네이비. */
+  accent?: string;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -4355,18 +4571,30 @@ function Section({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full px-3.5 py-2.5 flex items-center gap-2 bg-gradient-to-r from-slate-50 to-white hover:from-slate-100 transition-colors text-left group"
+        className="relative w-full px-3.5 py-2.5 pl-4 flex items-center gap-2 bg-gradient-to-r from-slate-50 to-white hover:from-slate-100 transition-colors text-left group overflow-hidden"
       >
-        <span className="flex items-center justify-center w-[22px] h-[22px] rounded-md bg-[#004791]/10 text-[#004791] shrink-0 group-hover:bg-[#004791]/15">
+        {/* 섹션 색 구분: 옅은 행 배경 틴트 + 왼쪽 컬러 바 */}
+        <span
+          className="pointer-events-none absolute inset-0"
+          style={{ backgroundColor: accent, opacity: 0.06 }}
+        />
+        <span
+          className="pointer-events-none absolute left-0 top-0 h-full w-[3px]"
+          style={{ backgroundColor: accent }}
+        />
+        <span
+          className="relative flex items-center justify-center w-[22px] h-[22px] rounded-md shrink-0"
+          style={{ backgroundColor: accent + "22", color: accent }}
+        >
           <Icon className="w-3.5 h-3.5" />
         </span>
-        <h2 className="text-[12.5px] font-bold text-slate-700 tracking-tight flex-1 min-w-0">
+        <h2 className="relative text-[12.5px] font-bold text-slate-700 tracking-tight flex-1 min-w-0">
           {title}
         </h2>
         {right}
         <ChevronDown
           className={cn(
-            "w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200",
+            "relative w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200",
             !open && "-rotate-90"
           )}
         />
