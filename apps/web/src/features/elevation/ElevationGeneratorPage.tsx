@@ -28,6 +28,7 @@ import {
   EyeOff,
   Trash2,
   X,
+  HelpCircle,
   CornerDownLeft,
   Wand2,
   Download,
@@ -474,6 +475,46 @@ const DEFAULT_PRESETS: OpeningPreset[] = [
 // ────────────────────── 헬퍼 ──────────────────────
 const uid = () => Math.random().toString(36).slice(2, 10);
 
+/**
+ * 절단판 상세 보기용 — 한 온장(L×H)에 조각들을 길로틴 재단 배치.
+ * packCutBoards 와 동일 규칙(면적 내림차순 + best-fit + 오른쪽/위 분할)이라
+ * 같은 그룹 조각들은 항상 한 판 안에 들어간다.
+ */
+function layoutCutPieces(
+  pieces: { w: number; h: number; key: string }[],
+  L: number,
+  H: number
+): { x: number; y: number; w: number; h: number; key: string }[] {
+  const EPS = 1e-6;
+  type FreeRect = { x: number; y: number; w: number; h: number };
+  const free: FreeRect[] = [{ x: 0, y: 0, w: L, h: H }];
+  const out: { x: number; y: number; w: number; h: number; key: string }[] = [];
+  const sorted = [...pieces].sort((a, b) => b.w * b.h - a.w * a.h);
+  for (const p of sorted) {
+    let best = -1;
+    let bestArea = Infinity;
+    for (let k = 0; k < free.length; k++) {
+      const f = free[k];
+      if (f.w >= p.w - EPS && f.h >= p.h - EPS && f.w * f.h < bestArea) {
+        bestArea = f.w * f.h;
+        best = k;
+      }
+    }
+    if (best < 0) {
+      out.push({ x: 0, y: 0, w: p.w, h: p.h, key: p.key }); // 이론상 도달 안 함
+      continue;
+    }
+    const f = free[best];
+    free.splice(best, 1);
+    out.push({ x: f.x, y: f.y, w: p.w, h: p.h, key: p.key });
+    const right = { x: f.x + p.w, y: f.y, w: f.w - p.w, h: p.h };
+    const top = { x: f.x, y: f.y + p.h, w: f.w, h: f.h - p.h };
+    if (right.w > EPS && right.h > EPS) free.push(right);
+    if (top.w > EPS && top.h > EPS) free.push(top);
+  }
+  return out;
+}
+
 const KIND_COLOR: Record<OpeningKind, string> = {
   window: "#38bdf8",
   door: "#f472b6",
@@ -547,6 +588,15 @@ export default function ElevationGeneratorPage() {
   // ── 캔버스 탭 (평면도 / 전개 입면) — 한 번에 하나만 전폭으로 표시 ──
   const [canvasTab, setCanvasTab] = useState<"plan" | "elev">("plan");
   const [elevListOpen, setElevListOpen] = useState(false); // 입면 목록 팝업(모달)
+  const [helpOpen, setHelpOpen] = useState(false); // 사용법 팝업(모달)
+  // 첫 방문 시 사용법 자동 표시 (닫으면 다시 자동으로 뜨지 않음 — ? 버튼으로 재열람)
+  useEffect(() => {
+    if (!localStorage.getItem("ipg-help-seen")) setHelpOpen(true);
+  }, []);
+  const closeHelp = useCallback(() => {
+    localStorage.setItem("ipg-help-seen", "1");
+    setHelpOpen(false);
+  }, []);
 
   // ── 단열재 나누기도 (추가 기능 — OFF 면 기존 동작과 동일) ──
   // 수동 방식: 트레이싱한 각 선(체인)을 자기 길이 그대로 보드로 분할.
@@ -659,6 +709,23 @@ export default function ElevationGeneratorPage() {
   const elevCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const elevContainerRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  // 전개 입면 휠 줌/드래그 팬 (기본 1 = 화면 맞춤 배율). 더블클릭으로 리셋.
+  const [elevView, setElevView] = useState({ zoom: 1, x: 0, y: 0 });
+  const elevDragRef = useRef<{ x: number; y: number } | null>(null);
+  const elevMovedRef = useRef(0); // 드래그 이동량 — 클릭(<5px)과 팬 구분
+  // 보드 번호 클릭 → 절단판 상세 팝업. 그리기 시점에 히트 영역/시트 데이터를 기록한다.
+  const elevHitRef = useRef<
+    { x: number; y: number; w: number; h: number; ci: number; sheet: number }[]
+  >([]);
+  const elevSheetsRef = useRef<
+    {
+      chainName: string;
+      ply: number;
+      cells: { x: number; y: number; w: number; h: number; discarded?: boolean }[];
+      labels: string[];
+    }[]
+  >([]);
+  const [boardDetail, setBoardDetail] = useState<{ sheet: number; ci: number } | null>(null);
   const [hoverWorld, setHoverWorld] = useState<Point2D | null>(null);
   const [snapHit, setSnapHit] = useState<Point2D | null>(null);
 
@@ -1497,6 +1564,14 @@ export default function ElevationGeneratorPage() {
       return;
     }
 
+    // 휠 줌/팬 변환 — 이후 모든 시트 그리기에 적용 (배경·빈 상태 문구는 변환 제외)
+    ctx.translate(elevView.x, elevView.y);
+    ctx.scale(elevView.zoom, elevView.zoom);
+
+    // 보드 번호 클릭 판정용 기록 초기화 (fit 좌표계 기준으로 다시 채움)
+    elevHitRef.current = [];
+    elevSheetsRef.current = [];
+
     // ── 그릴 "시트" 목록 구성 ──
     // 단열재 OFF: 체인당 구조 입면 1장 (기존 동작)
     // 단열재 ON : 체인당 ply별 별도 입면(1P, 2P …) — 한 장에 겹치지 않게 따로 쌓는다
@@ -1805,6 +1880,38 @@ export default function ElevationGeneratorPage() {
 
         // 보드 번호(원형) + 치수 — 정척="온장", 절단=전용그룹 N-1/N-2
         const labels = numberBoards(dev.cells, boardLength, boardHeight);
+        // 클릭 상세용 시트 등록 (fit 좌표계 히트 영역은 아래 forEach 에서 기록)
+        const sheetIdx =
+          elevSheetsRef.current.push({
+            chainName: sheet.chain.name,
+            ply: sheet.ply,
+            cells: dev.cells,
+            labels,
+          }) - 1;
+
+        // 선택한 절단판 그룹 음영 — 같은 그룹(N-1·N-2…)을 입면 위에서 전부 강조
+        if (boardDetail && boardDetail.sheet === sheetIdx) {
+          const selLabel = labels[boardDetail.ci] ?? "";
+          const g =
+            selLabel === "온장" || selLabel === "버림" ? null : selLabel.split("-")[0];
+          dev.cells.forEach((cell, ci) => {
+            const inGroup = g
+              ? labels[ci] === g || labels[ci].startsWith(`${g}-`)
+              : ci === boardDetail.ci;
+            if (!inGroup) return;
+            const hx = ex(cell.x);
+            const hy = ey(cell.y + cell.h);
+            const hwpx = cell.w * s;
+            const hhpx = cell.h * s;
+            ctx.fillStyle =
+              ci === boardDetail.ci ? "rgba(20,120,214,0.38)" : "rgba(20,120,214,0.20)";
+            ctx.fillRect(hx, hy, hwpx, hhpx);
+            ctx.strokeStyle = "#1478d6";
+            ctx.lineWidth = ci === boardDetail.ci ? 2.5 : 1.5;
+            ctx.strokeRect(hx, hy, hwpx, hhpx);
+          });
+        }
+
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         dev.cells.forEach((cell, ci) => {
@@ -1813,6 +1920,14 @@ export default function ElevationGeneratorPage() {
           if (wpx < 5 || hpx < 5) return; // 거의 안 보이는 것만 생략
           const label = labels[ci];
           if (!label) return;
+          elevHitRef.current.push({
+            x: ex(cell.x),
+            y: ey(cell.y + cell.h),
+            w: wpx,
+            h: hpx,
+            ci,
+            sheet: sheetIdx,
+          });
           const cx = ex(cell.x) + wpx / 2;
           const cy = ey(cell.y + cell.h) + hpx / 2;
           const remainder = cell.xRemainder || cell.yRemainder;
@@ -1971,6 +2086,8 @@ export default function ElevationGeneratorPage() {
     discardWidth,
     constructMinW,
     selectedSeg,
+    elevView,
+    boardDetail,
   ]);
 
   // ─── 휠 줌 ───
@@ -1990,6 +2107,26 @@ export default function ElevationGeneratorPage() {
           y: my - (my - prevOff.y) * (ns / prev),
         }));
         return ns;
+      });
+    };
+    canvas.addEventListener("wheel", handler, { passive: false });
+    return () => canvas.removeEventListener("wheel", handler);
+  }, []);
+
+  // ─── 전개 입면 휠 줌 (마우스 위치 기준 확대·축소) ───
+  useEffect(() => {
+    const canvas = elevCanvasRef.current;
+    if (!canvas) return;
+    const handler = (ev: WheelEvent) => {
+      ev.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = ev.clientX - rect.left;
+      const my = ev.clientY - rect.top;
+      const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setElevView(prev => {
+        const nz = Math.max(0.2, Math.min(50, prev.zoom * factor));
+        const k = nz / prev.zoom;
+        return { zoom: nz, x: mx - (mx - prev.x) * k, y: my - (my - prev.y) * k };
       });
     };
     canvas.addEventListener("wheel", handler, { passive: false });
@@ -2900,6 +3037,14 @@ export default function ElevationGeneratorPage() {
               <span className="rounded-md bg-[#004791]/8 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[#004791]/75">
                 Platform
               </span>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(true)}
+                className="flex items-center justify-center w-7 h-7 rounded-full text-slate-400 hover:bg-[#004791]/8 hover:text-[#004791] transition-colors"
+                title="사용법 보기"
+              >
+                <HelpCircle className="w-[17px] h-[17px]" />
+              </button>
             </div>
           </div>
 
@@ -3330,7 +3475,42 @@ export default function ElevationGeneratorPage() {
                   : "opacity-0 pointer-events-none z-0"
               )}
             >
-              <canvas ref={elevCanvasRef} className="block w-full h-full" />
+              <canvas
+                ref={elevCanvasRef}
+                className="block w-full h-full cursor-grab active:cursor-grabbing"
+                onMouseDown={e => {
+                  elevDragRef.current = { x: e.clientX, y: e.clientY };
+                  elevMovedRef.current = 0;
+                }}
+                onMouseMove={e => {
+                  if (!elevDragRef.current) return;
+                  const dx = e.clientX - elevDragRef.current.x;
+                  const dy = e.clientY - elevDragRef.current.y;
+                  elevDragRef.current = { x: e.clientX, y: e.clientY };
+                  elevMovedRef.current += Math.abs(dx) + Math.abs(dy);
+                  setElevView(p => ({ ...p, x: p.x + dx, y: p.y + dy }));
+                }}
+                onMouseUp={e => {
+                  const moved = elevMovedRef.current;
+                  elevDragRef.current = null;
+                  if (moved >= 5) return; // 팬이었으면 클릭 아님
+                  // 보드 클릭 → 절단판 상세 (fit 좌표계로 역변환 후 히트 판정)
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const fx = (e.clientX - rect.left - elevView.x) / elevView.zoom;
+                  const fy = (e.clientY - rect.top - elevView.y) / elevView.zoom;
+                  const hits = elevHitRef.current;
+                  for (let i = hits.length - 1; i >= 0; i--) {
+                    const h = hits[i];
+                    if (fx >= h.x && fx <= h.x + h.w && fy >= h.y && fy <= h.y + h.h) {
+                      setBoardDetail({ sheet: h.sheet, ci: h.ci });
+                      return;
+                    }
+                  }
+                }}
+                onMouseLeave={() => (elevDragRef.current = null)}
+                onDoubleClick={() => setElevView({ zoom: 1, x: 0, y: 0 })}
+                title="휠: 확대·축소 · 드래그: 이동 · 더블클릭: 초기화 · 보드 클릭: 절단판 상세"
+              />
             </div>
             </div>
           </div>
@@ -4186,6 +4366,282 @@ export default function ElevationGeneratorPage() {
                 </div>
               </div>
             )}
+
+            {/* 사용법 팝업(모달) — 첫 방문 시 자동 표시, 헤더 ? 버튼으로 재열람 */}
+            {helpOpen && (
+              <div
+                className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 backdrop-blur-sm p-4"
+                onClick={closeHelp}
+              >
+                <div
+                  className="flex w-[min(640px,94vw)] max-h-[88vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {/* 헤더 */}
+                  <div className="relative shrink-0 overflow-hidden bg-gradient-to-br from-[#1478d6] via-[#0a63b8] to-[#003a78] px-6 py-5">
+                    <div
+                      className="pointer-events-none absolute inset-0 opacity-[0.14]"
+                      style={{
+                        backgroundImage:
+                          "linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)",
+                        backgroundSize: "28px 28px",
+                      }}
+                    />
+                    <div className="relative flex items-start justify-between">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/60">
+                          How to use
+                        </div>
+                        <h2 className="mt-1 text-[19px] font-extrabold text-white">
+                          세대 단열재 나누기도 — 사용법
+                        </h2>
+                        <p className="mt-1 text-[12.5px] text-white/70">
+                          아래 순서대로 진행하면 도면 업로드부터 산출·저장까지 완료됩니다.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={closeHelp}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/60 hover:bg-white/15 hover:text-white"
+                        title="닫기"
+                      >
+                        <X className="w-[18px] h-[18px]" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 단계 목록 */}
+                  <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+                    <ol className="space-y-4">
+                      {[
+                        {
+                          t: "DXF 업로드",
+                          d: "상단 'DXF 업로드'로 평면 도면(.dxf)을 불러옵니다. 휠로 확대·축소, '화면 맞춤'으로 전체 보기.",
+                        },
+                        {
+                          t: "외벽 트레이싱",
+                          d: "'트레이싱' 모드에서 외벽선을 따라 클릭하고 Enter 또는 더블클릭으로 확정 → 전개 입면이 생성됩니다. 구조선 1개만 그리면 1P·2P가 자동 생성됩니다.",
+                        },
+                        {
+                          t: "동·타입 설정",
+                          d: "우측 '동·타입 설정'에서 동(401~405)과 타입을 등록하고, '입면 목록'에서 각 입면에 동·타입을 지정합니다.",
+                        },
+                        {
+                          t: "오프닝(창·문) 배치",
+                          d: "'오프닝 프리셋'에서 창·문을 고르고(치수 직접 수정 가능) '프리셋 배치' 모드로 벽 위를 클릭합니다. 평면의 창호 라벨(예: 18×11.8)을 클릭하면 폭·높이 자동 인식, '창호 자동'으로 일괄 배치도 가능합니다.",
+                        },
+                        {
+                          t: "단열 설정",
+                          d: "'입면 목록 크게 보기'에서 변(S#)별 노출타입(직접/간접외기)과 두께를 지정합니다. 배치 방식(물량 최소/시공성 우선)·최소 조각 폭·버림 기준은 '단열재 나누기도' 섹션에서 조정합니다.",
+                        },
+                        {
+                          t: "산출·내보내기",
+                          d: "물량 표 CSV·현장식 산출서 CSV로 수량을 뽑고, DXF 통합/분할·SVG 통합으로 도면을 내보냅니다. 'Output'에서 결과를 한눈에 확인합니다.",
+                        },
+                        {
+                          t: "저장·이동",
+                          d: "'새 프로젝트' 생성 후 '저장(새 REV)'으로 서버에 보관하고, 'REV 목록'으로 복원합니다. '내보내기'는 프로젝트를 파일(.swelev.json)로 저장하며 Smart Works 단열재와 서로 불러올 수 있습니다.",
+                        },
+                      ].map((s, i) => (
+                        <li key={i} className="flex gap-3.5">
+                          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#004791]/8 text-[13px] font-extrabold text-[#0a63b8]">
+                            {i + 1}
+                          </span>
+                          <div>
+                            <div className="text-[14px] font-bold text-slate-800">{s.t}</div>
+                            <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-500">
+                              {s.d}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+
+                  {/* 푸터 */}
+                  <div className="shrink-0 flex items-center justify-between border-t border-slate-200 px-6 py-3.5">
+                    <span className="text-[11.5px] text-slate-400">
+                      언제든 상단 <HelpCircle className="inline w-3.5 h-3.5 -mt-0.5" /> 버튼으로 다시 볼 수 있습니다.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={closeHelp}
+                      className="rounded-lg bg-gradient-to-b from-[#1478d6] to-[#0a5cad] px-5 py-2 text-[13px] font-semibold text-white shadow-sm shadow-blue-900/20 hover:from-[#1a80e0] hover:to-[#0a63b8] transition-colors"
+                    >
+                      시작하기
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 절단판 상세 팝업 — 입면의 보드 번호 클릭 시 */}
+            {boardDetail &&
+              (() => {
+                const sh = elevSheetsRef.current[boardDetail.sheet];
+                if (!sh) return null;
+                const label = sh.labels[boardDetail.ci] ?? "";
+                const cell = sh.cells[boardDetail.ci];
+                const L = boardLength;
+                const H = boardHeight;
+                const close = () => setBoardDetail(null);
+
+                // 온장/버림/절단 그룹 분기
+                const groupNo = label === "온장" || label === "버림" ? null : label.split("-")[0];
+                const groupIdx: number[] = [];
+                if (groupNo) {
+                  sh.labels.forEach((lb, i) => {
+                    if (lb === groupNo || lb.startsWith(`${groupNo}-`)) groupIdx.push(i);
+                  });
+                }
+                const pieces = groupIdx.map(i => ({
+                  w: sh.cells[i].w,
+                  h: sh.cells[i].h,
+                  key: `${i}`,
+                }));
+                const placed = groupNo ? layoutCutPieces(pieces, L, H) : [];
+                const usedArea = pieces.reduce((a, p) => a + p.w * p.h, 0);
+                const wasteArea = Math.max(0, L * H - usedArea);
+                // SVG 배치도 스케일 (y 뒤집기: 패킹 y=아래 기준 → SVG 위 기준)
+                const svgW = 420;
+                const svgH = (svgW * H) / L;
+
+                return (
+                  <div className="fixed bottom-6 left-6 z-[85]">
+                    <div
+                      className="flex w-[min(480px,92vw)] max-h-[72vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_24px_56px_-16px_rgba(15,23,42,0.4)] ring-1 ring-[#1478d6]/20"
+                    >
+                      <div className="shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
+                        <div>
+                          <h2 className="text-[15px] font-bold text-slate-800">
+                            {label === "온장"
+                              ? "온장 (정척)"
+                              : label === "버림"
+                                ? "버림 조각 (폐기)"
+                                : `절단판 ${groupNo} — 재단 상세`}
+                          </h2>
+                          <p className="mt-0.5 text-[11.5px] text-slate-400">
+                            {sh.chainName} · {sh.ply}P · 온장 {L}×{H}mm
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={close}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                          title="닫기"
+                        >
+                          <X className="w-[18px] h-[18px]" />
+                        </button>
+                      </div>
+
+                      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+                        {label === "온장" && (
+                          <p className="text-[13px] leading-relaxed text-slate-600">
+                            정척 온장 그대로 시공하는 판입니다 — 규격{" "}
+                            <b className="tabular-nums">{L}×{H}mm</b>, 절단 없음.
+                          </p>
+                        )}
+                        {label === "버림" && (
+                          <p className="text-[13px] leading-relaxed text-slate-600">
+                            버림 기준 폭보다 좁아 <b>폐기 처리</b>된 자투리(
+                            <b className="tabular-nums">
+                              {Math.round(cell.w)}×{Math.round(cell.h)}mm
+                            </b>
+                            )입니다. 물량·발주 집계에서 제외됩니다.
+                          </p>
+                        )}
+                        {groupNo && (
+                          <>
+                            {/* 재단 배치도 */}
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <svg
+                                viewBox={`0 0 ${L} ${H}`}
+                                style={{ width: svgW, maxWidth: "100%", height: "auto" }}
+                                className="block"
+                              >
+                                <rect x={0} y={0} width={L} height={H} fill="#e2e8f0" stroke="#94a3b8" strokeWidth={L / 200} />
+                                {placed.map(p => {
+                                  const i = Number(p.key);
+                                  const isSel = i === boardDetail.ci;
+                                  return (
+                                    <g key={p.key}>
+                                      <rect
+                                        x={p.x}
+                                        y={H - p.y - p.h}
+                                        width={p.w}
+                                        height={p.h}
+                                        fill={isSel ? "#1478d6" : "#bfdbfe"}
+                                        stroke="#1e5fa8"
+                                        strokeWidth={L / 300}
+                                      />
+                                      <text
+                                        x={p.x + p.w / 2}
+                                        y={H - p.y - p.h / 2}
+                                        textAnchor="middle"
+                                        dominantBaseline="central"
+                                        fontSize={Math.min(p.w, p.h) * 0.32 + 20}
+                                        fontWeight={700}
+                                        fill={isSel ? "#ffffff" : "#1e3a5f"}
+                                      >
+                                        {sh.labels[i]}
+                                      </text>
+                                    </g>
+                                  );
+                                })}
+                              </svg>
+                              <p className="mt-1.5 text-[10.5px] text-slate-400">
+                                회색 = 잔재(자투리) · 파랑 = 재단 조각 · 진한 파랑 = 선택한 조각
+                              </p>
+                            </div>
+
+                            {/* 조각 목록 */}
+                            <div className="mt-3 overflow-hidden rounded-lg border border-slate-200">
+                              <table className="w-full text-[12px]">
+                                <thead>
+                                  <tr className="bg-slate-50 text-slate-500">
+                                    <th className="px-3 py-1.5 text-left font-semibold">조각</th>
+                                    <th className="px-3 py-1.5 text-right font-semibold">규격(mm)</th>
+                                    <th className="px-3 py-1.5 text-right font-semibold">면적(㎡)</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {groupIdx.map(i => (
+                                    <tr
+                                      key={i}
+                                      className={cn(
+                                        "border-t border-slate-100",
+                                        i === boardDetail.ci && "bg-[#e8f1fd] font-bold text-[#0a63b8]"
+                                      )}
+                                    >
+                                      <td className="px-3 py-1.5">{sh.labels[i]}</td>
+                                      <td className="px-3 py-1.5 text-right tabular-nums">
+                                        {Math.round(sh.cells[i].w)}×{Math.round(sh.cells[i].h)}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right tabular-nums">
+                                        {((sh.cells[i].w * sh.cells[i].h) / 1_000_000).toFixed(2)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  <tr className="border-t border-slate-200 bg-slate-50 text-slate-500">
+                                    <td className="px-3 py-1.5">잔재(자투리)</td>
+                                    <td className="px-3 py-1.5 text-right">—</td>
+                                    <td className="px-3 py-1.5 text-right tabular-nums">
+                                      {(wasteArea / 1_000_000).toFixed(2)}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                            <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+                              온장 1판에서 위 조각들을 함께 재단합니다. (두께가 같은 조각끼리만 한 판에서 재단)
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
             {/* 프리셋 */}
             <Section icon={Square} title="오프닝 프리셋" accent="#d97706">
