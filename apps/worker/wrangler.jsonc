@@ -10,15 +10,12 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
-  // DCR 통합로그인 백엔드(회원 로그인 프록시 대상). 이 값은 prod = dcr-app.
-  // 로컬/dev 는 apps/worker/.dev.vars 에서 DCR_BASE_URL=https://dcr-app-dev.jogh.workers.dev 로 덮어써 dcr-dev 로 향하게 한다.
-  // (서비스 바인딩을 쓰려면 아래 services 주석 해제 — 동일 계정이라 가능. 그 경우 DCR_APP 이 DCR_BASE_URL 보다 우선.)
-  "vars": {
-    "DCR_BASE_URL": "https://dcr-app.jogh.workers.dev"
-  },
-  // 동일 계정(Smarttech) dcr-app 으로의 서버-투-서버 로그인 프록시.
-  // 동일 계정 workers.dev 간 공개 URL fetch 는 응답을 제대로 못 받는 경우가 있어 서비스 바인딩을 사용.
-  // (로컬 dev 는 바인딩이 없으므로 DCR_BASE_URL 폴백 사용 — auth.ts 가 DCR_APP 우선.)
+  // DCR 통합로그인 백엔드(회원 로그인 프록시 대상).
+  // prod 는 vars 에 DCR_BASE_URL 을 두지 않는다 → auth.ts 가 아래 DCR_APP 서비스 바인딩을 사용.
+  //   (동일 계정 workers.dev 간 공개 URL fetch 는 응답을 제대로 못 받는 경우가 있어 바인딩을 사용.)
+  // 로컬 dev 는 wrangler 가 DCR_APP 을 주입해도 dcr-app 이 로컬에 없어 5xx 이므로,
+  //   apps/worker/.dev.vars 에 DCR_BASE_URL(=dcr-app 또는 dcr-app-dev) 를 설정해 공개 URL 로 직접 fetch 한다.
+  //   auth.ts 는 DCR_BASE_URL 이 있으면 그걸 우선 사용한다.
   "services": [{ "binding": "DCR_APP", "service": "dcr-app" }],
 
   // 정적 자산: apps/web 의 Vite 빌드 결과(dist)를 서빙한다.

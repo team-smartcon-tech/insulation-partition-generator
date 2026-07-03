@@ -121,7 +121,7 @@ export interface DcrLoginResult {
 }
 
 /**
- * DCR /auth/login 서버-투-서버 호출(서비스 바인딩 우선 → 공개 URL 폴백). SSX 로그인과 동일(이메일+비밀번호).
+ * DCR /auth/login 서버-투-서버 호출(공개 URL 우선 → 서비스 바인딩 폴백). SSX 로그인과 동일(이메일+비밀번호).
  * 브라우저가 아니라 Worker가 호출하므로 CORS 무관.
  * 응답에서 id/name/email/role 만 취하고 token 등은 버린다(자체 토큰 재발급 사용).
  */
@@ -138,12 +138,16 @@ export async function callDcrLogin(
 
   let res: Response;
   try {
-    if (env.DCR_APP) {
-      res = await env.DCR_APP.fetch(new Request(`https://dcr-app${path}`, init));
-    } else if (env.DCR_BASE_URL) {
+    // 우선순위: DCR_BASE_URL(로컬 .dev.vars 전용) → DCR_APP 바인딩(prod).
+    // 로컬 wrangler dev 는 DCR_APP 바인딩을 주입하지만 dcr-app 이 로컬에 안 떠 있어 5xx 를 돌려주므로,
+    // 로컬은 .dev.vars 의 DCR_BASE_URL 로 공개 URL 을 직접 fetch(localhost 프로세스라 정상 동작).
+    // prod 는 vars 에 DCR_BASE_URL 을 두지 않으므로 바인딩을 사용(같은 계정 workers.dev fetch 회피).
+    if (env.DCR_BASE_URL) {
       res = await fetch(`${env.DCR_BASE_URL.replace(/\/$/, "")}${path}`, init);
+    } else if (env.DCR_APP) {
+      res = await env.DCR_APP.fetch(new Request(`https://dcr-app${path}`, init));
     } else {
-      return { ok: false, status: 500, error: "DCR 로그인 백엔드 미설정 (DCR_APP/DCR_BASE_URL)" };
+      return { ok: false, status: 500, error: "DCR 로그인 백엔드 미설정 (DCR_BASE_URL/DCR_APP)" };
     }
   } catch (e) {
     console.error("[auth] DCR 호출 실패:", e instanceof Error ? e.message : String(e));
