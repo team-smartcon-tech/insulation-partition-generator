@@ -17,32 +17,29 @@ import type { Point2D } from "./geometry";
 
 // ── 앱 내부 정규화 타입 (ElevationGeneratorPage 에서 이전) ──
 
-export type NormalizedEntity =
-  | { kind: "line"; layer: string; color: string; a: Point2D; b: Point2D }
-  | {
-      kind: "polyline";
-      layer: string;
-      color: string;
-      points: Point2D[];
-      closed: boolean;
-    }
-  | {
-      kind: "circle";
-      layer: string;
-      color: string;
-      center: Point2D;
-      radius: number;
-    }
-  | {
-      kind: "arc";
-      layer: string;
-      color: string;
-      center: Point2D;
-      radius: number;
-      start: number;
-      end: number;
-    }
-  | { kind: "text"; layer: string; color: string; pos: Point2D; text: string };
+interface NormalizedBase {
+  id: string;
+  layer: string;
+  color: string;
+  /** 원본 DXF 텍스트에서 이 엔티티가 차지하는 라인 범위 (1-based, 양끝 포함) */
+  startLine: number;
+  endLine: number;
+  /**
+   * ENTITIES 섹션의 최상위 엔티티만 true.
+   * 블록(INSERT) 전개로 나온 엔티티는 소스가 BLOCKS 섹션(블록 정의)이라
+   * 개별 수정 시 모든 인스턴스가 함께 바뀌므로 편집 대상에서 제외한다.
+   */
+  editable: boolean;
+}
+
+export type NormalizedEntity = NormalizedBase &
+  (
+    | { kind: "line"; a: Point2D; b: Point2D }
+    | { kind: "polyline"; points: Point2D[]; closed: boolean }
+    | { kind: "circle"; center: Point2D; radius: number }
+    | { kind: "arc"; center: Point2D; radius: number; start: number; end: number }
+    | { kind: "text"; pos: Point2D; text: string }
+  );
 
 export interface ParsedDxf {
   entities: NormalizedEntity[];
@@ -95,6 +92,11 @@ export function parseDxfText(text: string): ParsedDxf {
 
   const sceneEntities = buildDXFSceneEntities(validation, SCENE_LIMITS);
 
+  // ENTITIES 섹션 라인 범위 — 이 안의 최상위 엔티티만 편집 가능
+  const entSection = validation.document.sections.find(
+    s => s.name === "ENTITIES"
+  );
+
   const entities: NormalizedEntity[] = [];
   const warnings: string[] = [];
   const layerSet = new Set<string>();
@@ -115,6 +117,15 @@ export function parseDxfText(text: string): ParsedDxf {
     const layer = e.layer || "0";
     layerSet.add(layer);
     const color = entityColorHex(e);
+    const base: Omit<NormalizedBase, "layer" | "color"> = {
+      id: e.id,
+      startLine: e.startLine,
+      endLine: e.endLine,
+      editable:
+        !!entSection &&
+        e.startLine >= entSection.startLine &&
+        e.endLine <= entSection.endLine,
+    };
     switch (e.type) {
       case "LINE": {
         const [p0, p1] = e.points;
@@ -126,7 +137,7 @@ export function parseDxfText(text: string): ParsedDxf {
           addBound(b);
           // 끝점 + 중점(개구부 중앙 등 정밀 배치 보조)
           snapPoints.push(a, b, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-          entities.push({ kind: "line", layer, color, a, b });
+          entities.push({ ...base, kind: "line", layer, color, a, b });
         }
         break;
       }
@@ -149,6 +160,7 @@ export function parseDxfText(text: string): ParsedDxf {
             }
           });
           entities.push({
+            ...base,
             kind: "polyline",
             layer,
             color,
@@ -170,7 +182,14 @@ export function parseDxfText(text: string): ParsedDxf {
           const c = { x: c0.x, y: c0.y };
           addBound({ x: c.x - r!, y: c.y - r! });
           addBound({ x: c.x + r!, y: c.y + r! });
-          entities.push({ kind: "circle", layer, color, center: c, radius: r! });
+          entities.push({
+            ...base,
+            kind: "circle",
+            layer,
+            color,
+            center: c,
+            radius: r!,
+          });
         }
         break;
       }
@@ -190,6 +209,7 @@ export function parseDxfText(text: string): ParsedDxf {
           addBound({ x: c.x - r!, y: c.y - r! });
           addBound({ x: c.x + r!, y: c.y + r! });
           entities.push({
+            ...base,
             kind: "arc",
             layer,
             color,
@@ -208,6 +228,7 @@ export function parseDxfText(text: string): ParsedDxf {
           const pos = { x: p0.x, y: p0.y };
           addBound(pos);
           entities.push({
+            ...base,
             kind: "text",
             layer,
             color,

@@ -41,6 +41,10 @@ import {
   History,
   FolderOpen,
   Loader2,
+  Route,
+  Hexagon,
+  MousePointerClick,
+  Undo2,
 } from "lucide-react";
 import {
   developPly,
@@ -55,7 +59,12 @@ import { cn } from "@/lib/utils";
 import {
   parseDxfText,
   type ParsedDxf,
+  type NormalizedEntity,
 } from "./utils/dxfEngine";
+import {
+  deleteEntitiesFromDxf,
+  translateEntityInDxf,
+} from "./utils/dxfEdit";
 import PlanDxfCanvas from "./components/PlanDxfCanvas";
 import {
   buildElevationDxfMulti,
@@ -208,7 +217,23 @@ interface WallChain {
   refChainId?: string;
 }
 
-type Mode = "view" | "trace" | "place" | "two-point" | "auto" | "seg";
+type Mode =
+  | "view"
+  | "trace"
+  | "place"
+  | "two-point"
+  | "auto"
+  | "seg"
+  // 측정: 거리(두 점) / 연속 거리·둘레 / 면적
+  | "measure-dist"
+  | "measure-path"
+  | "measure-area"
+  // DXF 원본 편집: 엔티티 선택 → 이동/삭제
+  | "edit";
+
+/** 측정 계열 모드 여부 */
+const isMeasureMode = (m: Mode) =>
+  m === "measure-dist" || m === "measure-path" || m === "measure-area";
 
 /** 수직 조인트 1개 — x 위치 + 높이 구간(관통 판정용) */
 type JointSeg = { x: number; y0: number; y1: number };
@@ -272,6 +297,32 @@ function expandBuildingRange(input: string): string[] {
   const out: string[] = [];
   for (let n = start; n <= end; n++) out.push(`${n}동`);
   return out;
+}
+
+// ────────────────────── 측정 헬퍼 ──────────────────────
+/** 폴리곤 면적 (신발끈 공식, 도면 단위 mm 기준 mm²) */
+function polygonArea(pts: Point2D[]): number {
+  let s = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(s) / 2;
+}
+
+const fmtMm = (v: number) => `${Math.round(v).toLocaleString()}mm`;
+
+/** 점-선분 최단거리 */
+function distToSeg(p: Point2D, a: Point2D, b: Point2D): number {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const len2 = vx * vx + vy * vy;
+  const t =
+    len2 === 0
+      ? 0
+      : Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2));
+  return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t));
 }
 
 // 체인 색상 팔레트 (입면 1, 2, 3…)
@@ -405,6 +456,21 @@ export default function ElevationGeneratorPage() {
   const [defaultSill, setDefaultSill] = useState<number>(900);
 
   const [mode, setMode] = useState<Mode>("view");
+
+  // ── 측정 (거리/연속/면적) — 클릭한 점 목록, 오버레이에 표시 ──
+  const [measurePts, setMeasurePts] = useState<Point2D[]>([]);
+
+  // ── DXF 원본 편집 ──
+  /** 선택된 엔티티 id (parsed.entities 의 id — 편집 적용 후 재파싱되면 해제) */
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  /** 이동 드래그 진행 상태 — 시작 월드좌표 */
+  const editDragRef = useRef<{ start: Point2D; entityId: string } | null>(null);
+  /** 이동 드래그 라이브 델타 (고스트 표시용) */
+  const [editDragDelta, setEditDragDelta] = useState<Point2D | null>(null);
+  /** 되돌리기(Ctrl+Z) 스택 — 편집 직전의 rawDxfText 스냅샷 (최대 30) */
+  const undoStackRef = useRef<string[]>([]);
+  /** 편집 재파싱 시 화면 fit 재실행 방지 */
+  const suppressFitRef = useRef(false);
 
   // ── 캔버스 탭 (평면도 / 전개 입면) — 한 번에 하나만 전폭으로 표시 ──
   const [canvasTab, setCanvasTab] = useState<"plan" | "elev">("plan");
@@ -1028,7 +1094,13 @@ export default function ElevationGeneratorPage() {
   }, [parsed]);
 
   useEffect(() => {
-    if (parsed) fitToScreen();
+    if (!parsed) return;
+    // 편집(이동/삭제/되돌리기) 재파싱은 뷰 유지 — 새 도면 로드에만 fit
+    if (suppressFitRef.current) {
+      suppressFitRef.current = false;
+      return;
+    }
+    fitToScreen();
   }, [parsed, fitToScreen]);
 
   // ─── 좌표 변환 ───
@@ -1045,6 +1117,15 @@ export default function ElevationGeneratorPage() {
       y: -(py - offset.y) / scale,
     }),
     [scale, offset]
+  );
+
+  // ─── 편집 선택 엔티티 (오버레이 렌더에서 사용) ───
+  const selectedEntity = useMemo(
+    () =>
+      selectedEntityId && parsed
+        ? (parsed.entities.find(e => e.id === selectedEntityId) ?? null)
+        : null,
+    [selectedEntityId, parsed]
   );
 
   // ─── 평면 오버레이 렌더 (체인/트레이싱/개구부/스냅 — DXF 는 PlanDxfCanvas 가 그림) ───
@@ -1256,6 +1337,158 @@ export default function ElevationGeneratorPage() {
         }
       }
     }
+
+    // ── 측정 오버레이 (거리/연속/면적) ──
+    const drawMeasureLabel = (
+      x: number,
+      y: number,
+      textStr: string,
+      big = false
+    ) => {
+      ctx.font = big
+        ? "bold 12px 'Noto Sans KR', sans-serif"
+        : "bold 10px 'Noto Sans KR', sans-serif";
+      const tw = ctx.measureText(textStr).width;
+      ctx.fillStyle = "rgba(15,23,42,0.85)";
+      ctx.fillRect(x - tw / 2 - 4, y - (big ? 10 : 8), tw + 8, big ? 20 : 16);
+      ctx.fillStyle = "#fbbf24";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(textStr, x, y);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+    };
+    if (isMeasureMode(mode) && measurePts.length > 0) {
+      const pts = measurePts.map(toPx);
+      ctx.save();
+      ctx.strokeStyle = "#f59e0b";
+      ctx.fillStyle = "#f59e0b";
+      ctx.lineWidth = 1.5;
+      // 면적: 반투명 채움
+      if (mode === "measure-area" && measurePts.length >= 3) {
+        ctx.beginPath();
+        pts.forEach((q, i) => (i === 0 ? ctx.moveTo(q.x, q.y) : ctx.lineTo(q.x, q.y)));
+        ctx.closePath();
+        ctx.save();
+        ctx.globalAlpha = 0.15;
+        ctx.fill();
+        ctx.restore();
+      }
+      // 측정선
+      ctx.beginPath();
+      pts.forEach((q, i) => (i === 0 ? ctx.moveTo(q.x, q.y) : ctx.lineTo(q.x, q.y)));
+      if (mode === "measure-area" && measurePts.length >= 3) ctx.closePath();
+      ctx.stroke();
+      // 러버밴드 (마지막 점 → 마우스)
+      if (hoverWorld) {
+        const live = toPx(hoverWorld);
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+        ctx.lineTo(live.x, live.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // 러버밴드 구간 실시간 길이
+        drawMeasureLabel(
+          (pts[pts.length - 1].x + live.x) / 2,
+          (pts[pts.length - 1].y + live.y) / 2 - 12,
+          fmtMm(dist(measurePts[measurePts.length - 1], hoverWorld))
+        );
+      }
+      // 측정점
+      for (const q of pts) {
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 확정 구간 치수
+      for (let i = 1; i < measurePts.length; i++) {
+        drawMeasureLabel(
+          (pts[i - 1].x + pts[i].x) / 2,
+          (pts[i - 1].y + pts[i].y) / 2,
+          fmtMm(dist(measurePts[i - 1], measurePts[i]))
+        );
+      }
+      // 누적 길이 (연속 측정)
+      if (mode === "measure-path" && measurePts.length >= 2) {
+        let total = 0;
+        for (let i = 1; i < measurePts.length; i++)
+          total += dist(measurePts[i - 1], measurePts[i]);
+        const last = pts[pts.length - 1];
+        drawMeasureLabel(last.x, last.y - 20, `합계 ${fmtMm(total)}`, true);
+      }
+      // 면적 표시 (폴리곤 무게중심 근사 = 평균점)
+      if (mode === "measure-area" && measurePts.length >= 3) {
+        const area = polygonArea(measurePts);
+        const cx = pts.reduce((s, q) => s + q.x, 0) / pts.length;
+        const cy = pts.reduce((s, q) => s + q.y, 0) / pts.length;
+        drawMeasureLabel(
+          cx,
+          cy,
+          `${(area / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })}㎡`,
+          true
+        );
+      }
+      ctx.restore();
+    }
+
+    // ── 편집: 선택 하이라이트 + 이동 고스트 ──
+    if (mode === "edit" && selectedEntity) {
+      const drawEnt = (e: NormalizedEntity, dx = 0, dy = 0, ghost = false) => {
+        ctx.save();
+        ctx.strokeStyle = ghost ? "#22d3ee" : "#38bdf8";
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.lineWidth = ghost ? 1.5 : 3;
+        if (ghost) ctx.setLineDash([6, 4]);
+        const t = (p: Point2D) => toPx({ x: p.x + dx, y: p.y + dy });
+        switch (e.kind) {
+          case "line": {
+            const a = t(e.a);
+            const b = t(e.b);
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+            break;
+          }
+          case "polyline": {
+            ctx.beginPath();
+            e.points.forEach((p, i) => {
+              const q = t(p);
+              if (i === 0) ctx.moveTo(q.x, q.y);
+              else ctx.lineTo(q.x, q.y);
+            });
+            if (e.closed) ctx.closePath();
+            ctx.stroke();
+            break;
+          }
+          case "circle": {
+            const c = t(e.center);
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, e.radius * scale, 0, Math.PI * 2);
+            ctx.stroke();
+            break;
+          }
+          case "arc": {
+            const c = t(e.center);
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, e.radius * scale, -e.end, -e.start, false);
+            ctx.stroke();
+            break;
+          }
+          case "text": {
+            const p = t(e.pos);
+            ctx.font = "10px 'Noto Sans KR', sans-serif";
+            const tw = Math.max(30, ctx.measureText(e.text).width + 8);
+            ctx.strokeRect(p.x - 4, p.y - 12, tw, 16);
+            break;
+          }
+        }
+        ctx.restore();
+      };
+      drawEnt(selectedEntity);
+      if (editDragDelta) drawEnt(selectedEntity, editDragDelta.x, editDragDelta.y, true);
+    }
   }, [
     parsed,
     scale,
@@ -1271,6 +1504,9 @@ export default function ElevationGeneratorPage() {
     selectedOpeningId,
     selectedSeg,
     toPx,
+    measurePts,
+    selectedEntity,
+    editDragDelta,
   ]);
 
   // ─── 입면 렌더 (여러 체인 세로로 쌓기) ───
@@ -1953,6 +2189,125 @@ export default function ElevationGeneratorPage() {
     [walls]
   );
 
+  // ─── DXF 원본 편집 ───
+  /** 클릭 지점에서 가장 가까운 DXF 엔티티 (숨긴 레이어 제외) */
+  const pickEntity = useCallback(
+    (world: Point2D, tolWorld: number): NormalizedEntity | null => {
+      if (!parsed) return null;
+      let best: { e: NormalizedEntity; d: number } | null = null;
+      const consider = (e: NormalizedEntity, d: number) => {
+        if (d <= tolWorld && (!best || d < best.d)) best = { e, d };
+      };
+      for (const e of parsed.entities) {
+        if (hiddenLayers.has(e.layer)) continue;
+        switch (e.kind) {
+          case "line":
+            consider(e, distToSeg(world, e.a, e.b));
+            break;
+          case "polyline": {
+            let d = Infinity;
+            for (let i = 1; i < e.points.length; i++)
+              d = Math.min(d, distToSeg(world, e.points[i - 1], e.points[i]));
+            if (e.closed && e.points.length >= 3)
+              d = Math.min(
+                d,
+                distToSeg(world, e.points[e.points.length - 1], e.points[0])
+              );
+            consider(e, d);
+            break;
+          }
+          case "circle":
+            consider(e, Math.abs(dist(world, e.center) - e.radius));
+            break;
+          case "arc": {
+            // 반지름 거리 + 각도 범위(CCW) 판정
+            const d = Math.abs(dist(world, e.center) - e.radius);
+            const norm = (a: number) =>
+              ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+            const s = norm(e.start);
+            const en = norm(e.end);
+            const a = norm(
+              Math.atan2(world.y - e.center.y, world.x - e.center.x)
+            );
+            const inArc = s <= en ? a >= s && a <= en : a >= s || a <= en;
+            if (inArc) consider(e, d);
+            break;
+          }
+          case "text":
+            consider(e, dist(world, e.pos));
+            break;
+        }
+      }
+      return best ? (best as { e: NormalizedEntity; d: number }).e : null;
+    },
+    [parsed, hiddenLayers]
+  );
+
+  /** 편집 결과 텍스트 적용 — undo 스냅샷 + 뷰 유지 재파싱 + REV 첨부 파일 갱신 */
+  const applyEditedDxf = useCallback(
+    (nextText: string) => {
+      if (rawDxfText) {
+        undoStackRef.current.push(rawDxfText);
+        if (undoStackRef.current.length > 30) undoStackRef.current.shift();
+      }
+      try {
+        const next = parseDxfText(nextText);
+        suppressFitRef.current = true;
+        setParsed(next);
+        setRawDxfText(nextText);
+        // 저장(REV)·번들 내보내기에 수정본이 반영되도록 첨부 파일 교체
+        const name = fileName || "drawing.dxf";
+        setLastDxfFile(new File([nextText], name, { type: "application/dxf" }));
+      } catch (e) {
+        undoStackRef.current.pop();
+        toast.error(
+          `편집 적용 실패: ${e instanceof Error ? e.message : String(e)}`
+        );
+      }
+      setSelectedEntityId(null);
+      setEditDragDelta(null);
+    },
+    [rawDxfText, fileName]
+  );
+
+  const undoDxfEdit = useCallback(() => {
+    const prev = undoStackRef.current.pop();
+    if (!prev) {
+      toast.info("되돌릴 편집이 없습니다.");
+      return;
+    }
+    suppressFitRef.current = true;
+    setParsed(parseDxfText(prev));
+    setRawDxfText(prev);
+    const name = fileName || "drawing.dxf";
+    setLastDxfFile(new File([prev], name, { type: "application/dxf" }));
+    setSelectedEntityId(null);
+    setEditDragDelta(null);
+  }, [fileName]);
+
+  const deleteSelectedEntity = useCallback(() => {
+    if (!rawDxfText || !selectedEntity) return;
+    applyEditedDxf(deleteEntitiesFromDxf(rawDxfText, [selectedEntity]));
+    toast.success("요소를 삭제했습니다. (Ctrl+Z 되돌리기)");
+  }, [rawDxfText, selectedEntity, applyEditedDxf]);
+
+  /** 수정본 DXF 다운로드 */
+  const downloadEditedDxf = useCallback(() => {
+    if (!rawDxfText) return;
+    const base = (fileName || "drawing.dxf").replace(/\.dxf$/i, "");
+    downloadText(`${base}_edit.dxf`, rawDxfText, "application/dxf");
+  }, [rawDxfText, fileName]);
+
+  // 모드 이탈 시 측정/편집 상태 정리
+  useEffect(() => {
+    if (!isMeasureMode(mode)) setMeasurePts([]);
+    if (mode !== "edit") {
+      setSelectedEntityId(null);
+      setEditDragDelta(null);
+      editDragRef.current = null;
+    }
+  }, [mode]);
+
   // ─── 평면 마우스 ───
   const onPlanMouseDown = (ev: React.MouseEvent<HTMLCanvasElement>) => {
     // 휠(가운데) 버튼 드래그 = 모든 모드에서 화면 이동
@@ -1961,6 +2316,25 @@ export default function ElevationGeneratorPage() {
       dragRef.current = { x: ev.clientX - offset.x, y: ev.clientY - offset.y };
       setHoverWorld(null);
       setSnapHit(null);
+      return;
+    }
+    // 편집 모드: 좌클릭 = 요소 선택 + 이동 드래그 시작
+    if (mode === "edit" && ev.button === 0) {
+      const rect = planCanvasRef.current!.getBoundingClientRect();
+      const world = pxToWorld(ev.clientX - rect.left, ev.clientY - rect.top);
+      const hit = pickEntity(world, snapTolerancePx / scale);
+      if (!hit) {
+        setSelectedEntityId(null);
+        return;
+      }
+      if (!hit.editable) {
+        toast.info("블록 내부 요소는 편집할 수 없습니다.");
+        setSelectedEntityId(null);
+        return;
+      }
+      setSelectedEntityId(hit.id);
+      editDragRef.current = { start: world, entityId: hit.id };
+      setEditDragDelta(null);
       return;
     }
     if (mode === "view") {
@@ -1983,13 +2357,22 @@ export default function ElevationGeneratorPage() {
       return;
     }
 
-    if (mode === "view") {
+    // 편집 이동 드래그 — 라이브 델타 갱신 (고스트 표시)
+    if (editDragRef.current) {
+      setEditDragDelta({
+        x: w.x - editDragRef.current.start.x,
+        y: w.y - editDragRef.current.start.y,
+      });
+      return;
+    }
+
+    if (mode === "view" || mode === "edit") {
       setHoverWorld(null);
       setSnapHit(null);
       return;
     }
 
-    if (mode === "trace") {
+    if (mode === "trace" || isMeasureMode(mode)) {
       const snap = findSnap(w, snapTolerancePx);
       setSnapHit(snap);
       setHoverWorld(snap ?? w);
@@ -2021,6 +2404,23 @@ export default function ElevationGeneratorPage() {
 
   const onPlanMouseUp = () => {
     dragRef.current = null;
+    // 편집 이동 드래그 종료 — 3px 이상 움직였으면 원본에 평행이동 적용
+    if (editDragRef.current) {
+      const drag = editDragRef.current;
+      editDragRef.current = null;
+      const delta = editDragDelta;
+      setEditDragDelta(null);
+      if (delta && rawDxfText && parsed) {
+        const movedPx = Math.hypot(delta.x * scale, delta.y * scale);
+        const ent = parsed.entities.find(e => e.id === drag.entityId);
+        if (ent && movedPx >= 3) {
+          applyEditedDxf(translateEntityInDxf(rawDxfText, ent, delta.x, delta.y));
+          toast.success(
+            `이동 적용: ΔX ${fmtMm(delta.x)} · ΔY ${fmtMm(delta.y)} (Ctrl+Z 되돌리기)`
+          );
+        }
+      }
+    }
   };
 
   /** 클릭 위치 근처 TEXT 에서 폭×높이 추출 */
@@ -2100,11 +2500,23 @@ export default function ElevationGeneratorPage() {
 
   const onPlanClick = (ev: React.MouseEvent<HTMLCanvasElement>) => {
     if (mode === "view") return;
+    if (mode === "edit") return; // 선택/이동은 mousedown/up 에서 처리
     const rect = planCanvasRef.current!.getBoundingClientRect();
     const mx = ev.clientX - rect.left;
     const my = ev.clientY - rect.top;
     const worldRaw = pxToWorld(mx, my);
     const world = snapHit ?? worldRaw;
+
+    // ── 측정 모드 — 스냅된 점 추가 ──
+    if (isMeasureMode(mode)) {
+      if (mode === "measure-dist") {
+        // 두 점까지만 — 세 번째 클릭은 새 측정 시작
+        setMeasurePts(prev => (prev.length >= 2 ? [world] : [...prev, world]));
+      } else {
+        setMeasurePts(prev => [...prev, world]);
+      }
+      return;
+    }
 
     if (mode === "trace") {
       // 첫 점 근처 스냅이면 닫기
@@ -2221,8 +2633,25 @@ export default function ElevationGeneratorPage() {
   // ─── 키보드 ───
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
+      // 입력 필드 포커스 중에는 캔버스 단축키 무시 (Delete/Ctrl+Z 오동작 방지)
+      const t = ev.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
       if (ev.key === "Escape") {
-        if (mode === "trace" && draft.length >= 2) {
+        if (isMeasureMode(mode)) {
+          // 1차: 현재 측정 초기화 → 2차: 모드 종료
+          if (measurePts.length > 0) setMeasurePts([]);
+          else setMode("view");
+        } else if (mode === "edit") {
+          if (selectedEntityId) setSelectedEntityId(null);
+          else setMode("view");
+        } else if (mode === "trace" && draft.length >= 2) {
           commitDraft(false);
           setMode("view");
         } else if (mode !== "view") {
@@ -2236,6 +2665,12 @@ export default function ElevationGeneratorPage() {
           setMode("view");
         }
       } else if (
+        (ev.key === "Delete" || ev.key === "Backspace") &&
+        !ev.ctrlKey &&
+        mode === "edit"
+      ) {
+        deleteSelectedEntity();
+      } else if (
         (ev.key === "Backspace" ||
           ev.key === "z" ||
           ev.key === "Z" ||
@@ -2243,11 +2678,20 @@ export default function ElevationGeneratorPage() {
         ev.ctrlKey
       ) {
         if (mode === "trace") setDraft(d => d.slice(0, -1));
+        else if (mode === "edit") undoDxfEdit();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, draft.length, commitDraft]);
+  }, [
+    mode,
+    draft.length,
+    commitDraft,
+    measurePts.length,
+    selectedEntityId,
+    deleteSelectedEntity,
+    undoDxfEdit,
+  ]);
 
   // ─── 레이어 ───
   const toggleLayer = (layer: string) => {
@@ -2775,11 +3219,17 @@ export default function ElevationGeneratorPage() {
   };
 
   const cursorClass =
-    mode === "trace" || mode === "place" || mode === "two-point" || mode === "auto"
+    mode === "trace" ||
+    mode === "place" ||
+    mode === "two-point" ||
+    mode === "auto" ||
+    isMeasureMode(mode)
       ? "cursor-crosshair"
-      : dragRef.current
-        ? "cursor-grabbing"
-        : "cursor-grab";
+      : mode === "edit"
+        ? "cursor-default"
+        : dragRef.current
+          ? "cursor-grabbing"
+          : "cursor-grab";
 
   return (
     <>
@@ -3075,6 +3525,38 @@ export default function ElevationGeneratorPage() {
             <ModeButton active={mode === "two-point"} onClick={() => { setMode("two-point"); setTwoPointAnchor(null); }} icon={CornerDownLeft} label="정밀" disabled={walls.length === 0} />
             <ModeButton active={mode === "auto"} onClick={() => setMode("auto")} icon={Wand2} label="창호 자동" disabled={walls.length === 0 || !parsed} />
           </div>
+          <div className="w-px h-6 bg-slate-200 mx-2" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase mr-0.5">
+              측정·편집
+            </span>
+            <ModeButton active={mode === "measure-dist"} onClick={() => setMode("measure-dist")} icon={Ruler} label="거리" disabled={!parsed} />
+            <ModeButton active={mode === "measure-path"} onClick={() => setMode("measure-path")} icon={Route} label="연속" disabled={!parsed} />
+            <ModeButton active={mode === "measure-area"} onClick={() => setMode("measure-area")} icon={Hexagon} label="면적" disabled={!parsed} />
+            <ModeButton active={mode === "edit"} onClick={() => setMode("edit")} icon={MousePointerClick} label="편집" disabled={!parsed} />
+          </div>
+          {mode === "edit" && (
+            <>
+              <div className="w-px h-7 bg-slate-200" />
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-[11px] h-7 gap-1 !text-rose-600 !bg-rose-50 hover:!bg-rose-100 !border-rose-200"
+                  onClick={deleteSelectedEntity}
+                  disabled={!selectedEntityId}
+                >
+                  <Trash2 className="w-3 h-3" /> 삭제
+                </Button>
+                <Button size="sm" variant="outline" className="text-[11px] h-7 gap-1" onClick={undoDxfEdit}>
+                  <Undo2 className="w-3 h-3" /> 되돌리기
+                </Button>
+                <Button size="sm" variant="outline" className="text-[11px] h-7 gap-1" onClick={downloadEditedDxf} disabled={!rawDxfText}>
+                  <Download className="w-3 h-3" /> 수정본 DXF
+                </Button>
+              </div>
+            </>
+          )}
           <div className="w-px h-7 bg-slate-200" />
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase">층고</span>
@@ -3245,6 +3727,15 @@ export default function ElevationGeneratorPage() {
                     `정밀 배치: ${
                       twoPointAnchor === null ? "시작점 클릭" : "끝점 클릭"
                     }`}
+                  {mode === "measure-dist" && "거리 측정 — 두 점 클릭 (Esc 초기화)"}
+                  {mode === "measure-path" &&
+                    "연속 측정 — 점을 이어 클릭, 누적 길이 표시 (Esc 초기화)"}
+                  {mode === "measure-area" &&
+                    "면적 측정 — 꼭짓점 3개 이상 클릭 (Esc 초기화)"}
+                  {mode === "edit" &&
+                    (selectedEntityId
+                      ? "편집 — 드래그 이동 · Del 삭제 · Ctrl+Z 되돌리기"
+                      : "편집 — 도면 요소를 클릭해 선택")}
                 </div>
               )}
             </div>
