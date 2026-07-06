@@ -1849,7 +1849,10 @@ export default function ElevationGeneratorPage() {
     boardDetail,
   ]);
 
-  // ─── 휠 줌 ───
+  // ─── 휠 줌 (마우스 포인터 기준) ───
+  // 주의: setScale 업데이터 안에서 setOffset 을 호출하면 StrictMode 의
+  // 업데이터 2회 실행으로 오프셋 보정이 이중 적용되어 줌 중심이 어긋난다.
+  // scale/offset 을 함께 읽어 한 번에 계산하고 각각 값으로 set 한다.
   useEffect(() => {
     const canvas = planCanvasRef.current;
     if (!canvas) return;
@@ -1859,18 +1862,17 @@ export default function ElevationGeneratorPage() {
       const mx = ev.clientX - rect.left;
       const my = ev.clientY - rect.top;
       const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
-      setScale(prev => {
-        const ns = Math.max(0.0001, Math.min(1e6, prev * factor));
-        setOffset(prevOff => ({
-          x: mx - (mx - prevOff.x) * (ns / prev),
-          y: my - (my - prevOff.y) * (ns / prev),
-        }));
-        return ns;
+      const ns = Math.max(0.0001, Math.min(1e6, scale * factor));
+      const k = ns / scale;
+      setScale(ns);
+      setOffset({
+        x: mx - (mx - offset.x) * k,
+        y: my - (my - offset.y) * k,
       });
     };
     canvas.addEventListener("wheel", handler, { passive: false });
     return () => canvas.removeEventListener("wheel", handler);
-  }, []);
+  }, [scale, offset]);
 
   // ─── 전개 입면 휠 줌 (마우스 위치 기준 확대·축소) ───
   useEffect(() => {
@@ -1953,6 +1955,14 @@ export default function ElevationGeneratorPage() {
 
   // ─── 평면 마우스 ───
   const onPlanMouseDown = (ev: React.MouseEvent<HTMLCanvasElement>) => {
+    // 휠(가운데) 버튼 드래그 = 모든 모드에서 화면 이동
+    if (ev.button === 1) {
+      ev.preventDefault(); // 브라우저 오토스크롤 방지
+      dragRef.current = { x: ev.clientX - offset.x, y: ev.clientY - offset.y };
+      setHoverWorld(null);
+      setSnapHit(null);
+      return;
+    }
     if (mode === "view") {
       dragRef.current = { x: ev.clientX - offset.x, y: ev.clientY - offset.y };
     }
@@ -1964,13 +1974,16 @@ export default function ElevationGeneratorPage() {
     const my = ev.clientY - rect.top;
     const w = pxToWorld(mx, my);
 
+    // 드래그 팬 진행 중이면 모드와 무관하게 화면 이동만
+    if (dragRef.current) {
+      setOffset({
+        x: ev.clientX - dragRef.current.x,
+        y: ev.clientY - dragRef.current.y,
+      });
+      return;
+    }
+
     if (mode === "view") {
-      if (dragRef.current) {
-        setOffset({
-          x: ev.clientX - dragRef.current.x,
-          y: ev.clientY - dragRef.current.y,
-        });
-      }
       setHoverWorld(null);
       setSnapHit(null);
       return;
@@ -3250,6 +3263,7 @@ export default function ElevationGeneratorPage() {
                 ref={elevCanvasRef}
                 className="block w-full h-full cursor-grab active:cursor-grabbing"
                 onMouseDown={e => {
+                  if (e.button === 1) e.preventDefault(); // 휠 버튼 오토스크롤 방지
                   elevDragRef.current = { x: e.clientX, y: e.clientY };
                   elevMovedRef.current = 0;
                 }}
