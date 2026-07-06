@@ -780,9 +780,20 @@ export default function ElevationGeneratorPage() {
         setLastDxfFile(null);
         setRawDxfText(null);
         if (dxfSignedUrl) {
-          const text = await fetch(dxfSignedUrl).then(r => r.text());
+          const res = await fetch(dxfSignedUrl);
+          if (!res.ok) throw new Error(`도면 파일 다운로드 실패 (HTTP ${res.status})`);
+          const text = await res.text();
           setRawDxfText(text); // 내보내기용 원본 DXF 보관
           setParsed(parseDxfText(text));
+        } else if (revision.dxf_path) {
+          // dxf_path 는 있는데 signed URL 발급 실패 — Storage 파일 누락 등. 조용히 빈 캔버스가 되지 않게 안내
+          toast.error(
+            "원본 DXF 파일을 불러오지 못했습니다 (Storage 파일 누락 가능). 도면을 다시 업로드한 뒤 저장(새 REV) 하세요."
+          );
+        } else {
+          toast.info(
+            "이 REV에는 도면 파일이 저장되어 있지 않습니다. DXF 업로드 후 저장(새 REV) 하면 함께 보관됩니다."
+          );
         }
         setRevPanelOpen(false);
         toast.success(`REV ${revision.rev_no} 불러옴`);
