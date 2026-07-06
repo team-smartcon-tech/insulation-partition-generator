@@ -15,8 +15,8 @@ importers:
   apps/web:
     dependencies:
       '@jakkelab-aec/rw-dxf-engine-ts':
-        specifier: 0.1.5
-        version: 0.1.5(three@0.184.0)
+        specifier: file:../../vendor/jakkelab-aec-rw-dxf-engine-ts-0.1.5.tgz
+        version: file:vendor/jakkelab-aec-rw-dxf-engine-ts-0.1.5.tgz(three@0.184.0)
       '@radix-ui/react-slot':
         specifier: ^1.2.3
         version: 1.3.0(@types/react@19.2.17)(react@19.2.7)
@@ -560,8 +560,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@jakkelab-aec/rw-dxf-engine-ts@0.1.5':
-    resolution: {integrity: sha512-Ivs7F8LMOM1x1g1iTn9mc6hXJKXUk5AhpMzDFQxUikTbJQJfj+4z1H1nu8PxAwk3jjgbNbFYhUIMMpd8FbcWmw==, tarball: https://npm.pkg.github.com/download/@jakkelab-aec/rw-dxf-engine-ts/0.1.5/267c0b65efc4886c60050e1e0688235083fca61b}
+  '@jakkelab-aec/rw-dxf-engine-ts@file:vendor/jakkelab-aec-rw-dxf-engine-ts-0.1.5.tgz':
+    resolution: {integrity: sha512-Ivs7F8LMOM1x1g1iTn9mc6hXJKXUk5AhpMzDFQxUikTbJQJfj+4z1H1nu8PxAwk3jjgbNbFYhUIMMpd8FbcWmw==, tarball: file:vendor/jakkelab-aec-rw-dxf-engine-ts-0.1.5.tgz}
+    version: 0.1.5
     peerDependencies:
       three: ^0.184.0
     peerDependenciesMeta:
@@ -1814,7 +1815,7 @@ snapshots:
   '@img/sharp-win32-x64@0.34.5':
     optional: true
 
-  '@jakkelab-aec/rw-dxf-engine-ts@0.1.5(three@0.184.0)':
+  '@jakkelab-aec/rw-dxf-engine-ts@file:vendor/jakkelab-aec-rw-dxf-engine-ts-0.1.5.tgz(three@0.184.0)':
     optionalDependencies:
       three: 0.184.0
 
