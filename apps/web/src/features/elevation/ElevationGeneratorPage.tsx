@@ -1643,7 +1643,9 @@ export default function ElevationGeneratorPage() {
 
     const padX = 60;
     const padTopHeader = 22;
-    const padBetween = 36;
+    // 입면 사이 간격 — 하단 m눈금·[물량] 라벨·다음 입면 헤더가 모두 이 안에 그려지므로
+    // 36px 에서는 서로 붙어 보였다 → 72px 로 확대 (2026-07 현장 요청)
+    const padBetween = 72;
     const padBottom = 24;
     const maxBaseLen = Math.max(1, ...sheets.map(sh => sh.baseLen));
     const sumHeights = sheets.reduce((a, sh) => a + sh.fh, 0);
