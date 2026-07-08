@@ -23,3 +23,5 @@ coverage/
 .DS_Store
 Thumbs.db
 *.log
+# MS Office 임시 잠금파일 (문서 열어두면 자동 생성 → 소스컨트롤에 뜨지 않게)
+~$*
