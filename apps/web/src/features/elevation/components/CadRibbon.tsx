@@ -12,6 +12,7 @@
 import { useState, type ComponentType } from "react";
 import {
   Blocks,
+  Calculator,
   Check,
   CornerDownLeft,
   Download,
@@ -127,6 +128,8 @@ export interface CadRibbonProps {
   onResetAll: () => void;
   onHelp: () => void;
   onExit: () => void;
+  /** 마감 물량 산출 · 기성 패널 열기 */
+  onOpenTakeoff: () => void;
   // ── 전체화면 (CAD 처럼 브라우저 크롬 숨김) ──
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
@@ -134,7 +137,7 @@ export interface CadRibbonProps {
   onAutoFullscreen: (v: boolean) => void;
 }
 
-const TABS = ["홈", "삽입", "수정", "측정", "출력", "관리"] as const;
+const TABS = ["홈", "삽입", "수정", "측정", "적산", "출력", "관리"] as const;
 type TabKey = (typeof TABS)[number];
 
 /* ── 리본 버튼 (큰 아이콘 = CAD 주요 명령) ───────────────── */
@@ -686,6 +689,31 @@ export default function CadRibbon(p: CadRibbonProps) {
               active={p.mode === "measure-area"}
               disabled={!p.hasDxf}
               title="꼭짓점 3개 이상 클릭"
+            />
+          </Group>
+        )}
+
+        {tab === "적산" && (
+          <Group title="마감 물량" wide>
+            <BigBtn
+              icon={Calculator}
+              label={"물량\n산출"}
+              onClick={p.onOpenTakeoff}
+              tone="primary"
+              title="실 영역을 추적해 마감 물량을 산출합니다 (장판·타일·도배·걸레받이)"
+            />
+            <BigBtn
+              icon={LayoutList}
+              label={"세대\n대장"}
+              onClick={p.onOpenTakeoff}
+              title="동·층·호 세대 대장 (규칙 생성 / Excel 붙여넣기)"
+            />
+            <BigBtn
+              icon={Blocks}
+              label={"기성\n관리"}
+              onClick={p.onOpenTakeoff}
+              tone="success"
+              title="차수별 진도 입력 → 기성 물량 산출 · 검증"
             />
           </Group>
         )}

@@ -93,6 +93,7 @@ import OutputPanel from "./components/OutputPanel";
 import CadRibbon from "./components/CadRibbon";
 import CadStatusBar from "./components/CadStatusBar";
 import { useFullscreen } from "./useFullscreen";
+import TakeoffPanel from "@/features/takeoff/TakeoffPanel";
 import type { WallSummaryInput } from "./utils/elevationAggregate";
 import { toast } from "sonner";
 import {
@@ -485,6 +486,8 @@ export default function ElevationGeneratorPage() {
     autoEnter: autoFullscreen,
     setAuto: setAutoFullscreen,
   } = useFullscreen();
+  /** 마감 물량 산출 · 기성 패널 (리본 [적산] 탭) */
+  const [takeoffOpen, setTakeoffOpen] = useState(false);
   const [dlg, setDlg] = useState<
     null | "insul" | "types" | "elev" | "preset" | "openings" | "layers"
   >(null);
@@ -3421,6 +3424,7 @@ export default function ElevationGeneratorPage() {
               </select>
             </div>
           }
+          onOpenTakeoff={() => setTakeoffOpen(true)}
           isFullscreen={isFullscreen}
           onToggleFullscreen={toggleFullscreen}
           autoFullscreen={autoFullscreen}
@@ -4430,6 +4434,16 @@ export default function ElevationGeneratorPage() {
               <X className="w-3 h-3" /> 해제
             </button>
           </div>
+        )}
+
+        {/* 마감 물량 산출 · 기성 */}
+        {takeoffOpen && (
+          <TakeoffPanel
+            onClose={() => setTakeoffOpen(false)}
+            dxfBuffer={
+              rawDxfText ? new TextEncoder().encode(rawDxfText).buffer : null
+            }
+          />
         )}
 
         {/* ── 전역 오버레이 팝업 ── */}
