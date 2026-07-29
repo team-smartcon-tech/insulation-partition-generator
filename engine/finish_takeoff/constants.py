@@ -46,6 +46,11 @@ CURVE_CHORD_MAX_MM: Final[float] = 10.0
 #: 문 개구부로 인정하는 폭 범위 (mm)
 DOOR_WIDTH_RANGE_MM: Final[tuple[float, float]] = (600.0, 1500.0)
 
+#: 문 스윙 ARC 끝점이 벽선에서 떨어져 있어도 '벽 위'로 인정하는 거리 (mm).
+#: 실측: 문틀(문선) 두께 때문에 최소 35 / 중앙 50 / 75% 80mm 떨어져 있었다.
+#: 16mm 로는 448개 중 0개, 100mm 면 376개가 잡힌다.
+DOOR_ARC_WALL_TOLERANCE_MM: Final[float] = 100.0
+
 #: 문 스윙 ARC 반지름으로 문 폭을 추정할 때의 유효 범위 (mm).
 #: 실측 샘플: 690~991mm (중앙값 840) — 문 블록(INSERT)이 없고 ARC 로만 작도된 도면이 있다.
 DOOR_SWING_RADIUS_RANGE_MM: Final[tuple[float, float]] = (600.0, 1300.0)
