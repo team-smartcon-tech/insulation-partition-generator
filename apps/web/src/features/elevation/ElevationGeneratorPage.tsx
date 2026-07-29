@@ -3301,7 +3301,9 @@ export default function ElevationGeneratorPage() {
     return buildElevationDxfMulti({ chains });
   };
 
+  // 실 클릭 모드에서는 커서를 십자로 (클릭 대상임을 알린다)
   const cursorClass =
+    takeoffPicking ||
     mode === "trace" ||
     mode === "place" ||
     mode === "two-point" ||
@@ -4501,7 +4503,14 @@ export default function ElevationGeneratorPage() {
               rawDxfText ? new TextEncoder().encode(rawDxfText).buffer : null
             }
             picking={takeoffPicking}
-            onPickingChange={setTakeoffPicking}
+            onPickingChange={v => {
+              setTakeoffPicking(v);
+              if (v) {
+                setCanvasTab("plan"); // 평면에서 클릭해야 한다
+                setMode("view");
+                fitToScreen();
+              }
+            }}
             rooms={takeoffRooms}
             onRoomsChange={setTakeoffRooms}
             registerClickHandler={fn => {

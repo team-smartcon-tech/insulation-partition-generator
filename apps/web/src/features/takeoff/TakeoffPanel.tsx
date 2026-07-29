@@ -280,6 +280,106 @@ export default function TakeoffPanel({
     }
   }, [registry, progress, quantities]);
 
+  // 실 클릭 모드 — 오버레이를 걷고 우측 상단 작은 바로 접는다.
+  // (대화상자가 화면을 덮고 있으면 평면을 클릭할 수 없다)
+  if (picking) {
+    return (
+      <div className="pointer-events-none fixed inset-0 z-[72]">
+        <div className="pointer-events-auto absolute right-4 top-4 w-[360px] rounded-xl border border-slate-300 bg-white/95 shadow-2xl backdrop-blur">
+          <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
+            <span className="flex h-2 w-2 animate-pulse rounded-full bg-rose-500" />
+            <b className="text-[12.5px] text-slate-800">실 클릭 중</b>
+            <span className="text-[11px] text-slate-500">
+              평면에서 실 안쪽을 클릭하세요
+            </span>
+            <button
+              type="button"
+              onClick={() => onPickingChange?.(false)}
+              className="ml-auto rounded bg-rose-600 px-2.5 py-1 text-[11.5px] font-semibold text-white"
+            >
+              중지
+            </button>
+          </div>
+
+          <div className="max-h-[52vh] overflow-y-auto px-3 py-2">
+            {busy && (
+              <p className="flex items-center gap-1.5 py-1 text-[11.5px] text-slate-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {busy}
+              </p>
+            )}
+            {error && (
+              <p className="mb-1.5 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
+                {error}
+              </p>
+            )}
+            {rooms.length === 0 ? (
+              <p className="py-4 text-center text-[11.5px] text-slate-400">
+                아직 클릭한 실이 없습니다.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {rooms.map((r, i) => (
+                  <li
+                    key={i}
+                    className="flex items-center gap-1.5 rounded border border-slate-100 px-2 py-1 text-[11.5px]"
+                  >
+                    <input
+                      value={r.name}
+                      onChange={e =>
+                        setRooms(prev =>
+                          prev.map((x, j) =>
+                            j === i ? { ...x, name: e.target.value } : x
+                          )
+                        )
+                      }
+                      className="w-24 rounded border border-slate-200 px-1 py-0.5"
+                    />
+                    <span className="tabular-nums text-slate-600">
+                      {(pickedRooms?.[i]?.area_m2 ?? 0).toFixed(2)}㎡
+                    </span>
+                    {r.is_approximate && (
+                      <span className="rounded bg-amber-100 px-1 py-0.5 text-[9.5px] font-bold text-amber-700">
+                        근사
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRooms(prev => prev.filter((_, j) => j !== i));
+                        onRoomsChange?.((pickedRooms ?? []).filter((_, j) => j !== i));
+                      }}
+                      className="ml-auto text-slate-300 hover:text-rose-500"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 border-t border-slate-200 px-3 py-2">
+            <span className="text-[11.5px] text-slate-500">
+              추적 {rooms.length}개
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                onPickingChange?.(false);
+                void runTakeoff();
+              }}
+              disabled={rooms.length === 0}
+              className="ml-auto rounded bg-[#004791] px-3 py-1.5 text-[11.5px] font-semibold text-white disabled:opacity-40"
+            >
+              물량 산출
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-[72] flex items-start justify-center bg-slate-900/40 p-6 backdrop-blur-[2px]">
       <div className="mt-4 flex max-h-[88vh] w-[min(1180px,96vw)] flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl">
