@@ -48,12 +48,46 @@ tests/             단위 테스트
 
 ## 진행 상황
 
+**1부 · 엔진 (도면 → 물량)**
 - [x] 1. DXF 로더 + 레이어 분석 리포트 (CLI)
-- [ ] 2. 엔티티 → 선분화 (INSERT 재귀 전개 · 미러 처리)
-- [ ] 3. 지오메트리 정리 (스냅/중복제거/교차분할)
-- [ ] 4. 벡터 폐합영역 추적 + sanity check
-- [ ] 5. 개구부 처리
-- [ ] 6. 래스터 폴백
-- [ ] 7. 물량 산출 규칙 + Excel 출력
-- [ ] 8. UI 연동
-- [ ] 9~15. 세대 대장 · 범위 파서 · 기성 산출/검증/출력
+- [x] 2. 엔티티 → 선분화 (INSERT 재귀 전개 · 미러 처리)
+- [x] 3. 지오메트리 정리 (스냅/중복제거/교차분할)
+- [x] 4. 벡터 폐합영역 추적 + sanity check
+- [x] 5. 개구부 처리 (문 스윙 ARC → 폐합선)
+- [x] 6. 래스터 폴백 (+ 트인 공간 중복 계상 차단)
+- [x] 7. 물량 산출 규칙 + Excel 출력
+- [ ] 8. UI 연동 (오토콘 리본에 붙이기)
+
+**2부 · 기성**
+- [x] 9. 세대 대장 (Excel 붙여넣기 · 규칙 생성기 · 필로티/결번 제외)
+- [x] 10. 범위 문자열 파서 + 미리보기
+- [x] 11. 진도 모델(누계) + 차수 관리 + 스냅샷
+- [ ] 12. 그리드 UI (엔진 범위 밖 — UI 연동 시)
+- [x] 13. 기성 산출 + 검증 규칙
+- [x] 14. 기성 Excel 출력 (5시트)
+- [x] 15. 이력/스냅샷 + REV 변경 대응
+
+## 사용 예 (전 구간)
+
+```python
+# 도면 → 실 물량
+doc, info = load("평면도.dxf")
+stats = layers.analyze(doc, info.unit_scale_to_mm)
+preset = layers.suggest_preset(stats)
+segs, _ = entities.extract_segments(doc, info.unit_scale_to_mm, layers=wall_layers)
+result = raster_fill.trace(segs, click_mm)          # 또는 polygonize.trace_at()
+rooms  = [rules.compute(room_name="거실", polygon=result.polygon)]
+excel.write("물량산출서.xlsx", rooms)
+
+# 세대 대장 → 기성
+reg = UnitRegistry.from_rule(["101"], 1, 25, {"01": "84A", "02": "84B"},
+                             exclude_floors=[1])     # 필로티 제외
+matched = parser.parse("101동 2~15F 전체 @50%", reg)  # 미리보기 후 적용
+store.set_many(Progress(1, u.key, "WALLPAPER", r) for u, r in matched.matched)
+res = compute_billing(period=p2, registry=reg, store=store,
+                      quantities=q, prev_period=p1)
+report = validate(period=p2, result=res, ...)        # 오류면 확정 차단
+if report.can_lock:
+    lock_period(p2, q)                               # 물량 스냅샷 고정
+billing_excel.write("기성청구서.xlsx", res, validation=report)
+```
