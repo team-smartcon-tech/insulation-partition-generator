@@ -90,6 +90,9 @@ import {
 } from "./hooks";
 import { getElevRevision } from "./api";
 import OutputPanel from "./components/OutputPanel";
+import CadRibbon from "./components/CadRibbon";
+import CadStatusBar from "./components/CadStatusBar";
+import { useFullscreen } from "./useFullscreen";
 import type { WallSummaryInput } from "./utils/elevationAggregate";
 import { toast } from "sonner";
 import {
@@ -475,6 +478,16 @@ export default function ElevationGeneratorPage() {
   // ── 캔버스 탭 (평면도 / 전개 입면) — 한 번에 하나만 전폭으로 표시 ──
   const [canvasTab, setCanvasTab] = useState<"plan" | "elev">("plan");
   const [elevListOpen, setElevListOpen] = useState(false); // 입면 목록 팝업(모달)
+  /** CAD 대화상자 — 리본 [패널] 그룹에서 여는 우측 패널 대체 (AutoCAD 대화상자 방식) */
+  const {
+    isFullscreen,
+    toggle: toggleFullscreen,
+    autoEnter: autoFullscreen,
+    setAuto: setAutoFullscreen,
+  } = useFullscreen();
+  const [dlg, setDlg] = useState<
+    null | "insul" | "types" | "elev" | "preset" | "openings" | "layers"
+  >(null);
   const [helpOpen, setHelpOpen] = useState(false); // 사용법 팝업(모달)
   // 첫 방문 시 사용법 자동 표시 (닫으면 다시 자동으로 뜨지 않음 — ? 버튼으로 재열람)
   useEffect(() => {
@@ -3248,235 +3261,192 @@ export default function ElevationGeneratorPage() {
     <>
       {/* 전체화면 스튜디오 오버레이 — 사이드바/상단 네비를 덮고 몰입형으로 (AutoCAD 스타일) */}
       <div className="fixed inset-0 z-[60] overflow-hidden bg-slate-100 flex flex-col">
-        {/* 헤더 — 커맨드 바 */}
-        <div className="shrink-0 flex items-center justify-between gap-3 flex-wrap border-b border-slate-200 bg-white px-4 py-1.5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                if (window.history.length > 1) window.history.back();
-                else window.location.assign("/");
-              }}
-              className="flex items-center justify-center w-9 h-9 rounded-lg bg-white border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors shrink-0"
-              title="나가기 (본사 통합 관리로)"
-            >
-              <X className="w-[18px] h-[18px]" />
-            </button>
-            <span className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-[#1478d6] via-[#0a63b8] to-[#003a78] text-white shadow-lg shadow-blue-900/20 ring-1 ring-white/15 shrink-0">
-              <Square className="w-[17px] h-[17px]" strokeWidth={2.2} />
-            </span>
-            <div className="flex items-center gap-2">
-              <h1 className="text-[16px] font-extrabold tracking-tight text-slate-800">
-                세대 단열재 나누기도
-              </h1>
-              <span className="rounded-md bg-[#004791]/8 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[#004791]/75">
-                Platform
-              </span>
-              <button
-                type="button"
-                onClick={() => setHelpOpen(true)}
-                className="flex items-center justify-center w-7 h-7 rounded-full text-slate-400 hover:bg-[#004791]/8 hover:text-[#004791] transition-colors"
-                title="사용법 보기"
-              >
-                <HelpCircle className="w-[17px] h-[17px]" />
-              </button>
+        {/* ── AutoCAD 스타일 리본 (타이틀바 · 탭 · 패널) ── */}
+        <CadRibbon
+          projects={elevProjects.map(pr => ({
+            id: pr.id,
+            name: pr.name,
+            latest_rev_no: pr.latest_rev_no,
+          }))}
+          activeProjectId={activeProjectId}
+          onSelectProject={setActiveProjectId}
+          activeProjectName={activeProjectData?.project.name}
+          activeRevNo={activeProjectData?.revisions[0]?.rev_no}
+          revCount={activeProjectData?.revisions.length ?? 0}
+          dxfName={loadedDxfMeta?.name ?? null}
+          reusedRev={!!loadedDxfMeta}
+          onUploadDxf={handleFile}
+          onImportProject={handleImportProjectFile}
+          onNewProject={handleNewProject}
+          onSaveRev={handleSaveRev}
+          savingRev={saveRevMut.isPending}
+          onToggleRevPanel={() => setRevPanelOpen(o => !o)}
+          revPanelOpen={revPanelOpen}
+          onExportProject={handleExportProject}
+          onDeleteProject={async () => {
+            if (!activeProjectId) return;
+            if (!window.confirm("이 프로젝트(모든 REV)를 삭제할까요?")) return;
+            try {
+              await deleteProjectMut.mutateAsync(activeProjectId);
+              setActiveProjectId(null);
+              toast.success("프로젝트 삭제됨");
+            } catch (e) {
+              toast.error(
+                `삭제 실패: ${e instanceof Error ? e.message : String(e)}`
+              );
+            }
+          }}
+          onFitToScreen={fitToScreen}
+          onZoomIn={() => setScale(sc => sc * 1.25)}
+          onZoomOut={() => setScale(sc => sc / 1.25)}
+          hasDxf={!!parsed}
+          mode={mode}
+          onMode={m => setMode(m)}
+          onStartNewChain={startNewChain}
+          onTwoPoint={() => {
+            setMode("two-point");
+            setTwoPointAnchor(null);
+          }}
+          wallCount={walls.length}
+          onDeleteEntity={deleteSelectedEntity}
+          hasSelectedEntity={!!selectedEntityId}
+          onUndoEdit={undoDxfEdit}
+          onDownloadEditedDxf={downloadEditedDxf}
+          hasRawDxf={!!rawDxfText}
+          draftCount={draft.length}
+          onCommitDraft={() => {
+            commitDraft(false);
+            setMode("view");
+            setCanvasTab("elev");
+          }}
+          onUndoDraftPoint={() => setDraft(d => d.slice(0, -1))}
+          onExportCombinedDxf={() => handleExportCombined("dxf")}
+          onExportSplitDxf={() => handleExportAll("dxf")}
+          onExportCombinedSvg={() => handleExportCombined("svg")}
+          onOpenOutput={() => setOutputOpen(true)}
+          canExport={canExport}
+          floorHeightInput={
+            <NumberInput
+              value={defaultFloorHeight}
+              onChange={setDefaultFloorHeight}
+              suffix="mm"
+              step={50}
+              min={1000}
+              max={6000}
+            />
+          }
+          onResetAll={resetAll}
+          onOpenDialog={k => setDlg(k)}
+          openDialog={dlg}
+          presetControl={
+            <div className="flex items-start gap-2">
+              {/* 프리셋 선택 — CAD 블록 갤러리 자리 */}
+              <div className="flex max-w-[248px] flex-wrap gap-1">
+                {presets.map(pr => {
+                  const on = pr.id === selectedPresetId;
+                  return (
+                    <button
+                      key={pr.id}
+                      type="button"
+                      onClick={() => setSelectedPresetId(pr.id)}
+                      title={`${pr.label} · ${pr.width}×${pr.height}${pr.sill ? ` ↑${pr.sill}` : ""}`}
+                      className={cn(
+                        "flex items-center gap-1 rounded border px-1.5 py-[3px] text-[10.5px] font-medium transition-colors",
+                        on
+                          ? "border-[#7fb3e0] bg-[#cfe3f7] text-[#0a4a86]"
+                          : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      <span
+                        className="h-2 w-2 rounded-sm border"
+                        style={{
+                          backgroundColor: KIND_COLOR[pr.kind] + "44",
+                          borderColor: KIND_COLOR[pr.kind],
+                        }}
+                      />
+                      {pr.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* 선택 프리셋 치수 — 리본에서 바로 수정 */}
+              {preset && (
+                <div className="flex items-end gap-1">
+                  {(
+                    [
+                      ["폭", preset.width, (v: number) => updatePreset(preset.id, { width: v })],
+                      ["높이", preset.height, (v: number) => updatePreset(preset.id, { height: v })],
+                      ["SILL", preset.sill ?? 0, (v: number) => updatePreset(preset.id, { sill: v })],
+                    ] as const
+                  ).map(([lab, val, on]) => (
+                    <div key={lab} className="w-[62px]">
+                      <div className="mb-[2px] text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+                        {lab}
+                      </div>
+                      <NumberInput value={val} onChange={on} suffix="mm" step={50} compact />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 rounded-lg bg-slate-50 border border-slate-200 px-2 py-1.5">
-            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#004791] text-white text-[12.5px] font-semibold shadow-sm hover:bg-[#003a78] cursor-pointer transition-colors">
-              <Upload className="w-4 h-4" />
-              DXF 업로드
-              <input
-                type="file"
-                accept=".dxf"
-                className="hidden"
+          }
+          layerControl={
+            <div className="flex flex-col gap-1 pt-0.5">
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={showText}
+                  onChange={ev => setShowText(ev.target.checked)}
+                  className="h-3 w-3"
+                />
+                텍스트 표시
+              </label>
+              <select
+                value=""
                 onChange={ev => {
-                  const f = ev.target.files?.[0];
-                  if (f) handleFile(f);
+                  if (ev.target.value) toggleLayer(ev.target.value);
                   ev.target.value = "";
                 }}
-              />
-            </label>
-            <label
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#004791]/30 bg-white text-[#004791] text-[12.5px] font-semibold shadow-sm hover:bg-[#004791]/5 cursor-pointer transition-colors"
-              title="Smart Works 등에서 내보낸 프로젝트 파일(.swelev.json)을 불러옵니다"
-            >
-              <FolderOpen className="w-4 h-4" />
-              프로젝트 불러오기
-              <input
-                type="file"
-                accept=".json,.swelev.json,application/json"
-                className="hidden"
-                onChange={ev => {
-                  const f = ev.target.files?.[0];
-                  if (f) handleImportProjectFile(f);
-                  ev.target.value = "";
-                }}
-              />
-            </label>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={fitToScreen}
-              disabled={!parsed}
-              className="gap-1"
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-              화면 맞춤
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setScale(s => s * 1.25)}
-              disabled={!parsed}
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setScale(s => s / 1.25)}
-              disabled={!parsed}
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </Button>
-            <div className="w-px h-5 bg-slate-300 mx-1" />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleExportCombined("dxf")}
-              disabled={!canExport}
-              className="gap-1"
-              title="모든 입면을 하나의 DXF 파일에 위/아래로 통합 출력"
-            >
-              <Download className="w-3.5 h-3.5" />
-              DXF 통합
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleExportAll("dxf")}
-              disabled={!canExport}
-              className="gap-1"
-              title="입면별 분할 DXF 파일 저장"
-            >
-              <Download className="w-3.5 h-3.5" />
-              DXF 분할
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleExportCombined("svg")}
-              disabled={!canExport}
-              className="gap-1"
-              title="모든 입면을 하나의 SVG 파일에 통합 출력"
-            >
-              <Download className="w-3.5 h-3.5" />
-              SVG 통합
-            </Button>
-            <div className="w-px h-5 bg-slate-300 mx-1" />
-            <Button
-              size="sm"
-              onClick={() => setOutputOpen(true)}
-              disabled={!canExport}
-              className="gap-1 bg-emerald-600 hover:bg-emerald-700"
-              title="동·코어별 통합 물량 산출 (Output)"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              Output
-            </Button>
+                disabled={!parsed}
+                className="h-6 w-[124px] rounded border border-slate-300 bg-white px-1.5 text-[11px] text-slate-700 disabled:opacity-40"
+              >
+                <option value="">
+                  도면층 {parsed?.layers.length ?? 0}개 · 켜기/끄기
+                </option>
+                {parsed?.layers.map(ly => (
+                  <option key={ly} value={ly}>
+                    {hiddenLayers.has(ly) ? "☐" : "☑"} {ly}
+                  </option>
+                ))}
+              </select>
+            </div>
+          }
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          autoFullscreen={autoFullscreen}
+          onAutoFullscreen={setAutoFullscreen}
+          onHelp={() => setHelpOpen(true)}
+          onExit={() => {
+            if (window.history.length > 1) window.history.back();
+            else window.location.assign("/");
+          }}
+        />
+
+        {/* 전체화면 안내 — 브라우저는 사용자 클릭 없이 전체화면 전환을 허용하지 않는다.
+            첫 클릭이 들어오면 즉시 전체화면으로 바뀌며 이 줄도 사라진다. */}
+        {!isFullscreen && autoFullscreen && (
+          <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1 text-[11.5px] text-amber-800">
+            <Maximize2 className="h-3.5 w-3.5" />
+            화면을 한 번 클릭하면 <b>전체화면</b>으로 전환됩니다 (브라우저 탭·주소창
+            숨김). 항상 전체화면으로 쓰려면 주소창의 <b>설치</b> 버튼으로 앱을
+            설치하세요.
           </div>
-        </div>
+        )}
 
-        {/* 프로젝트 / REV(리비전) 바 — 저장·복원 + 작업 모드 · 층고 */}
-        <div className="shrink-0 flex items-center gap-2 flex-wrap border-b border-slate-200 bg-white px-3.5 py-1">
-          <span className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-slate-600 pr-1">
-            <span className="w-1.5 h-4 rounded-sm bg-[#3b82f6] inline-block" />
-            프로젝트
-          </span>
-          <select
-            value={activeProjectId ?? ""}
-            onChange={e => setActiveProjectId(e.target.value || null)}
-            className="h-8 text-[12.5px] rounded-md border border-slate-300 bg-white text-slate-800 px-2 min-w-[200px] focus:outline-none focus:ring-1 focus:ring-[#004791]/30 [&>option]:text-slate-900"
-          >
-            <option value="">— 선택 —</option>
-            {elevProjects.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name} (REV {p.latest_rev_no})
-              </option>
-            ))}
-          </select>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleNewProject}
-            className="gap-1"
-          >
-            <FilePlus2 className="w-3.5 h-3.5" /> 새 프로젝트
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSaveRev}
-            disabled={!activeProjectId || saveRevMut.isPending}
-            className="gap-1 bg-[#004791] hover:bg-[#003a78]"
-          >
-            {saveRevMut.isPending ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Save className="w-3.5 h-3.5" />
-            )}
-            저장(새 REV)
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setRevPanelOpen(o => !o)}
-            disabled={!activeProjectId}
-            className="gap-1"
-          >
-            <History className="w-3.5 h-3.5" /> REV 목록
-            {activeProjectData ? ` (${activeProjectData.revisions.length})` : ""}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportProject}
-            disabled={!walls.length}
-            className="gap-1"
-            title="현재 프로젝트(설정·입면·DXF)를 파일로 내보내기 — Smart Works에서 불러올 수 있음"
-          >
-            <Download className="w-3.5 h-3.5" /> 내보내기
-          </Button>
-          {activeProjectId && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                if (!window.confirm("이 프로젝트(모든 REV)를 삭제할까요?")) return;
-                try {
-                  await deleteProjectMut.mutateAsync(activeProjectId);
-                  setActiveProjectId(null);
-                  toast.success("프로젝트 삭제됨");
-                } catch (e) {
-                  toast.error(`삭제 실패: ${e instanceof Error ? e.message : String(e)}`);
-                }
-              }}
-              className="gap-1 text-rose-600 border-rose-200 hover:bg-rose-50"
-              title="프로젝트 삭제"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </Button>
-          )}
-          {loadedDxfMeta && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-              <FolderOpen className="w-3 h-3" /> 불러온 REV · DXF 재사용
-            </span>
-          )}
-
-          {/* REV 목록 패널 */}
-          {revPanelOpen && activeProjectData && (
-            <div className="w-full mt-1 rounded-md border border-slate-200 bg-white divide-y divide-slate-100 max-h-56 overflow-auto">
+        {/* REV 목록 — 리본 '관리 > REV 목록' 토글 시 아래로 펼침 */}
+        {revPanelOpen && activeProjectData && (
+          <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-2">
+            <div className="max-h-56 divide-y divide-slate-100 overflow-auto rounded-md border border-slate-200">
               {activeProjectData.revisions.length === 0 && (
                 <div className="px-3 py-2 text-[12px] text-slate-400">
                   저장된 REV가 없습니다.
@@ -3487,10 +3457,10 @@ export default function ElevationGeneratorPage() {
                   key={r.id}
                   className="flex items-center gap-2 px-3 py-1.5 text-[12px]"
                 >
-                  <span className="font-semibold text-slate-700 w-14 shrink-0">
+                  <span className="w-14 shrink-0 font-semibold text-slate-700">
                     REV {r.rev_no}
                   </span>
-                  <span className="text-slate-400 shrink-0 tabular-nums">
+                  <span className="shrink-0 tabular-nums text-slate-400">
                     {new Date(r.created_at).toLocaleString("ko-KR")}
                   </span>
                   <span className="flex-1 truncate text-slate-500">
@@ -3500,7 +3470,7 @@ export default function ElevationGeneratorPage() {
                   <button
                     type="button"
                     onClick={() => handleLoadRev(r.id)}
-                    className="px-2 py-0.5 rounded border border-[#004791] text-[#004791] hover:bg-blue-50 font-semibold shrink-0"
+                    className="shrink-0 rounded border border-[#004791] px-2 py-0.5 font-semibold text-[#004791] hover:bg-blue-50"
                   >
                     불러오기
                   </button>
@@ -3515,136 +3485,26 @@ export default function ElevationGeneratorPage() {
                         });
                         toast.success("삭제됨");
                       } catch (e) {
-                        toast.error(`삭제 실패: ${e instanceof Error ? e.message : String(e)}`);
+                        toast.error(
+                          `삭제 실패: ${e instanceof Error ? e.message : String(e)}`
+                        );
                       }
                     }}
-                    className="px-1.5 py-0.5 rounded text-rose-500 hover:bg-rose-50 shrink-0"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-rose-500 hover:bg-rose-50"
                     title="REV 삭제"
                   >
-                    <Trash2 className="w-3 h-3" />
+                    <Trash2 className="h-3 w-3" />
                   </button>
                 </div>
               ))}
             </div>
-          )}
-          <div className="w-px h-6 bg-slate-200 mx-2" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase mr-0.5">
-              작업
-            </span>
-            <ModeButton active={mode === "view"} onClick={() => setMode("view")} icon={MousePointer2} label="보기" />
-            <ModeButton active={mode === "trace"} onClick={startNewChain} icon={Pencil} label={walls.length === 0 ? "트레이싱" : "새 입면"} disabled={!parsed} />
-            <ModeButton active={mode === "place"} onClick={() => setMode("place")} icon={Square} label="프리셋 배치" disabled={walls.length === 0} />
-            <ModeButton active={mode === "two-point"} onClick={() => { setMode("two-point"); setTwoPointAnchor(null); }} icon={CornerDownLeft} label="정밀" disabled={walls.length === 0} />
-            <ModeButton active={mode === "auto"} onClick={() => setMode("auto")} icon={Wand2} label="창호 자동" disabled={walls.length === 0 || !parsed} />
           </div>
-          <div className="w-px h-6 bg-slate-200 mx-2" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase mr-0.5">
-              측정·편집
-            </span>
-            <ModeButton active={mode === "measure-dist"} onClick={() => setMode("measure-dist")} icon={Ruler} label="거리" disabled={!parsed} />
-            <ModeButton active={mode === "measure-path"} onClick={() => setMode("measure-path")} icon={Route} label="연속" disabled={!parsed} />
-            <ModeButton active={mode === "measure-area"} onClick={() => setMode("measure-area")} icon={Hexagon} label="면적" disabled={!parsed} />
-            <ModeButton active={mode === "edit"} onClick={() => setMode("edit")} icon={MousePointerClick} label="편집" disabled={!parsed} />
-          </div>
-          {mode === "edit" && (
-            <>
-              <div className="w-px h-7 bg-slate-200" />
-              <div className="flex items-center gap-1.5">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-[11px] h-7 gap-1 !text-rose-600 !bg-rose-50 hover:!bg-rose-100 !border-rose-200"
-                  onClick={deleteSelectedEntity}
-                  disabled={!selectedEntityId}
-                >
-                  <Trash2 className="w-3 h-3" /> 삭제
-                </Button>
-                <Button size="sm" variant="outline" className="text-[11px] h-7 gap-1" onClick={undoDxfEdit}>
-                  <Undo2 className="w-3 h-3" /> 되돌리기
-                </Button>
-                <Button size="sm" variant="outline" className="text-[11px] h-7 gap-1" onClick={downloadEditedDxf} disabled={!rawDxfText}>
-                  <Download className="w-3 h-3" /> 수정본 DXF
-                </Button>
-              </div>
-            </>
-          )}
-          <div className="w-px h-7 bg-slate-200" />
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-slate-500 tracking-wider uppercase">층고</span>
-            <div className="w-[128px]">
-              <NumberInput value={defaultFloorHeight} onChange={setDefaultFloorHeight} suffix="mm" step={50} min={1000} max={6000} />
-            </div>
-          </div>
-          {mode === "trace" && draft.length > 0 && (
-            <>
-              <div className="w-px h-7 bg-slate-200" />
-              <div className="flex items-center gap-1.5">
-                <Button size="sm" variant="outline" className="text-[11px] h-7 gap-1" onClick={() => { commitDraft(false); setMode("view"); setCanvasTab("elev"); }} disabled={draft.length < 2}>
-                  <Check className="w-3 h-3" /> 입면 확정
-                </Button>
-                <Button size="sm" variant="outline" className="text-[11px] h-7" onClick={() => setDraft(d => d.slice(0, -1))}>
-                  되돌리기
-                </Button>
-              </div>
-            </>
-          )}
-          {(walls.length > 0 || draft.length > 0) && (
-            <>
-              <div className="w-px h-7 bg-slate-200" />
-              <Button size="sm" variant="outline" className="text-[11px] h-7 gap-1 !text-rose-600 !bg-rose-50 hover:!bg-rose-100 !border-rose-200" onClick={resetAll}>
-                <Trash2 className="w-3 h-3" /> 전체 초기화
-              </Button>
-            </>
-          )}
-        </div>
+        )}
 
         {/* 본문 — 전폭 캔버스(탭) + 얇은 인스펙터 패널 */}
-        <div className="flex-1 min-h-0 grid grid-cols-[1fr_460px] grid-rows-[minmax(0,1fr)] gap-3 p-2">
+        <div className="flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-3 p-2">
           {/* 좌측: 캔버스 탭 (평면 / 전개 입면) — 한 번에 하나만 전폭 표시 */}
           <div className="flex flex-col gap-1.5 min-h-0">
-            {/* 탭 스위처 — 클릭으로 전환 */}
-            <div className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-100 border border-slate-200 p-1 w-fit">
-              <button
-                type="button"
-                onClick={() => setCanvasTab("plan")}
-                className={cn(
-                  "px-3.5 py-1.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 transition-all",
-                  canvasTab === "plan"
-                    ? "bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white shadow-sm shadow-blue-900/20"
-                    : "text-slate-500 hover:bg-white hover:text-slate-700"
-                )}
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                평면도 · PLAN
-              </button>
-              <button
-                type="button"
-                onClick={() => setCanvasTab("elev")}
-                className={cn(
-                  "px-3.5 py-1.5 rounded-md text-[12px] font-semibold flex items-center gap-1.5 transition-all",
-                  canvasTab === "elev"
-                    ? "bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white shadow-sm shadow-blue-900/20"
-                    : "text-slate-500 hover:bg-white hover:text-slate-700"
-                )}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                전개 입면 · ELEVATION
-                {walls.length > 0 && (
-                  <span
-                    className={cn(
-                      "ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums leading-none",
-                      canvasTab === "elev"
-                        ? "bg-white/20 text-white"
-                        : "bg-[#004791]/10 text-[#004791]"
-                    )}
-                  >
-                    {walls.length}
-                  </span>
-                )}
-              </button>
-            </div>
             {/* 캔버스 영역 — 두 캔버스 모두 마운트, 활성 탭만 노출(리사이즈 정확도 유지) */}
             <div className="relative flex-1 min-h-0">
             {/* 평면 */}
@@ -3805,8 +3665,18 @@ export default function ElevationGeneratorPage() {
           </div>
 
           {/* 우측 인스펙터 패널 */}
-          <aside className="rounded-xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-200/60 flex flex-col overflow-y-auto self-stretch min-h-0 accent-[#004791] [&_option]:text-slate-900">
+          {/* ── CAD 대화상자 — 리본 [패널] 그룹에서 열기 ── */}
+          {dlg && (
+            <div
+              className="fixed inset-0 z-[68] flex items-start justify-center bg-slate-900/40 p-6 backdrop-blur-[2px]"
+              onClick={() => setDlg(null)}
+            >
+            <div
+              className="mt-6 w-[min(920px,96vw)] max-h-[84vh] overflow-y-auto rounded-xl border border-slate-300 bg-white shadow-2xl accent-[#004791] [&_option]:text-slate-900"
+              onClick={e => e.stopPropagation()}
+            >
             {/* 단열재 나누기도 (추가 기능) */}
+            {dlg === "insul" && (
             <Section icon={Square} title="단열재 나누기도" defaultOpen={false} accent="#0a63b8">
             <div className="px-3 py-2 text-[11.5px] space-y-2">
               <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -4077,8 +3947,10 @@ export default function ElevationGeneratorPage() {
             </div>
 
             </Section>
+            )}
 
             {/* 동·타입 설정 (동·타입·세대수 매트릭스 → 현장식 산출서 구동) */}
+            {dlg === "types" && (
             <Section
               icon={LayoutGrid}
               title={`동·타입 설정 (${typeMatrix.buildings.length}동 · ${typeMatrix.types.length}타입)`}
@@ -4305,8 +4177,10 @@ export default function ElevationGeneratorPage() {
                   )}
               </div>
             </Section>
+            )}
 
             {/* 입면 목록 */}
+            {dlg === "elev" && (
             <Section icon={Layers} title={`입면 목록 (${walls.length})`} accent="#0891b2">
             <div className="px-2 py-2 space-y-2">
               <button
@@ -4324,6 +4198,7 @@ export default function ElevationGeneratorPage() {
               )}
             </div>
             </Section>
+            )}
 
             {/* 입면 목록 팝업(모달) — 사이드바가 좁아 넓은 화면에서 편집 */}
             {elevListOpen && (
@@ -4933,6 +4808,7 @@ export default function ElevationGeneratorPage() {
               })()}
 
             {/* 프리셋 */}
+            {dlg === "preset" && (
             <Section icon={Square} title="오프닝 프리셋" accent="#d97706">
             <div className="px-2 py-1.5 space-y-1">
               {presets.map(p => {
@@ -5061,8 +4937,10 @@ export default function ElevationGeneratorPage() {
             </div>
 
             </Section>
+            )}
 
             {/* 오프닝 목록 */}
+            {dlg === "openings" && (
             <Section icon={Layers} title={`오프닝 (${openings.length})`} accent="#059669">
             <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1 min-h-0">
               {openings.length === 0 && (
@@ -5212,54 +5090,63 @@ export default function ElevationGeneratorPage() {
               })}
             </div>
 
-            {/* 레이어 */}
-            <details className="border-t border-slate-200">
-              <summary className="px-3 py-2 cursor-pointer flex items-center gap-1.5 text-[12px] font-bold text-slate-700">
-                <Layers className="w-3.5 h-3.5 text-slate-500" />
-                레이어 ({parsed?.layers.length ?? 0})
-                <span className="ml-auto flex items-center gap-2">
-                  <label className="flex items-center gap-1 font-normal text-[10.5px] text-slate-500">
+            </Section>
+            )}
+
+            {dlg === "layers" && (
+              <div className="p-1">
+                <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
+                  <Layers className="h-4 w-4 text-slate-500" />
+                  <h2 className="text-[13px] font-bold text-slate-700">
+                    도면층 ({parsed?.layers.length ?? 0})
+                  </h2>
+                  <label className="ml-auto flex items-center gap-1 text-[11px] text-slate-500">
                     <input
                       type="checkbox"
                       checked={showText}
                       onChange={ev => setShowText(ev.target.checked)}
-                      className="w-3 h-3"
-                      onClick={e => e.stopPropagation()}
+                      className="h-3 w-3"
                     />
-                    텍스트
+                    텍스트 표시
                   </label>
-                </span>
-              </summary>
-              <div className="px-2 pb-2 max-h-40 overflow-y-auto">
-                {parsed?.layers.map(layer => {
-                  const hidden = hiddenLayers.has(layer);
-                  return (
-                    <label
-                      key={layer}
-                      className={cn(
-                        "flex items-center gap-1.5 px-2 py-0.5 rounded text-[10.5px] cursor-pointer hover:bg-slate-100",
-                        hidden && "text-slate-400"
-                      )}
-                    >
-                      {hidden ? (
-                        <EyeOff className="w-3 h-3" />
-                      ) : (
-                        <Eye className="w-3 h-3" />
-                      )}
-                      <input
-                        type="checkbox"
-                        checked={!hidden}
-                        onChange={() => toggleLayer(layer)}
-                        className="w-3 h-3"
-                      />
-                      <span className="truncate">{layer}</span>
-                    </label>
-                  );
-                })}
+                </div>
+                <div className="max-h-[60vh] overflow-y-auto px-2 py-2">
+                  {parsed?.layers.map(layer => {
+                    const hidden = hiddenLayers.has(layer);
+                    return (
+                      <label
+                        key={layer}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-[11.5px] hover:bg-slate-100",
+                          hidden && "text-slate-400"
+                        )}
+                      >
+                        {hidden ? (
+                          <EyeOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" />
+                        )}
+                        <input
+                          type="checkbox"
+                          checked={!hidden}
+                          onChange={() => toggleLayer(layer)}
+                          className="h-3 w-3"
+                        />
+                        <span className="truncate">{layer}</span>
+                      </label>
+                    );
+                  })}
+                  {!parsed && (
+                    <p className="px-2 py-6 text-center text-[12px] text-slate-400">
+                      DXF 를 업로드하면 도면층이 표시됩니다.
+                    </p>
+                  )}
+                </div>
               </div>
-            </details>
-            </Section>
-          </aside>
+            )}
+            </div>
+          </div>
+        )}
         </div>
 
         {selectedOpening && (
@@ -5277,6 +5164,37 @@ export default function ElevationGeneratorPage() {
             </button>
           </div>
         )}
+
+        {/* ── 하단 상태바 (AutoCAD 모형/배치 탭 + 명령행 자리) ── */}
+        <CadStatusBar
+          canvasTab={canvasTab}
+          onCanvasTab={setCanvasTab}
+          wallCount={walls.length}
+          openingCount={openings.length}
+          scale={scale}
+          floorHeight={defaultFloorHeight}
+          hint={
+            mode === "trace"
+              ? "트레이싱 — 외벽선을 순서대로 클릭 · 더블클릭/입면 확정으로 종료 (Esc 취소)"
+              : mode === "place"
+                ? "프리셋 배치 — 선택한 오프닝을 벽 위에 클릭해 배치"
+                : mode === "two-point"
+                  ? "정밀 배치 — 시작점과 끝점 두 곳을 클릭"
+                  : mode === "auto"
+                    ? "창호 자동 — 평면의 창호 라벨(예: 18×11.8)을 클릭"
+                    : mode === "measure-dist"
+                      ? "거리 측정 — 두 점 클릭 (Esc 초기화)"
+                      : mode === "measure-path"
+                        ? "연속 측정 — 점을 이어 클릭, 누적 길이 표시 (Esc 초기화)"
+                        : mode === "measure-area"
+                          ? "면적 측정 — 꼭짓점 3개 이상 클릭 (Esc 초기화)"
+                          : mode === "edit"
+                            ? "편집 — 요소 클릭 후 드래그 이동 · Del 삭제 · Ctrl+Z 되돌리기"
+                            : parsed
+                              ? "명령 대기 중 — 리본에서 명령을 선택하세요 (휠: 확대·축소, 드래그: 화면 이동)"
+                              : "DXF 파일을 업로드하세요 — 리본 [삽입] 탭 > DXF 업로드"
+          }
+        />
 
         {/* Output 통합 산출 오버레이 */}
         {outputOpen && (
