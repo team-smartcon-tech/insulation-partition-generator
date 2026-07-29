@@ -488,6 +488,18 @@ export default function ElevationGeneratorPage() {
   } = useFullscreen();
   /** 마감 물량 산출 · 기성 패널 (리본 [적산] 탭) */
   const [takeoffOpen, setTakeoffOpen] = useState(false);
+  /** 실 추적 모드 — 켜면 평면 클릭이 '실 클릭'으로 동작한다 */
+  const [takeoffPicking, setTakeoffPicking] = useState(false);
+  /** 추적된 실 (평면에 하이라이트로 그린다) */
+  const [takeoffRooms, setTakeoffRooms] = useState<
+    {
+      name: string;
+      polygon: [number, number][];
+      area_m2: number;
+      approx: boolean;
+    }[]
+  >([]);
+  const takeoffClickRef = useRef<((x: number, y: number) => void) | null>(null);
   const [dlg, setDlg] = useState<
     null | "insul" | "types" | "elev" | "preset" | "openings" | "layers"
   >(null);
@@ -1174,6 +1186,40 @@ export default function ElevationGeneratorPage() {
     ctx.clearRect(0, 0, cw, ch);
     if (!parsed) return;
 
+    // 적산 — 클릭으로 추적한 실 하이라이트 (근사추적은 다른 색)
+    takeoffRooms.forEach(rm => {
+      if (rm.polygon.length < 3) return;
+      ctx.beginPath();
+      rm.polygon.forEach(([wx, wy], i) => {
+        const q = toPx({ x: wx, y: wy });
+        if (i === 0) ctx.moveTo(q.x, q.y);
+        else ctx.lineTo(q.x, q.y);
+      });
+      ctx.closePath();
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = rm.approx ? "#f59e0b" : "#22c55e";
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = rm.approx ? "#b45309" : "#15803d";
+      ctx.stroke();
+      // 실명 + 면적
+      const cx = rm.polygon.reduce((a, p2) => a + p2[0], 0) / rm.polygon.length;
+      const cy = rm.polygon.reduce((a, p2) => a + p2[1], 0) / rm.polygon.length;
+      const c = toPx({ x: cx, y: cy });
+      const label = `${rm.name} ${rm.area_m2.toFixed(1)}㎡${rm.approx ? " (근사)" : ""}`;
+      ctx.font = "bold 12px Pretendard, sans-serif";
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(15,23,42,0.85)";
+      ctx.fillRect(c.x - tw / 2 - 5, c.y - 9, tw + 10, 18);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, c.x, c.y);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    });
+
     // 확정된 체인들
     walls.forEach((w, idx) => {
       const col = chainColor(idx);
@@ -1534,6 +1580,7 @@ export default function ElevationGeneratorPage() {
     measurePts,
     selectedEntity,
     editDragDelta,
+    takeoffRooms,
   ]);
 
   // ─── 입면 렌더 (여러 체인 세로로 쌓기) ───
@@ -2364,6 +2411,13 @@ export default function ElevationGeneratorPage() {
       setSelectedEntityId(hit.id);
       editDragRef.current = { start: world, entityId: hit.id };
       setEditDragDelta(null);
+      return;
+    }
+    // 적산 실 추적 모드: 좌클릭 = 실 내부 클릭
+    if (takeoffPicking && ev.button === 0) {
+      const rect = planCanvasRef.current!.getBoundingClientRect();
+      const world = pxToWorld(ev.clientX - rect.left, ev.clientY - rect.top);
+      takeoffClickRef.current?.(world.x, world.y);
       return;
     }
     if (mode === "view") {
@@ -4439,10 +4493,20 @@ export default function ElevationGeneratorPage() {
         {/* 마감 물량 산출 · 기성 */}
         {takeoffOpen && (
           <TakeoffPanel
-            onClose={() => setTakeoffOpen(false)}
+            onClose={() => {
+              setTakeoffOpen(false);
+              setTakeoffPicking(false);
+            }}
             dxfBuffer={
               rawDxfText ? new TextEncoder().encode(rawDxfText).buffer : null
             }
+            picking={takeoffPicking}
+            onPickingChange={setTakeoffPicking}
+            rooms={takeoffRooms}
+            onRoomsChange={setTakeoffRooms}
+            registerClickHandler={fn => {
+              takeoffClickRef.current = fn;
+            }}
           />
         )}
 

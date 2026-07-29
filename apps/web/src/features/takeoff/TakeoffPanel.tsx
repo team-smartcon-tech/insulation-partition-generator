@@ -16,10 +16,25 @@ import * as api from "./api";
 
 type Tab = "takeoff" | "registry" | "billing";
 
+export interface PickedRoom {
+  name: string;
+  polygon: [number, number][];
+  area_m2: number;
+  approx: boolean;
+}
+
 export interface TakeoffPanelProps {
   onClose: () => void;
   /** 현재 도면 DXF 원문 — 있으면 열자마자 분석한다. */
   dxfBuffer?: ArrayBuffer | null;
+  /** 실 클릭 모드 on/off */
+  picking?: boolean;
+  onPickingChange?: (v: boolean) => void;
+  /** 평면에 하이라이트할 추적 결과 (페이지가 그린다) */
+  rooms?: PickedRoom[];
+  onRoomsChange?: (r: PickedRoom[]) => void;
+  /** 평면 클릭 좌표를 이 패널로 넘겨줄 콜백을 등록한다 */
+  registerClickHandler?: (fn: ((x: number, y: number) => void) | null) => void;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -30,7 +45,15 @@ const KIND_LABEL: Record<string, string> = {
   baseboard: "걸레받이",
 };
 
-export default function TakeoffPanel({ onClose, dxfBuffer }: TakeoffPanelProps) {
+export default function TakeoffPanel({
+  onClose,
+  dxfBuffer,
+  picking = false,
+  onPickingChange,
+  rooms: pickedRooms,
+  onRoomsChange,
+  registerClickHandler,
+}: TakeoffPanelProps) {
   const [tab, setTab] = useState<Tab>("takeoff");
   const [alive, setAlive] = useState<boolean | null>(null);
   const [busy, setBusy] = useState("");
@@ -69,6 +92,60 @@ export default function TakeoffPanel({ onClose, dxfBuffer }: TakeoffPanelProps) 
       .catch(e => setError(String(e.message ?? e)))
       .finally(() => setBusy(""));
   }, [dxfBuffer, analysis, alive]);
+
+  /** 평면 클릭 → 엔진 추적 → 실 목록/하이라이트 반영 */
+  const handleCanvasClick = useCallback(
+    async (x: number, y: number) => {
+      if (!analysis) {
+        setError("도면 분석이 끝난 뒤 클릭하세요.");
+        return;
+      }
+      setBusy("실 추적 중…");
+      setError("");
+      try {
+        const t = await api.trace(analysis.session, x, y, { allowRaster: true });
+        if (!t.ok || !t.polygon) {
+          const msg = t.warnings[0]?.message ?? "실을 추적하지 못했습니다.";
+          setError(
+            t.touched_border
+              ? msg + " (열린 공간으로 새어나감 — 임의 면적을 내지 않습니다)"
+              : msg
+          );
+          return;
+        }
+        const name = "실 " + (rooms.length + 1);
+        setRooms(prev => [
+          ...prev,
+          {
+            name,
+            polygon: t.polygon!,
+            holes: t.holes,
+            is_approximate: !!t.is_approximate,
+            openings: [{ width_mm: 900, height_mm: 2100, kind: "door" as const }],
+          },
+        ]);
+        onRoomsChange?.([
+          ...(pickedRooms ?? []),
+          {
+            name,
+            polygon: t.polygon,
+            area_m2: t.area_m2 ?? 0,
+            approx: !!t.is_approximate,
+          },
+        ]);
+      } catch (e) {
+        setError(String((e as Error).message));
+      } finally {
+        setBusy("");
+      }
+    },
+    [analysis, rooms.length, pickedRooms, onRoomsChange]
+  );
+
+  useEffect(() => {
+    registerClickHandler?.(handleCanvasClick);
+    return () => registerClickHandler?.(null);
+  }, [registerClickHandler, handleCanvasClick]);
 
   const runTakeoff = useCallback(async () => {
     if (rooms.length === 0) return;
@@ -295,6 +372,58 @@ export default function TakeoffPanel({ onClose, dxfBuffer }: TakeoffPanelProps) 
                     </div>
                   </section>
 
+                  <section className="rounded-lg border border-[#004791]/25 bg-blue-50/40 p-3">
+                    <h3 className="mb-1.5 text-[12.5px] font-bold text-[#004791]">
+                      사용법
+                    </h3>
+                    <ol className="ml-4 list-decimal space-y-0.5 text-[11.5px] text-slate-600">
+                      <li>
+                        아래 <b>[실 클릭 시작]</b> 을 누르면 평면 클릭이 실 선택으로 바뀝니다.
+                      </li>
+                      <li>
+                        평면도에서 <b>실 안쪽 빈 공간</b> 을 클릭하세요. 벽 위를 누르면
+                        &quot;벽체입니다&quot; 안내가 뜹니다.
+                      </li>
+                      <li>
+                        필요한 실을 다 클릭한 뒤 <b>[물량 산출]</b> 을 누릅니다.
+                      </li>
+                      <li>
+                        세대별 기성까지 뽑으려면 <b>[세대 대장]</b> → <b>[기성]</b> 탭으로.
+                      </li>
+                    </ol>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onPickingChange?.(!picking)}
+                        disabled={!analysis}
+                        className={cn(
+                          "rounded px-3 py-1.5 text-[12px] font-semibold text-white transition-colors disabled:opacity-40",
+                          picking ? "bg-rose-600" : "bg-[#004791] hover:bg-[#003a78]"
+                        )}
+                      >
+                        {picking ? "실 클릭 중지" : "실 클릭 시작"}
+                      </button>
+                      {picking && (
+                        <span className="text-[11.5px] font-semibold text-rose-600">
+                          평면도에서 실 안쪽을 클릭하세요 — 이 창은 열어둬도 됩니다
+                        </span>
+                      )}
+                      {rooms.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRooms([]);
+                            setResult(null);
+                            onRoomsChange?.([]);
+                          }}
+                          className="ml-auto rounded border border-slate-300 px-2.5 py-1.5 text-[11.5px] text-slate-600"
+                        >
+                          전체 지우기
+                        </button>
+                      )}
+                    </div>
+                  </section>
+
                   <section className="rounded-lg border border-slate-200 p-3">
                     <div className="mb-2 flex items-center justify-between">
                       <h3 className="text-[12.5px] font-bold text-slate-700">
@@ -311,8 +440,50 @@ export default function TakeoffPanel({ onClose, dxfBuffer }: TakeoffPanelProps) 
                     </div>
                     {rooms.length === 0 && (
                       <p className="py-4 text-center text-[12px] text-slate-400">
-                        캔버스에서 실 내부를 클릭하면 여기에 추가됩니다.
+                        평면도에서 실 내부를 클릭하면 여기에 추가됩니다.
                       </p>
+                    )}
+                    {rooms.length > 0 && !result && (
+                      <ul className="space-y-1 text-[11.5px]">
+                        {rooms.map((r, i) => (
+                          <li
+                            key={i}
+                            className="flex items-center gap-2 rounded border border-slate-100 px-2 py-1"
+                          >
+                            <input
+                              value={r.name}
+                              onChange={e =>
+                                setRooms(prev =>
+                                  prev.map((x, j) =>
+                                    j === i ? { ...x, name: e.target.value } : x
+                                  )
+                                )
+                              }
+                              className="w-32 rounded border border-slate-200 px-1.5 py-0.5"
+                            />
+                            <span className="tabular-nums text-slate-500">
+                              {(pickedRooms?.[i]?.area_m2 ?? 0).toFixed(2)}㎡
+                            </span>
+                            {r.is_approximate && (
+                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                                근사추적
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRooms(prev => prev.filter((_, j) => j !== i));
+                                onRoomsChange?.(
+                                  (pickedRooms ?? []).filter((_, j) => j !== i)
+                                );
+                              }}
+                              className="ml-auto text-slate-300 hover:text-rose-500"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                     {result && (
                       <table className="w-full text-[11.5px]">
@@ -370,8 +541,10 @@ export default function TakeoffPanel({ onClose, dxfBuffer }: TakeoffPanelProps) 
               ) : (
                 <p className="py-10 text-center text-[12.5px] text-slate-400">
                   {alive === false
-                    ? "엔진이 실행 중이 아닙니다. engine 폴더에서 `python -m finish_takeoff.server` 를 실행하세요."
-                    : "DXF 를 업로드하면 도면 분석이 시작됩니다."}
+                    ? "엔진이 실행 중이 아닙니다. engine 폴더에서 python -m finish_takeoff.server 를 실행하세요."
+                    : busy
+                      ? "도면을 분석하고 있습니다… 18만 엔티티 도면은 20초쯤 걸립니다."
+                      : "DXF 를 업로드하면 도면 분석이 시작됩니다."}
                 </p>
               )}
             </div>
