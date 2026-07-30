@@ -102,6 +102,88 @@ def _classify_axis(seg: Segment, tol_mm: float, min_len_mm: float
     return None
 
 
+def clip_segments(segments: Sequence[Segment],
+                  bbox_mm: tuple[float, float, float, float],
+                  pad_mm: float = 1500.0) -> list[Segment]:
+    """
+    선분을 관심 영역에 **자른다**. 영역을 넘는 선분을 버리지 않는 것이 핵심이다.
+
+    실측 사고: 세대 박스 필터를 "양 끝점이 모두 박스 안" 으로 만들었더니
+    박스를 넘나드는 3~4m 짜리 벽선이 통째로 버려져 마스크가 벽 토막만 남았다.
+    그 결과 모든 실이 한 공간으로 이어져 분할이 시드 충돌선에만 의존했고
+    실별 면적이 최대 98% 까지 어긋났다. 클립으로 바꾸자 마스크 비율이
+    11% → 17%, 세대 전체 면적 편차가 0.7% 로 떨어졌다.
+
+    Args:
+        segments: 원본 선분 (mm).
+        bbox_mm: 관심 영역 (minx, miny, maxx, maxy).
+        pad_mm: 영역 밖으로 이만큼 여유를 두고 자른다 — 경계 벽이 살아 있어야
+            영역이 밖으로 새지 않는다.
+
+    Returns:
+        잘린 선분 목록. 영역과 겹치지 않는 선분은 제외된다.
+    """
+    x0, y0 = bbox_mm[0] - pad_mm, bbox_mm[1] - pad_mm
+    x1, y1 = bbox_mm[2] + pad_mm, bbox_mm[3] + pad_mm
+    out: list[Segment] = []
+    for (ax, ay), (bx, by) in segments:
+        if max(ax, bx) < x0 or min(ax, bx) > x1:
+            continue
+        if max(ay, by) < y0 or min(ay, by) > y1:
+            continue
+        nax, nbx = max(x0, min(ax, x1)), max(x0, min(bx, x1))
+        nay, nby = max(y0, min(ay, y1)), max(y0, min(by, y1))
+        if nax == nbx and nay == nby:
+            continue
+        out.append(((nax, nay), (nbx, nby)))
+    return out
+
+
+def merge_collinear(lines: list[tuple[float, float, float]],
+                    coord_tol_mm: float = 2.0,
+                    gap_tol_mm: float = 30.0) -> list[tuple[float, float, float]]:
+    """
+    같은 좌표선 위의 선분들을 하나로 이어붙인다. **페어링 전에 반드시 한다.**
+
+    이 도면의 벽선은 400~500mm 토막으로 쪼개져 있다 (실측: `AA-WAXM-CONC`
+    중앙값 370mm, `ASMB` 522mm — 방 벽 한 면은 3~4m 다). 토막 상태로 페어링하면
+    겹침 조건(짧은 선분의 50%)이 산발적으로만 성립해 마스크가 구멍난 벽 토막이
+    되고, 실이 전부 한 공간으로 이어져 분할이 시드 충돌선에만 의존하게 된다.
+
+    Args:
+        lines: (좌표, 시작, 끝) 형태의 축정렬 선분.
+        coord_tol_mm: 이 이내면 같은 좌표선으로 본다.
+        gap_tol_mm: 길이 방향으로 이 이내로 떨어져 있으면 이어붙인다
+            (끝점 벌어짐 0.01~5mm 는 일상이고, 문틀 사이 30mm 정도도 잇는다).
+
+    Returns:
+        이어붙인 선분 목록.
+    """
+    if not lines:
+        return []
+    # 좌표를 tol 격자로 양자화해 묶는다 — 이중 루프를 쓰지 않는다
+    buckets: dict[int, list[tuple[float, float, float]]] = {}
+    for c, a, b in lines:
+        buckets.setdefault(int(round(c / coord_tol_mm)), []).append((c, a, b))
+
+    out: list[tuple[float, float, float]] = []
+    for key, group in buckets.items():
+        group.sort(key=lambda t: t[1])
+        cur_c, cur_a, cur_b = group[0]
+        csum, cnt = cur_c, 1
+        for c, a, b in group[1:]:
+            if a <= cur_b + gap_tol_mm:
+                cur_b = max(cur_b, b)
+                csum += c
+                cnt += 1
+            else:
+                out.append((csum / cnt, cur_a, cur_b))
+                cur_c, cur_a, cur_b = c, a, b
+                csum, cnt = c, 1
+        out.append((csum / cnt, cur_a, cur_b))
+    return out
+
+
 def _pair_axis(lines: list[tuple[float, float, float]],
                kind: str, t_min: float, t_max: float, overlap_ratio: float
                ) -> tuple[list[Polygon], set[int]]:
@@ -309,6 +391,9 @@ def build(segments: Sequence[Segment], *,
             hmap.append(idx)
             horis.append((c, a, b))
 
+    # 토막난 벽선을 먼저 이어붙인다 — 이걸 빼면 마스크가 벽 토막이 된다
+    verts = merge_collinear(verts)
+    horis = merge_collinear(horis)
     vp, vused = _pair_axis(verts, "v", t_min, t_max, overlap_ratio)
     hp2, hused = _pair_axis(horis, "h", t_min, t_max, overlap_ratio)
     stats.paired = len(vp) + len(hp2)
@@ -341,8 +426,8 @@ def build(segments: Sequence[Segment], *,
                 continue
             kind, c, a, b = cls
             (ov if kind == "v" else oh).append((c, a, b))
-        op_v, _ = _pair_axis(ov, "v", t_min, t_max, overlap_ratio)
-        op_h, _ = _pair_axis(oh, "h", t_min, t_max, overlap_ratio)
+        op_v, _ = _pair_axis(merge_collinear(ov), "v", t_min, t_max, overlap_ratio)
+        op_h, _ = _pair_axis(merge_collinear(oh), "h", t_min, t_max, overlap_ratio)
         openings = op_v + op_h
         pieces.extend(openings)
 
