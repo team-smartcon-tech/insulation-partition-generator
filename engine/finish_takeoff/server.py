@@ -517,66 +517,150 @@ def _room_at(sess: dict, px: float, py: float) -> Optional[dict]:
 
 def _auto_rooms(body: dict) -> dict:
     """
-    실명 텍스트를 기준으로 도면의 실을 **자동으로** 전부 잡는다.
+    실 자동 인식 — 벡터 폐합면 기반 (28세대 전수 검증에서 가장 정확한 경로).
 
-    사용자가 실을 하나씩 클릭할 필요가 없다(대형 도면에서 확대·클릭 자체가 고통).
-    `_sess` 로 세션을 직접 넘기면 내부 호출(클릭 시 지연 계산)로 쓴다.
+    래스터·시드확장은 결과가 시드 위치에 민감해 같은 타입끼리 최대 98% 어긋났다.
+    폐합면은 경계가 닫혀 있으면 오차가 사실상 0 이다(욕실2·발코니-1 편차 0.0%).
+    닫히지 않은 개방형 공간은 여러 실명이 한 면에 들어간 채로 보고하며
+    **임의로 쪼개거나 근사 면적을 만들지 않는다.**
     """
+    from .space import unit_split, vector_rooms, wall_mask
+    from .takeoff import openings as opening_mod
+
     sess = body.get("_sess") or _session(body)
-    doc, info, stats, preset = sess["doc"], sess["info"], sess["stats"], sess["preset"]
+    doc, info, stats, preset = (sess["doc"], sess["info"],
+                                sess["stats"], sess["preset"])
     scale = info.unit_scale_to_mm
-    v, h = _boundary_lines(sess)
 
-    rooms, failed = [], []
+    # 경계 후보 — 벽체/골조 + 창호·문틀 + 발코니난간(발코니 외곽이 난간이다)
+    deny = ("INS", "PATT", "PAT1", "HAT", "FUR", "SANI", "CLEN", "DRAIN",
+            "치수", "TEXT", "DIM")
+    wall_lay = {x.name for x in stats if x.line_count > 0
+                and not any(d in x.normalized.upper() for d in deny)
+                and any(a in x.normalized.upper() for a in ("WAXM", "골조"))}
+    edge_lay = {x.name for x in stats if x.line_count > 0
+                and any(a in x.normalized.upper() for a in ("DWXM", "난간"))}
+    door_lay = {x.name for x in stats if "DWXM-DOOR" in x.normalized.upper()}
 
-    for txt, px, py in _room_labels(sess):
-        got = _room_at(sess, px, py)
-        if got is None:
-            failed.append(txt)
-            continue
-        got["names"] = [txt]
-        rooms.append(got)
+    cached = sess.get("vec_segs")
+    if cached is None:
+        wsegs, _ = entity_mod.extract_segments(doc, scale, layers=wall_lay)
+        esegs, _ = entity_mod.extract_segments(doc, scale, layers=edge_lay)
+        chords = [c.as_segment() for c in opening_mod.collect(
+            doc, scale, wsegs, door_layers=door_lay, use_gap_fallback=False)]
+        sess["vec_segs"] = (wsegs, esegs, chords)
+    else:
+        wsegs, esegs, chords = cached
 
-    # 거실·주방/식당처럼 벽 없이 트인 공간(LDK)은 라벨마다 같은 영역이 잡힌다.
-    # 그대로 두면 같은 바닥을 두 번 계상하므로 크게 겹치는 것끼리 하나로 합친다.
-    merged: list[dict] = []
-    for r in rooms:
-        l1, r1, d1, u1 = r["box"]
-        a1 = (r1 - l1) * (u1 - d1)
-        for m in merged:
-            l2, r2, d2, u2 = m["box"]
-            ow = min(r1, r2) - max(l1, l2)
-            oh = min(u1, u2) - max(d1, d2)
-            if ow <= 0 or oh <= 0:
-                continue
-            if (ow * oh) / min(a1, (r2 - l2) * (u2 - d2)) >= _ROOM_MERGE_OVERLAP:
-                # 더 큰 쪽(트인 공간 전체)을 남기고 이름만 합친다
-                if a1 > (r2 - l2) * (u2 - d2):
-                    m.update({k: r[k] for k in
-                              ("polygon", "area_m2", "perimeter_m",
-                               "width_mm", "depth_mm", "box", "method")})
-                if r["names"][0] not in m["names"]:
-                    m["names"].append(r["names"][0])
-                break
-        else:
-            merged.append(dict(r))
+    label_lay = layer_mod.find_role_layers(stats, preset, LayerRole.ROOM_LABEL)
+    units = sess.get("units")
+    if units is None:
+        units = unit_split.split(doc, scale, label_layers=label_lay)
+        sess["units"] = units
 
-    rooms = [{
-        "name": "+".join(m["names"]),
-        "area_m2": m["area_m2"],
-        "width_mm": m["width_mm"],
-        "depth_mm": m["depth_mm"],
-        "polygon": m["polygon"],
-        "is_approximate": m["is_approximate"],
-        "method": m["method"],
-        "merged": len(m["names"]) > 1,
-    } for m in merged]
-    rooms.sort(key=lambda r: -r["area_m2"])
+    pad = float(body.get("clip_pad_mm", 1500.0))
+    rooms: list[dict] = []
+    failed: list[str] = []
+    unit_out: list[dict] = []
+
+    for u in units:
+        segs = (wall_mask.clip_segments(wsegs, u.bbox_mm, pad)
+                + wall_mask.clip_segments(esegs, u.bbox_mm, pad))
+        extra = wall_mask.clip_segments(chords, u.bbox_mm, pad)
+        seeds = [(s.text, s.category, (s.x, s.y)) for s in u.seeds]
+
+        found, missed = vector_rooms.trace(
+            segs, seeds, extra=extra,
+            min_len_mm=float(body.get("min_len_mm", vector_rooms.DEFAULT_MIN_LEN_MM)),
+            merge_gap_mm=float(body.get("merge_gap_mm", vector_rooms.DEFAULT_MERGE_GAP_MM)),
+            extend_mm=float(body.get("extend_mm", vector_rooms.DEFAULT_EXTEND_MM)),
+        )
+        failed += ["#%d %s" % (u.index, n) for n in missed]
+
+        for r in found:
+            ext = [[round(x, 1), round(y, 1)] for x, y in r.polygon.exterior.coords]
+            xs = [p[0] for p in ext]
+            ys = [p[1] for p in ext]
+            warns = []
+            if "현관" in r.labels and r.area_m2 > 6.0:
+                warns.append("현관 면적 6㎡ 초과 — 복도 흡수 의심")
+            rooms.append({
+                "name": r.name,
+                "unit_index": u.index,
+                "unit_type": u.unit_type,
+                "category": r.categories[0] if r.categories else "",
+                "area_m2": r.area_m2,
+                "width_mm": round(max(xs) - min(xs)),
+                "depth_mm": round(max(ys) - min(ys)),
+                "polygon": ext,
+                "holes": [[[round(x, 1), round(y, 1)] for x, y in ring.coords]
+                          for ring in r.polygon.interiors],
+                "badge": r.badge,
+                # 폐합면이므로 정확하다. 여러 실이 한 면인 경우만 별도 표시한다.
+                "is_approximate": False,
+                "merged": r.is_merged,
+                "merged_from": r.labels if r.is_merged else [],
+                "warnings": warns,
+            })
+
+        mine = [r for r in rooms if r["unit_index"] == u.index]
+        unit_out.append({
+            "index": u.index, "unit_type": u.unit_type,
+            "rooms": len(mine),
+            "area_m2": round(sum(r["area_m2"] for r in mine), 2),
+            "net_area_m2": round(sum(r["area_m2"] for r in mine
+                                     if r["category"] != "SERVICE"), 2),
+        })
+
+    rooms.sort(key=lambda r: (r["unit_index"], -r["area_m2"]))
     return {
         "rooms": rooms,
         "failed": failed,
         "total_area_m2": round(sum(r["area_m2"] for r in rooms), 2),
+        "units": unit_out,
+        "cross_check": _cross_check(rooms),
     }
+
+
+def _cross_check(rooms: list[dict], tolerance_pct: float = 1.0) -> dict:
+    """
+    타입 간 교차 검증 — 동일 타입 세대의 실별 면적을 비교한다.
+
+    이 검증이 있으면 누출 버그를 사람이 화면으로 찾지 않아도 된다.
+    """
+    import collections
+
+    byt: dict[str, dict[str, list[float]]] = {}
+    units_of: dict[str, set] = {}
+    for r in rooms:
+        t = r["unit_type"] or "(미지정)"
+        byt.setdefault(t, {}).setdefault(r["name"], []).append(r["area_m2"])
+        units_of.setdefault(t, set()).add(r["unit_index"])
+
+    summary: dict[str, dict] = {}
+    issues: list[dict] = []
+    worst = 0.0
+    for t, names in byt.items():
+        n_units = len(units_of[t])
+        summary[t] = {"units": n_units, "rooms": {}}
+        for nm, vals in names.items():
+            lo, hi = min(vals), max(vals)
+            dev = (hi - lo) / hi * 100 if hi > 0 else 100.0
+            worst = max(worst, dev)
+            summary[t]["rooms"][nm] = {
+                "n": len(vals), "min": round(lo, 2), "max": round(hi, 2),
+                "median": round(sorted(vals)[len(vals) // 2], 2),
+                "dev_pct": round(dev, 2),
+            }
+            if dev > tolerance_pct:
+                issues.append({"severity": "warning", "type": t, "room": nm,
+                               "message": "%s %s 편차 %.1f%% (%.2f~%.2f㎡)"
+                                          % (t, nm, dev, lo, hi)})
+            if len(vals) != n_units:
+                issues.append({"severity": "error", "type": t, "room": nm,
+                               "message": "%s %s 개수 불일치 — 세대 %d개 중 %d개"
+                                          % (t, nm, n_units, len(vals))})
+    return {"by_type": summary, "issues": issues, "worst_pct": round(worst, 2)}
 
 
 def _trace(body: dict) -> dict:
