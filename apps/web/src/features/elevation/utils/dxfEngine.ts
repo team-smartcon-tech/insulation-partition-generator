@@ -73,10 +73,13 @@ function entityColorHex(e: DXFSceneEntity, fallback = "#cbd5e1"): string {
   return ACI_COLORS[aci] ?? fallback;
 }
 
+// 주동 전체 평면(단지 배치 포함)은 20만 엔티티를 쉽게 넘는다.
+// 5만에서 자르면 도면 아래쪽 동이 통째로 사라지고 벽선도 군데군데 빠져서
+// 실 인식·물량 산출이 전부 틀어진다(실측 확인: 180,068개 중 49,860개만 표시됨).
 const SCENE_LIMITS = {
-  maxEntities: 50000,
-  maxPoints: 500000,
-  maxBlockDepth: 4,
+  maxEntities: 400000,
+  maxPoints: 4000000,
+  maxBlockDepth: 6,
 } as const;
 
 /**

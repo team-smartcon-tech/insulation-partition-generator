@@ -503,4 +503,110 @@ app.delete("/api/elevation-projects/:projectId/revisions/:revId", async (c) => {
   }
 });
 
+// ─── 마감 물량 산출 — LLM 실 검수 ──────────────────────────
+//
+// 기하 엔진이 뽑은 실(이름 + 가로/세로 + 면적)을 LLM 이 실무 관점에서 검수한다.
+// 도면마다 벽 표현이 제각각이라 레이캐스트가 개구부를 지나쳐 실을 과대/과소로
+// 잡는 경우가 있는데, "84㎡ 세대의 침실이 45㎡" 같은 건 사람은 즉시 알아본다.
+// 좌표 계산 자체를 LLM 에 맡기지는 않는다 — 판정과 분류만 시킨다.
+//
+// LLM 은 반드시 dcr-app 단일 진입점(/api/llm/generate) 을 경유한다. provider 직접 호출 금지.
+
+interface LlmRoomIn {
+  name: string;
+  area_m2: number;
+  width_mm: number;
+  depth_mm: number;
+}
+
+app.post("/api/takeoff/verify-rooms", async (c) => {
+  try {
+    const body = (await c.req.json()) as { rooms?: LlmRoomIn[]; unit_type?: string };
+    const rooms = body.rooms ?? [];
+    if (rooms.length === 0) return c.json({ error: "검수할 실이 없습니다" }, 400);
+
+    // 토큰 낭비를 막기 위해 면적 큰 순으로 상위 60개만 보낸다.
+    const sample = [...rooms].sort((a, b) => b.area_m2 - a.area_m2).slice(0, 60);
+
+    const system = [
+      "당신은 국내 공동주택 마감 적산 전문가입니다.",
+      "도면에서 자동 추출한 실 목록을 검수합니다. 좌표를 다시 계산하지 말고, 실명과 치수의 타당성만 판정하세요.",
+      "판정 기준(전용 84㎡ 기준 통상값): 거실 15~25㎡, 안방 10~18㎡, 침실 7~14㎡,",
+      "주방/식당 8~16㎡, 욕실 3~7㎡, 드레스룸 2~6㎡, 현관 2~5㎡, 발코니 3~12㎡.",
+      "치수가 통상값을 크게 벗어나면 대개 벽 개구부를 지나쳐 옆 실까지 합쳐 잡힌 것입니다.",
+      "반드시 JSON 만 출력하세요. 형식:",
+      '{"rooms":[{"index":0,"verdict":"ok|too_big|too_small|not_a_room","reason":"한 문장","room_type":"거실|안방|침실|주방|욕실|드레스룸|현관|발코니|기타"}],"summary":"한 문장"}',
+    ].join("\n");
+
+    const user = [
+      body.unit_type ? `세대 타입: ${body.unit_type}` : "",
+      "실 목록:",
+      ...sample.map(
+        (r, i) => `${i}. ${r.name} — ${r.area_m2}㎡ (${r.width_mm}×${r.depth_mm}mm)`,
+      ),
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const init: RequestInit = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system,
+        user,
+        maxTokens: 4000,
+        temperature: 0,
+        responseFormat: "json",
+      }),
+    };
+
+    // auth 와 동일 전략: 서비스 바인딩 우선 → 로컬(502/503)이면 공개 URL 폴백
+    let res: Response | null = null;
+    if (c.env.DCR_APP) {
+      try {
+        const bound = await c.env.DCR_APP.fetch(
+          new Request("https://dcr-app/api/llm/generate", init),
+        );
+        if (bound.status !== 502 && bound.status !== 503) res = bound;
+      } catch (e) {
+        console.error("[takeoff] LLM 바인딩 호출 실패, 폴백:", errMsg(e));
+      }
+    }
+    if (!res && c.env.DCR_BASE_URL) {
+      res = await fetch(`${c.env.DCR_BASE_URL.replace(/\/$/, "")}/api/llm/generate`, init);
+    }
+    if (!res) return c.json({ error: "LLM 백엔드 미설정 (DCR_APP/DCR_BASE_URL)" }, 500);
+    if (!res.ok) {
+      return c.json({ error: `LLM 호출 실패 (${res.status})` }, 502);
+    }
+
+    const raw = (await res.json()) as { text?: string; content?: string };
+    const text = raw.text ?? raw.content ?? "";
+    // 코드펜스로 감싸 오는 모델이 있어 벗겨낸 뒤 파싱한다.
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+    let parsed: { rooms?: { index: number; verdict: string; reason: string; room_type?: string }[]; summary?: string };
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      return c.json({ error: "LLM 응답을 해석할 수 없습니다", raw: cleaned.slice(0, 400) }, 502);
+    }
+
+    // 샘플 인덱스를 원본 배열 인덱스로 되돌린다.
+    const backMap = sample.map((s) => rooms.indexOf(s));
+    const verdicts = (parsed.rooms ?? []).map((v) => ({
+      ...v,
+      index: backMap[v.index] ?? v.index,
+    }));
+
+    return c.json({
+      verdicts,
+      summary: parsed.summary ?? "",
+      checked: sample.length,
+      skipped: rooms.length - sample.length,
+    });
+  } catch (err) {
+    return c.json({ error: `실 검수 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
 export default app;

@@ -1,0 +1,70 @@
+# 적산 기준 — 전부 화면에서 입력·수정 가능해야 한다 (사용자 요청 2026-07-30).
+# 여기 값은 **초기값**이며 회사 적산 기준으로 덮어쓴다. 코드에 박지 않는다.
+#
+# 모든 산출 결과는 원면적과 할증 적용 면적을 **둘 다** 저장한다.
+
+ceiling:
+  # 천장고(mm). 실별로 개별 설정 가능 — 아래는 카테고리 기본값.
+  default_mm: 2300
+  by_category:
+    LIVING: 2300
+    WET: 2200
+    ENTRY: 2300
+    SERVICE: 2300
+
+waste:
+  # 할증률(0.05 = 5%). 항목별로 입력받는다.
+  sheet_floor: 0.05      # 장판/마루
+  floor_tile: 0.05       # 바닥 타일
+  wallpaper: 0.10        # 벽 도배
+  ceiling: 0.10          # 천장 도배
+  baseboard: 0.05        # 걸레받이
+
+tile:
+  # 바닥 타일 규격(mm). 장수 = ceil(면적 / 타일면적 × (1+할증))
+  width_mm: 300
+  height_mm: 300
+  ignore_grout: true     # 줄눈 폭 무시 (옵션)
+
+openings:
+  # 개구부 공제 기준
+  door_deduct: full            # full = 전체 공제
+  window_deduct_over_m2: 0.5   # 창은 이 면적 초과분만 공제
+  # 개방부 경계선(시드 충돌로 생긴 변)은 실제 벽이 아니므로
+  # 걸레받이·벽 도배에서 제외한다. 이 구분이 없으면 물량이 틀린다.
+  exclude_open_edges: true
+
+units:
+  pyeong_per_m2: 3.3058
+  wallpaper_roll_m2: 16.5   # 실크 기준
+
+# 카테고리별 적용 마감 — WET 은 도배 제외, SERVICE 는 별도 사양
+applies:
+  LIVING: [sheet_floor, wallpaper, ceiling, baseboard]
+  WET: [floor_tile]
+  ENTRY: [floor_tile, wallpaper, ceiling]
+  SERVICE: [floor_tile]
+  EXCLUDE: []
+
+billing:
+  # 기성 청구 물량의 원천.
+  #   drawing  = 도면 산출 물량 (기본)
+  #   contract = 계약 내역서 물량 (입력 시 대조 칸 표시)
+  # 사용자 확인(2026-07-30): 계약 내역서 미입력 상태이므로 도면 산출로 시작하고,
+  # 계약 물량을 넣으면 대조가 뜨게 한다.
+  quantity_source: drawing
+  show_contract_comparison: true
+
+geometry:
+  # tolerance 는 전부 인자로 받고 기본값만 여기 둔다.
+  wall_thickness_min_mm: 80
+  wall_thickness_max_mm: 400
+  wall_thickness_default_mm: 150   # 페어를 못 찾은 고립 선분 추정 두께
+  raster_res_mm: 10
+  mask_dilate_px: 1                # 2px 이상 금지 — 좁은 요철이 메워진다
+  simplify_epsilon_mm: 5           # 20mm 이상 금지 — 형상 소실
+  orthogonalize_deg: 5
+  snap_tolerance_mm: 30
+  min_edge_merge_mm: 100
+  min_vertices_keep: 6             # 이 아래로 떨어지면 병합 중단 (L자 붕괴 방지)
+  seed_relocate_radius_mm: 500

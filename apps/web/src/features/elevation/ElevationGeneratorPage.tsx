@@ -2165,26 +2165,50 @@ export default function ElevationGeneratorPage() {
   // 주의: setScale 업데이터 안에서 setOffset 을 호출하면 StrictMode 의
   // 업데이터 2회 실행으로 오프셋 보정이 이중 적용되어 줌 중심이 어긋난다.
   // scale/offset 을 함께 읽어 한 번에 계산하고 각각 값으로 set 한다.
+  // 최신 뷰 상태 미러 — 휠 핸들러가 매번 재등록되지 않도록 ref 로 읽는다
+  const viewStateRef = useRef({ scale, offset });
+  viewStateRef.current = { scale, offset };
+
   useEffect(() => {
     const canvas = planCanvasRef.current;
     if (!canvas) return;
+
+    // 휠은 초당 수십 번 발생한다. 이벤트마다 setState 하면 대형 페이지가 통째로
+    // 리렌더되고 49k 엔티티 씬도 그만큼 다시 그려져 확대가 심하게 버벅인다.
+    // 배율만 ref 에 누적하고 실제 반영은 프레임당 한 번으로 모은다.
+    let raf = 0;
+    let pendingFactor = 1;
+    let mx = 0;
+    let my = 0;
+
+    const flush = () => {
+      raf = 0;
+      const f = pendingFactor;
+      pendingFactor = 1;
+      const { scale: s, offset: o } = viewStateRef.current;
+      const ns = Math.max(0.0001, Math.min(1e6, s * f));
+      const k = ns / s;
+      const no = { x: mx - (mx - o.x) * k, y: my - (my - o.y) * k };
+      viewStateRef.current = { scale: ns, offset: no };
+      setScale(ns);
+      setOffset(no);
+    };
+
     const handler = (ev: WheelEvent) => {
       ev.preventDefault();
       const rect = canvas.getBoundingClientRect();
-      const mx = ev.clientX - rect.left;
-      const my = ev.clientY - rect.top;
-      const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
-      const ns = Math.max(0.0001, Math.min(1e6, scale * factor));
-      const k = ns / scale;
-      setScale(ns);
-      setOffset({
-        x: mx - (mx - offset.x) * k,
-        y: my - (my - offset.y) * k,
-      });
+      mx = ev.clientX - rect.left;
+      my = ev.clientY - rect.top;
+      pendingFactor *= ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+      if (!raf) raf = requestAnimationFrame(flush);
     };
+
     canvas.addEventListener("wheel", handler, { passive: false });
-    return () => canvas.removeEventListener("wheel", handler);
-  }, [scale, offset]);
+    return () => {
+      canvas.removeEventListener("wheel", handler);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
 
   // ─── 전개 입면 휠 줌 (마우스 위치 기준 확대·축소) ───
   useEffect(() => {

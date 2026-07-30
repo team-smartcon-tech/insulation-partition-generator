@@ -61,6 +61,9 @@ export default function TakeoffPanel({
 
   const [analysis, setAnalysis] = useState<api.AnalyzeResult | null>(null);
   const [rooms, setRooms] = useState<api.RoomInput[]>([]);
+  // 자동 인식 원본(치수 포함) — AI 검수 입력으로 쓴다
+  const [autoRooms, setAutoRooms] = useState<api.AutoRoom[]>([]);
+  const [verdicts, setVerdicts] = useState<api.VerifyResult | null>(null);
   const [result, setResult] = useState<api.TakeoffResult | null>(null);
 
   const [registry, setRegistry] = useState<api.RegistryResult | null>(null);
@@ -93,6 +96,22 @@ export default function TakeoffPanel({
       .finally(() => setBusy(""));
   }, [dxfBuffer, analysis, alive]);
 
+  /**
+   * 세션 만료 시 도면을 다시 올려 새 세션을 받는다.
+   *
+   * 엔진은 도면을 메모리에 들고 있어서 엔진이 재기동되면 세션이 사라진다.
+   * 그때마다 사용자가 도면을 다시 여는 건 말이 안 되므로 조용히 복구한다.
+   */
+  const recoverSession = useCallback(async (): Promise<string | null> => {
+    if (!dxfBuffer) return null;
+    const a = await api.analyze(dxfBuffer);
+    setAnalysis(a);
+    return a.session;
+  }, [dxfBuffer]);
+
+  const isExpired = (e: unknown) =>
+    String((e as Error)?.message ?? e).includes("세션이 만료");
+
   /** 평면 클릭 → 엔진 추적 → 실 목록/하이라이트 반영 */
   const handleCanvasClick = useCallback(
     async (x: number, y: number) => {
@@ -103,7 +122,16 @@ export default function TakeoffPanel({
       setBusy("실 추적 중…");
       setError("");
       try {
-        const t = await api.trace(analysis.session, x, y, { allowRaster: true });
+        let t = await api.trace(analysis.session, x, y, { allowRaster: true }).catch(
+          async err => {
+            if (!isExpired(err)) throw err;
+            setBusy("도면 세션 복구 중…");
+            const sid = await recoverSession();
+            if (!sid) throw err;
+            setBusy("실 추적 중…");
+            return api.trace(sid, x, y, { allowRaster: true });
+          }
+        );
         if (!t.ok || !t.polygon) {
           const msg = t.warnings[0]?.message ?? "실을 추적하지 못했습니다.";
           setError(
@@ -113,7 +141,8 @@ export default function TakeoffPanel({
           );
           return;
         }
-        const name = "실 " + (rooms.length + 1);
+        // 엔진이 스냅한 도면 실명을 쓴다 — "실 1" 보다 훨씬 알아보기 쉽다
+        const name = t.name || "실 " + (rooms.length + 1);
         setRooms(prev => [
           ...prev,
           {
@@ -139,13 +168,106 @@ export default function TakeoffPanel({
         setBusy("");
       }
     },
-    [analysis, rooms.length, pickedRooms, onRoomsChange]
+    [analysis, rooms.length, pickedRooms, onRoomsChange, recoverSession]
   );
 
   useEffect(() => {
     registerClickHandler?.(handleCanvasClick);
     return () => registerClickHandler?.(null);
   }, [registerClickHandler, handleCanvasClick]);
+
+  // 창을 닫았다 열면 이 컴포넌트의 로컬 상태는 사라지지만 평면에 그려진 실
+  // (부모가 들고 있는 pickedRooms) 은 남는다. 그대로 두면 "아직 클릭한 실이
+  // 없습니다" 라고 뜨면서 실제로는 실이 표시되는 불일치가 생긴다. 부모 목록에서 복원한다.
+  useEffect(() => {
+    if (rooms.length > 0 || !pickedRooms?.length) return;
+    setRooms(
+      pickedRooms.map(r => ({
+        name: r.name,
+        polygon: r.polygon as [number, number][],
+        is_approximate: !!r.approx,
+        openings: [{ width_mm: 900, height_mm: 2100, kind: "door" as const }],
+      }))
+    );
+    // 최초 복원 1회만 — 이후 편집은 로컬 상태가 원천이다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** 실명 텍스트 기반 자동 인식 — 클릭 없이 도면 전체 실을 한 번에 잡는다 */
+  const runAutoRooms = useCallback(async () => {
+    if (!analysis) return;
+    setBusy("실 자동 인식 중…");
+    setError("");
+    setVerdicts(null);
+    try {
+      const r = await api.autoRooms(analysis.session).catch(async err => {
+        if (!isExpired(err)) throw err;
+        setBusy("도면 세션 복구 중…");
+        const sid = await recoverSession();
+        if (!sid) throw err;
+        setBusy("실 자동 인식 중…");
+        return api.autoRooms(sid);
+      });
+      if (r.rooms.length === 0) {
+        setError(
+          `실을 하나도 잡지 못했습니다. 실명 텍스트 레이어가 인식되지 않았거나 ` +
+            `벽선이 없는 도면일 수 있습니다. (실패 ${r.failed.length}건)`
+        );
+        return;
+      }
+      setAutoRooms(r.rooms);
+      setRooms(
+        r.rooms.map(x => ({
+          name: x.name,
+          polygon: x.polygon,
+          is_approximate: x.is_approximate,
+          openings: [{ width_mm: 900, height_mm: 2100, kind: "door" as const }],
+        }))
+      );
+      onRoomsChange?.(
+        r.rooms.map(x => ({
+          name: x.name,
+          polygon: x.polygon,
+          area_m2: x.area_m2,
+          approx: x.is_approximate,
+        }))
+      );
+      if (r.failed.length > 0) {
+        setError(
+          `${r.rooms.length}개 인식 · ${r.failed.length}개는 사방이 벽으로 닫히지 않아 건너뛰었습니다.`
+        );
+      }
+    } catch (e) {
+      setError(String((e as Error).message));
+    } finally {
+      setBusy("");
+    }
+  }, [analysis, onRoomsChange, recoverSession]);
+
+  /** LLM 검수 — 치수가 실무 통상값을 벗어난 실을 걸러낸다 */
+  const runVerify = useCallback(async () => {
+    if (autoRooms.length === 0) {
+      setError("먼저 [실 자동 인식] 을 실행하세요.");
+      return;
+    }
+    setBusy("AI 검수 중…");
+    setError("");
+    try {
+      const r = await api.verifyRooms(
+        autoRooms.map(x => ({
+          name: x.name,
+          area_m2: x.area_m2,
+          width_mm: x.width_mm,
+          depth_mm: x.depth_mm,
+        }))
+      );
+      setVerdicts(r);
+    } catch (e) {
+      setError(String((e as Error).message));
+    } finally {
+      setBusy("");
+    }
+  }, [autoRooms]);
 
   const runTakeoff = useCallback(async () => {
     if (rooms.length === 0) return;
@@ -478,20 +600,36 @@ export default function TakeoffPanel({
                     </h3>
                     <ol className="ml-4 list-decimal space-y-0.5 text-[11.5px] text-slate-600">
                       <li>
-                        아래 <b>[실 클릭 시작]</b> 을 누르면 평면 클릭이 실 선택으로 바뀝니다.
+                        <b>[실 자동 인식]</b> 을 누르면 도면의 실명(거실·침실·안방…)을 읽어
+                        <b>전체 실을 한 번에</b> 잡습니다. 클릭할 필요 없습니다.
                       </li>
                       <li>
-                        평면도에서 <b>실 안쪽 빈 공간</b> 을 클릭하세요. 벽 위를 누르면
-                        &quot;벽체입니다&quot; 안내가 뜹니다.
+                        <b>[AI 검수]</b> 로 치수가 통상값을 벗어난 실을 걸러냅니다.
                       </li>
                       <li>
-                        필요한 실을 다 클릭한 뒤 <b>[물량 산출]</b> 을 누릅니다.
+                        빠진 실만 <b>[실 클릭 시작]</b> 으로 보완한 뒤 <b>[물량 산출]</b>.
                       </li>
                       <li>
                         세대별 기성까지 뽑으려면 <b>[세대 대장]</b> → <b>[기성]</b> 탭으로.
                       </li>
                     </ol>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={runAutoRooms}
+                        disabled={!analysis || !!busy}
+                        className="rounded bg-emerald-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                      >
+                        실 자동 인식
+                      </button>
+                      <button
+                        type="button"
+                        onClick={runVerify}
+                        disabled={rooms.length === 0 || !!busy}
+                        className="rounded bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
+                      >
+                        AI 검수
+                      </button>
                       <button
                         type="button"
                         onClick={() => onPickingChange?.(!picking)}
@@ -513,6 +651,8 @@ export default function TakeoffPanel({
                           type="button"
                           onClick={() => {
                             setRooms([]);
+                            setAutoRooms([]);
+                            setVerdicts(null);
                             setResult(null);
                             onRoomsChange?.([]);
                           }}
@@ -523,6 +663,68 @@ export default function TakeoffPanel({
                       )}
                     </div>
                   </section>
+
+                  {verdicts && (
+                    <section className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+                      <h3 className="mb-1.5 text-[12.5px] font-bold text-violet-800">
+                        AI 검수 결과
+                        <span className="ml-2 font-normal text-violet-600">
+                          {verdicts.checked}개 검수
+                          {verdicts.skipped > 0 && ` · ${verdicts.skipped}개 생략(면적 하위)`}
+                        </span>
+                      </h3>
+                      {verdicts.summary && (
+                        <p className="mb-2 text-[11.5px] text-slate-600">{verdicts.summary}</p>
+                      )}
+                      {(() => {
+                        const bad = verdicts.verdicts.filter(v => v.verdict !== "ok");
+                        if (bad.length === 0) {
+                          return (
+                            <p className="flex items-center gap-1.5 text-[11.5px] font-semibold text-emerald-700">
+                              <CheckCircle2 className="h-4 w-4" />
+                              모든 실이 통상 치수 범위입니다.
+                            </p>
+                          );
+                        }
+                        return (
+                          <ul className="space-y-1">
+                            {bad.map(v => {
+                              const rm = autoRooms[v.index];
+                              return (
+                                <li
+                                  key={v.index}
+                                  className="flex items-start gap-2 rounded border border-amber-200 bg-white px-2 py-1.5 text-[11.5px]"
+                                >
+                                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                                  <span>
+                                    <b>{rm?.name ?? `#${v.index}`}</b>
+                                    {rm && (
+                                      <span className="ml-1 tabular-nums text-slate-500">
+                                        {rm.area_m2.toFixed(1)}㎡
+                                      </span>
+                                    )}
+                                    <span className="ml-1 text-amber-700">
+                                      —{" "}
+                                      {v.verdict === "too_big"
+                                        ? "과대"
+                                        : v.verdict === "too_small"
+                                          ? "과소"
+                                          : "실 아님"}
+                                    </span>
+                                    <span className="ml-1 text-slate-600">{v.reason}</span>
+                                  </span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        );
+                      })()}
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        AI 는 치수 타당성만 판정합니다. 면적 자체는 도면 기하에서 계산된
+                        값이며 AI 가 바꾸지 않습니다.
+                      </p>
+                    </section>
+                  )}
 
                   <section className="rounded-lg border border-slate-200 p-3">
                     <div className="mb-2 flex items-center justify-between">

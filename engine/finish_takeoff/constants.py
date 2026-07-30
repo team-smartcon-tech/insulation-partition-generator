@@ -78,7 +78,7 @@ XREF_LAYER_PREFIX_SEP: Final[str] = "$"
 
 # ── 래스터 폴백 ────────────────────────────────────────────
 RASTER_WINDOW_MM: Final[float] = 50_000.0   # 50m × 50m
-RASTER_RESOLUTION_MM: Final[float] = 5.0    # 5mm/px
+RASTER_RESOLUTION_MM: Final[float] = 15.0   # 5mm/px 는 2000×2000px 라 너무 느리다
 RASTER_LINE_THICKNESS_PX: Final[int] = 2
 
 # ── 성능 ───────────────────────────────────────────────────

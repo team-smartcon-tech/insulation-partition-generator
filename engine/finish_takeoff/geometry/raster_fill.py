@@ -86,8 +86,19 @@ def _rasterize(
     return img
 
 
+def _flood_fill_pil(img: Image.Image, seed_xy: tuple[int, int]) -> np.ndarray:
+    """
+    PIL 의 C 구현 flood fill — 파이썬 루프보다 수십 배 빠르다.
+
+    빈 공간(255)을 128 로 칠한 뒤 그 픽셀만 뽑아 마스크로 만든다.
+    """
+    work = img.copy()
+    ImageDraw.floodfill(work, seed_xy, 128, thresh=0)
+    return np.array(work) == 128
+
+
 def _flood_fill(mask: np.ndarray, seed: tuple[int, int]) -> np.ndarray:
-    """4-연결 flood fill (스택 기반 — 재귀 깊이 제한 회피)."""
+    """4-연결 flood fill (스택 기반 — 순수 파이썬 폴백, 테스트용)."""
     h, w = mask.shape
     filled = np.zeros_like(mask, dtype=bool)
     sy, sx = seed
@@ -218,7 +229,8 @@ def trace(
             False, 0, res_mm,
         )
 
-    filled = _flood_fill(mask, seed)
+    # (row, col) → PIL 은 (x, y)
+    filled = _flood_fill_pil(img, (seed[1], seed[0]))
     n = int(filled.sum())
 
     touched = bool(

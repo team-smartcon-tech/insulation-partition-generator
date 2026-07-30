@@ -61,15 +61,25 @@ export interface AnalyzeResult {
   top_layers: { layer: string; total: number; lines: number; median_mm: number }[];
 }
 
-/** DXF 원문(ArrayBuffer) → 레이어 분석 + 세션 생성 */
+/**
+ * DXF 원문 → 레이어 분석 + 세션 생성.
+ *
+ * **base64 로 감싸지 않고 원문 그대로 보낸다.** 92MB 도면을 base64 로 바꾸면
+ * 123MB 가 되고, 브라우저에서 문자열로 만드는 동안 탭이 멈춘다.
+ * 서버는 내용 해시로 파싱 결과를 캐시하므로 같은 도면은 두 번째부터 즉시 응답한다.
+ */
 export async function analyze(dxf: ArrayBuffer, unit?: string): Promise<AnalyzeResult> {
-  let bin = "";
-  const bytes = new Uint8Array(dxf);
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return post<AnalyzeResult>("/analyze", { dxf_base64: btoa(bin), unit });
+  const res = await fetch(`${takeoffApiBase()}/analyze-raw`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      ...(unit ? { "X-Unit": unit } : {}),
+    },
+    body: dxf,
+  });
+  const json = await res.json().catch(() => ({ error: "응답을 해석할 수 없습니다" }));
+  if (!res.ok) throw new Error(json.error ?? `분석 실패 (${res.status})`);
+  return json as AnalyzeResult;
 }
 
 // ── 실 추적 ────────────────────────────────────────────────
@@ -87,6 +97,8 @@ export interface TraceResult {
   polygon?: [number, number][];
   holes?: [number, number][][];
   click?: [number, number];
+  /** 스냅된 실명 (도면의 실명 텍스트) */
+  name?: string | null;
   is_approximate?: boolean;
   touched_border?: boolean;
   warnings: TraceWarning[];
@@ -106,6 +118,67 @@ export async function trace(
     name: opts?.name,
     allow_raster: opts?.allowRaster ?? true,
   });
+}
+
+// ── 실 자동 인식 ───────────────────────────────────────────
+
+export interface AutoRoom {
+  name: string;
+  area_m2: number;
+  width_mm: number;
+  depth_mm: number;
+  polygon: [number, number][];
+  is_approximate: boolean;
+  merged: boolean;
+}
+
+export interface AutoRoomsResult {
+  rooms: AutoRoom[];
+  failed: string[];
+  total_area_m2: number;
+}
+
+/**
+ * 도면의 실명 텍스트를 읽어 실 전체를 한 번에 잡는다.
+ *
+ * 클릭 방식은 대형 도면에서 확대·조준 자체가 고통스럽고, 라벨이 문 개구부와
+ * 같은 선상이면 옆 실까지 먹는다. 이쪽은 라벨 주변 여러 점에서 광선을 쏴
+ * 다수결로 정하므로 훨씬 안정적이다.
+ */
+export async function autoRooms(session: string): Promise<AutoRoomsResult> {
+  return post<AutoRoomsResult>("/auto-rooms", { session });
+}
+
+// ── AI 실 검수 (오토콘 Worker → dcr-app LLM) ───────────────
+
+export interface RoomVerdict {
+  index: number;
+  verdict: "ok" | "too_big" | "too_small" | "not_a_room";
+  reason: string;
+  room_type?: string;
+}
+
+export interface VerifyResult {
+  verdicts: RoomVerdict[];
+  summary: string;
+  checked: number;
+  skipped: number;
+}
+
+/** 자동 인식 결과를 LLM 이 실무 통상값 기준으로 검수한다. */
+export async function verifyRooms(
+  rooms: { name: string; area_m2: number; width_mm: number; depth_mm: number }[],
+  unitType?: string
+): Promise<VerifyResult> {
+  const res = await fetch("/api/takeoff/verify-rooms", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ rooms, unit_type: unitType }),
+  });
+  const json = await res.json().catch(() => ({ error: "응답을 해석할 수 없습니다" }));
+  if (!res.ok) throw new Error(json.error ?? `검수 실패 (${res.status})`);
+  return json as VerifyResult;
 }
 
 // ── 물량 산출 ──────────────────────────────────────────────

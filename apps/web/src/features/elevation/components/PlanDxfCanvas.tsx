@@ -26,6 +26,9 @@ interface PlanDxfCanvasProps {
 
 const BG_COLOR = 0x0b1220;
 
+/** 휠이 멈춘 뒤 실제 렌더까지 기다리는 시간(ms) — 이보다 짧으면 렌더가 겹쳐 끊긴다 */
+const RENDER_SETTLE_MS = 110;
+
 export default function PlanDxfCanvas({
   sceneEntities,
   hiddenLayers,
@@ -39,6 +42,9 @@ export default function PlanDxfCanvas({
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const importedRef = useRef<DXFImportedObject3D | null>(null);
   const sizeRef = useRef({ w: 1, h: 1 });
+  /** 마지막으로 **실제 렌더한** 뷰 — 휠 중 CSS 변환의 기준점 */
+  const renderedViewRef = useRef<{ scale: number; offset: Point2D } | null>(null);
+  const settleRef = useRef(0);
   // 최신 뷰 상태를 리사이즈 콜백에서도 쓰도록 ref 로 미러링
   const viewRef = useRef({ scale, offset });
   viewRef.current = { scale, offset };
@@ -138,6 +144,8 @@ export default function PlanDxfCanvas({
       scene.add(imported);
       applyVisibility();
     }
+    renderedViewRef.current = { scale: viewRef.current.scale, offset: viewRef.current.offset };
+    syncCamera();
     render();
   }, [sceneEntities]);
 
@@ -148,9 +156,36 @@ export default function PlanDxfCanvas({
   }, [hiddenLayers, showText]);
 
   // 줌/팬 동기화
+  //
+  // 주동 전체 도면은 18만 엔티티라 한 번 렌더에 수십~수백 ms 가 걸린다.
+  // 휠을 굴리는 동안 매번 실제 렌더하면 화면이 끊겨 "확대가 느리게 당겨진다".
+  // 그래서 굴리는 중에는 **마지막으로 렌더한 화면을 CSS 로 변환해 즉시** 보여주고,
+  // 손을 멈춘 뒤에 한 번만 진짜 렌더한다. 눈에는 즉각 반응으로 보인다.
   useEffect(() => {
-    syncCamera();
-    render();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const base = renderedViewRef.current;
+    if (base) {
+      const k = scale / base.scale;
+      const tx = offset.x - base.offset.x * k;
+      const ty = offset.y - base.offset.y * k;
+      canvas.style.transformOrigin = "0 0";
+      canvas.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
+    }
+
+    if (settleRef.current) clearTimeout(settleRef.current);
+    settleRef.current = window.setTimeout(() => {
+      settleRef.current = 0;
+      canvas.style.transform = "";
+      renderedViewRef.current = { scale, offset };
+      syncCamera();
+      render();
+    }, RENDER_SETTLE_MS);
+
+    return () => {
+      if (settleRef.current) clearTimeout(settleRef.current);
+    };
   }, [scale, offset]);
 
   return (
