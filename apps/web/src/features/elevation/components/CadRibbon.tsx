@@ -102,6 +102,12 @@ export interface CadRibbonProps {
   onCommitDraft: () => void;
   onUndoDraftPoint: () => void;
   // ── 출력 ──
+  /** 물량 표 CSV (전 입면 · 소스 보드 단위) */
+  onExportInsulationCsv: () => void;
+  /** 현장식 산출서 CSV (두께별 · 동별/타입별) */
+  onExportSiteReportCsv: () => void;
+  /** 현장식 산출서 버튼 라벨의 두께 표기 (예 "50T/90T") */
+  siteReportThkLabel: string;
   onExportCombinedDxf: () => void;
   onExportSplitDxf: () => void;
   onExportCombinedSvg: () => void;
@@ -743,13 +749,28 @@ export default function CadRibbon(p: CadRibbonProps) {
                 title="모든 입면을 한 SVG 로 통합"
               />
             </Group>
-            <Group title="물량">
+            <Group title="물량" wide>
+              <BigBtn
+                icon={FileSpreadsheet}
+                label={"물량 표\nCSV"}
+                onClick={p.onExportInsulationCsv}
+                disabled={!p.canExport}
+                tone="success"
+                title="전 입면 물량 표 CSV — 소스 보드(판) 단위로 묶어 내보냅니다"
+              />
+              <BigBtn
+                icon={FileSpreadsheet}
+                label={"현장식\n산출서"}
+                onClick={p.onExportSiteReportCsv}
+                disabled={!p.canExport}
+                tone="primary"
+                title={`두께(${p.siteReportThkLabel || "두께별"})별 · 동별/타입별 현장식 산출서 CSV. 세대수는 입면별 '세대수'로 곱합니다`}
+              />
               <BigBtn
                 icon={FileSpreadsheet}
                 label="Output"
                 onClick={p.onOpenOutput}
                 disabled={!p.canExport}
-                tone="success"
                 title="동·코어별 통합 물량 산출"
               />
             </Group>
