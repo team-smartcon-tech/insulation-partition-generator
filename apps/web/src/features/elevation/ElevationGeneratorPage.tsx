@@ -94,6 +94,7 @@ import CadRibbon from "./components/CadRibbon";
 import CadStatusBar from "./components/CadStatusBar";
 import { useFullscreen } from "./useFullscreen";
 import TakeoffPanel from "@/features/takeoff/TakeoffPanel";
+import * as takeoffApi from "@/features/takeoff/api";
 import type { WallSummaryInput } from "./utils/elevationAggregate";
 import { toast } from "sonner";
 import {
@@ -416,6 +417,19 @@ function clampS(s: number, width: number, perimeter: number): number {
 
 // ─────────────────────────── 페이지 ───────────────────────────
 
+/** 점이 폴리곤 내부인지 (ray casting) — 실 선택 히트테스트용 */
+function pointInPolygon(p: { x: number; y: number }, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 export default function ElevationGeneratorPage() {
   // ── 파일/파싱 ──
   const [fileName, setFileName] = useState<string>("");
@@ -497,9 +511,38 @@ export default function ElevationGeneratorPage() {
       polygon: [number, number][];
       area_m2: number;
       approx: boolean;
+      /** 사람이 손으로 고친 실 — 자동 인식 결과와 구분해 표시한다 */
+      edited?: boolean;
     }[]
   >([]);
   const takeoffClickRef = useRef<((x: number, y: number) => void) | null>(null);
+
+  // ── 실 경계 수기 보정 ────────────────────────────────────
+  /** 편집 모드 — 켜면 실을 골라 정점을 드래그하거나 추가·삭제할 수 있다 */
+  const [roomEdit, setRoomEdit] = useState(false);
+  /** 선택된 실 index (takeoffRooms 기준) */
+  const [selRoom, setSelRoom] = useState<number | null>(null);
+  /** 드래그 중인 정점 — {실, 정점} */
+  const dragVertexRef = useRef<{ room: number; vertex: number } | null>(null);
+  /** Undo 스택 — 편집 직전 상태를 담는다 (얕은 복사로 충분) */
+  const [roomHistory, setRoomHistory] = useState<
+    { name: string; polygon: [number, number][]; area_m2: number; approx: boolean }[][]
+  >([]);
+
+  /** 편집 전 상태를 Undo 스택에 넣는다 (최대 40단계) */
+  const pushRoomHistory = useCallback(() => {
+    setRoomHistory(prev =>
+      [...prev, takeoffRooms.map(r => ({ ...r, polygon: [...r.polygon] }))].slice(-40)
+    );
+  }, [takeoffRooms]);
+
+  const undoRoomEdit = useCallback(() => {
+    setRoomHistory(prev => {
+      if (prev.length === 0) return prev;
+      setTakeoffRooms(prev[prev.length - 1]);
+      return prev.slice(0, -1);
+    });
+  }, []);
   const [dlg, setDlg] = useState<
     null | "insul" | "types" | "elev" | "preset" | "openings" | "layers"
   >(null);
@@ -1187,7 +1230,7 @@ export default function ElevationGeneratorPage() {
     if (!parsed) return;
 
     // 적산 — 클릭으로 추적한 실 하이라이트 (근사추적은 다른 색)
-    takeoffRooms.forEach(rm => {
+    takeoffRooms.forEach((rm, idx) => {
       if (rm.polygon.length < 3) return;
       ctx.beginPath();
       rm.polygon.forEach(([wx, wy], i) => {
@@ -1196,18 +1239,42 @@ export default function ElevationGeneratorPage() {
         else ctx.lineTo(q.x, q.y);
       });
       ctx.closePath();
-      ctx.globalAlpha = 0.28;
-      ctx.fillStyle = rm.approx ? "#f59e0b" : "#22c55e";
+      const isSel = roomEdit && selRoom === idx;
+      ctx.globalAlpha = isSel ? 0.4 : 0.28;
+      // 수기 수정된 실은 파랑, 근사는 주황, 정확은 초록
+      ctx.fillStyle = rm.edited ? "#3b82f6" : rm.approx ? "#f59e0b" : "#22c55e";
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = rm.approx ? "#b45309" : "#15803d";
+      ctx.lineWidth = isSel ? 3 : 2;
+      ctx.strokeStyle = isSel
+        ? "#0ea5e9"
+        : rm.edited
+          ? "#1d4ed8"
+          : rm.approx
+            ? "#b45309"
+            : "#15803d";
       ctx.stroke();
+
+      // 선택된 실은 정점 핸들을 그린다 — 드래그로 경계를 고칠 수 있다
+      if (isSel) {
+        rm.polygon.forEach(([wx, wy]) => {
+          const q = toPx({ x: wx, y: wy });
+          ctx.beginPath();
+          ctx.rect(q.x - 4, q.y - 4, 8, 8);
+          ctx.fillStyle = "#fff";
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = "#0284c7";
+          ctx.stroke();
+        });
+      }
       // 실명 + 면적
       const cx = rm.polygon.reduce((a, p2) => a + p2[0], 0) / rm.polygon.length;
       const cy = rm.polygon.reduce((a, p2) => a + p2[1], 0) / rm.polygon.length;
       const c = toPx({ x: cx, y: cy });
-      const label = `${rm.name} ${rm.area_m2.toFixed(1)}㎡${rm.approx ? " (근사)" : ""}`;
+      const label = `${rm.name} ${rm.area_m2.toFixed(1)}㎡${
+        rm.edited ? " (수정)" : rm.approx ? " (근사)" : ""
+      }`;
       ctx.font = "bold 12px Pretendard, sans-serif";
       const tw = ctx.measureText(label).width;
       ctx.fillStyle = "rgba(15,23,42,0.85)";
@@ -1581,6 +1648,8 @@ export default function ElevationGeneratorPage() {
     selectedEntity,
     editDragDelta,
     takeoffRooms,
+    roomEdit,
+    selRoom,
   ]);
 
   // ─── 입면 렌더 (여러 체인 세로로 쌓기) ───
@@ -2437,6 +2506,41 @@ export default function ElevationGeneratorPage() {
       setEditDragDelta(null);
       return;
     }
+    // 실 수기 보정 모드: 좌클릭 = 정점 잡기 / 실 선택
+    if (roomEdit && ev.button === 0) {
+      const rect = planCanvasRef.current!.getBoundingClientRect();
+      const px = ev.clientX - rect.left;
+      const py = ev.clientY - rect.top;
+      const world = pxToWorld(px, py);
+
+      // 1) 근처 정점을 잡는다 (선택된 실 우선 → 나머지)
+      const HIT_PX = 9;
+      const order =
+        selRoom !== null
+          ? [selRoom, ...takeoffRooms.map((_, i) => i).filter(i => i !== selRoom)]
+          : takeoffRooms.map((_, i) => i);
+      for (const ri of order) {
+        const rm = takeoffRooms[ri];
+        if (!rm) continue;
+        for (let vi = 0; vi < rm.polygon.length; vi++) {
+          const q = toPx({ x: rm.polygon[vi][0], y: rm.polygon[vi][1] });
+          if (Math.hypot(q.x - px, q.y - py) <= HIT_PX) {
+            pushRoomHistory();
+            setSelRoom(ri);
+            dragVertexRef.current = { room: ri, vertex: vi };
+            return;
+          }
+        }
+      }
+
+      // 2) 정점이 아니면 실 내부 클릭 = 그 실 선택 (없으면 선택 해제)
+      const inside = takeoffRooms.findIndex(rm =>
+        pointInPolygon(world, rm.polygon)
+      );
+      setSelRoom(inside >= 0 ? inside : null);
+      return;
+    }
+
     // 적산 실 추적 모드: 좌클릭 = 실 내부 클릭
     if (takeoffPicking && ev.button === 0) {
       const rect = planCanvasRef.current!.getBoundingClientRect();
@@ -2461,6 +2565,33 @@ export default function ElevationGeneratorPage() {
         x: ev.clientX - dragRef.current.x,
         y: ev.clientY - dragRef.current.y,
       });
+      return;
+    }
+
+    // 실 정점 드래그 — 좌표를 즉시 갱신하고 면적은 놓을 때 재계산한다
+    if (dragVertexRef.current) {
+      const { room, vertex } = dragVertexRef.current;
+      setTakeoffRooms(prev =>
+        prev.map((rm, i) => {
+          if (i !== room) return rm;
+          const poly = [...rm.polygon];
+          poly[vertex] = [w.x, w.y];
+          // 첫 정점과 마지막 정점이 같은 닫힘 표현이면 함께 옮긴다
+          const last = poly.length - 1;
+          if (
+            last > 0 &&
+            ((vertex === 0 &&
+              rm.polygon[0][0] === rm.polygon[last][0] &&
+              rm.polygon[0][1] === rm.polygon[last][1]) ||
+              (vertex === last &&
+                rm.polygon[0][0] === rm.polygon[last][0] &&
+                rm.polygon[0][1] === rm.polygon[last][1]))
+          ) {
+            poly[vertex === 0 ? last : 0] = [w.x, w.y];
+          }
+          return { ...rm, polygon: poly };
+        })
+      );
       return;
     }
 
@@ -2511,6 +2642,34 @@ export default function ElevationGeneratorPage() {
 
   const onPlanMouseUp = () => {
     dragRef.current = null;
+
+    // 실 정점 드래그 종료 — 엔진에 면적을 다시 계산시킨다.
+    // 클라이언트에서 대충 재지 않는다. 자기교차 같은 무효 형상도 엔진이 알려준다.
+    if (dragVertexRef.current) {
+      const { room } = dragVertexRef.current;
+      dragVertexRef.current = null;
+      const rm = takeoffRooms[room];
+      if (rm) {
+        void takeoffApi
+          .areaOf(rm.polygon)
+          .then(res => {
+            if (!res.ok) {
+              toast.error(res.error ?? "면적을 계산할 수 없습니다");
+              return;
+            }
+            setTakeoffRooms(prev =>
+              prev.map((x, i) =>
+                i === room ? { ...x, area_m2: res.area_m2 ?? x.area_m2, edited: true } : x
+              )
+            );
+            if (res.self_intersect) {
+              toast.warning("형상이 자기교차했습니다 — 보정된 면적입니다");
+            }
+          })
+          .catch(e => toast.error(String(e?.message ?? e)));
+      }
+      return;
+    }
     // 편집 이동 드래그 종료 — 3px 이상 움직였으면 원본에 평행이동 적용
     if (editDragRef.current) {
       const drag = editDragRef.current;
@@ -4540,7 +4699,145 @@ export default function ElevationGeneratorPage() {
             registerClickHandler={fn => {
               takeoffClickRef.current = fn;
             }}
+            editing={roomEdit}
+            onEditingChange={v => {
+              setRoomEdit(v);
+              if (v) {
+                setCanvasTab("plan");
+                setMode("view");
+                setTakeoffPicking(false);
+              } else {
+                setSelRoom(null);
+              }
+            }}
           />
+        )}
+
+        {/* ── 실 경계 수기 보정 툴바 (편집 모드에서만) ── */}
+        {roomEdit && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-8 z-[74] flex justify-center">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-[12px] shadow-2xl backdrop-blur">
+              <span className="flex items-center gap-1.5 font-semibold text-sky-700">
+                <span className="flex h-2 w-2 animate-pulse rounded-full bg-sky-500" />
+                실 보정 중
+              </span>
+              <span className="text-slate-500">
+                {selRoom === null
+                  ? "실을 클릭해 선택하세요"
+                  : `${takeoffRooms[selRoom]?.name} · ${takeoffRooms[selRoom]?.area_m2.toFixed(2)}㎡ — 흰 점을 드래그`}
+              </span>
+
+              <span className="mx-1 h-5 w-px bg-slate-200" />
+
+              <button
+                type="button"
+                disabled={selRoom === null}
+                onClick={() => {
+                  if (selRoom === null) return;
+                  pushRoomHistory();
+                  // 가장 긴 변의 중점에 정점을 하나 넣는다 — 요철을 만들 시작점
+                  setTakeoffRooms(prev =>
+                    prev.map((rm, i) => {
+                      if (i !== selRoom) return rm;
+                      let bi = 0;
+                      let blen = -1;
+                      for (let k = 0; k < rm.polygon.length - 1; k++) {
+                        const d = Math.hypot(
+                          rm.polygon[k + 1][0] - rm.polygon[k][0],
+                          rm.polygon[k + 1][1] - rm.polygon[k][1]
+                        );
+                        if (d > blen) {
+                          blen = d;
+                          bi = k;
+                        }
+                      }
+                      const mid: [number, number] = [
+                        (rm.polygon[bi][0] + rm.polygon[bi + 1][0]) / 2,
+                        (rm.polygon[bi][1] + rm.polygon[bi + 1][1]) / 2,
+                      ];
+                      const poly = [...rm.polygon];
+                      poly.splice(bi + 1, 0, mid);
+                      return { ...rm, polygon: poly, edited: true };
+                    })
+                  );
+                }}
+                className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+              >
+                정점 추가
+              </button>
+
+              <button
+                type="button"
+                disabled={
+                  selRoom === null || (takeoffRooms[selRoom]?.polygon.length ?? 0) <= 4
+                }
+                onClick={() => {
+                  if (selRoom === null) return;
+                  pushRoomHistory();
+                  // 가장 짧은 변을 만드는 정점을 뺀다 (닫힘 정점은 건드리지 않는다)
+                  setTakeoffRooms(prev =>
+                    prev.map((rm, i) => {
+                      if (i !== selRoom) return rm;
+                      const n = rm.polygon.length;
+                      let bi = 1;
+                      let blen = Infinity;
+                      for (let k = 1; k < n - 1; k++) {
+                        const d = Math.hypot(
+                          rm.polygon[k][0] - rm.polygon[k - 1][0],
+                          rm.polygon[k][1] - rm.polygon[k - 1][1]
+                        );
+                        if (d < blen) {
+                          blen = d;
+                          bi = k;
+                        }
+                      }
+                      const poly = rm.polygon.filter((_, k) => k !== bi);
+                      return { ...rm, polygon: poly, edited: true };
+                    })
+                  );
+                }}
+                className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+              >
+                정점 삭제
+              </button>
+
+              <button
+                type="button"
+                disabled={selRoom === null}
+                onClick={() => {
+                  if (selRoom === null) return;
+                  pushRoomHistory();
+                  setTakeoffRooms(prev => prev.filter((_, i) => i !== selRoom));
+                  setSelRoom(null);
+                }}
+                className="rounded border border-rose-300 px-2 py-1 text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+              >
+                실 삭제
+              </button>
+
+              <span className="mx-1 h-5 w-px bg-slate-200" />
+
+              <button
+                type="button"
+                disabled={roomHistory.length === 0}
+                onClick={undoRoomEdit}
+                className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+              >
+                되돌리기 ({roomHistory.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRoomEdit(false);
+                  setSelRoom(null);
+                }}
+                className="rounded bg-[#004791] px-3 py-1 font-semibold text-white hover:bg-[#003a78]"
+              >
+                완료
+              </button>
+            </div>
+          </div>
         )}
 
         {/* ── 전역 오버레이 팝업 ── */}

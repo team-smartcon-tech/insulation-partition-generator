@@ -35,6 +35,9 @@ export interface TakeoffPanelProps {
   onRoomsChange?: (r: PickedRoom[]) => void;
   /** 평면 클릭 좌표를 이 패널로 넘겨줄 콜백을 등록한다 */
   registerClickHandler?: (fn: ((x: number, y: number) => void) | null) => void;
+  /** 실 경계 수기 보정 모드 */
+  editing?: boolean;
+  onEditingChange?: (v: boolean) => void;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -53,6 +56,8 @@ export default function TakeoffPanel({
   rooms: pickedRooms,
   onRoomsChange,
   registerClickHandler,
+  editing = false,
+  onEditingChange,
 }: TakeoffPanelProps) {
   const [tab, setTab] = useState<Tab>("takeoff");
   const [alive, setAlive] = useState<boolean | null>(null);
@@ -122,26 +127,19 @@ export default function TakeoffPanel({
       setBusy("실 추적 중…");
       setError("");
       try {
-        let t = await api.trace(analysis.session, x, y, { allowRaster: true }).catch(
-          async err => {
-            if (!isExpired(err)) throw err;
-            setBusy("도면 세션 복구 중…");
-            const sid = await recoverSession();
-            if (!sid) throw err;
-            setBusy("실 추적 중…");
-            return api.trace(sid, x, y, { allowRaster: true });
-          }
-        );
+        // 자동 인식과 **같은 벡터 폐합면 경로**를 쓴다 — 클릭으로 넣은 실도 같은 정확도
+        const t = await api.traceVector(analysis.session, x, y).catch(async err => {
+          if (!isExpired(err)) throw err;
+          setBusy("도면 세션 복구 중…");
+          const sid = await recoverSession();
+          if (!sid) throw err;
+          setBusy("실 추적 중…");
+          return api.traceVector(sid, x, y);
+        });
         if (!t.ok || !t.polygon) {
-          const msg = t.warnings[0]?.message ?? "실을 추적하지 못했습니다.";
-          setError(
-            t.touched_border
-              ? msg + " (열린 공간으로 새어나감 — 임의 면적을 내지 않습니다)"
-              : msg
-          );
+          setError(t.error ?? "이 지점을 감싸는 폐합면이 없습니다.");
           return;
         }
-        // 엔진이 스냅한 도면 실명을 쓴다 — "실 1" 보다 훨씬 알아보기 쉽다
         const name = t.name || "실 " + (rooms.length + 1);
         setRooms(prev => [
           ...prev,
@@ -149,7 +147,7 @@ export default function TakeoffPanel({
             name,
             polygon: t.polygon!,
             holes: t.holes,
-            is_approximate: !!t.is_approximate,
+            is_approximate: false,   // 폐합면이므로 정확하다
             openings: [{ width_mm: 900, height_mm: 2100, kind: "door" as const }],
           },
         ]);
@@ -159,7 +157,7 @@ export default function TakeoffPanel({
             name,
             polygon: t.polygon,
             area_m2: t.area_m2 ?? 0,
-            approx: !!t.is_approximate,
+            approx: false,   // 폐합면 추적이므로 근사가 아니다
           },
         ]);
       } catch (e) {
@@ -607,7 +605,12 @@ export default function TakeoffPanel({
                         <b>[AI 검수]</b> 로 치수가 통상값을 벗어난 실을 걸러냅니다.
                       </li>
                       <li>
-                        빠진 실만 <b>[실 클릭 시작]</b> 으로 보완한 뒤 <b>[물량 산출]</b>.
+                        빠진 실만 <b>[실 클릭 시작]</b> 으로 보완합니다.
+                      </li>
+                      <li>
+                        경계가 틀린 실은 <b>[경계 수기 보정]</b> → 평면에서 실을 클릭 →
+                        흰 점을 드래그해 고칩니다. 정점 추가·삭제·되돌리기 가능하고,
+                        고친 실은 <b>파란색 (수정)</b> 으로 표시됩니다.
                       </li>
                       <li>
                         세대별 기성까지 뽑으려면 <b>[세대 대장]</b> → <b>[기성]</b> 탭으로.
@@ -629,6 +632,17 @@ export default function TakeoffPanel({
                         className="rounded bg-violet-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
                       >
                         AI 검수
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onEditingChange?.(!editing)}
+                        disabled={rooms.length === 0}
+                        className={cn(
+                          "rounded px-3 py-1.5 text-[12px] font-semibold text-white transition-colors disabled:opacity-40",
+                          editing ? "bg-sky-600" : "bg-slate-600 hover:bg-slate-700"
+                        )}
+                      >
+                        {editing ? "보정 중지" : "경계 수기 보정"}
                       </button>
                       <button
                         type="button"
@@ -754,18 +768,29 @@ export default function TakeoffPanel({
                           >
                             <input
                               value={r.name}
-                              onChange={e =>
+                              onChange={e => {
+                                const nm = e.target.value;
                                 setRooms(prev =>
-                                  prev.map((x, j) =>
-                                    j === i ? { ...x, name: e.target.value } : x
+                                  prev.map((x, j) => (j === i ? { ...x, name: nm } : x))
+                                );
+                                // 평면 라벨도 함께 바꿔야 화면과 목록이 어긋나지 않는다
+                                onRoomsChange?.(
+                                  (pickedRooms ?? []).map((x, j) =>
+                                    j === i ? { ...x, name: nm } : x
                                   )
-                                )
-                              }
+                                );
+                              }}
                               className="w-32 rounded border border-slate-200 px-1.5 py-0.5"
                             />
                             <span className="tabular-nums text-slate-500">
                               {(pickedRooms?.[i]?.area_m2 ?? 0).toFixed(2)}㎡
                             </span>
+                            {(pickedRooms?.[i] as { edited?: boolean } | undefined)
+                              ?.edited && (
+                              <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                                수정
+                              </span>
+                            )}
                             {r.is_approximate && (
                               <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
                                 근사추적

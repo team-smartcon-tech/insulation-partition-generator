@@ -149,6 +149,53 @@ export async function autoRooms(session: string): Promise<AutoRoomsResult> {
   return post<AutoRoomsResult>("/auto-rooms", { session });
 }
 
+// ── 수기 보정 ──────────────────────────────────────────────
+
+export interface TraceVectorResult {
+  ok: boolean;
+  error?: string;
+  name?: string;
+  unit_index?: number;
+  unit_type?: string | null;
+  area_m2?: number;
+  width_mm?: number;
+  depth_mm?: number;
+  polygon?: [number, number][];
+  holes?: [number, number][][];
+  badge?: string;
+}
+
+/**
+ * 클릭 지점 → 폐합면 1개. 자동 인식이 놓친 실을 사람이 찍어 추가할 때 쓴다.
+ *
+ * 자동 인식과 **같은 벡터 경로**라 클릭으로 넣은 실도 같은 정확도가 나온다.
+ * 폐합면이 없으면 ok:false — 임의 면적을 만들지 않는다.
+ */
+export async function traceVector(
+  session: string,
+  x: number,
+  y: number,
+  name?: string
+): Promise<TraceVectorResult> {
+  return post<TraceVectorResult>("/trace-vector", { session, x, y, name });
+}
+
+export interface AreaResult {
+  ok: boolean;
+  error?: string;
+  area_m2?: number;
+  perimeter_m?: number;
+  self_intersect?: boolean;
+}
+
+/** 수기 편집된 폴리곤의 면적·둘레 재계산 (정점 드래그 후 확정 시). */
+export async function areaOf(
+  polygon: [number, number][],
+  holes?: [number, number][][]
+): Promise<AreaResult> {
+  return post<AreaResult>("/area", { polygon, holes });
+}
+
 // ── AI 실 검수 (오토콘 Worker → dcr-app LLM) ───────────────
 
 export interface RoomVerdict {

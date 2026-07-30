@@ -622,6 +622,133 @@ def _auto_rooms(body: dict) -> dict:
     }
 
 
+def _vec_context(sess: dict) -> tuple:
+    """벡터 추적용 선분·세대 목록을 세션에 캐시한다 (자동 인식과 공유)."""
+    from .space import unit_split
+    from .takeoff import openings as opening_mod
+
+    if sess.get("vec_segs") is None:
+        doc, info, stats = sess["doc"], sess["info"], sess["stats"]
+        scale = info.unit_scale_to_mm
+        deny = ("INS", "PATT", "PAT1", "HAT", "FUR", "SANI", "CLEN", "DRAIN",
+                "치수", "TEXT", "DIM")
+        wall_lay = {x.name for x in stats if x.line_count > 0
+                    and not any(d in x.normalized.upper() for d in deny)
+                    and any(a in x.normalized.upper() for a in ("WAXM", "골조"))}
+        edge_lay = {x.name for x in stats if x.line_count > 0
+                    and any(a in x.normalized.upper() for a in ("DWXM", "난간"))}
+        door_lay = {x.name for x in stats if "DWXM-DOOR" in x.normalized.upper()}
+        wsegs, _ = entity_mod.extract_segments(doc, scale, layers=wall_lay)
+        esegs, _ = entity_mod.extract_segments(doc, scale, layers=edge_lay)
+        chords = [c.as_segment() for c in opening_mod.collect(
+            doc, scale, wsegs, door_layers=door_lay, use_gap_fallback=False)]
+        sess["vec_segs"] = (wsegs, esegs, chords)
+
+    if sess.get("units") is None:
+        label_lay = layer_mod.find_role_layers(
+            sess["stats"], sess["preset"], LayerRole.ROOM_LABEL)
+        sess["units"] = unit_split.split(
+            sess["doc"], sess["info"].unit_scale_to_mm, label_layers=label_lay)
+
+    return sess["vec_segs"], sess["units"]
+
+
+def _trace_vector(body: dict) -> dict:
+    """
+    클릭 지점 → 벡터 폐합면 1개. 수기 보정(시드 추가) 에 쓴다.
+
+    자동 인식과 **같은 경로**를 쓰므로 클릭으로 추가한 실도 같은 정확도가 나온다.
+    폐합면을 못 찾으면 실패로 돌려주고 임의 면적을 만들지 않는다.
+    """
+    from .space import vector_rooms, wall_mask
+
+    sess = _session(body)
+    (wsegs, esegs, chords), units = _vec_context(sess)
+    x, y = float(body["x"]), float(body["y"])
+
+    # 클릭 지점을 담는(또는 가장 가까운) 세대를 고른다
+    best_u, best_d = None, float("inf")
+    for u in units:
+        x0, y0, x1, y1 = u.bbox_mm
+        if x0 <= x <= x1 and y0 <= y <= y1:
+            best_u, best_d = u, -1.0
+            break
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        d = (cx - x) ** 2 + (cy - y) ** 2
+        if d < best_d:
+            best_u, best_d = u, d
+    if best_u is None:
+        return {"ok": False, "error": "세대를 찾지 못했습니다"}
+
+    pad = float(body.get("clip_pad_mm", 1500.0))
+    segs = (wall_mask.clip_segments(wsegs, best_u.bbox_mm, pad)
+            + wall_mask.clip_segments(esegs, best_u.bbox_mm, pad))
+    extra = wall_mask.clip_segments(chords, best_u.bbox_mm, pad)
+
+    name = body.get("name") or "새 실"
+    found, missed = vector_rooms.trace(
+        segs, [(name, body.get("category", ""), (x, y))], extra=extra)
+    if not found:
+        return {"ok": False,
+                "error": "이 지점을 감싸는 폐합면이 없습니다. 경계를 직접 그리거나 "
+                         "다른 지점을 클릭하세요.",
+                "unit_index": best_u.index}
+
+    r = found[0]
+    ext = [[round(px, 1), round(py, 1)] for px, py in r.polygon.exterior.coords]
+    xs = [p[0] for p in ext]
+    ys = [p[1] for p in ext]
+    return {
+        "ok": True,
+        "name": name,
+        "unit_index": best_u.index,
+        "unit_type": best_u.unit_type,
+        "area_m2": r.area_m2,
+        "width_mm": round(max(xs) - min(xs)),
+        "depth_mm": round(max(ys) - min(ys)),
+        "polygon": ext,
+        "holes": [[[round(px, 1), round(py, 1)] for px, py in ring.coords]
+                  for ring in r.polygon.interiors],
+        "badge": "정확",
+        "is_approximate": False,
+    }
+
+
+def _area_of(body: dict) -> dict:
+    """
+    수기 편집된 폴리곤의 면적·둘레를 다시 계산한다.
+
+    정점을 드래그해 형상이 바뀌면 면적이 즉시 맞아야 한다. 자기교차 등으로
+    무효한 폴리곤은 그 사실을 알린다 — 조용히 보정하지 않는다.
+    """
+    from shapely.geometry import Polygon
+
+    ring = body.get("polygon") or []
+    if len(ring) < 3:
+        return {"ok": False, "error": "정점이 3개 이상이어야 합니다"}
+    holes = body.get("holes") or []
+    try:
+        poly = Polygon([(float(p[0]), float(p[1])) for p in ring],
+                       [[(float(p[0]), float(p[1])) for p in h] for h in holes])
+    except Exception as e:
+        return {"ok": False, "error": "폴리곤을 만들 수 없습니다: %s" % e}
+
+    valid = poly.is_valid
+    if not valid:
+        fixed = poly.buffer(0)
+        if fixed.is_empty:
+            return {"ok": False, "error": "형상이 유효하지 않습니다 (자기교차)"}
+        poly = fixed if fixed.geom_type == "Polygon" else max(
+            fixed.geoms, key=lambda g: g.area)
+
+    return {
+        "ok": True,
+        "area_m2": round(poly.area / 1e6, 3),
+        "perimeter_m": round(poly.exterior.length / 1000, 3),
+        "self_intersect": not valid,
+    }
+
+
 def _cross_check(rooms: list[dict], tolerance_pct: float = 1.0) -> dict:
     """
     타입 간 교차 검증 — 동일 타입 세대의 실별 면적을 비교한다.
@@ -874,6 +1001,8 @@ ROUTES = {
     "/analyze": _analyze,
     "/trace": _trace,
     "/auto-rooms": _auto_rooms,
+    "/trace-vector": _trace_vector,
+    "/area": _area_of,
     "/takeoff": _takeoff,
     "/registry/rule": _registry_from_rule,
     "/registry/paste": _registry_from_paste,
@@ -926,7 +1055,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             n = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(n) or b"{}")
+            raw_body = self.rfile.read(n) or b"{}"
+            try:
+                body = json.loads(raw_body)
+            except UnicodeDecodeError:
+                # 클라이언트가 UTF-8 이 아닌 인코딩으로 보낸 경우 (일부 CLI/구형 도구).
+                # 500 을 내지 말고 알아볼 수 있는 오류로 돌려준다.
+                body = json.loads(raw_body.decode("utf-8", "replace"))
             self._send(200, fn(body))
         except DxfLoadError as e:
             self._send(400, {"error": str(e)})
