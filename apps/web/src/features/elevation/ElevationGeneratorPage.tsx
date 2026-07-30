@@ -67,6 +67,14 @@ import {
 } from "./utils/dxfEdit";
 import PlanDxfCanvas from "./components/PlanDxfCanvas";
 import {
+  saveDraftState,
+  saveDraftDxf,
+  loadDraftState,
+  loadDraftDxf,
+  clearDraft,
+  draftHasWork,
+} from "./draftStore";
+import {
   buildElevationDxfMulti,
   buildElevationSvgMulti,
   downloadText,
@@ -93,6 +101,8 @@ import OutputPanel from "./components/OutputPanel";
 import CadRibbon from "./components/CadRibbon";
 import CadStatusBar from "./components/CadStatusBar";
 import { useFullscreen } from "./useFullscreen";
+import TakeoffPanel from "@/features/takeoff/TakeoffPanel";
+import * as takeoffApi from "@/features/takeoff/api";
 import type { WallSummaryInput } from "./utils/elevationAggregate";
 import { toast } from "sonner";
 import {
@@ -243,6 +253,19 @@ type JointSeg = { x: number; y0: number; y1: number };
 
 // ────────────────────── 동·타입 매트릭스 헬퍼 ──────────────────────
 const EMPTY_MATRIX: ElevTypeMatrix = { buildings: [], types: [], cells: {} };
+
+/** 도킹 패널 헤더 제목 */
+const DLG_TITLE: Record<
+  "insul" | "types" | "elev" | "preset" | "openings" | "layers",
+  string
+> = {
+  insul: "단열재 나누기도",
+  types: "동·타입 설정",
+  elev: "입면 목록",
+  preset: "오프닝 프리셋",
+  openings: "오프닝 목록",
+  layers: "도면층",
+};
 /** (동,타입) 셀 키 */
 const cellKey = (buildingId: string, typeId: string) => `${buildingId}::${typeId}`;
 let _idSeq = 0;
@@ -415,6 +438,19 @@ function clampS(s: number, width: number, perimeter: number): number {
 
 // ─────────────────────────── 페이지 ───────────────────────────
 
+/** 점이 폴리곤 내부인지 (ray casting) — 실 선택 히트테스트용 */
+function pointInPolygon(p: { x: number; y: number }, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 export default function ElevationGeneratorPage() {
   // ── 파일/파싱 ──
   const [fileName, setFileName] = useState<string>("");
@@ -477,7 +513,6 @@ export default function ElevationGeneratorPage() {
 
   // ── 캔버스 탭 (평면도 / 전개 입면) — 한 번에 하나만 전폭으로 표시 ──
   const [canvasTab, setCanvasTab] = useState<"plan" | "elev">("plan");
-  const [elevListOpen, setElevListOpen] = useState(false); // 입면 목록 팝업(모달)
   /** CAD 대화상자 — 리본 [패널] 그룹에서 여는 우측 패널 대체 (AutoCAD 대화상자 방식) */
   const {
     isFullscreen,
@@ -485,9 +520,54 @@ export default function ElevationGeneratorPage() {
     autoEnter: autoFullscreen,
     setAuto: setAutoFullscreen,
   } = useFullscreen();
+  /** 마감 물량 산출 · 기성 패널 (리본 [적산] 탭) */
+  const [takeoffOpen, setTakeoffOpen] = useState(false);
+  /** 실 추적 모드 — 켜면 평면 클릭이 '실 클릭'으로 동작한다 */
+  const [takeoffPicking, setTakeoffPicking] = useState(false);
+  /** 추적된 실 (평면에 하이라이트로 그린다) */
+  const [takeoffRooms, setTakeoffRooms] = useState<
+    {
+      name: string;
+      polygon: [number, number][];
+      area_m2: number;
+      approx: boolean;
+      /** 사람이 손으로 고친 실 — 자동 인식 결과와 구분해 표시한다 */
+      edited?: boolean;
+    }[]
+  >([]);
+  const takeoffClickRef = useRef<((x: number, y: number) => void) | null>(null);
+
+  // ── 실 경계 수기 보정 ────────────────────────────────────
+  /** 편집 모드 — 켜면 실을 골라 정점을 드래그하거나 추가·삭제할 수 있다 */
+  const [roomEdit, setRoomEdit] = useState(false);
+  /** 선택된 실 index (takeoffRooms 기준) */
+  const [selRoom, setSelRoom] = useState<number | null>(null);
+  /** 드래그 중인 정점 — {실, 정점} */
+  const dragVertexRef = useRef<{ room: number; vertex: number } | null>(null);
+  /** Undo 스택 — 편집 직전 상태를 담는다 (얕은 복사로 충분) */
+  const [roomHistory, setRoomHistory] = useState<
+    { name: string; polygon: [number, number][]; area_m2: number; approx: boolean }[][]
+  >([]);
+
+  /** 편집 전 상태를 Undo 스택에 넣는다 (최대 40단계) */
+  const pushRoomHistory = useCallback(() => {
+    setRoomHistory(prev =>
+      [...prev, takeoffRooms.map(r => ({ ...r, polygon: [...r.polygon] }))].slice(-40)
+    );
+  }, [takeoffRooms]);
+
+  const undoRoomEdit = useCallback(() => {
+    setRoomHistory(prev => {
+      if (prev.length === 0) return prev;
+      setTakeoffRooms(prev[prev.length - 1]);
+      return prev.slice(0, -1);
+    });
+  }, []);
   const [dlg, setDlg] = useState<
     null | "insul" | "types" | "elev" | "preset" | "openings" | "layers"
   >(null);
+  /** 도킹 패널 넓게 보기 — 입면 목록·오프닝처럼 항목이 많은 패널용 */
+  const [dockWide, setDockWide] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false); // 사용법 팝업(모달)
   // 첫 방문 시 사용법 자동 표시 (닫으면 다시 자동으로 뜨지 않음 — ? 버튼으로 재열람)
   useEffect(() => {
@@ -751,6 +831,95 @@ export default function ElevationGeneratorPage() {
       toast.error(`생성 실패: ${e instanceof Error ? e.message : String(e)}`);
     }
   }, [createProjectMut]);
+
+  // ─── 작업 초안 자동 저장/복원 ───
+  // 새로고침·다른 화면 이동으로 작업(입면·오프닝·동타입 설정)이 사라지던 문제 대응.
+  // 저장 원천은 Supabase REV 이고, 이 초안은 저장 전 작업을 지키는 로컬 안전망이다.
+  /** 초안 복원이 끝나기 전에는 자동 저장하지 않는다(빈 상태로 초안을 덮어쓰는 것 방지) */
+  const draftReadyRef = useRef(false);
+  const [draftRestoredAt, setDraftRestoredAt] = useState<string | null>(null);
+
+  // (a) 마운트 시 1회 복원
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rec = await loadDraftState();
+        if (!alive) return;
+        if (draftHasWork(rec) && rec) {
+          applyElevState(rec.state);
+          if (rec.projectId) setActiveProjectId(rec.projectId);
+          const dxf = await loadDraftDxf();
+          if (!alive) return;
+          if (dxf?.text) {
+            setFileName(dxf.name);
+            setParsed(parseDxfText(dxf.text));
+            setRawDxfText(dxf.text);
+            // 이후 REV 저장 시 원본이 첨부되도록 File 재구성
+            setLastDxfFile(
+              new File([dxf.text], dxf.name, { type: "application/dxf" })
+            );
+            setLoadedDxfMeta(null);
+          }
+          setDraftRestoredAt(rec.savedAt);
+        }
+      } finally {
+        if (alive) draftReadyRef.current = true;
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // applyElevState 는 useCallback([]) 로 고정 — 마운트 1회만 실행
+  }, [applyElevState]);
+
+  // (b) 상태 변경 시 디바운스 저장(1.2s). DXF 텍스트는 (c) 에서 따로 저장.
+  //     buildElevState 는 실제 상태 deps 로 메모돼 있으므로, 무관한 리렌더로는
+  //     타이머가 리셋되지 않는다.
+  useEffect(() => {
+    if (!draftReadyRef.current) return;
+    const t = setTimeout(() => {
+      void saveDraftState(buildElevState(), activeProjectId);
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [buildElevState, activeProjectId]);
+
+  // (c) 원본 DXF 는 열거나 편집(엔티티 삭제 등)했을 때만 저장 — 매 입력마다 쓰면 무겁다
+  useEffect(() => {
+    if (!draftReadyRef.current || !rawDxfText) return;
+    void saveDraftDxf(fileName || "drawing.dxf", rawDxfText);
+  }, [rawDxfText, fileName]);
+
+  // (d) 디바운스 대기 중 새로고침/닫기로 마지막 변경이 유실되지 않도록 즉시 저장
+  useEffect(() => {
+    const onLeave = () => {
+      if (draftReadyRef.current)
+        void saveDraftState(buildElevState(), activeProjectId);
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => {
+      window.removeEventListener("beforeunload", onLeave);
+      onLeave(); // 다른 화면으로 이동(언마운트) 할 때도 저장
+    };
+  }, [buildElevState, activeProjectId]);
+
+  /** 복원본을 버리고 빈 화면에서 새로 시작 */
+  const discardDraft = useCallback(async () => {
+    await clearDraft();
+    setDraftRestoredAt(null);
+    setWalls([]);
+    setOpenings([]);
+    setTypeMatrix(EMPTY_MATRIX);
+    setDraft([]);
+    setActiveWallId(null);
+    setSelectedOpeningId(null);
+    setParsed(null);
+    setRawDxfText(null);
+    setLastDxfFile(null);
+    setFileName("");
+    setMode("view");
+    toast.success("초안을 비우고 새로 시작합니다.");
+  }, []);
 
   const handleSaveRev = useCallback(async () => {
     if (!activeProjectId) {
@@ -1171,6 +1340,64 @@ export default function ElevationGeneratorPage() {
     ctx.clearRect(0, 0, cw, ch);
     if (!parsed) return;
 
+    // 적산 — 클릭으로 추적한 실 하이라이트 (근사추적은 다른 색)
+    takeoffRooms.forEach((rm, idx) => {
+      if (rm.polygon.length < 3) return;
+      ctx.beginPath();
+      rm.polygon.forEach(([wx, wy], i) => {
+        const q = toPx({ x: wx, y: wy });
+        if (i === 0) ctx.moveTo(q.x, q.y);
+        else ctx.lineTo(q.x, q.y);
+      });
+      ctx.closePath();
+      const isSel = roomEdit && selRoom === idx;
+      ctx.globalAlpha = isSel ? 0.4 : 0.28;
+      // 수기 수정된 실은 파랑, 근사는 주황, 정확은 초록
+      ctx.fillStyle = rm.edited ? "#3b82f6" : rm.approx ? "#f59e0b" : "#22c55e";
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = isSel ? 3 : 2;
+      ctx.strokeStyle = isSel
+        ? "#0ea5e9"
+        : rm.edited
+          ? "#1d4ed8"
+          : rm.approx
+            ? "#b45309"
+            : "#15803d";
+      ctx.stroke();
+
+      // 선택된 실은 정점 핸들을 그린다 — 드래그로 경계를 고칠 수 있다
+      if (isSel) {
+        rm.polygon.forEach(([wx, wy]) => {
+          const q = toPx({ x: wx, y: wy });
+          ctx.beginPath();
+          ctx.rect(q.x - 4, q.y - 4, 8, 8);
+          ctx.fillStyle = "#fff";
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = "#0284c7";
+          ctx.stroke();
+        });
+      }
+      // 실명 + 면적
+      const cx = rm.polygon.reduce((a, p2) => a + p2[0], 0) / rm.polygon.length;
+      const cy = rm.polygon.reduce((a, p2) => a + p2[1], 0) / rm.polygon.length;
+      const c = toPx({ x: cx, y: cy });
+      const label = `${rm.name} ${rm.area_m2.toFixed(1)}㎡${
+        rm.edited ? " (수정)" : rm.approx ? " (근사)" : ""
+      }`;
+      ctx.font = "bold 12px Pretendard, sans-serif";
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(15,23,42,0.85)";
+      ctx.fillRect(c.x - tw / 2 - 5, c.y - 9, tw + 10, 18);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, c.x, c.y);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    });
+
     // 확정된 체인들
     walls.forEach((w, idx) => {
       const col = chainColor(idx);
@@ -1531,6 +1758,9 @@ export default function ElevationGeneratorPage() {
     measurePts,
     selectedEntity,
     editDragDelta,
+    takeoffRooms,
+    roomEdit,
+    selRoom,
   ]);
 
   // ─── 입면 렌더 (여러 체인 세로로 쌓기) ───
@@ -2115,26 +2345,50 @@ export default function ElevationGeneratorPage() {
   // 주의: setScale 업데이터 안에서 setOffset 을 호출하면 StrictMode 의
   // 업데이터 2회 실행으로 오프셋 보정이 이중 적용되어 줌 중심이 어긋난다.
   // scale/offset 을 함께 읽어 한 번에 계산하고 각각 값으로 set 한다.
+  // 최신 뷰 상태 미러 — 휠 핸들러가 매번 재등록되지 않도록 ref 로 읽는다
+  const viewStateRef = useRef({ scale, offset });
+  viewStateRef.current = { scale, offset };
+
   useEffect(() => {
     const canvas = planCanvasRef.current;
     if (!canvas) return;
+
+    // 휠은 초당 수십 번 발생한다. 이벤트마다 setState 하면 대형 페이지가 통째로
+    // 리렌더되고 49k 엔티티 씬도 그만큼 다시 그려져 확대가 심하게 버벅인다.
+    // 배율만 ref 에 누적하고 실제 반영은 프레임당 한 번으로 모은다.
+    let raf = 0;
+    let pendingFactor = 1;
+    let mx = 0;
+    let my = 0;
+
+    const flush = () => {
+      raf = 0;
+      const f = pendingFactor;
+      pendingFactor = 1;
+      const { scale: s, offset: o } = viewStateRef.current;
+      const ns = Math.max(0.0001, Math.min(1e6, s * f));
+      const k = ns / s;
+      const no = { x: mx - (mx - o.x) * k, y: my - (my - o.y) * k };
+      viewStateRef.current = { scale: ns, offset: no };
+      setScale(ns);
+      setOffset(no);
+    };
+
     const handler = (ev: WheelEvent) => {
       ev.preventDefault();
       const rect = canvas.getBoundingClientRect();
-      const mx = ev.clientX - rect.left;
-      const my = ev.clientY - rect.top;
-      const factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
-      const ns = Math.max(0.0001, Math.min(1e6, scale * factor));
-      const k = ns / scale;
-      setScale(ns);
-      setOffset({
-        x: mx - (mx - offset.x) * k,
-        y: my - (my - offset.y) * k,
-      });
+      mx = ev.clientX - rect.left;
+      my = ev.clientY - rect.top;
+      pendingFactor *= ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+      if (!raf) raf = requestAnimationFrame(flush);
     };
+
     canvas.addEventListener("wheel", handler, { passive: false });
-    return () => canvas.removeEventListener("wheel", handler);
-  }, [scale, offset]);
+    return () => {
+      canvas.removeEventListener("wheel", handler);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
 
   // ─── 전개 입면 휠 줌 (마우스 위치 기준 확대·축소) ───
   useEffect(() => {
@@ -2363,6 +2617,48 @@ export default function ElevationGeneratorPage() {
       setEditDragDelta(null);
       return;
     }
+    // 실 수기 보정 모드: 좌클릭 = 정점 잡기 / 실 선택
+    if (roomEdit && ev.button === 0) {
+      const rect = planCanvasRef.current!.getBoundingClientRect();
+      const px = ev.clientX - rect.left;
+      const py = ev.clientY - rect.top;
+      const world = pxToWorld(px, py);
+
+      // 1) 근처 정점을 잡는다 (선택된 실 우선 → 나머지)
+      const HIT_PX = 9;
+      const order =
+        selRoom !== null
+          ? [selRoom, ...takeoffRooms.map((_, i) => i).filter(i => i !== selRoom)]
+          : takeoffRooms.map((_, i) => i);
+      for (const ri of order) {
+        const rm = takeoffRooms[ri];
+        if (!rm) continue;
+        for (let vi = 0; vi < rm.polygon.length; vi++) {
+          const q = toPx({ x: rm.polygon[vi][0], y: rm.polygon[vi][1] });
+          if (Math.hypot(q.x - px, q.y - py) <= HIT_PX) {
+            pushRoomHistory();
+            setSelRoom(ri);
+            dragVertexRef.current = { room: ri, vertex: vi };
+            return;
+          }
+        }
+      }
+
+      // 2) 정점이 아니면 실 내부 클릭 = 그 실 선택 (없으면 선택 해제)
+      const inside = takeoffRooms.findIndex(rm =>
+        pointInPolygon(world, rm.polygon)
+      );
+      setSelRoom(inside >= 0 ? inside : null);
+      return;
+    }
+
+    // 적산 실 추적 모드: 좌클릭 = 실 내부 클릭
+    if (takeoffPicking && ev.button === 0) {
+      const rect = planCanvasRef.current!.getBoundingClientRect();
+      const world = pxToWorld(ev.clientX - rect.left, ev.clientY - rect.top);
+      takeoffClickRef.current?.(world.x, world.y);
+      return;
+    }
     if (mode === "view") {
       dragRef.current = { x: ev.clientX - offset.x, y: ev.clientY - offset.y };
     }
@@ -2380,6 +2676,33 @@ export default function ElevationGeneratorPage() {
         x: ev.clientX - dragRef.current.x,
         y: ev.clientY - dragRef.current.y,
       });
+      return;
+    }
+
+    // 실 정점 드래그 — 좌표를 즉시 갱신하고 면적은 놓을 때 재계산한다
+    if (dragVertexRef.current) {
+      const { room, vertex } = dragVertexRef.current;
+      setTakeoffRooms(prev =>
+        prev.map((rm, i) => {
+          if (i !== room) return rm;
+          const poly = [...rm.polygon];
+          poly[vertex] = [w.x, w.y];
+          // 첫 정점과 마지막 정점이 같은 닫힘 표현이면 함께 옮긴다
+          const last = poly.length - 1;
+          if (
+            last > 0 &&
+            ((vertex === 0 &&
+              rm.polygon[0][0] === rm.polygon[last][0] &&
+              rm.polygon[0][1] === rm.polygon[last][1]) ||
+              (vertex === last &&
+                rm.polygon[0][0] === rm.polygon[last][0] &&
+                rm.polygon[0][1] === rm.polygon[last][1]))
+          ) {
+            poly[vertex === 0 ? last : 0] = [w.x, w.y];
+          }
+          return { ...rm, polygon: poly };
+        })
+      );
       return;
     }
 
@@ -2430,6 +2753,34 @@ export default function ElevationGeneratorPage() {
 
   const onPlanMouseUp = () => {
     dragRef.current = null;
+
+    // 실 정점 드래그 종료 — 엔진에 면적을 다시 계산시킨다.
+    // 클라이언트에서 대충 재지 않는다. 자기교차 같은 무효 형상도 엔진이 알려준다.
+    if (dragVertexRef.current) {
+      const { room } = dragVertexRef.current;
+      dragVertexRef.current = null;
+      const rm = takeoffRooms[room];
+      if (rm) {
+        void takeoffApi
+          .areaOf(rm.polygon)
+          .then(res => {
+            if (!res.ok) {
+              toast.error(res.error ?? "면적을 계산할 수 없습니다");
+              return;
+            }
+            setTakeoffRooms(prev =>
+              prev.map((x, i) =>
+                i === room ? { ...x, area_m2: res.area_m2 ?? x.area_m2, edited: true } : x
+              )
+            );
+            if (res.self_intersect) {
+              toast.warning("형상이 자기교차했습니다 — 보정된 면적입니다");
+            }
+          })
+          .catch(e => toast.error(String(e?.message ?? e)));
+      }
+      return;
+    }
     // 편집 이동 드래그 종료 — 3px 이상 움직였으면 원본에 평행이동 적용
     if (editDragRef.current) {
       const drag = editDragRef.current;
@@ -3244,7 +3595,9 @@ export default function ElevationGeneratorPage() {
     return buildElevationDxfMulti({ chains });
   };
 
+  // 실 클릭 모드에서는 커서를 십자로 (클릭 대상임을 알린다)
   const cursorClass =
+    takeoffPicking ||
     mode === "trace" ||
     mode === "place" ||
     mode === "two-point" ||
@@ -3323,6 +3676,9 @@ export default function ElevationGeneratorPage() {
           onExportCombinedDxf={() => handleExportCombined("dxf")}
           onExportSplitDxf={() => handleExportAll("dxf")}
           onExportCombinedSvg={() => handleExportCombined("svg")}
+          onExportInsulationCsv={handleExportInsulationCsv}
+          onExportSiteReportCsv={handleExportSiteReportCsv}
+          siteReportThkLabel={thkLabel}
           onOpenOutput={() => setOutputOpen(true)}
           canExport={canExport}
           floorHeightInput={
@@ -3421,6 +3777,7 @@ export default function ElevationGeneratorPage() {
               </select>
             </div>
           }
+          onOpenTakeoff={() => setTakeoffOpen(true)}
           isFullscreen={isFullscreen}
           onToggleFullscreen={toggleFullscreen}
           autoFullscreen={autoFullscreen}
@@ -3501,8 +3858,52 @@ export default function ElevationGeneratorPage() {
           </div>
         )}
 
+        {/* 초안 복원 안내 — 새로고침/화면 이동으로 잃었던 작업을 되살렸을 때만 */}
+        {draftRestoredAt && (
+          <div className="mx-2 mt-1 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11.5px] text-amber-900">
+            <Info className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+            <span>
+              직전 작업을 복원했습니다
+              <span className="ml-1 tabular-nums text-amber-700/80">
+                ({new Date(draftRestoredAt).toLocaleString("ko-KR", {
+                  month: "numeric",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}{" "}
+                자동 저장분)
+              </span>
+            </span>
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => void discardDraft()}
+                className="rounded border border-amber-300 bg-white px-2 py-[3px] font-semibold text-amber-800 hover:bg-amber-100"
+              >
+                새로 시작
+              </button>
+              <button
+                type="button"
+                onClick={() => setDraftRestoredAt(null)}
+                className="rounded p-1 text-amber-500 hover:bg-amber-100 hover:text-amber-800"
+                title="안내 닫기"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* 본문 — 전폭 캔버스(탭) + 얇은 인스펙터 패널 */}
-        <div className="flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-3 p-2">
+        <div
+          className="flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)] gap-3 p-2"
+          style={{
+            // 패널을 도면 위에 띄우지 않고 옆 칸으로 도킹 → 도면을 보면서 편집한다
+            gridTemplateColumns: dlg
+              ? `minmax(0,1fr) ${dockWide ? 880 : 460}px`
+              : "minmax(0,1fr)",
+          }}
+        >
           {/* 좌측: 캔버스 탭 (평면 / 전개 입면) — 한 번에 하나만 전폭 표시 */}
           <div className="flex flex-col gap-1.5 min-h-0">
             {/* 캔버스 영역 — 두 캔버스 모두 마운트, 활성 탭만 노출(리사이즈 정확도 유지) */}
@@ -3664,17 +4065,34 @@ export default function ElevationGeneratorPage() {
             </div>
           </div>
 
-          {/* 우측 인스펙터 패널 */}
-          {/* ── CAD 대화상자 — 리본 [패널] 그룹에서 열기 ── */}
+          {/* ── CAD 패널 — 리본 [패널] 그룹에서 열기.
+                 모달(도면 가림) 이 아니라 캔버스 옆 칸에 도킹한다 — 도면을 보면서 편집. ── */}
           {dlg && (
-            <div
-              className="fixed inset-0 z-[68] flex items-start justify-center bg-slate-900/40 p-6 backdrop-blur-[2px]"
-              onClick={() => setDlg(null)}
-            >
-            <div
-              className="mt-6 w-[min(920px,96vw)] max-h-[84vh] overflow-y-auto rounded-xl border border-slate-300 bg-white shadow-2xl accent-[#004791] [&_option]:text-slate-900"
-              onClick={e => e.stopPropagation()}
-            >
+            <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-lg accent-[#004791] [&_option]:text-slate-900">
+              <div className="flex items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                <span className="text-[12px] font-bold text-slate-700">
+                  {DLG_TITLE[dlg]}
+                </span>
+                <div className="ml-auto flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setDockWide(v => !v)}
+                    className="rounded border border-slate-300 bg-white px-1.5 py-[3px] text-[10.5px] font-medium text-slate-600 hover:bg-slate-100"
+                    title={dockWide ? "패널 좁게" : "패널 넓게"}
+                  >
+                    {dockWide ? "좁게" : "넓게"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDlg(null)}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                    title="패널 닫기"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
             {/* 단열재 나누기도 (추가 기능) */}
             {dlg === "insul" && (
             <Section icon={Square} title="단열재 나누기도" defaultOpen={false} accent="#0a63b8">
@@ -3923,25 +4341,12 @@ export default function ElevationGeneratorPage() {
                     <b>최적배치</b>=SP 자동 최소물량. 2P 조인트가 1P와 {minJointGap}mm
                     미달로 엇갈리면 <b className="text-red-600">빨강</b>(결로위험).
                   </p>
-                  <button
-                    type="button"
-                    onClick={handleExportInsulationCsv}
-                    disabled={!canExport}
-                    className="col-span-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md bg-emerald-600 text-white text-[11.5px] font-semibold whitespace-nowrap hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    물량 표 CSV 내보내기 (전 입면)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleExportSiteReportCsv}
-                    disabled={!canExport}
-                    className="col-span-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md bg-[#004791] text-white text-[11.5px] font-semibold whitespace-nowrap hover:bg-[#003a78] disabled:opacity-40 disabled:cursor-not-allowed"
-                    title={`두께(${thkLabel || "두께별"})별 · 동별/타입별 현장식 산출서. 세대수는 입면별 '세대수'로 곱함`}
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    현장식 산출서 CSV ({thkLabel || "두께별"} · 동별)
-                  </button>
+                  {/* CSV 내보내기는 리본 [출력] 탭 > '물량' 그룹으로 이동했다
+                      (설정 패널에는 계산 옵션만 남긴다) */}
+                  <p className="col-span-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500">
+                    물량 표·현장식 산출서 CSV 는 상단 <b className="text-slate-600">[출력]</b> 탭 &gt;{" "}
+                    <b className="text-slate-600">물량</b> 그룹에서 내보냅니다.
+                  </p>
                 </div>
               )}
             </div>
@@ -4181,285 +4586,9 @@ export default function ElevationGeneratorPage() {
 
             {/* 입면 목록 */}
             {dlg === "elev" && (
-            <Section icon={Layers} title={`입면 목록 (${walls.length})`} accent="#0891b2">
-            <div className="px-2 py-2 space-y-2">
-              <button
-                type="button"
-                onClick={() => setElevListOpen(true)}
-                className="w-full px-2 py-2 rounded-md border border-[#2a86e0] bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white text-[11.5px] font-semibold shadow-sm shadow-blue-900/20 hover:from-[#1a80e0] hover:to-[#0a63b8] flex items-center justify-center gap-1.5 transition-colors"
-              >
-                <Maximize2 className="w-3.5 h-3.5" />
-                입면 목록 크게 보기{walls.length > 0 ? ` (${walls.length})` : ""}
-              </button>
-              {walls.length === 0 && (
-                <p className="px-2 py-1 text-[11px] text-slate-400 text-center">
-                  "트레이싱" 모드로 외벽을 그리세요.
-                </p>
-              )}
-            </div>
-            </Section>
-            )}
-
-            {/* 입면 목록 팝업(모달) — 사이드바가 좁아 넓은 화면에서 편집 */}
-
-            {/* 사용법 팝업(모달) — 첫 방문 시 자동 표시, 헤더 ? 버튼으로 재열람 */}
-
-            {/* 절단판 상세 팝업 — 입면의 보드 번호 클릭 시 */}
-
-            {/* 오프닝 목록 */}
-            {dlg === "openings" && (
-            <Section icon={Layers} title={`오프닝 (${openings.length})`} accent="#059669">
-            <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1 min-h-0">
-              {openings.length === 0 && (
-                <p className="px-2 py-3 text-[11px] text-slate-400 text-center">
-                  입면을 트레이싱한 뒤 벽 위를 클릭하세요.
-                </p>
-              )}
-              {openings.map(op => {
-                const active = op.id === selectedOpeningId;
-                const ownerIdx = walls.findIndex(w => w.id === op.wallId);
-                const owner = walls[ownerIdx];
-                return (
-                  <div
-                    key={op.id}
-                    className={cn(
-                      "rounded-md border text-[11px]",
-                      active
-                        ? "border-[#004791] bg-[#004791]/8"
-                        : "border-slate-200 bg-slate-50 text-slate-700"
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedOpeningId(active ? null : op.id);
-                        if (!active) setActiveWallId(op.wallId);
-                      }}
-                      className="w-full text-left px-2 py-1.5 flex items-center justify-between gap-2"
-                    >
-                      <span className="flex items-center gap-1.5 truncate">
-                        <span
-                          className="w-2 h-2 rounded-sm"
-                          style={{ backgroundColor: KIND_COLOR[op.kind] }}
-                        />
-                        <b className="truncate">
-                          {op.label ?? KIND_LABEL[op.kind]}
-                        </b>
-                        {owner && (
-                          <span
-                            className="text-[9.5px] px-1 rounded"
-                            style={{
-                              color: chainColor(ownerIdx),
-                              backgroundColor: chainColor(ownerIdx) + "22",
-                            }}
-                          >
-                            {owner.name}
-                          </span>
-                        )}
-                      </span>
-                      <span className="font-mono text-[10px] text-slate-500">
-                        {op.width}×{op.height}
-                      </span>
-                    </button>
-                    {active && (
-                      <div className="px-2 pb-2 grid grid-cols-2 gap-1.5">
-                        <LabelInput
-                          label="타입"
-                          control={
-                            <select
-                              value={op.kind}
-                              onChange={ev =>
-                                updateOpening(op.id, {
-                                  kind: ev.target.value as OpeningKind,
-                                })
-                              }
-                              className="text-[11px] border border-slate-300 rounded px-1.5 py-1 w-full bg-white text-slate-800"
-                            >
-                              <option value="window">창문</option>
-                              <option value="door">문</option>
-                              <option value="opening">개구부</option>
-                            </select>
-                          }
-                        />
-                        <LabelInput
-                          label="위치 s"
-                          control={
-                            <NumberInput
-                              value={Math.round(op.sAlong)}
-                              onChange={v => {
-                                const peri =
-                                  wallMetricsById.get(op.wallId)?.total ?? 0;
-                                updateOpening(op.id, {
-                                  sAlong: clampS(v, op.width, peri),
-                                });
-                              }}
-                              suffix="mm"
-                              step={50}
-                              compact
-                            />
-                          }
-                        />
-                        <LabelInput
-                          label="폭"
-                          control={
-                            <NumberInput
-                              value={op.width}
-                              onChange={v => {
-                                const peri =
-                                  wallMetricsById.get(op.wallId)?.total ?? 0;
-                                updateOpening(op.id, {
-                                  width: v,
-                                  sAlong: clampS(op.sAlong, v, peri),
-                                });
-                              }}
-                              suffix="mm"
-                              step={50}
-                              compact
-                            />
-                          }
-                        />
-                        <LabelInput
-                          label="높이"
-                          control={
-                            <NumberInput
-                              value={op.height}
-                              onChange={v => updateOpening(op.id, { height: v })}
-                              suffix="mm"
-                              step={50}
-                              compact
-                            />
-                          }
-                        />
-                        <LabelInput
-                          label="sill"
-                          control={
-                            <NumberInput
-                              value={op.sill}
-                              onChange={v => updateOpening(op.id, { sill: v })}
-                              suffix="mm"
-                              step={50}
-                              compact
-                            />
-                          }
-                        />
-                        <button
-                          type="button"
-                          onClick={() => deleteOpening(op.id)}
-                          className="self-end px-2 py-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] flex items-center justify-center gap-1"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          삭제
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            </Section>
-            )}
-
-            {dlg === "layers" && (
-              <div className="p-1">
-                <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
-                  <Layers className="h-4 w-4 text-slate-500" />
-                  <h2 className="text-[13px] font-bold text-slate-700">
-                    도면층 ({parsed?.layers.length ?? 0})
-                  </h2>
-                  <label className="ml-auto flex items-center gap-1 text-[11px] text-slate-500">
-                    <input
-                      type="checkbox"
-                      checked={showText}
-                      onChange={ev => setShowText(ev.target.checked)}
-                      className="h-3 w-3"
-                    />
-                    텍스트 표시
-                  </label>
-                </div>
-                <div className="max-h-[60vh] overflow-y-auto px-2 py-2">
-                  {parsed?.layers.map(layer => {
-                    const hidden = hiddenLayers.has(layer);
-                    return (
-                      <label
-                        key={layer}
-                        className={cn(
-                          "flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-[11.5px] hover:bg-slate-100",
-                          hidden && "text-slate-400"
-                        )}
-                      >
-                        {hidden ? (
-                          <EyeOff className="h-3.5 w-3.5" />
-                        ) : (
-                          <Eye className="h-3.5 w-3.5" />
-                        )}
-                        <input
-                          type="checkbox"
-                          checked={!hidden}
-                          onChange={() => toggleLayer(layer)}
-                          className="h-3 w-3"
-                        />
-                        <span className="truncate">{layer}</span>
-                      </label>
-                    );
-                  })}
-                  {!parsed && (
-                    <p className="px-2 py-6 text-center text-[12px] text-slate-400">
-                      DXF 를 업로드하면 도면층이 표시됩니다.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-            </div>
-          </div>
-        )}
-        </div>
-
-        {selectedOpening && (
-          <div className="text-[11px] text-slate-500 flex items-center gap-2">
-            <Info className="w-3.5 h-3.5" />
-            선택됨: <b className="text-slate-700">{selectedOpening.label}</b> ·
-            폭 {selectedOpening.width}mm · 높이 {selectedOpening.height}mm ·
-            sill {selectedOpening.sill}mm
-            <button
-              type="button"
-              onClick={() => setSelectedOpeningId(null)}
-              className="ml-2 inline-flex items-center gap-0.5 text-slate-400 hover:text-slate-700"
-            >
-              <X className="w-3 h-3" /> 해제
-            </button>
-          </div>
-        )}
-
-        {/* ── 전역 오버레이 팝업 ── */}
-        {/* 리본/대화상자 바깥(스튜디오 최상위)에 두어야 화면 어디서든 온전히 뜬다. */}
-        {elevListOpen && (
-          <div
-            className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
-            onClick={() => setElevListOpen(false)}
-          >
-            <div
-              className="flex w-[min(1200px,96vw)] h-[90vh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3">
-                <div className="flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-[#004791]" />
-                  <h2 className="text-[15px] font-bold text-slate-800">
-                    입면 목록 ({walls.length})
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setElevListOpen(false)}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  title="닫기"
-                >
-                  <X className="w-[18px] h-[18px]" />
-                </button>
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1">
+              <div className="px-2 py-2 space-y-1">
+                {/* 도면 옆에 도킹돼 있어 입면을 편집하면서 평면/전개를 그대로 볼 수 있다.
+                    항목이 많으면 헤더의 [넓게] 로 패널 폭을 키운다. */}
           {walls.length === 0 && (
             <p className="px-2 py-3 text-[11px] text-slate-400 text-center">
               "트레이싱" 모드로 외벽을 그리세요.
@@ -4760,9 +4889,407 @@ export default function ElevationGeneratorPage() {
             </button>
           )}
               </div>
+            )}
+
+            {/* 입면 목록 팝업(모달) — 사이드바가 좁아 넓은 화면에서 편집 */}
+
+            {/* 사용법 팝업(모달) — 첫 방문 시 자동 표시, 헤더 ? 버튼으로 재열람 */}
+
+            {/* 절단판 상세 팝업 — 입면의 보드 번호 클릭 시 */}
+
+            {/* 오프닝 목록 */}
+            {dlg === "openings" && (
+            <Section icon={Layers} title={`오프닝 (${openings.length})`} accent="#059669">
+            <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1 min-h-0">
+              {openings.length === 0 && (
+                <p className="px-2 py-3 text-[11px] text-slate-400 text-center">
+                  입면을 트레이싱한 뒤 벽 위를 클릭하세요.
+                </p>
+              )}
+              {openings.map(op => {
+                const active = op.id === selectedOpeningId;
+                const ownerIdx = walls.findIndex(w => w.id === op.wallId);
+                const owner = walls[ownerIdx];
+                return (
+                  <div
+                    key={op.id}
+                    className={cn(
+                      "rounded-md border text-[11px]",
+                      active
+                        ? "border-[#004791] bg-[#004791]/8"
+                        : "border-slate-200 bg-slate-50 text-slate-700"
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOpeningId(active ? null : op.id);
+                        if (!active) setActiveWallId(op.wallId);
+                      }}
+                      className="w-full text-left px-2 py-1.5 flex items-center justify-between gap-2"
+                    >
+                      <span className="flex items-center gap-1.5 truncate">
+                        <span
+                          className="w-2 h-2 rounded-sm"
+                          style={{ backgroundColor: KIND_COLOR[op.kind] }}
+                        />
+                        <b className="truncate">
+                          {op.label ?? KIND_LABEL[op.kind]}
+                        </b>
+                        {owner && (
+                          <span
+                            className="text-[9.5px] px-1 rounded"
+                            style={{
+                              color: chainColor(ownerIdx),
+                              backgroundColor: chainColor(ownerIdx) + "22",
+                            }}
+                          >
+                            {owner.name}
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-500">
+                        {op.width}×{op.height}
+                      </span>
+                    </button>
+                    {active && (
+                      <div className="px-2 pb-2 grid grid-cols-2 gap-1.5">
+                        <LabelInput
+                          label="타입"
+                          control={
+                            <select
+                              value={op.kind}
+                              onChange={ev =>
+                                updateOpening(op.id, {
+                                  kind: ev.target.value as OpeningKind,
+                                })
+                              }
+                              className="text-[11px] border border-slate-300 rounded px-1.5 py-1 w-full bg-white text-slate-800"
+                            >
+                              <option value="window">창문</option>
+                              <option value="door">문</option>
+                              <option value="opening">개구부</option>
+                            </select>
+                          }
+                        />
+                        <LabelInput
+                          label="위치 s"
+                          control={
+                            <NumberInput
+                              value={Math.round(op.sAlong)}
+                              onChange={v => {
+                                const peri =
+                                  wallMetricsById.get(op.wallId)?.total ?? 0;
+                                updateOpening(op.id, {
+                                  sAlong: clampS(v, op.width, peri),
+                                });
+                              }}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                        <LabelInput
+                          label="폭"
+                          control={
+                            <NumberInput
+                              value={op.width}
+                              onChange={v => {
+                                const peri =
+                                  wallMetricsById.get(op.wallId)?.total ?? 0;
+                                updateOpening(op.id, {
+                                  width: v,
+                                  sAlong: clampS(op.sAlong, v, peri),
+                                });
+                              }}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                        <LabelInput
+                          label="높이"
+                          control={
+                            <NumberInput
+                              value={op.height}
+                              onChange={v => updateOpening(op.id, { height: v })}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                        <LabelInput
+                          label="sill"
+                          control={
+                            <NumberInput
+                              value={op.sill}
+                              onChange={v => updateOpening(op.id, { sill: v })}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                        <button
+                          type="button"
+                          onClick={() => deleteOpening(op.id)}
+                          className="self-end px-2 py-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] flex items-center justify-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          삭제
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            </Section>
+            )}
+
+            {dlg === "layers" && (
+              <div className="p-1">
+                <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
+                  <Layers className="h-4 w-4 text-slate-500" />
+                  <h2 className="text-[13px] font-bold text-slate-700">
+                    도면층 ({parsed?.layers.length ?? 0})
+                  </h2>
+                  <label className="ml-auto flex items-center gap-1 text-[11px] text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={showText}
+                      onChange={ev => setShowText(ev.target.checked)}
+                      className="h-3 w-3"
+                    />
+                    텍스트 표시
+                  </label>
+                </div>
+                <div className="max-h-[60vh] overflow-y-auto px-2 py-2">
+                  {parsed?.layers.map(layer => {
+                    const hidden = hiddenLayers.has(layer);
+                    return (
+                      <label
+                        key={layer}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-[11.5px] hover:bg-slate-100",
+                          hidden && "text-slate-400"
+                        )}
+                      >
+                        {hidden ? (
+                          <EyeOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" />
+                        )}
+                        <input
+                          type="checkbox"
+                          checked={!hidden}
+                          onChange={() => toggleLayer(layer)}
+                          className="h-3 w-3"
+                        />
+                        <span className="truncate">{layer}</span>
+                      </label>
+                    );
+                  })}
+                  {!parsed && (
+                    <p className="px-2 py-6 text-center text-[12px] text-slate-400">
+                      DXF 를 업로드하면 도면층이 표시됩니다.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            </div>
+            </aside>
+        )}
+        </div>
+
+        {selectedOpening && (
+          <div className="text-[11px] text-slate-500 flex items-center gap-2">
+            <Info className="w-3.5 h-3.5" />
+            선택됨: <b className="text-slate-700">{selectedOpening.label}</b> ·
+            폭 {selectedOpening.width}mm · 높이 {selectedOpening.height}mm ·
+            sill {selectedOpening.sill}mm
+            <button
+              type="button"
+              onClick={() => setSelectedOpeningId(null)}
+              className="ml-2 inline-flex items-center gap-0.5 text-slate-400 hover:text-slate-700"
+            >
+              <X className="w-3 h-3" /> 해제
+            </button>
+          </div>
+        )}
+
+        {/* 마감 물량 산출 · 기성 */}
+        {takeoffOpen && (
+          <TakeoffPanel
+            onClose={() => {
+              setTakeoffOpen(false);
+              setTakeoffPicking(false);
+            }}
+            dxfBuffer={
+              rawDxfText ? new TextEncoder().encode(rawDxfText).buffer : null
+            }
+            picking={takeoffPicking}
+            onPickingChange={v => {
+              setTakeoffPicking(v);
+              if (v) {
+                setCanvasTab("plan"); // 평면에서 클릭해야 한다
+                setMode("view");
+                fitToScreen();
+              }
+            }}
+            rooms={takeoffRooms}
+            onRoomsChange={setTakeoffRooms}
+            registerClickHandler={fn => {
+              takeoffClickRef.current = fn;
+            }}
+            editing={roomEdit}
+            onEditingChange={v => {
+              setRoomEdit(v);
+              if (v) {
+                setCanvasTab("plan");
+                setMode("view");
+                setTakeoffPicking(false);
+              } else {
+                setSelRoom(null);
+              }
+            }}
+          />
+        )}
+
+        {/* ── 실 경계 수기 보정 툴바 (편집 모드에서만) ── */}
+        {roomEdit && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-8 z-[74] flex justify-center">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-[12px] shadow-2xl backdrop-blur">
+              <span className="flex items-center gap-1.5 font-semibold text-sky-700">
+                <span className="flex h-2 w-2 animate-pulse rounded-full bg-sky-500" />
+                실 보정 중
+              </span>
+              <span className="text-slate-500">
+                {selRoom === null
+                  ? "실을 클릭해 선택하세요"
+                  : `${takeoffRooms[selRoom]?.name} · ${takeoffRooms[selRoom]?.area_m2.toFixed(2)}㎡ — 흰 점을 드래그`}
+              </span>
+
+              <span className="mx-1 h-5 w-px bg-slate-200" />
+
+              <button
+                type="button"
+                disabled={selRoom === null}
+                onClick={() => {
+                  if (selRoom === null) return;
+                  pushRoomHistory();
+                  // 가장 긴 변의 중점에 정점을 하나 넣는다 — 요철을 만들 시작점
+                  setTakeoffRooms(prev =>
+                    prev.map((rm, i) => {
+                      if (i !== selRoom) return rm;
+                      let bi = 0;
+                      let blen = -1;
+                      for (let k = 0; k < rm.polygon.length - 1; k++) {
+                        const d = Math.hypot(
+                          rm.polygon[k + 1][0] - rm.polygon[k][0],
+                          rm.polygon[k + 1][1] - rm.polygon[k][1]
+                        );
+                        if (d > blen) {
+                          blen = d;
+                          bi = k;
+                        }
+                      }
+                      const mid: [number, number] = [
+                        (rm.polygon[bi][0] + rm.polygon[bi + 1][0]) / 2,
+                        (rm.polygon[bi][1] + rm.polygon[bi + 1][1]) / 2,
+                      ];
+                      const poly = [...rm.polygon];
+                      poly.splice(bi + 1, 0, mid);
+                      return { ...rm, polygon: poly, edited: true };
+                    })
+                  );
+                }}
+                className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+              >
+                정점 추가
+              </button>
+
+              <button
+                type="button"
+                disabled={
+                  selRoom === null || (takeoffRooms[selRoom]?.polygon.length ?? 0) <= 4
+                }
+                onClick={() => {
+                  if (selRoom === null) return;
+                  pushRoomHistory();
+                  // 가장 짧은 변을 만드는 정점을 뺀다 (닫힘 정점은 건드리지 않는다)
+                  setTakeoffRooms(prev =>
+                    prev.map((rm, i) => {
+                      if (i !== selRoom) return rm;
+                      const n = rm.polygon.length;
+                      let bi = 1;
+                      let blen = Infinity;
+                      for (let k = 1; k < n - 1; k++) {
+                        const d = Math.hypot(
+                          rm.polygon[k][0] - rm.polygon[k - 1][0],
+                          rm.polygon[k][1] - rm.polygon[k - 1][1]
+                        );
+                        if (d < blen) {
+                          blen = d;
+                          bi = k;
+                        }
+                      }
+                      const poly = rm.polygon.filter((_, k) => k !== bi);
+                      return { ...rm, polygon: poly, edited: true };
+                    })
+                  );
+                }}
+                className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+              >
+                정점 삭제
+              </button>
+
+              <button
+                type="button"
+                disabled={selRoom === null}
+                onClick={() => {
+                  if (selRoom === null) return;
+                  pushRoomHistory();
+                  setTakeoffRooms(prev => prev.filter((_, i) => i !== selRoom));
+                  setSelRoom(null);
+                }}
+                className="rounded border border-rose-300 px-2 py-1 text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+              >
+                실 삭제
+              </button>
+
+              <span className="mx-1 h-5 w-px bg-slate-200" />
+
+              <button
+                type="button"
+                disabled={roomHistory.length === 0}
+                onClick={undoRoomEdit}
+                className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+              >
+                되돌리기 ({roomHistory.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRoomEdit(false);
+                  setSelRoom(null);
+                }}
+                className="rounded bg-[#004791] px-3 py-1 font-semibold text-white hover:bg-[#003a78]"
+              >
+                완료
+              </button>
             </div>
           </div>
         )}
+
+        {/* ── 전역 오버레이 팝업 ── */}
+        {/* 리본/대화상자 바깥(스튜디오 최상위)에 두어야 화면 어디서든 온전히 뜬다. */}
 
         {helpOpen && (
           <div

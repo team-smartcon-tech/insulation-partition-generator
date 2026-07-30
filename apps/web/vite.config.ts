@@ -20,8 +20,11 @@ export default defineConfig({
     },
   },
   server: {
-    // Smart Works 로컬 dev(5173)와 겹치지 않도록 5273 사용.
-    port: 5273,
+    // Smart Works 로컬 dev(5173)와 겹치지 않도록 별도 포트 사용.
+    // 5273 은 Windows 예약 포트 범위(WinNAT/Hyper-V, 5210~5519)에 걸려
+    // `EACCES: permission denied ::1:5273` 로 실패하므로 예약 블록에서 떨어진 5973 사용.
+    // 예약 범위 확인: netsh interface ipv4 show excludedportrange protocol=tcp
+    port: 5973,
     proxy: {
       "/api": { target: apiTarget, changeOrigin: true },
     },

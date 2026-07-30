@@ -12,6 +12,7 @@
 import { useState, type ComponentType } from "react";
 import {
   Blocks,
+  Calculator,
   Check,
   CornerDownLeft,
   Download,
@@ -101,6 +102,12 @@ export interface CadRibbonProps {
   onCommitDraft: () => void;
   onUndoDraftPoint: () => void;
   // ── 출력 ──
+  /** 물량 표 CSV (전 입면 · 소스 보드 단위) */
+  onExportInsulationCsv: () => void;
+  /** 현장식 산출서 CSV (두께별 · 동별/타입별) */
+  onExportSiteReportCsv: () => void;
+  /** 현장식 산출서 버튼 라벨의 두께 표기 (예 "50T/90T") */
+  siteReportThkLabel: string;
   onExportCombinedDxf: () => void;
   onExportSplitDxf: () => void;
   onExportCombinedSvg: () => void;
@@ -127,6 +134,8 @@ export interface CadRibbonProps {
   onResetAll: () => void;
   onHelp: () => void;
   onExit: () => void;
+  /** 마감 물량 산출 · 기성 패널 열기 */
+  onOpenTakeoff: () => void;
   // ── 전체화면 (CAD 처럼 브라우저 크롬 숨김) ──
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
@@ -134,7 +143,7 @@ export interface CadRibbonProps {
   onAutoFullscreen: (v: boolean) => void;
 }
 
-const TABS = ["홈", "삽입", "수정", "측정", "출력", "관리"] as const;
+const TABS = ["홈", "삽입", "수정", "측정", "적산", "출력", "관리"] as const;
 type TabKey = (typeof TABS)[number];
 
 /* ── 리본 버튼 (큰 아이콘 = CAD 주요 명령) ───────────────── */
@@ -690,6 +699,31 @@ export default function CadRibbon(p: CadRibbonProps) {
           </Group>
         )}
 
+        {tab === "적산" && (
+          <Group title="마감 물량" wide>
+            <BigBtn
+              icon={Calculator}
+              label={"물량\n산출"}
+              onClick={p.onOpenTakeoff}
+              tone="primary"
+              title="실 영역을 추적해 마감 물량을 산출합니다 (장판·타일·도배·걸레받이)"
+            />
+            <BigBtn
+              icon={LayoutList}
+              label={"세대\n대장"}
+              onClick={p.onOpenTakeoff}
+              title="동·층·호 세대 대장 (규칙 생성 / Excel 붙여넣기)"
+            />
+            <BigBtn
+              icon={Blocks}
+              label={"기성\n관리"}
+              onClick={p.onOpenTakeoff}
+              tone="success"
+              title="차수별 진도 입력 → 기성 물량 산출 · 검증"
+            />
+          </Group>
+        )}
+
         {tab === "출력" && (
           <>
             <Group title="도면 출력">
@@ -715,13 +749,28 @@ export default function CadRibbon(p: CadRibbonProps) {
                 title="모든 입면을 한 SVG 로 통합"
               />
             </Group>
-            <Group title="물량">
+            <Group title="물량" wide>
+              <BigBtn
+                icon={FileSpreadsheet}
+                label={"물량 표\nCSV"}
+                onClick={p.onExportInsulationCsv}
+                disabled={!p.canExport}
+                tone="success"
+                title="전 입면 물량 표 CSV — 소스 보드(판) 단위로 묶어 내보냅니다"
+              />
+              <BigBtn
+                icon={FileSpreadsheet}
+                label={"현장식\n산출서"}
+                onClick={p.onExportSiteReportCsv}
+                disabled={!p.canExport}
+                tone="primary"
+                title={`두께(${p.siteReportThkLabel || "두께별"})별 · 동별/타입별 현장식 산출서 CSV. 세대수는 입면별 '세대수'로 곱합니다`}
+              />
               <BigBtn
                 icon={FileSpreadsheet}
                 label="Output"
                 onClick={p.onOpenOutput}
                 disabled={!p.canExport}
-                tone="success"
                 title="동·코어별 통합 물량 산출"
               />
             </Group>
