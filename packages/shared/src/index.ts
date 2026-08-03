@@ -7,9 +7,29 @@ export interface ElevTypeDef {
   id: string;
   name: string;
 }
+
+/**
+ * 층 그룹 — 층고가 다른 구간. 세대수 입력(ElevUnitCounts)과 같은 축이다.
+ *   low = 1~3F(저층부) · roof = 지붕층 · base = 기준층
+ */
+export type ElevFloorGroup = "low" | "roof" | "base";
+
+/**
+ * 층 그룹별 층고(mm). 층고가 다르면 단열재 나누기(행 구성)와 물량도 달라지므로
+ * 대표 입면 1개를 그룹 층고로 각각 전개해 물량을 낸다.
+ * 미입력(0/undefined) 항목은 상위로 폴백: 동 예외 → 전역 → 입면별 층고.
+ */
+export interface ElevFloorHeights {
+  low?: number;
+  roof?: number;
+  base?: number;
+}
+
 export interface ElevBuildingDef {
   id: string;
   name: string;
+  /** 이 동만 층고가 다를 때의 예외값(mm). 미입력 항목은 전역 층고를 따른다. */
+  floorHeights?: ElevFloorHeights;
 }
 export interface ElevUnitCounts {
   /** 1~3F */
@@ -29,6 +49,8 @@ export interface ElevTypeMatrix {
   types: ElevTypeDef[];
   /** 배분+세대수. key = `${buildingId}::${typeId}`. 키 존재 = 그 동에 그 타입 배분됨. */
   cells: Record<string, ElevUnitCounts>;
+  /** 프로젝트 공통 층 그룹별 층고(mm). 동별 예외는 buildings[].floorHeights. */
+  floorHeights?: ElevFloorHeights;
 }
 
 /** 복원용 직렬화 상태(schema_ver=1). walls/openings/presets/buildings 는 페이지 타입을 느슨히 담는다. */

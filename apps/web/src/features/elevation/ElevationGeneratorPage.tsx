@@ -86,6 +86,8 @@ import type {
   ElevBuildingDef,
   ElevTypeDef,
   ElevUnitCounts,
+  ElevFloorGroup,
+  ElevFloorHeights,
   ElevState,
 } from "./types";
 import {
@@ -96,7 +98,7 @@ import {
   useDeleteElevRevision,
   useDeleteElevProject,
 } from "./hooks";
-import { getElevRevision } from "./api";
+import { getElevRevision, fetchDxfText } from "./api";
 import OutputPanel from "./components/OutputPanel";
 import CadRibbon from "./components/CadRibbon";
 import CadStatusBar from "./components/CadStatusBar";
@@ -266,6 +268,17 @@ const DLG_TITLE: Record<
   openings: "오프닝 목록",
   layers: "도면층",
 };
+/**
+ * 층 그룹 — 세대수 입력(1~3F / 지붕 / 기준)과 같은 축.
+ * 층고가 그룹마다 다르면 나누기(행 구성)와 물량도 달라지므로, 대표 입면을
+ * 그룹 층고로 각각 전개해 세대수를 곱한다.
+ */
+const FLOOR_GROUPS: { key: ElevFloorGroup; label: string }[] = [
+  { key: "low", label: "1~3F" },
+  { key: "roof", label: "지붕층" },
+  { key: "base", label: "기준층" },
+];
+
 /** (동,타입) 셀 키 */
 const cellKey = (buildingId: string, typeId: string) => `${buildingId}::${typeId}`;
 let _idSeq = 0;
@@ -675,6 +688,30 @@ export default function ElevationGeneratorPage() {
       cells[key] = { ...(cells[key] ?? {}), [field]: val };
       return { ...m, cells };
     });
+  /** 전역 층 그룹 층고(mm) 설정 — 0/빈값이면 해제(상위 폴백) */
+  const setGroupHeight = (g: ElevFloorGroup, val: number) =>
+    setTypeMatrix(m => ({
+      ...m,
+      floorHeights: { ...(m.floorHeights ?? {}), [g]: val > 0 ? val : undefined },
+    }));
+  /** 동별 층고 예외(mm) — 0/빈값이면 해제(전역 층고를 따름) */
+  const setBuildingHeight = (bId: string, g: ElevFloorGroup, val: number) =>
+    setTypeMatrix(m => ({
+      ...m,
+      buildings: m.buildings.map(b =>
+        b.id === bId
+          ? {
+              ...b,
+              floorHeights: {
+                ...(b.floorHeights ?? {}),
+                [g]: val > 0 ? val : undefined,
+              },
+            }
+          : b
+      ),
+    }));
+  /** 화면(전개도·물량 요약)에 표시할 층 그룹 — 도면/산출서는 그룹별로 각각 계산 */
+  const [previewGroup, setPreviewGroup] = useState<ElevFloorGroup>("base");
   // 세그먼트 두께 지정 모드에서 선택된 변
   const [selectedSeg, setSelectedSeg] = useState<{
     wallId: string;
@@ -962,9 +999,8 @@ export default function ElevationGeneratorPage() {
         setLastDxfFile(null);
         setRawDxfText(null);
         if (dxfSignedUrl) {
-          const res = await fetch(dxfSignedUrl);
-          if (!res.ok) throw new Error(`도면 파일 다운로드 실패 (HTTP ${res.status})`);
-          const text = await res.text();
+          // gzip 으로 저장된 REV(.dxf.gz) 는 fetchDxfText 가 풀어서 준다
+          const text = await fetchDxfText(dxfSignedUrl);
           setRawDxfText(text); // 내보내기용 원본 DXF 보관
           setParsed(parseDxfText(text));
         } else if (revision.dxf_path) {
@@ -995,6 +1031,61 @@ export default function ElevationGeneratorPage() {
 
   const activeWall = walls.find(w => w.id === activeWallId) ?? null;
 
+  /**
+   * (입면, 층 그룹) → 실제 적용 층고(mm).
+   * 우선순위: 동별 예외 → 전역 층 그룹 → 입면별 층고(구 REV 동작 그대로).
+   * 층 그룹 층고를 한 번도 입력하지 않으면 기존과 완전히 동일하게 동작한다.
+   */
+  const floorHeightFor = useCallback(
+    (w: WallChain, g: ElevFloorGroup, buildingId?: string): number => {
+      const bId = buildingId ?? w.buildingId;
+      const bh = bId
+        ? typeMatrix.buildings.find(b => b.id === bId)?.floorHeights?.[g]
+        : undefined;
+      if (bh && bh > 0) return bh;
+      const gh = typeMatrix.floorHeights?.[g];
+      if (gh && gh > 0) return gh;
+      return w.floorHeight || defaultFloorHeight;
+    },
+    [typeMatrix, defaultFloorHeight]
+  );
+
+  /** 전역 층 그룹 층고 표시값 — 미입력이면 기본 층고를 보여준다 */
+  const groupHeightValue = (g: ElevFloorGroup) =>
+    typeMatrix.floorHeights?.[g] || defaultFloorHeight;
+
+  /** 층 그룹 층고를 실제로 쓰는 프로젝트인가 (미설정이면 기존 동작 그대로) */
+  const hasGroupHeights = useMemo(
+    () =>
+      FLOOR_GROUPS.some(g => (typeMatrix.floorHeights?.[g.key] ?? 0) > 0) ||
+      typeMatrix.buildings.some(b =>
+        FLOOR_GROUPS.some(g => (b.floorHeights?.[g.key] ?? 0) > 0)
+      ),
+    [typeMatrix]
+  );
+
+  /**
+   * 이 입면(타입)이 실제로 쓰이는 층 그룹 목록 — 매트릭스 세대수가 1 이상인 그룹.
+   * 세대수를 아직 안 넣었으면 화면에서 보고 있는 그룹 1개만 쓴다.
+   */
+  const activeGroupsFor = useCallback(
+    (w: WallChain): ElevFloorGroup[] => {
+      const used = new Set<ElevFloorGroup>();
+      if (w.typeId) {
+        for (const [key, counts] of Object.entries(typeMatrix.cells)) {
+          const [bId, tId] = key.split("::");
+          if (tId !== w.typeId) continue;
+          if (w.buildingId && bId !== w.buildingId) continue;
+          for (const g of FLOOR_GROUPS)
+            if ((counts?.[g.key] ?? 0) > 0) used.add(g.key);
+        }
+      }
+      const list = FLOOR_GROUPS.filter(g => used.has(g.key)).map(g => g.key);
+      return list.length > 0 ? list : [previewGroup];
+    },
+    [typeMatrix, previewGroup]
+  );
+
   // ── 세그먼트별 단열 스펙 정규화 (길이 = points.length-1, 폴백 포함) ──
   const resolveSegInsul = useCallback(
     (w: WallChain): SegInsul[] => {
@@ -1006,7 +1097,11 @@ export default function ElevationGeneratorPage() {
       const src = w.segInsul ?? [];
       return Array.from({ length: n }, (_, i) => {
         const s = src[i];
-        if (s && (s.skip || (s.ply1 > 0 && s.ply2 > 0))) return s;
+        // 2P=0(1겹만 시공: 간접외기 90T 단일겹 등)도 정상 값이다.
+        // 예전 조건(ply1>0 && ply2>0)은 2P=0 프리셋을 무효로 보고 기본 프리셋으로
+        // 되돌려서, 입면 목록에서 간접외기가 선택되지 않는 것처럼 보였다.
+        // (exposure 가 있으면 이 앱이 저장한 정상 값 — 편집 중 0 을 입력해도 되돌리지 않는다)
+        if (s && (s.skip || !!s.exposure || s.ply1 > 0 || s.ply2 > 0)) return s;
         // 레거시 폴백: 옛 단일 thickness → 1P=thickness, 2P=기본 프리셋 2P
         if (w.thickness && w.thickness > 0)
           return { ply1: w.thickness, ply2: def.ply2, exposure: "custom" };
@@ -1055,17 +1150,23 @@ export default function ElevationGeneratorPage() {
     w: WallChain,
     pts: Point2D[],
     isP2: boolean,
-    opsDevX: { x0: number; x1: number; y0: number; y1: number }[]
+    opsDevX: { x0: number; x1: number; y0: number; y1: number }[],
+    /** 이 전개에 쓸 층고(mm) — 층 그룹별로 다르게 전개할 때 주입 */
+    floorHeight: number
   ): DevelopPlyParams => {
     const segInsul = resolveSegInsul(w);
     // 실제 1P/2P 두께를 그대로 전달 — developPly 가 겹별로 골라 쓰고(segLapW),
     // 2P 인셋 계산 때 아래 겹(1P) 두께 s.ply1 이 필요하다.
     const thk = segInsul.map(s => ({ ply1: s.ply1, ply2: s.ply2 }));
-    const segSkip = segInsul.map(s => !!s.skip); // 배치 안함(선만 이음) 변
+    // 배치 안함(선만 이음) 변 + 이 겹의 두께가 0인 변(예: 간접외기 2P=0 → 1겹만 시공).
+    // 두께 0인 채로 타일링하면 "0T" 물량이 산출서에 잡히므로 겹 단위로 제외한다.
+    const segSkip = segInsul.map(
+      s => !!s.skip || (isP2 ? s.ply2 <= 0 : s.ply1 <= 0)
+    );
     return {
       points: pts,
       closed: w.closed,
-      wallHeight: w.floorHeight,
+      wallHeight: floorHeight,
       board: { length: boardLength, height: boardHeight, thickness: boardThickness },
       ply: isP2 ? 2 : 1, // 2P=창 물림, 1P=창 경계 절단
       segThickness: thk,
@@ -1115,12 +1216,15 @@ export default function ElevationGeneratorPage() {
   // 한 입면 → 1P(points) + 2P(points2P, 있으면) 전개. 물량은 두 겹 합산.
   //  · 2P 는 창을 물고 넘어가고, SP 를 훑어 1P 조인트와 결로 최소가 되게 엇갈림.
   const buildPlyDev = (
-    w: WallChain
+    w: WallChain,
+    /** 층 그룹 층고(mm). 미지정 시 화면에서 보고 있는 그룹 층고 */
+    floorHeightArg?: number
   ): {
     dev1: PlyDevelopment;
     dev2: PlyDevelopment | null;
     conflictSegs: JointSeg[];
   } => {
+    const floorHeight = floorHeightArg ?? floorHeightFor(w, previewGroup);
     const ops = openings.filter(o => o.wallId === w.id);
     const opsStruct = ops.map(o => ({
       x0: o.sAlong - o.width / 2,
@@ -1128,11 +1232,15 @@ export default function ElevationGeneratorPage() {
       y0: o.sill,
       y1: o.sill + o.height,
     }));
-    const p1 = makeParams(w, w.points, false, opsStruct);
+    const p1 = makeParams(w, w.points, false, opsStruct, floorHeight);
     const dev1 = optimizeSP ? developPlyMinBoards(p1).dev : developPly(p1);
 
     if (!w.points2P || w.points2P.length < 2)
       return { dev1, dev2: null, conflictSegs: [] };
+
+    // 모든 변이 2P=0(또는 배치 안함)이면 2P 겹 자체가 없다 → 빈 전개면/0T 물량 방지
+    const has2P = resolveSegInsul(w).some(s => !s.skip && s.ply2 > 0);
+    if (!has2P) return { dev1, dev2: null, conflictSegs: [] };
 
     // 2P는 1P와 '같은 벽 선·같은 개구부'로 전개한다.
     // 오프셋 선(w.points2P)을 별도 전개하면 오목부(노치)에서 선이 자기교차해
@@ -1141,7 +1249,7 @@ export default function ElevationGeneratorPage() {
     //   창은 1P와 같은 위치(코너 사이)에 남는다.
     // 2P 구분은 straddle(창 물림) + 조인트 엇갈림(아래 startOffset 스윕) + 2P 두께로 표현.
     // (파란 점선 w.points2P 는 평면에서 2P 시각 가이드로만 사용)
-    const p2 = makeParams(w, w.points, true, opsStruct);
+    const p2 = makeParams(w, w.points, true, opsStruct, floorHeight);
 
     const j1 = jointSegsOf(dev1);
     const L = boardLength;
@@ -1802,7 +1910,9 @@ export default function ElevationGeneratorPage() {
         perimeter: wallMetricsById.get(w.id)?.total ?? 0,
         cum: wallMetricsById.get(w.id)?.cum ?? [0],
       }))
-      .filter(c => c.perimeter > 0 && c.chain.floorHeight > 0);
+      .filter(
+        c => c.perimeter > 0 && floorHeightFor(c.chain, previewGroup) > 0
+      );
 
     if (chains.length === 0) {
       ctx.fillStyle = "#94a3b8";
@@ -1846,10 +1956,11 @@ export default function ElevationGeneratorPage() {
 
     const sheets: Sheet[] = [];
     chains.forEach((c, idx) => {
-      const fh = c.chain.floorHeight;
+      // 화면에는 선택한 층 그룹(저층/기준/지붕)의 층고로 전개를 그린다
+      const fh = floorHeightFor(c.chain, previewGroup);
       if (insulOn && c.chain.points.length >= 2) {
         // 한 입면 → 1P(그린 선) + 2P(있으면) 두 장. 물량은 합산.
-        const { dev1, dev2, conflictSegs } = buildPlyDev(c.chain);
+        const { dev1, dev2, conflictSegs } = buildPlyDev(c.chain, fh);
         sheets.push({
           kind: "ply",
           chain: c.chain,
@@ -2339,6 +2450,9 @@ export default function ElevationGeneratorPage() {
     selectedSeg,
     elevView,
     boardDetail,
+    // 층 그룹 층고 변경/전환 시 전개도를 다시 그린다
+    previewGroup,
+    floorHeightFor,
   ]);
 
   // ─── 휠 줌 (마우스 포인터 기준) ───
@@ -3250,11 +3364,18 @@ export default function ElevationGeneratorPage() {
    * 반환해 Multi export 가 각각 전개도로 쌓아 그린다(2P 도 DXF/SVG 에 포함).
    */
   const buildElevEntriesFor = (
-    w: WallChain
+    w: WallChain,
+    /** 이 전개의 층 그룹 — 층고가 그룹마다 다르면 나누기도 달라진다 */
+    group?: ElevFloorGroup
   ): (ElevationExportInput & { title?: string })[] => {
     const cum = wallMetricsById.get(w.id);
     if (!cum || cum.total <= 0) return [];
-    const floorHeight = w.floorHeight ?? defaultFloorHeight;
+    const floorHeight = floorHeightFor(w, group ?? previewGroup);
+    // 층 그룹 층고를 쓰는 프로젝트에서만 제목에 그룹·층고를 병기(구 REV 는 제목 그대로)
+    const gLabel =
+      group && hasGroupHeights
+        ? ` · ${FLOOR_GROUPS.find(x => x.key === group)?.label}(${Math.round(floorHeight)})`
+        : "";
     const openingsArr = openings
       .filter(o => o.wallId === w.id)
       .map(o => ({
@@ -3273,10 +3394,10 @@ export default function ElevationGeneratorPage() {
           floorHeight,
           wallCum: cum.cum,
           openings: openingsArr,
-          title: w.name,
+          title: `${w.name}${gLabel}`,
         },
       ];
-    const { dev1, dev2 } = buildPlyDev(w);
+    const { dev1, dev2 } = buildPlyDev(w, floorHeight);
     const segInsul = resolveSegInsul(w);
     const mk = (dev: PlyDevelopment, ply: number) => {
       // 창 위치를 이 겹의 전개좌표로 옮긴다(2P 는 코너 인셋만큼 이동).
@@ -3292,7 +3413,7 @@ export default function ElevationGeneratorPage() {
         floorHeight,
         wallCum: [0, ...dev.cornerXs, dev.baselineLength],
         openings: devOpenings,
-        title: `${w.name} · ${ply}P`,
+        title: `${w.name}${gLabel} · ${ply}P`,
         insulation: insulExportFromDev(dev, ply, segInsul),
       };
     };
@@ -3312,13 +3433,22 @@ export default function ElevationGeneratorPage() {
     ];
     let any = false;
     let grandBoards = 0;
-    for (const w of walls) {
-      if (w.points.length < 2) continue;
-      const { dev1, dev2 } = buildPlyDev(w);
+    // 층 그룹 층고를 쓰면 입면 × 층 그룹(1~3F/기준/지붕)마다 나누기가 달라 별도 표로 낸다
+    const jobs = walls
+      .filter(w => w.points.length >= 2)
+      .flatMap(w =>
+        (hasGroupHeights ? activeGroupsFor(w) : [null]).map(g => ({ w, g }))
+      );
+    for (const { w, g } of jobs) {
+      const fh = floorHeightFor(w, g ?? previewGroup);
+      const { dev1, dev2 } = buildPlyDev(w, fh);
       const cells = [...dev1.cells, ...(dev2?.cells ?? [])]; // 1P+2P 합산
       if (cells.length === 0) continue;
       any = true;
-      const name = w.name.replace(/,/g, " ");
+      const gLabel = g
+        ? ` ${FLOOR_GROUPS.find(x => x.key === g)?.label}(${Math.round(fh)})`
+        : "";
+      const name = `${w.name}${gLabel}`.replace(/,/g, " ");
 
       // 정척(온장) — 버림 제외
       const fulls = cells.filter(c => isFull(c) && !c.discarded);
@@ -3371,9 +3501,11 @@ export default function ElevationGeneratorPage() {
 
   /** 입면(단위세대) 1개의 두께별 물량 — EA(시공 조각 수)·면적(㎡). 1P+2P 합산 */
   const wallThicknessTally = (
-    w: WallChain
+    w: WallChain,
+    /** 층 그룹 층고(mm). 층고가 다르면 최상단 잘림 행이 달라져 물량도 달라진다 */
+    floorHeight?: number
   ): Map<number, { ea: number; areaM2: number }> => {
-    const { dev1, dev2 } = buildPlyDev(w);
+    const { dev1, dev2 } = buildPlyDev(w, floorHeight);
     const cells = [...dev1.cells, ...(dev2?.cells ?? [])].filter(
       c => !c.discarded
     );
@@ -3411,8 +3543,9 @@ export default function ElevationGeneratorPage() {
 
   /**
    * 현장식 산출서 CSV — 두께(50T/90T/…)별로 나눠 산출.
-   *  ① 단위세대 타입별 단열재 수량 (개수 EA · 면적 M2)
-   *  ② 동별 집계표 (단위세대 물량 × 세대수[1~3F+지붕층+기준층])
+   *  ① 단위세대 타입 × 층 그룹별 단열재 수량 (개수 EA · 면적 M2)
+   *  ② 동별 집계표 (층 그룹별 단위세대 물량 × 그 그룹 세대수 합)
+   * 층고가 그룹마다 다르면 나누기·물량이 달라지므로 그룹 층고로 각각 전개해 집계한다.
    * 두께 열은 실제 등장하는 두께로 자동 구성.
    */
   const handleExportSiteReportCsv = () => {
@@ -3422,25 +3555,39 @@ export default function ElevationGeneratorPage() {
       return;
     }
     const esc = (s: string) => (s ?? "").replace(/,/g, " ");
-    // 입면 tally 캐시(입면당 buildPlyDev 1회)
+    // 입면×층고 tally 캐시 (같은 층고면 재사용)
     const tallyCache = new Map<string, Map<number, { ea: number; areaM2: number }>>();
-    const tallyOf = (w: WallChain | null) => {
+    const tallyOf = (w: WallChain | null, fh: number) => {
       if (!w) return null;
-      const c = tallyCache.get(w.id);
+      const key = `${w.id}|${Math.round(fh)}`;
+      const c = tallyCache.get(key);
       if (c) return c;
-      const m = wallThicknessTally(w);
-      tallyCache.set(w.id, m);
+      const m = wallThicknessTally(w, fh);
+      tallyCache.set(key, m);
       return m;
     };
+    /** (셀 소스 입면, 층 그룹) → 그 그룹 층고로 낸 tally */
+    const tallyForGroup = (
+      w: WallChain | null,
+      g: ElevFloorGroup,
+      buildingId?: string
+    ) => (w ? tallyOf(w, floorHeightFor(w, g, buildingId)) : null);
 
-    // 두께 열: 모든 타입 대표 + (동,타입) 셀 소스 입면의 두께 union
+    // 두께 열: 모든 타입 대표 + (동,타입) 셀 소스 입면의 두께 union (그룹 무관하게 동일)
     const thkSet = new Set<number>();
-    for (const t of typeMatrix.types)
-      tallyOf(repElevByType(t.id))?.forEach((_, k) => thkSet.add(k));
+    for (const t of typeMatrix.types) {
+      const rep = repElevByType(t.id);
+      if (rep)
+        for (const g of activeGroupsFor(rep))
+          tallyForGroup(rep, g)?.forEach((_, k) => thkSet.add(k));
+    }
     for (const b of typeMatrix.buildings)
       for (const t of typeMatrix.types) {
         if (!typeMatrix.cells[cellKey(b.id, t.id)]) continue;
-        tallyOf(elevForCell(b.id, t.id))?.forEach((_, k) => thkSet.add(k));
+        const src = elevForCell(b.id, t.id);
+        if (src)
+          for (const g of FLOOR_GROUPS)
+            tallyForGroup(src, g.key, b.id)?.forEach((_, k) => thkSet.add(k));
       }
     const thks = [...thkSet].sort((a, b) => a - b);
     const eaCols = thks.map(t => `${t}T 개수(EA)`).join(",");
@@ -3449,26 +3596,35 @@ export default function ElevationGeneratorPage() {
     const rows: string[] = [];
     const missing: string[] = [];
 
-    // ── ① 단위세대 타입별 단열재 수량 (대표 입면 1세대 기준) ──
+    // ── ① 단위세대 타입 × 층 그룹별 단열재 수량 (대표 입면 1세대 기준) ──
     rows.push("[단위세대 타입별 단열재 수량]");
-    rows.push(`단위세대 타입,${eaCols},${arCols}`);
+    rows.push(`단위세대 타입,층 그룹,층고(mm),${eaCols},${arCols}`);
     for (const t of typeMatrix.types) {
-      const tally = tallyOf(repElevByType(t.id));
-      if (!tally) {
+      const rep = repElevByType(t.id);
+      if (!rep) {
         missing.push(t.name);
         const dash = thks.map(() => "-").join(",");
-        rows.push(`${esc(t.name)},${dash},${dash}`);
+        rows.push(`${esc(t.name)},-,-,${dash},${dash}`);
         continue;
       }
-      const ea = thks.map(x => tally.get(x)?.ea ?? 0);
-      const ar = thks.map(x => (tally.get(x)?.areaM2 ?? 0).toFixed(2));
-      rows.push(`${esc(t.name)},${ea.join(",")},${ar.join(",")}`);
+      for (const g of activeGroupsFor(rep)) {
+        const fh = floorHeightFor(rep, g);
+        const tally = tallyOf(rep, fh);
+        const gLabel = FLOOR_GROUPS.find(x => x.key === g)?.label ?? g;
+        const ea = thks.map(x => tally?.get(x)?.ea ?? 0);
+        const ar = thks.map(x => (tally?.get(x)?.areaM2 ?? 0).toFixed(2));
+        rows.push(
+          `${esc(t.name)},${gLabel},${Math.round(fh)},${ea.join(",")},${ar.join(",")}`
+        );
+      }
     }
     rows.push("");
 
-    // ── ② 동별 단열재 집계표 (매트릭스 세대수 곱) ──
+    // ── ② 동별 단열재 집계표 (층 그룹별 물량 × 그 그룹 세대수) ──
     rows.push("[동별 단열재 집계표]");
-    rows.push(`동,단위세대 타입,1~3F,지붕층,기준층,세대수,${arCols}`);
+    rows.push(
+      `동,단위세대 타입,1~3F,지붕층,기준층,세대수,층고(1~3F/지붕/기준),${arCols}`
+    );
     const grand = new Map<number, number>();
     let grandUnits = 0;
     for (const b of typeMatrix.buildings) {
@@ -3481,19 +3637,33 @@ export default function ElevationGeneratorPage() {
         const total = low + roof + base;
         if (total === 0) continue;
         grandUnits += total;
-        const tally = tallyOf(elevForCell(b.id, t.id));
+        const src = elevForCell(b.id, t.id);
+        // 그룹마다 층고가 다르므로 그룹별 물량 × 그 그룹 세대수 를 더한다
+        const byThk = new Map<number, number>();
+        for (const g of FLOOR_GROUPS) {
+          const n = counts[g.key] ?? 0;
+          if (n <= 0) continue;
+          const tally = tallyForGroup(src, g.key, b.id);
+          if (!tally) continue;
+          tally.forEach((v, k) =>
+            byThk.set(k, (byThk.get(k) ?? 0) + v.areaM2 * n)
+          );
+        }
+        const fhLabel = FLOOR_GROUPS.map(g =>
+          src ? Math.round(floorHeightFor(src, g.key, b.id)) : "-"
+        ).join("/");
         const ar = thks.map(x => {
-          const a = (tally?.get(x)?.areaM2 ?? 0) * total;
+          const a = byThk.get(x) ?? 0;
           grand.set(x, (grand.get(x) ?? 0) + a);
-          return tally ? a.toFixed(1) : "-";
+          return src ? a.toFixed(1) : "-";
         });
         rows.push(
-          `${esc(b.name)},${esc(t.name)},${low},${roof},${base},${total},${ar.join(",")}`
+          `${esc(b.name)},${esc(t.name)},${low},${roof},${base},${total},${fhLabel},${ar.join(",")}`
         );
       }
     }
     rows.push(
-      `합계,,,,,${grandUnits},${thks.map(t => (grand.get(t) ?? 0).toFixed(1)).join(",")}`
+      `합계,,,,,${grandUnits},,${thks.map(t => (grand.get(t) ?? 0).toFixed(1)).join(",")}`
     );
 
     if (missing.length > 0)
@@ -3505,11 +3675,23 @@ export default function ElevationGeneratorPage() {
     downloadText(`${exportBase}_현장산출서.csv`, csv, "text/csv");
   };
 
-  /** 단일 체인 DXF 추출 — insulOn 이면 1P·2P 두 장 stack */
+  /**
+   * 한 입면 → 출력 엔트리 전체.
+   * 층 그룹 층고를 쓰면 세대수가 있는 그룹마다(1~3F/기준/지붕) 전개를 따로 만든다.
+   * 층고가 다르면 나누기(행 구성)가 달라지므로 도면도 그룹 수만큼 나온다.
+   */
+  const buildElevEntriesAllGroups = (
+    w: WallChain
+  ): (ElevationExportInput & { title?: string })[] => {
+    if (!hasGroupHeights) return buildElevEntriesFor(w);
+    return activeGroupsFor(w).flatMap(g => buildElevEntriesFor(w, g));
+  };
+
+  /** 단일 체인 DXF 추출 — insulOn 이면 1P·2P 두 장 stack (층 그룹별로 반복) */
   const handleExportDxfFor = (wallId: string) => {
     const w = walls.find(x => x.id === wallId);
     if (!w) return;
-    const chains = buildElevEntriesFor(w);
+    const chains = buildElevEntriesAllGroups(w);
     if (chains.length === 0) return;
     const dxf = buildElevationDxfMulti({ chains });
     downloadText(
@@ -3523,7 +3705,7 @@ export default function ElevationGeneratorPage() {
   const handleExportSvgFor = (wallId: string) => {
     const w = walls.find(x => x.id === wallId);
     if (!w) return;
-    const chains = buildElevEntriesFor(w);
+    const chains = buildElevEntriesAllGroups(w);
     if (chains.length === 0) return;
     const svg = buildElevationSvgMulti({ chains });
     downloadText(
@@ -3535,7 +3717,7 @@ export default function ElevationGeneratorPage() {
 
   /** 모든 입면을 한 파일에 통합 출력 (입면마다 1P·2P 위/아래로 stack) */
   const handleExportCombined = (kind: "dxf" | "svg") => {
-    const chains = walls.flatMap(buildElevEntriesFor);
+    const chains = walls.flatMap(buildElevEntriesAllGroups);
     if (chains.length === 0) return;
     if (kind === "dxf") {
       const dxf = buildElevationDxfMulti({ chains });
@@ -3582,6 +3764,7 @@ export default function ElevationGeneratorPage() {
     [
       walls, openings, boardLength, boardHeight, boardThickness, placement,
       discardWidth, constructMinW, minPieceWidth, optimizeSP, minJointGap, defaultFloorHeight, insulOn, plyInward, exposurePresets, typeMatrix,
+      previewGroup,
     ]
   );
 
@@ -3590,7 +3773,7 @@ export default function ElevationGeneratorPage() {
     const idSet = new Set(ids);
     const chains = walls
       .filter(w => idSet.has(w.id))
-      .flatMap(buildElevEntriesFor);
+      .flatMap(buildElevEntriesAllGroups);
     if (chains.length === 0) return null;
     return buildElevationDxfMulti({ chains });
   };
@@ -3682,14 +3865,40 @@ export default function ElevationGeneratorPage() {
           onOpenOutput={() => setOutputOpen(true)}
           canExport={canExport}
           floorHeightInput={
-            <NumberInput
-              value={defaultFloorHeight}
-              onChange={setDefaultFloorHeight}
-              suffix="mm"
-              step={50}
-              min={1000}
-              max={6000}
-            />
+            // 층 그룹(1~3F/지붕/기준)별 층고 — 선택한 그룹 기준으로 화면 전개도가 그려지고,
+            // 도면·산출서는 세대수가 있는 그룹마다 각각 계산된다.
+            <div className="flex flex-col gap-1">
+              <div className="flex gap-0.5">
+                {FLOOR_GROUPS.map(g => (
+                  <button
+                    key={g.key}
+                    type="button"
+                    onClick={() => setPreviewGroup(g.key)}
+                    title={`${g.label} 층고 편집 · 화면 전개도를 이 층고로 표시`}
+                    className={cn(
+                      "flex-1 rounded border px-1 py-[2px] text-[10px] font-medium transition-colors",
+                      previewGroup === g.key
+                        ? "border-[#7fb3e0] bg-[#cfe3f7] text-[#0a4a86]"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                    )}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+              <NumberInput
+                value={groupHeightValue(previewGroup)}
+                onChange={v => {
+                  setGroupHeight(previewGroup, v);
+                  // 기준층 층고는 새 입면의 기본 층고로도 쓴다
+                  if (previewGroup === "base") setDefaultFloorHeight(v);
+                }}
+                suffix="mm"
+                step={50}
+                min={1000}
+                max={6000}
+              />
+            </div>
           }
           onResetAll={resetAll}
           onOpenDialog={k => setDlg(k)}
@@ -4471,8 +4680,33 @@ export default function ElevationGeneratorPage() {
                       <div className="max-h-64 overflow-auto rounded border border-slate-200 divide-y divide-slate-200">
                         {typeMatrix.buildings.map(b => (
                           <div key={b.id} className="p-1">
-                            <div className="text-[10.5px] font-bold text-[#004791] px-1 pb-0.5">
-                              {b.name}
+                            <div className="flex items-center gap-1 px-1 pb-0.5">
+                              <span className="text-[10.5px] font-bold text-[#004791] shrink-0">
+                                {b.name}
+                              </span>
+                              {/* 이 동만 층고가 다를 때 예외 입력 — 비우면 전역 층고를 따른다 */}
+                              <span className="text-[9px] text-slate-400 shrink-0">
+                                층고예외
+                              </span>
+                              {FLOOR_GROUPS.map(g => (
+                                <input
+                                  key={g.key}
+                                  type="number"
+                                  min={0}
+                                  step={50}
+                                  value={b.floorHeights?.[g.key] ?? ""}
+                                  placeholder={String(groupHeightValue(g.key))}
+                                  onChange={e =>
+                                    setBuildingHeight(
+                                      b.id,
+                                      g.key,
+                                      Number(e.target.value) || 0
+                                    )
+                                  }
+                                  title={`${b.name} ${g.label} 층고(mm) — 비우면 전역 ${groupHeightValue(g.key)}mm`}
+                                  className="w-12 border border-slate-200 rounded px-1 h-5 bg-white text-slate-700 tabular-nums text-[9.5px] placeholder:text-slate-300"
+                                />
+                              ))}
                             </div>
                             {typeMatrix.types.map(t => {
                               const key = cellKey(b.id, t.id);
@@ -4577,6 +4811,10 @@ export default function ElevationGeneratorPage() {
                       <p className="text-[9px] text-slate-500">
                         체크=그 동에 타입 배분 · 물량은 타입 대표 입면 1세대 ×
                         세대수. '동전용'은 그 동+타입으로 그린 입면이 덮어씀.
+                        <br />
+                        층고예외 3칸(1~3F/지붕/기준)은 그 동만 층고가 다를 때
+                        입력 — 비우면 상단 리본의 층 그룹 층고를 따릅니다. 층고가
+                        다르면 나누기도·물량이 그룹별로 각각 산출됩니다.
                       </p>
                     </div>
                   )}
@@ -4697,6 +4935,17 @@ export default function ElevationGeneratorPage() {
                         />
                       }
                     />
+                    {hasGroupHeights && (
+                      // 층 그룹 층고를 쓰면 그쪽이 우선 — 이 입면에 실제 적용되는 값을 보여준다
+                      <p className="col-span-2 text-[9px] text-slate-500">
+                        층 그룹 층고 적용 중 —{" "}
+                        {FLOOR_GROUPS.map(
+                          g =>
+                            `${g.label} ${Math.round(floorHeightFor(w, g.key))}`
+                        ).join(" · ")}
+                        mm (위 층고는 그룹 미설정 시에만 사용)
+                      </p>
+                    )}
                     {insulOn && (
                       <div className="col-span-2 flex items-center gap-1.5">
                         <button
@@ -5350,6 +5599,10 @@ export default function ElevationGeneratorPage() {
                       d: "우측 '동·타입 설정'에서 동(401~405)과 타입을 등록하고, '입면 목록'에서 각 입면에 동·타입을 지정합니다.",
                     },
                     {
+                      t: "층고(층 그룹)",
+                      d: "상단 '설정 > 층고'에서 1~3F·지붕층·기준층을 골라 각각의 층고를 입력합니다. 선택한 그룹 층고로 화면 전개도가 그려지고, 도면(DXF/SVG)과 산출서는 세대수가 있는 그룹마다 따로 계산됩니다. 특정 동만 층고가 다르면 '동·타입 설정'의 동 옆 '층고예외' 칸에 입력하세요.",
+                    },
+                    {
                       t: "오프닝(창·문) 배치",
                       d: "'오프닝 프리셋'에서 창·문을 고르고(치수 직접 수정 가능) '프리셋 배치' 모드로 벽 위를 클릭합니다. 평면의 창호 라벨(예: 18×11.8)을 클릭하면 폭·높이 자동 인식, '창호 자동'으로 일괄 배치도 가능합니다.",
                     },
@@ -5704,7 +5957,7 @@ export default function ElevationGeneratorPage() {
           wallCount={walls.length}
           openingCount={openings.length}
           scale={scale}
-          floorHeight={defaultFloorHeight}
+          floorHeight={groupHeightValue(previewGroup)}
           hint={
             mode === "trace"
               ? "트레이싱 — 외벽선을 순서대로 클릭 · 더블클릭/입면 확정으로 종료 (Esc 취소)"
