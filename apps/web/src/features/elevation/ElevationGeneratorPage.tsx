@@ -4973,30 +4973,39 @@ export default function ElevationGeneratorPage() {
                         먼저 <b>동·타입 설정</b>에서 타입을 만들면 여기서 선택할 수 있습니다.
                       </p>
                     )}
-                    <LabelInput
-                      label="층고"
-                      control={
-                        <NumberInput
-                          value={w.floorHeight}
-                          onChange={v =>
-                            updateChain(w.id, { floorHeight: v })
-                          }
-                          suffix="mm"
-                          step={50}
-                          compact
-                        />
-                      }
-                    />
-                    {hasGroupHeights && (
-                      // 층 그룹 층고를 쓰면 그쪽이 우선 — 이 입면에 실제 적용되는 값을 보여준다
-                      <p className="col-span-2 text-[9px] text-slate-500">
-                        층 그룹 층고 적용 중 —{" "}
-                        {FLOOR_GROUPS.map(
-                          g =>
-                            `${g.label} ${Math.round(floorHeightFor(w, g.key))}`
-                        ).join(" · ")}
-                        mm (위 층고는 그룹 미설정 시에만 사용)
-                      </p>
+                    {/* 층고는 '층 그룹'이 원천 — 그룹 층고를 쓰면 입면별 입력을 숨기고
+                        적용값만 읽기 전용으로 보여준다(어느 값이 적용되는지 헷갈리지 않게). */}
+                    {hasGroupHeights ? (
+                      <div className="col-span-2 rounded border border-slate-200 bg-slate-50 px-1.5 py-1">
+                        <div className="text-[9.5px] text-slate-400 font-semibold uppercase">
+                          층고 (층 그룹)
+                        </div>
+                        <div className="text-[10.5px] text-slate-700 tabular-nums">
+                          {FLOOR_GROUPS.map(
+                            g =>
+                              `${g.label} ${Math.round(floorHeightFor(w, g.key))}`
+                          ).join(" · ")}
+                          mm
+                        </div>
+                        <div className="text-[9px] text-slate-500">
+                          리본 '설정 &gt; 층고'에서 변경 · 동별 예외는 '동·타입 설정'
+                        </div>
+                      </div>
+                    ) : (
+                      <LabelInput
+                        label="층고"
+                        control={
+                          <NumberInput
+                            value={w.floorHeight}
+                            onChange={v =>
+                              updateChain(w.id, { floorHeight: v })
+                            }
+                            suffix="mm"
+                            step={50}
+                            compact
+                          />
+                        }
+                      />
                     )}
                     {insulOn && (
                       <div className="col-span-2 flex items-center gap-1.5">
