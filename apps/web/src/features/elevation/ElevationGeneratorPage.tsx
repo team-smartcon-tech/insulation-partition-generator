@@ -2014,10 +2014,13 @@ export default function ElevationGeneratorPage() {
     });
 
     const padX = 60;
-    const padTopHeader = 22;
+    // 시트가 많으면(입면 × 겹 × 층 그룹) 고정 여백이 화면 높이를 다 먹어
+    // 도면이 납작해지고 글자만 남아 겹친다 → 장수가 많을수록 여백을 줄인다.
+    const dense = sheets.length > 4;
+    const padTopHeader = dense ? 15 : 22;
     // 입면 사이 간격 — 하단 m눈금·[물량] 라벨·다음 입면 헤더가 모두 이 안에 그려지므로
     // 36px 에서는 서로 붙어 보였다 → 72px 로 확대 (2026-07 현장 요청)
-    const padBetween = 72;
+    const padBetween = dense ? 36 : 72;
     const padBottom = 24;
     const maxBaseLen = Math.max(1, ...sheets.map(sh => sh.baseLen));
     const sumHeights = sheets.reduce((a, sh) => a + sh.fh, 0);
@@ -2031,7 +2034,19 @@ export default function ElevationGeneratorPage() {
       padBottom;
     const sx = availW / maxBaseLen;
     const sy = availH / Math.max(1, sumHeights);
-    const s = Math.max(0.0001, Math.min(sx, sy));
+    // 세로로 다 안 들어가도 시트 한 장은 최소 높이를 확보한다.
+    // 억지로 화면에 다 욱여넣으면 도면이 선처럼 눌리고 글자가 서로 겹쳐 못 읽는다
+    // → 넘치는 분량은 드래그(팬)로 내려 본다.
+    const MIN_SHEET_PX = 72;
+    const maxFh = Math.max(1, ...sheets.map(sh => sh.fh));
+    const s = Math.max(0.0001, Math.min(sx, Math.max(sy, MIN_SHEET_PX / maxFh)));
+    // 화면 밖으로 넘치면 아래에 더 있다는 안내를 그린다(팬 유도)
+    const contentH =
+      sheets.reduce((a, sh) => a + sh.fh * s, 0) +
+      padTopHeader * sheets.length +
+      padBetween * Math.max(0, sheets.length - 1) +
+      padBottom;
+    const overflows = contentH > ch + 1;
 
     let cursorY = padTopHeader; // 위에서부터 그림
     for (const sheet of sheets) {
@@ -2072,6 +2087,7 @@ export default function ElevationGeneratorPage() {
           ? `${nameWithGroup} · ${sheet.ply === 2 ? "2P(외측)" : "1P(내측)"} · 전개 ${(baseLen / 1000).toFixed(2)}m · 보드 ${boardLength}×${boardHeight} · 층고 ${fh}mm`
           : `${nameWithGroup}  ·  둘레 ${(baseLen / 1000).toFixed(2)}m  ·  층고 ${fh}mm`;
       ctx.fillText(header, offX, offY - 4);
+      const headerW = ctx.measureText(header).width; // 우측 요약과 겹치는지 판정용
 
       // 가로 그리드 500mm
       ctx.strokeStyle = "#e2e8f0";
@@ -2354,17 +2370,19 @@ export default function ElevationGeneratorPage() {
             }
           } else {
             // 좁은 조각: 원 없이 번호만. 세로로 길면 회전해서 표시(빠지지 않게)
+            // 조각 폭보다 글자가 길면 옆 조각을 덮어 "온장온장온장" 처럼 겹치므로 생략한다.
             ctx.fillStyle = color;
             if (wpx < hpx && wpx < 22 && hpx > 24) {
               ctx.save();
               ctx.translate(cx, cy);
               ctx.rotate(-Math.PI / 2);
               ctx.font = `bold ${Math.max(7, Math.min(11, hpx * 0.05 + 6))}px 'Noto Sans KR', sans-serif`;
-              ctx.fillText(label, 0, 0);
+              if (ctx.measureText(label).width <= hpx - 2) ctx.fillText(label, 0, 0);
               ctx.restore();
             } else {
               ctx.font = `bold ${Math.max(6, Math.min(10, Math.min(wpx, hpx) * 0.5))}px 'Noto Sans KR', sans-serif`;
-              ctx.fillText(label, cx, cy);
+              if (ctx.measureText(label).width <= wpx - 2)
+                ctx.fillText(label, cx, cy);
             }
           }
         });
@@ -2419,14 +2437,16 @@ export default function ElevationGeneratorPage() {
         ctx.font = `bold ${metaFont}px 'Noto Sans KR', sans-serif`;
         ctx.textAlign = "right";
         ctx.textBaseline = "bottom";
-        ctx.fillText(
+        // 헤더(좌)와 요약(우)이 한 줄을 나눠 쓰므로, 폭이 모자라면 요약을 짧게 줄인다
+        const sumFull =
           `주문 ${sum.orderBoardCount}판 (온장 ${sum.fullCount} + 절단판 ${sum.cutBoardCount}) · 조각 ${sum.totalCount} · ${sum.totalAreaM2.toFixed(2)}㎡` +
-            (sum.discardedCount > 0
-              ? ` · 버림 ${sum.discardedCount}개(${sum.discardedAreaM2.toFixed(2)}㎡)`
-              : ""),
-          ex(baseLen),
-          offY - 4
-        );
+          (sum.discardedCount > 0
+            ? ` · 버림 ${sum.discardedCount}개(${sum.discardedAreaM2.toFixed(2)}㎡)`
+            : "");
+        const sumShort = `주문 ${sum.orderBoardCount}판 · ${sum.totalAreaM2.toFixed(1)}㎡`;
+        const fits =
+          headerW + ctx.measureText(sumFull).width + 16 <= widthPx;
+        ctx.fillText(fits ? sumFull : sumShort, ex(baseLen), offY - 4);
         // 하단: 규격별 수량 (정척·절단). 너무 많으면 상위 8종만
         const MAX_TALLY = 8;
         const shown = sum.tallies.slice(0, MAX_TALLY);
@@ -2466,6 +2486,20 @@ export default function ElevationGeneratorPage() {
       }
 
       cursorY += heightPx + padBetween;
+    }
+
+    // 화면 밖으로 넘치면 팬으로 볼 수 있다는 안내 (화면 고정 좌표 — 줌/팬 변환 해제)
+    if (overflows) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const msg = "▼ 아래에 입면이 더 있습니다 — 드래그로 이동 · 휠로 축소";
+      ctx.font = "bold 10px 'Noto Sans KR', sans-serif";
+      const tw = ctx.measureText(msg).width;
+      ctx.fillStyle = "rgba(15,23,42,0.72)";
+      ctx.fillRect(cw - tw - 22, ch - 26, tw + 14, 18);
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(msg, cw - tw - 15, ch - 17);
     }
   }, [
     walls,
