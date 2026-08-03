@@ -291,6 +291,52 @@ function emitInsulationSvg(
 // ───────────────────────── DXF ─────────────────────────
 
 /**
+ * DXF TEXT 를 CAD 에서 읽을 수 있는 ASCII 로 정규화한다.
+ *
+ * R12 ASCII DXF + SHX 폰트에서는 한글·기호가 `?????` 로 깨져 나온다.
+ * 앱이 쓰는 한국어 라벨은 영문으로 바꾸고, 남은 비ASCII(사용자가 지은 한글 이름 등)는
+ * 제거한다. SVG 는 UTF-8 이라 한글 그대로 나가므로 이 함수는 DXF 에만 쓴다.
+ */
+const DXF_WORDS: [RegExp, string][] = [
+  [/입면/g, "ELEV"],
+  [/기준층/g, "BASE"],
+  [/지붕층/g, "ROOF"],
+  [/저층/g, "LOW"],
+  [/내측/g, "IN"],
+  [/외측/g, "OUT"],
+  [/직접외기/g, "DIRECT"],
+  [/간접외기/g, "INDIRECT"],
+  [/커스텀/g, "CUSTOM"],
+  [/배치안함|배치 안함/g, "SKIP"],
+  [/층고/g, "FH"],
+  [/전개/g, "DEV"],
+  [/둘레/g, "PERIM"],
+  [/보드/g, "BOARD"],
+  [/온장/g, "FULL"],
+  [/절단/g, "CUT"],
+  [/버림/g, "WASTE"],
+  [/주문/g, "ORDER"],
+  [/조각/g, "PCS"],
+  [/판/g, "BD"],
+];
+export function dxfAscii(str: string): string {
+  let s = String(str ?? "");
+  for (const [re, en] of DXF_WORDS) s = s.replace(re, en);
+  s = s
+    .replace(/[·・]/g, "-")
+    .replace(/[×✕]/g, "x")
+    .replace(/㎡/g, "m2")
+    .replace(/…/g, "...")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[〜～]/g, "~")
+    .replace(/[^\x20-\x7E]/g, "") // 남은 비ASCII 제거
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return s || "-"; // 전부 한글이던 이름이 비면 빈 TEXT 대신 하이픈
+}
+
+/**
  * AutoCAD R12 호환 최소 DXF 생성.
  * 한국어 TEXT 는 R12 SHX 폰트 호환성이 떨어져 영문/숫자 라벨만 출력한다.
  */
@@ -327,7 +373,7 @@ export function buildElevationDxf(input: ElevationExportInput): string {
     push(20, y);
     push(30, 0);
     push(40, height);
-    push(1, str);
+    push(1, dxfAscii(str)); // 한글/기호는 CAD 에서 깨지므로 ASCII 로 정규화
   };
 
   // ── 헤더 ──
@@ -618,7 +664,7 @@ export function buildElevationDxfMulti(input: ElevationStackInput): string {
     push(20, y);
     push(30, 0);
     push(40, height);
-    push(1, str);
+    push(1, dxfAscii(str)); // 한글/기호는 CAD 에서 깨지므로 ASCII 로 정규화
   };
 
   // 헤더
@@ -665,7 +711,10 @@ export function buildElevationDxfMulti(input: ElevationStackInput): string {
     const { perimeter, floorHeight, wallCum, openings } = c;
     if (perimeter <= 0 || floorHeight <= 0) return;
     const dy = yCursor;
-    const titleStr = c.title ?? `Elevation ${idx + 1}`;
+    // 제목은 text() 가 ASCII 로 정규화한다. 이름이 전부 한글이라 남는 글자가 없으면
+    // 빈 제목 대신 순번을 쓴다(어느 입면인지 도면에서 구분되게).
+    const rawTitle = c.title ?? `Elevation ${idx + 1}`;
+    const titleStr = dxfAscii(rawTitle) === "-" ? `ELEV ${idx + 1}` : rawTitle;
 
     // 제목 (영문/숫자만 안전 — 한글은 R12 SHX 에서 ?로 나올 수 있음)
     text(0, dy + floorHeight + 250, 150, titleStr, "ELEV_TEXT");
