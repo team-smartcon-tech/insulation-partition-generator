@@ -577,7 +577,7 @@ export default function CadRibbon(p: CadRibbonProps) {
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                   층고 (층 그룹별)
                 </span>
-                <div className="w-[132px]">{p.floorHeightInput}</div>
+                <div className="w-[200px]">{p.floorHeightInput}</div>
               </div>
             </Group>
 

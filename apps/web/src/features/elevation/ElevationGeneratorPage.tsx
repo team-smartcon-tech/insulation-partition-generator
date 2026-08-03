@@ -3911,40 +3911,45 @@ export default function ElevationGeneratorPage() {
                   </button>
                 ))}
               </div>
-              <NumberInput
-                value={groupHeightValue(previewGroup)}
-                onChange={v => {
-                  setGroupHeight(previewGroup, v);
-                  // 기준층 층고는 새 입면의 기본 층고로도 쓴다
-                  if (previewGroup === "base") setDefaultFloorHeight(v);
-                }}
-                suffix="mm"
-                step={50}
-                min={1000}
-                max={6000}
-              />
-              <label
-                className={cn(
-                  "flex items-center gap-1 text-[10px]",
-                  hasGroupHeights
-                    ? "text-slate-600 cursor-pointer"
-                    : "text-slate-400 cursor-not-allowed"
-                )}
-                title={
-                  hasGroupHeights
-                    ? "전개 입면에 층 그룹(세대수가 있는 그룹)을 모두 쌓아 표시"
-                    : "층 그룹별 층고를 먼저 입력하세요"
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={showAllGroups}
-                  disabled={!hasGroupHeights}
-                  onChange={e => setShowAllGroups(e.target.checked)}
-                  className="accent-[#004791]"
-                />
-                전부 표시
-              </label>
+              {/* 리본 높이(96px)가 빠듯해 층고 입력과 '전부 표시'를 한 줄에 둔다 */}
+              <div className="flex items-center gap-1.5">
+                <div className="w-[118px] shrink-0">
+                  <NumberInput
+                    value={groupHeightValue(previewGroup)}
+                    onChange={v => {
+                      setGroupHeight(previewGroup, v);
+                      // 기준층 층고는 새 입면의 기본 층고로도 쓴다
+                      if (previewGroup === "base") setDefaultFloorHeight(v);
+                    }}
+                    suffix="mm"
+                    step={50}
+                    min={1000}
+                    max={6000}
+                  />
+                </div>
+                <label
+                  className={cn(
+                    "flex items-center gap-1 whitespace-nowrap text-[10px]",
+                    hasGroupHeights
+                      ? "cursor-pointer text-slate-600"
+                      : "cursor-not-allowed text-slate-400"
+                  )}
+                  title={
+                    hasGroupHeights
+                      ? "전개 입면에 층 그룹(세대수가 있는 그룹)을 모두 쌓아 표시"
+                      : "층 그룹별 층고를 먼저 입력하세요"
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={showAllGroups}
+                    disabled={!hasGroupHeights}
+                    onChange={e => setShowAllGroups(e.target.checked)}
+                    className="accent-[#004791]"
+                  />
+                  전부 표시
+                </label>
+              </div>
             </div>
           }
           onResetAll={resetAll}
