@@ -382,13 +382,25 @@ app.post("/api/elevation-projects/:projectId/revisions", async (c) => {
       if (file.size > 90 * 1024 * 1024) {
         return c.json({ error: "DXF 파일은 90MB 이하여야 합니다." }, 413);
       }
-      const objectPath = `elevation/${projectId}/${revId}.dxf`;
+      // 클라이언트가 gzip 으로 압축해 보냈으면 .dxf.gz 로 저장(불러올 때 매직넘버로 판별해 해제)
+      const gzip = form.get("dxfGzip") === "1";
+      const objectPath = `elevation/${projectId}/${revId}.dxf${gzip ? ".gz" : ""}`;
       const buf = await file.arrayBuffer();
-      await storageUpload(c.env, bucket, objectPath, buf, file.type || "application/dxf");
+      await storageUpload(
+        c.env,
+        bucket,
+        objectPath,
+        buf,
+        gzip ? "application/gzip" : file.type || "application/dxf",
+      );
       dxfPath = objectPath;
       dxfBucketCol = bucket;
-      dxfName = file.name;
-      dxfSize = file.size;
+      // 표시용 이름/크기는 압축 전 원본 기준
+      const nameRaw = form.get("dxfName");
+      const sizeRaw = form.get("dxfSize");
+      dxfName = typeof nameRaw === "string" && nameRaw ? nameRaw : file.name;
+      dxfSize =
+        typeof sizeRaw === "string" && sizeRaw ? Number(sizeRaw) || file.size : file.size;
     } else if (typeof form.get("dxfPath") === "string" && (form.get("dxfPath") as string)) {
       // 직전 REV DXF 재사용(변경 없음)
       dxfPath = form.get("dxfPath") as string;

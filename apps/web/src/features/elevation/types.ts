@@ -4,6 +4,8 @@ export type {
   ElevTypeDef,
   ElevBuildingDef,
   ElevUnitCounts,
+  ElevFloorGroup,
+  ElevFloorHeights,
   ElevTypeMatrix,
   ElevState,
   ElevSummary,
