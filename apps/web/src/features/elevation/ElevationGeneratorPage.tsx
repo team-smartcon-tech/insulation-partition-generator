@@ -712,6 +712,8 @@ export default function ElevationGeneratorPage() {
     }));
   /** 화면(전개도·물량 요약)에 표시할 층 그룹 — 도면/산출서는 그룹별로 각각 계산 */
   const [previewGroup, setPreviewGroup] = useState<ElevFloorGroup>("base");
+  /** 전개 입면에 층 그룹을 전부 쌓아 표시(비교용). 끄면 선택한 그룹 1개만 */
+  const [showAllGroups, setShowAllGroups] = useState(false);
   // 세그먼트 두께 지정 모드에서 선택된 변
   const [selectedSeg, setSelectedSeg] = useState<{
     wallId: string;
@@ -1942,6 +1944,8 @@ export default function ElevationGeneratorPage() {
           fh: number;
           cum: number[];
           idx: number;
+          /** '전부 표시' 일 때 헤더에 붙는 층 그룹 이름 (예: "1~3F") */
+          groupLabel?: string;
         }
       | {
           kind: "ply";
@@ -1952,46 +1956,60 @@ export default function ElevationGeneratorPage() {
           ply: number;
           idx: number;
           conflictSegs: JointSeg[];
+          groupLabel?: string;
         };
 
     const sheets: Sheet[] = [];
     chains.forEach((c, idx) => {
-      // 화면에는 선택한 층 그룹(저층/기준/지붕)의 층고로 전개를 그린다
-      const fh = floorHeightFor(c.chain, previewGroup);
-      if (insulOn && c.chain.points.length >= 2) {
-        // 한 입면 → 1P(그린 선) + 2P(있으면) 두 장. 물량은 합산.
-        const { dev1, dev2, conflictSegs } = buildPlyDev(c.chain, fh);
-        sheets.push({
-          kind: "ply",
-          chain: c.chain,
-          baseLen: dev1.baselineLength,
-          fh,
-          dev: dev1,
-          ply: 1,
-          idx,
-          conflictSegs: [],
-        });
-        if (dev2) {
+      // 기본: 리본에서 고른 층 그룹 1개. '전부 표시': 세대수가 있는 그룹을 모두 쌓는다.
+      const groups =
+        showAllGroups && hasGroupHeights
+          ? activeGroupsFor(c.chain)
+          : [previewGroup];
+      for (const g of groups) {
+        const fh = floorHeightFor(c.chain, g);
+        const groupLabel =
+          groups.length > 1
+            ? FLOOR_GROUPS.find(x => x.key === g)?.label
+            : undefined;
+        if (insulOn && c.chain.points.length >= 2) {
+          // 한 입면 → 1P(그린 선) + 2P(있으면) 두 장. 물량은 합산.
+          const { dev1, dev2, conflictSegs } = buildPlyDev(c.chain, fh);
           sheets.push({
             kind: "ply",
             chain: c.chain,
-            baseLen: dev2.baselineLength,
+            baseLen: dev1.baselineLength,
             fh,
-            dev: dev2,
-            ply: 2,
+            dev: dev1,
+            ply: 1,
             idx,
-            conflictSegs, // 결로 빨강은 2P
+            conflictSegs: [],
+            groupLabel,
+          });
+          if (dev2) {
+            sheets.push({
+              kind: "ply",
+              chain: c.chain,
+              baseLen: dev2.baselineLength,
+              fh,
+              dev: dev2,
+              ply: 2,
+              idx,
+              conflictSegs, // 결로 빨강은 2P
+              groupLabel,
+            });
+          }
+        } else {
+          sheets.push({
+            kind: "struct",
+            chain: c.chain,
+            baseLen: c.perimeter,
+            fh,
+            cum: c.cum,
+            idx,
+            groupLabel,
           });
         }
-      } else {
-        sheets.push({
-          kind: "struct",
-          chain: c.chain,
-          baseLen: c.perimeter,
-          fh,
-          cum: c.cum,
-          idx,
-        });
       }
     });
 
@@ -2035,10 +2053,14 @@ export default function ElevationGeneratorPage() {
       ctx.font = `bold 11px 'Noto Sans KR', sans-serif`;
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
+      // '전부 표시' 로 여러 층 그룹을 쌓을 때만 입면 이름 뒤에 그룹명을 붙인다
+      const nameWithGroup = sheet.groupLabel
+        ? `${sheet.chain.name} [${sheet.groupLabel}]`
+        : sheet.chain.name;
       const header =
         sheet.kind === "ply"
-          ? `${sheet.chain.name} · ${sheet.ply === 2 ? "2P(외측)" : "1P(내측)"} · 전개 ${(baseLen / 1000).toFixed(2)}m · 보드 ${boardLength}×${boardHeight} · 층고 ${fh}mm`
-          : `${sheet.chain.name}  ·  둘레 ${(baseLen / 1000).toFixed(2)}m  ·  층고 ${fh}mm`;
+          ? `${nameWithGroup} · ${sheet.ply === 2 ? "2P(외측)" : "1P(내측)"} · 전개 ${(baseLen / 1000).toFixed(2)}m · 보드 ${boardLength}×${boardHeight} · 층고 ${fh}mm`
+          : `${nameWithGroup}  ·  둘레 ${(baseLen / 1000).toFixed(2)}m  ·  층고 ${fh}mm`;
       ctx.fillText(header, offX, offY - 4);
 
       // 가로 그리드 500mm
@@ -2450,8 +2472,11 @@ export default function ElevationGeneratorPage() {
     selectedSeg,
     elevView,
     boardDetail,
-    // 층 그룹 층고 변경/전환 시 전개도를 다시 그린다
+    // 층 그룹 층고 변경/전환·전부 표시 토글 시 전개도를 다시 그린다
     previewGroup,
+    showAllGroups,
+    hasGroupHeights,
+    activeGroupsFor,
     floorHeightFor,
   ]);
 
@@ -3898,6 +3923,28 @@ export default function ElevationGeneratorPage() {
                 min={1000}
                 max={6000}
               />
+              <label
+                className={cn(
+                  "flex items-center gap-1 text-[10px]",
+                  hasGroupHeights
+                    ? "text-slate-600 cursor-pointer"
+                    : "text-slate-400 cursor-not-allowed"
+                )}
+                title={
+                  hasGroupHeights
+                    ? "전개 입면에 층 그룹(세대수가 있는 그룹)을 모두 쌓아 표시"
+                    : "층 그룹별 층고를 먼저 입력하세요"
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={showAllGroups}
+                  disabled={!hasGroupHeights}
+                  onChange={e => setShowAllGroups(e.target.checked)}
+                  className="accent-[#004791]"
+                />
+                전부 표시
+              </label>
             </div>
           }
           onResetAll={resetAll}
@@ -5600,7 +5647,7 @@ export default function ElevationGeneratorPage() {
                     },
                     {
                       t: "층고(층 그룹)",
-                      d: "상단 '설정 > 층고'에서 1~3F·지붕층·기준층을 골라 각각의 층고를 입력합니다. 선택한 그룹 층고로 화면 전개도가 그려지고, 도면(DXF/SVG)과 산출서는 세대수가 있는 그룹마다 따로 계산됩니다. 특정 동만 층고가 다르면 '동·타입 설정'의 동 옆 '층고예외' 칸에 입력하세요.",
+                      d: "상단 '설정 > 층고'에서 1~3F·지붕층·기준층을 골라 각각의 층고를 입력합니다. 선택한 그룹 층고로 화면 전개도가 그려지고, '전부 표시'를 켜면 세대수가 있는 층 그룹을 한 화면에 모두 쌓아 비교할 수 있습니다. 도면(DXF/SVG)과 산출서는 체크와 무관하게 그룹마다 따로 계산됩니다. 특정 동만 층고가 다르면 '동·타입 설정'의 동 옆 '층고예외' 칸에 입력하세요.",
                     },
                     {
                       t: "오프닝(창·문) 배치",
