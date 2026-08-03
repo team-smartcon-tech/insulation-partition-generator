@@ -2048,9 +2048,19 @@ export default function ElevationGeneratorPage() {
       const isActive = sheet.chain.id === activeWallId;
       const col = chainColor(sheet.idx);
 
+      // 시트가 많아지면(입면 × 겹 × 층 그룹) 한 장의 높이가 줄어드는데 글자 크기가
+      // 고정이면 헤더·눈금이 서로 겹쳐 읽을 수 없다 → 시트 높이에 맞춰 줄이고 생략한다.
+      const headerFont = Math.max(7.5, Math.min(11, heightPx * 0.2));
+      const metaFont = Math.max(6.5, Math.min(9, heightPx * 0.16));
+      const tickFont = Math.max(6, Math.min(9, heightPx * 0.14));
+      const showTicks = heightPx >= 34;
+      // 눈금 간격도 화면에서 최소 간격이 확보될 때까지 넓힌다
+      const yStep = [500, 1000, 2000, 5000].find(v => v * s >= 12) ?? 5000;
+      const xStep = [1000, 2000, 5000, 10000].find(v => v * s >= 26) ?? 10000;
+
       // 헤더
       ctx.fillStyle = sheet.kind === "ply" ? "#0284c7" : col;
-      ctx.font = `bold 11px 'Noto Sans KR', sans-serif`;
+      ctx.font = `bold ${headerFont}px 'Noto Sans KR', sans-serif`;
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
       // '전부 표시' 로 여러 층 그룹을 쌓을 때만 입면 이름 뒤에 그룹명을 붙인다
@@ -2392,7 +2402,7 @@ export default function ElevationGeneratorPage() {
             ctx.stroke();
           }
           ctx.fillStyle = "#dc2626";
-          ctx.font = "bold 9px 'Noto Sans KR', sans-serif";
+          ctx.font = `bold ${metaFont}px 'Noto Sans KR', sans-serif`;
           ctx.textAlign = "left";
           ctx.textBaseline = "top";
           ctx.fillText(
@@ -2406,7 +2416,7 @@ export default function ElevationGeneratorPage() {
         const sum = summarizeBoards(dev.cells, boardLength, boardHeight);
         // 헤더 우측: 총 장수/면적
         ctx.fillStyle = "#0284c7";
-        ctx.font = "bold 9px 'Noto Sans KR', sans-serif";
+        ctx.font = `bold ${metaFont}px 'Noto Sans KR', sans-serif`;
         ctx.textAlign = "right";
         ctx.textBaseline = "bottom";
         ctx.fillText(
@@ -2428,24 +2438,30 @@ export default function ElevationGeneratorPage() {
             )
             .join("   ") + (more > 0 ? `   …+${more}종` : "");
         ctx.fillStyle = "#475569";
-        ctx.font = "8px 'Noto Sans KR', sans-serif";
+        ctx.font = `${metaFont}px 'Noto Sans KR', sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
         ctx.fillText(`[물량] ${tallyStr}`, ex(0), ey(0) + 15);
       }
 
+      if (!showTicks) {
+        // 시트가 너무 낮으면 눈금 글자는 생략(겹쳐서 못 읽음) — 휠 줌으로 확대해 확인
+        cursorY += heightPx + padBetween;
+        continue;
+      }
+
       // 좌측 높이 눈금
       ctx.fillStyle = "#94a3b8";
-      ctx.font = "9px 'Noto Sans KR', sans-serif";
+      ctx.font = `${tickFont}px 'Noto Sans KR', sans-serif`;
       ctx.textAlign = "right";
       ctx.textBaseline = "middle";
-      for (let y = 0; y <= fh; y += 500) {
+      for (let y = 0; y <= fh; y += yStep) {
         ctx.fillText(`${y}`, ex(0) - 4, ey(y));
       }
       // 하단 m 눈금
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      for (let x = 0; x <= baseLen; x += 1000) {
+      for (let x = 0; x <= baseLen; x += xStep) {
         ctx.fillText(`${(x / 1000).toFixed(0)}m`, ex(x), ey(0) + 4);
       }
 
