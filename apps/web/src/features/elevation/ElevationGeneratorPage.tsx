@@ -52,6 +52,8 @@ import {
   summarizeBoards,
   numberBoards,
   packCutBoards,
+  groupKeyOf,
+  thicknessStyle,
   type DevelopPlyParams,
   type PlyDevelopment,
 } from "./utils/insulation";
@@ -2302,11 +2304,10 @@ export default function ElevationGeneratorPage() {
         // 선택한 절단판 그룹 음영 — 같은 그룹(N-1·N-2…)을 입면 위에서 전부 강조
         if (boardDetail && boardDetail.sheet === sheetIdx) {
           const selLabel = labels[boardDetail.ci] ?? "";
-          const g =
-            selLabel === "온장" || selLabel === "버림" ? null : selLabel.split("-")[0];
+          const g = groupKeyOf(selLabel);
           dev.cells.forEach((cell, ci) => {
             const inGroup = g
-              ? labels[ci] === g || labels[ci].startsWith(`${g}-`)
+              ? groupKeyOf(labels[ci] ?? "") === g
               : ci === boardDetail.ci;
             if (!inGroup) return;
             const hx = ex(cell.x);
@@ -2340,12 +2341,10 @@ export default function ElevationGeneratorPage() {
           });
           const cx = ex(cell.x) + wpx / 2;
           const cy = ey(cell.y + cell.h) + hpx / 2;
-          const remainder = cell.xRemainder || cell.yRemainder;
+          // 번호 색 = 두께색(60T ↔ 90T 구분). 버림은 회색으로 죽인다.
           const color = cell.discarded
             ? "#64748b"
-            : remainder
-              ? "#c2410c"
-              : "#0f172a";
+            : thicknessStyle(cell.thickness).hex;
           const r = Math.min(wpx, hpx) * 0.3;
           if (r > 7) {
             // 원 + 번호
@@ -3417,6 +3416,10 @@ export default function ElevationGeneratorPage() {
       boardHeight,
       cells: dev.cells.map(c => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
       labels: numberBoards(dev.cells, boardLength, boardHeight),
+      // 번호를 두께별 색으로 — 60T 와 90T 는 서로 잘라 쓸 수 없는 다른 자재다
+      cellThk: dev.cells.map(c => Math.round(c.thickness)),
+      labelColors: dev.cells.map(c => thicknessStyle(c.thickness).hex),
+      labelAcis: dev.cells.map(c => thicknessStyle(c.thickness).aci),
       cornerXs: dev.cornerXs,
       cornerLaps: dev.cornerLaps.map(l => ({ x0: l.x0, x1: l.x1 })),
       exposureBands,
@@ -3503,8 +3506,9 @@ export default function ElevationGeneratorPage() {
     const eps = 1e-6;
     const isFull = (c: { w: number; h: number }) =>
       c.w >= L - eps && c.h >= H - eps;
+    // 두께(60T/90T…)는 서로 잘라 쓸 수 없는 다른 자재라 발주 단위가 다르다 → 열로 분리
     const rows: string[] = [
-      "입면,보드,구분,재단 조각(가로x세로),조각수,판수,면적(㎡)",
+      "입면,보드,두께(T),구분,재단 조각(가로x세로),조각수,판수,면적(㎡)",
     ];
     let any = false;
     let grandBoards = 0;
@@ -3525,35 +3529,59 @@ export default function ElevationGeneratorPage() {
         : "";
       const name = `${w.name}${gLabel}`.replace(/,/g, " ");
 
-      // 정척(온장) — 버림 제외
+      // 정척(온장) — 버림 제외. **두께별로 나눠 낸다**(60T 온장과 90T 온장은 다른 자재)
       const fulls = cells.filter(c => isFull(c) && !c.discarded);
-      if (fulls.length > 0) {
-        const area = (fulls.length * L * H) / 1_000_000;
-        rows.push(
-          `${name},온장,정척,${L}x${H},${fulls.length},${fulls.length},${area.toFixed(2)}`
-        );
+      const fullByThk = new Map<number, number>();
+      for (const c of fulls) {
+        const t = Math.round(c.thickness);
+        fullByThk.set(t, (fullByThk.get(t) ?? 0) + 1);
       }
-      // 절단판 — 한 온장에서 재단되는 조각 묶음 = 1판
+      [...fullByThk]
+        .sort((a, b) => b[0] - a[0])
+        .forEach(([t, n]) => {
+          const area = (n * L * H) / 1_000_000;
+          rows.push(
+            `${name},온장,${t},정척,${L}x${H},${n},${n},${area.toFixed(2)}`
+          );
+        });
+
+      // 절단판 — 한 온장에서 재단되는 조각 묶음 = 1판 (묶음은 두께 단일이 보장된다)
+      // 번호는 도면과 같은 규칙으로 두께별 시퀀스를 쓴다 → 도면의 90-2 와 표의 90-2 가 같은 판
       const bins = packCutBoards(cells, L, H);
-      bins.forEach((items, bi) => {
+      const binSeq = new Map<number, number>();
+      bins.forEach(items => {
+        const thk = Math.round(cells[items[0]].thickness);
+        const no = (binSeq.get(thk) ?? 0) + 1;
+        binSeq.set(thk, no);
         const pieces = items.map(
           i => `${Math.round(cells[i].w)}x${Math.round(cells[i].h)}`
         );
         const area =
           items.reduce((s, i) => s + cells[i].w * cells[i].h, 0) / 1_000_000;
         rows.push(
-          `${name},절단판${bi + 1},절단,${pieces.join(" / ")},${items.length},1,${area.toFixed(2)}`
+          `${name},절단판 ${thk}-${no},${thk},절단,${pieces.join(" / ")},${items.length},1,${area.toFixed(2)}`
         );
       });
 
-      // 버림(폐기) 자투리 — 시공/발주 제외, 별도 표기
+      // 버림(폐기) 자투리 — 시공/발주 제외, 별도 표기. 두께별로 나눈다
       const discards = cells.filter(c => c.discarded);
       if (discards.length > 0) {
-        const dArea =
-          discards.reduce((s, c) => s + c.w * c.h, 0) / 1_000_000;
-        rows.push(
-          `${name},버림,폐기,자투리 ${discards.length}개,${discards.length},0,${dArea.toFixed(2)}`
-        );
+        const dByThk = new Map<number, { n: number; area: number }>();
+        for (const c of discards) {
+          const t = Math.round(c.thickness);
+          const cur = dByThk.get(t) ?? { n: 0, area: 0 };
+          dByThk.set(t, {
+            n: cur.n + 1,
+            area: cur.area + (c.w * c.h) / 1_000_000,
+          });
+        }
+        [...dByThk]
+          .sort((a, b) => b[0] - a[0])
+          .forEach(([t, v]) => {
+            rows.push(
+              `${name},버림,${t},폐기,자투리 ${v.n}개,${v.n},0,${v.area.toFixed(2)}`
+            );
+          });
       }
 
       const orderBoards = fulls.length + bins.length;
@@ -3563,12 +3591,12 @@ export default function ElevationGeneratorPage() {
       const totalArea =
         installed.reduce((s, c) => s + c.w * c.h, 0) / 1_000_000;
       rows.push(
-        `${name},합계,,조각 ${totalPieces}개,${totalPieces},${orderBoards},${totalArea.toFixed(2)}`
+        `${name},합계,,,조각 ${totalPieces}개,${totalPieces},${orderBoards},${totalArea.toFixed(2)}`
       );
       rows.push(""); // 입면 구분 빈 줄
     }
     if (!any) return;
-    rows.push(`전체,주문 판수 합계,,,,${grandBoards},`);
+    rows.push(`전체,주문 판수 합계,,,,,${grandBoards},`);
     // Excel 한글 깨짐 방지 BOM
     const csv = "﻿" + rows.join("\r\n");
     downloadText(`${exportBase}_단열재물량.csv`, csv, "text/csv");
@@ -5874,12 +5902,12 @@ export default function ElevationGeneratorPage() {
             const H = boardHeight;
             const close = () => setBoardDetail(null);
 
-            // 온장/버림/절단 그룹 분기
-            const groupNo = label === "온장" || label === "버림" ? null : label.split("-")[0];
+            // 온장/버림/절단 그룹 분기 — 그룹 키는 "{두께}-{번호}" (예 90-3)
+            const groupNo = groupKeyOf(label);
             const groupIdx: number[] = [];
             if (groupNo) {
               sh.labels.forEach((lb, i) => {
-                if (lb === groupNo || lb.startsWith(`${groupNo}-`)) groupIdx.push(i);
+                if (groupKeyOf(lb) === groupNo) groupIdx.push(i);
               });
             }
             const pieces = groupIdx.map(i => ({

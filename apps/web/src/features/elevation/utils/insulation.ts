@@ -895,8 +895,44 @@ export function packCutBoards(
 }
 
 /**
- * 보드 번호 매기기 (정척=공통 "온장", 절단=전용 그룹 N-1/N-2).
+ * 두께별 표시 색. 60T 와 90T 는 서로 잘라 쓸 수 없는 **다른 자재**이므로
+ * 도면에서 번호만으로 헷갈리지 않게 색으로도 갈라 준다.
+ * hex = 화면/SVG, aci = DXF 색 번호.
+ */
+export function thicknessStyle(thk: number): { hex: string; aci: number } {
+  // hex 는 흰 배경(화면·SVG)용이라 진한 값, aci 는 검은 배경(CAD)용이라 밝은 값을 쓴다.
+  const t = Math.round(thk);
+  switch (t) {
+    case 50:
+      return { hex: "#16A34A", aci: 3 }; // 초록
+    case 60:
+      return { hex: "#CA8A04", aci: 2 }; // 노랑
+    case 70:
+      return { hex: "#EA580C", aci: 30 }; // 주황
+    case 90:
+      return { hex: "#C026D3", aci: 6 }; // 자홍
+    case 100:
+      return { hex: "#0891B2", aci: 4 }; // 청록
+    default: {
+      // 등록되지 않은 두께 — 두께값으로 색을 고정 배정(같은 두께는 늘 같은 색)
+      const palette = [
+        { hex: "#DC2626", aci: 1 },
+        { hex: "#7C3AED", aci: 5 },
+        { hex: "#B45309", aci: 51 },
+        { hex: "#0F766E", aci: 91 },
+      ];
+      return palette[t % palette.length];
+    }
+  }
+}
+
+/**
+ * 보드 번호 매기기 (정척=공통 "온장", 절단=전용 그룹 "{두께}-{번호}[-{순번}]").
+ *
  * 절단 조각은 packCutBoards 로 한 온장에 2D 재단되는 것끼리 묶는다.
+ * **번호는 두께별로 따로 매긴다** — 60T 와 90T 는 서로 잘라 쓸 수 없는 다른 자재라
+ * 번호가 한 줄로 흐르면 현장에서 60T "3" 과 90T "3" 이 같은 묶음으로 읽힌다.
+ * 그래서 라벨 앞에 두께를 박아 `60-3`, `90-3-1` 처럼 두께가 곧 번호의 일부가 되게 한다.
  */
 export function numberBoards(
   cells: BoardCell[],
@@ -910,13 +946,29 @@ export function numberBoards(
     else if (isFull(c)) labels[i] = "온장";
   });
   const bins = packCutBoards(cells, L, H);
-  bins.forEach((items, bi) => {
-    const no = bi + 1;
+  // 두께별 번호 카운터 — bin 은 packCutBoards 에서 이미 두께 단일로 만들어진다
+  const seq = new Map<number, number>();
+  bins.forEach(items => {
+    if (items.length === 0) return;
+    const thk = Math.round(cells[items[0]].thickness);
+    const no = (seq.get(thk) ?? 0) + 1;
+    seq.set(thk, no);
     items.forEach((cellIdx, k) => {
-      labels[cellIdx] = items.length > 1 ? `${no}-${k + 1}` : `${no}`;
+      labels[cellIdx] =
+        items.length > 1 ? `${thk}-${no}-${k + 1}` : `${thk}-${no}`;
     });
   });
   return labels;
+}
+
+/**
+ * 라벨 → 재단 그룹 키. 같은 온장에서 함께 잘리는 조각끼리 같은 키를 갖는다.
+ * `90-3-1` · `90-3` → `90-3` / 온장·버림은 그룹이 없어 null.
+ */
+export function groupKeyOf(label: string): string | null {
+  if (!label || label === "온장" || label === "버림") return null;
+  const p = label.split("-");
+  return p.length >= 2 ? `${p[0]}-${p[1]}` : p[0];
 }
 
 /** 보드 셀 목록 → 규격별 물량 집계 + 실제 주문 판 수(L,H 필요 — 절단 빈패킹) */
