@@ -30,8 +30,16 @@ export interface InsulationExport {
   boardHeight: number;
   /** 전개면 보드 셀 (좌하단 기준 x,y + 크기) — 코너마다 끊김 */
   cells: { x: number; y: number; w: number; h: number }[];
-  /** 셀별 번호 라벨 (cells 와 같은 순서). 정척="온장", 절단="N-1" 등 */
+  /** 셀별 번호 라벨 (cells 와 같은 순서). 정척="온장", 절단="90-3-1" 등 */
   labels?: string[];
+  /**
+   * 셀별 두께(mm) — 번호 색을 두께별로 갈라 그린다.
+   * 60T 와 90T 는 서로 잘라 쓸 수 없는 자재라 도면에서 한눈에 구분돼야 한다.
+   */
+  cellThk?: number[];
+  /** 셀별 번호 색 — SVG(hex) / DXF(ACI). cellThk 와 같은 순서 */
+  labelColors?: string[];
+  labelAcis?: number[];
   /** 모든 꺾임(코너) 전개 x 위치 — V(▽) 마크/끊김선용 */
   cornerXs: number[];
   /** 모서리 겹침(먹힘) 구간 [x0,x1] — 해치 */
@@ -130,44 +138,62 @@ function emitInsulationDxf(
       if (xb > xa) line(xa, dy + (xa + k), xb, dy + (xb + k), "ELEV_INSUL_LAP");
     }
   }
+  /** 두께 색을 실은 TEXT — 번호는 두께별로 색이 달라야 현장에서 헷갈리지 않는다 */
+  const ctext = (
+    x: number,
+    y: number,
+    h: number,
+    s: string,
+    tAci: number,
+    rot?: number
+  ) => {
+    push(0, "TEXT");
+    push(8, "ELEV_INSUL_TXT");
+    push(62, tAci);
+    push(10, x);
+    push(20, y);
+    push(30, 0);
+    push(40, h);
+    push(1, s);
+    if (rot) push(50, rot);
+  };
+
   // 보드 번호(원+숫자) + 치수 — 칸 가운데. (한글 '온장'은 R12 깨질 수 있어 'F'로)
+  // 번호·원·치수 색은 **두께별**로 다르게 준다(60T ↔ 90T 오시공 방지).
   insul.cells.forEach((c, ci) => {
     const cx = c.x + c.w / 2;
     const cy = dy + c.y + c.h / 2;
     const raw = insul.labels?.[ci] ?? "";
-    const label = raw === "온장" ? "F" : raw; // 정척=F(Full)
+    const thk = insul.cellThk?.[ci];
+    const tAci = insul.labelAcis?.[ci] ?? 7;
+    const label = raw === "온장" ? (thk ? `F${Math.round(thk)}` : "F") : raw;
     const rad = Math.min(c.w, c.h) * 0.28;
     if (label) {
       if (rad > 50) {
         // 원 + 번호
         push(0, "CIRCLE");
         push(8, "ELEV_INSUL_TXT");
+        push(62, tAci);
         push(10, cx);
         push(20, cy);
         push(30, 0);
         push(40, rad);
-        const th = Math.min(rad * 1.1, 200);
-        text(cx - label.length * th * 0.3, cy - th / 2, th, label, "ELEV_INSUL_TXT");
+        // 라벨이 길어졌으므로(예 90-3-1) 원 안에 들어가도록 글자 크기를 폭에 맞춘다
+        const th = Math.min(rad * 1.1, 200, (rad * 1.9) / Math.max(1, label.length * 0.6));
+        ctext(cx - label.length * th * 0.3, cy - th / 2, th, label, tAci);
       } else {
         // 좁은 조각: 원 없이 번호. 좁고 길면 90° 회전(빠지지 않게)
         const th = Math.max(60, Math.min(c.w, c.h) * 0.55);
         if (c.w < c.h && c.w < 350) {
-          push(0, "TEXT");
-          push(8, "ELEV_INSUL_TXT");
-          push(10, cx + th * 0.35);
-          push(20, cy - label.length * th * 0.3);
-          push(30, 0);
-          push(40, th);
-          push(1, label);
-          push(50, 90); // 회전 90°
+          ctext(cx + th * 0.35, cy - label.length * th * 0.3, th, label, tAci, 90);
         } else {
-          text(cx - label.length * th * 0.3, cy - th / 2, th, label, "ELEV_INSUL_TXT");
+          ctext(cx - label.length * th * 0.3, cy - th / 2, th, label, tAci);
         }
       }
     }
-    // 치수 (원 아래)
+    // 치수 + 두께 (원 아래) — 번호를 못 읽어도 두께는 글자로 남는다
     const dh = Math.max(40, Math.min(90, Math.min(c.w, c.h) * 0.16));
-    const dim = `${Math.round(c.w)}x${Math.round(c.h)}`;
+    const dim = `${Math.round(c.w)}x${Math.round(c.h)}${thk ? ` ${Math.round(thk)}T` : ""}`;
     text(cx - dim.length * dh * 0.3, cy - rad - dh - 20, dh, dim, "ELEV_INSUL_TXT");
   });
 
@@ -212,6 +238,23 @@ function emitInsulationDxf(
     head += `  ORDER ${insul.summary.orderBoardCount} BD (FULL ${insul.summary.fullCount} + CUTBD ${insul.summary.cutBoardCount}) PIECES ${insul.summary.totalCount} ${insul.summary.totalAreaM2.toFixed(2)}sqm`;
   }
   text(0, dy + floorHeight + 450, 150, head, "ELEV_INSUL");
+
+  // 두께 색 범례 — 번호 색이 무슨 두께인지 도면 안에서 바로 읽히게 한다.
+  // (두께가 한 종류뿐이면 범례가 의미 없으므로 생략)
+  if (insul.cellThk && insul.labelAcis) {
+    const seen = new Map<number, number>(); // 두께 → aci
+    insul.cellThk.forEach((t, i) => {
+      if (t && !seen.has(t)) seen.set(t, insul.labelAcis?.[i] ?? 7);
+    });
+    if (seen.size > 1) {
+      let lx = head.length * 75 + 400;
+      const ly = dy + floorHeight + 450;
+      for (const [t, a] of [...seen].sort((x, y) => x[0] - y[0])) {
+        ctext(lx, ly, 150, `[${t}T]`, a);
+        lx += 700;
+      }
+    }
+  }
 }
 
 /** 단열재 나누기도를 SVG 조각으로 출력 (ex/ey = 좌표 변환) */
@@ -234,18 +277,22 @@ function emitInsulationSvg(
   insul.cells.forEach((c, ci) => {
     const cx = ex(c.x + c.w / 2);
     const cy = ey(c.y + c.h / 2);
-    const label = insul.labels?.[ci] ?? "";
+    const raw = insul.labels?.[ci] ?? "";
+    const thk = insul.cellThk?.[ci];
+    // 두께별 색 — 60T 와 90T 번호가 같은 색이면 현장에서 섞인다
+    const tc = insul.labelColors?.[ci] ?? "#0f172a";
+    const label = raw === "온장" && thk ? `온장 ${Math.round(thk)}T` : raw;
     const rad = Math.min(c.w, c.h) * 0.28;
     if (rad > 50 && label) {
       parts.push(
-        `<circle cx="${cx}" cy="${cy}" r="${rad}" fill="#ffffff" stroke="#0f172a" stroke-width="6"/>`
+        `<circle cx="${cx}" cy="${cy}" r="${rad}" fill="#ffffff" stroke="${tc}" stroke-width="8"/>`
       );
       parts.push(
-        `<text x="${cx}" y="${cy}" font-size="${Math.min(rad * 1.1, 200)}" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="#0f172a">${label}</text>`
+        `<text x="${cx}" y="${cy}" font-size="${Math.min(rad * 1.1, 200, (rad * 1.9) / Math.max(1, label.length * 0.6))}" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="${tc}">${label}</text>`
       );
     }
     parts.push(
-      `<text x="${cx}" y="${cy - rad - 30}" font-size="70" text-anchor="middle" fill="#94a3b8">${Math.round(c.w)}×${Math.round(c.h)}</text>`
+      `<text x="${cx}" y="${cy - rad - 30}" font-size="70" text-anchor="middle" fill="#94a3b8">${Math.round(c.w)}×${Math.round(c.h)}${thk ? ` ${Math.round(thk)}T` : ""}</text>`
     );
   });
   for (const lap of insul.cornerLaps) {
