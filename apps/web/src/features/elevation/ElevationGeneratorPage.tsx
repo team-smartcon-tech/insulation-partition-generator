@@ -3596,39 +3596,51 @@ export default function ElevationGeneratorPage() {
   };
 
   /**
-   * 입면(단위세대) 1개의 **실면적**(㎡) — 나누기(분할)와 무관한 순수 시공면적.
+   * 입면(단위세대) 1개의 **두께별 실면적**(㎡) — 나누기(분할)와 무관한 순수 시공면적.
    *
    * 전개면 사각형(전개길이 × 층고)에서 오프닝(창/문) 면적만 뺀다. 1P+2P 합산.
+   * 두께는 변마다 다를 수 있어(1P90/2P50 등) 변 구간별로 두께 버킷에 담는다 —
+   * 60T/90T 물량을 각각 실면적과 대비할 수 있어야 하기 때문이다.
    * 판 나누기 결과로 산출한 '현장식 면적'(주문 판수 × 정척면적)과 대비해
    * 로스율을 보기 위한 기준값이다.
    * ※ '배치 안함'(선만 잇는) 변과 2P 가 없는 변은 벽면이 아니므로 제외한다.
    */
-  const wallNetArea = (w: WallChain, floorHeight?: number): number => {
+  const wallNetArea = (
+    w: WallChain,
+    floorHeight?: number
+  ): Map<number, number> => {
     const { dev1, dev2 } = buildPlyDev(w, floorHeight);
     const segs = resolveSegInsul(w);
-    let mm2 = 0;
+    const mm2 = new Map<number, number>();
     for (const d of [dev1, dev2]) {
       if (!d) continue;
       const isPly2 = d === dev2;
       const H = d.wallHeight;
-      let len = 0;
-      d.segLengths.forEach((sl, i) => {
+      // 두께는 변마다 다르다(직접외기 1P90/2P50 등) → 변 구간별로 두께 버킷에 넣는다
+      let x = 0;
+      for (let i = 0; i < d.segLengths.length; i += 1) {
+        const x0 = x;
+        x += d.segLengths[i];
+        const x1 = x;
         const s = segs[i];
-        if (s?.skip) return;
-        if (isPly2 && s && s.ply2 <= 0) return;
-        len += sl;
-      });
-      mm2 += len * H;
-      // 오프닝은 겹마다 좌표가 다르다(2P 는 코너 인셋만큼 이동) — 전개면 안으로 잘라 뺀다
-      for (const o of d.openingRects) {
-        const x0 = Math.max(0, Math.min(o.x0, d.baselineLength));
-        const x1 = Math.max(0, Math.min(o.x1, d.baselineLength));
-        const y0 = Math.max(0, Math.min(o.y0, H));
-        const y1 = Math.max(0, Math.min(o.y1, H));
-        mm2 -= Math.max(0, x1 - x0) * Math.max(0, y1 - y0);
+        if (s?.skip) continue;
+        const t = Math.round((isPly2 ? s?.ply2 : s?.ply1) ?? 0);
+        if (t <= 0) continue; // 그 겹이 없는 변(2P=0 등)
+        let a = (x1 - x0) * H;
+        // 오프닝은 겹마다 좌표가 다르다(2P 는 코너 인셋만큼 이동) — 그 변 구간에 걸친 만큼만 뺀다
+        for (const o of d.openingRects) {
+          const ox0 = Math.max(x0, Math.min(o.x0, x1));
+          const ox1 = Math.max(x0, Math.min(o.x1, x1));
+          const oy0 = Math.max(0, Math.min(o.y0, H));
+          const oy1 = Math.max(0, Math.min(o.y1, H));
+          a -= Math.max(0, ox1 - ox0) * Math.max(0, oy1 - oy0);
+        }
+        mm2.set(t, (mm2.get(t) ?? 0) + Math.max(0, a));
       }
     }
-    return mm2 / 1_000_000;
+    const m = new Map<number, number>();
+    mm2.forEach((v, k) => m.set(k, v / 1_000_000));
+    return m;
   };
 
   // ── 물량 소스 입면 해석 ──
@@ -3703,24 +3715,44 @@ export default function ElevationGeneratorPage() {
     const thks = [...thkSet].sort((a, b) => a - b);
     const eaCols = thks.map(t => `${t}T 개수(EA)`).join(",");
     const arCols = thks.map(t => `${t}T 면적(M2)`).join(",");
-    // 실면적(나누기 전 전개면 − 오프닝) 대비 산출면적(발주 판수 기준) 비교 열
-    const cmpCols = "실면적(M2),산출면적(M2),차이(M2),로스율(%)";
+    // 실면적(나누기 전 전개면 − 오프닝) 대비 산출면적(발주 판수 기준) 비교 열 — 두께별 + 합계
+    const netCols = thks.map(t => `${t}T 실면적(M2)`).join(",");
+    const lossCols = thks.map(t => `${t}T 로스율(%)`).join(",");
+    const cmpCols = `${netCols},${lossCols},실면적 계(M2),산출면적 계(M2),차이(M2),로스율(%)`;
+    /** 비교열 자리 수만큼의 대시 (대표 입면이 없는 행용) */
+    const cmpDash = [...thks.map(() => "-"), ...thks.map(() => "-"), "-", "-", "-", "-"].join(",");
     /** 실면적 캐시 — (입면, 층고) 단위. tallyOf 와 같은 키 규칙 */
-    const netCache = new Map<string, number>();
+    const netCache = new Map<string, Map<number, number>>();
     const netOf = (w: WallChain | null, fh: number) => {
       if (!w) return null;
       const key = `${w.id}|${Math.round(fh)}`;
       const c = netCache.get(key);
-      if (c !== undefined) return c;
+      if (c) return c;
       const v = wallNetArea(w, fh);
       netCache.set(key, v);
       return v;
     };
-    /** 실면적·산출면적 → 비교 4열. 실면적 0 이면 로스율은 대시 */
-    const cmpCells = (net: number, gross: number) => {
-      const diff = gross - net;
-      const loss = net > 0 ? ((diff / net) * 100).toFixed(1) : "-";
-      return `${net.toFixed(2)},${gross.toFixed(2)},${diff.toFixed(2)},${loss}`;
+    /** 두께별 실면적·산출면적 → 비교 열들. 실면적 0 이면 로스율은 대시 */
+    const cmpCells = (
+      net: Map<number, number> | null,
+      gross: Map<number, number>
+    ) => {
+      const n = thks.map(t => net?.get(t) ?? 0);
+      const g = thks.map(t => gross.get(t) ?? 0);
+      const loss = n.map((v, i) =>
+        v > 0 ? (((g[i] - v) / v) * 100).toFixed(1) : "-"
+      );
+      const nSum = n.reduce((a, b) => a + b, 0);
+      const gSum = g.reduce((a, b) => a + b, 0);
+      const lossAll = nSum > 0 ? (((gSum - nSum) / nSum) * 100).toFixed(1) : "-";
+      return [
+        ...n.map(v => v.toFixed(2)),
+        ...loss,
+        nSum.toFixed(2),
+        gSum.toFixed(2),
+        (gSum - nSum).toFixed(2),
+        lossAll,
+      ].join(",");
     };
 
     const rows: string[] = [];
@@ -3729,16 +3761,16 @@ export default function ElevationGeneratorPage() {
     // ── ① 단위세대 타입 × 층 그룹별 단열재 수량 (대표 입면 1세대 기준) ──
     rows.push("[단위세대 타입별 단열재 수량]");
     rows.push(
-      "※ 실면적 = 전개면(전개길이×층고) − 오프닝. 나누기와 무관한 순수 시공면적."
+      "※ 실면적 = 전개면(전개길이×층고) − 오프닝. 나누기와 무관한 순수 시공면적. 변(면)마다의 두께로 나눠 집계."
     );
-    rows.push("※ 산출면적 = 주문 판수 × 정척면적(현장식). 로스율 = 차이 ÷ 실면적.");
+    rows.push("※ 산출면적 = 주문 판수 × 정척면적(현장식). 로스율 = (산출−실면적) ÷ 실면적.");
     rows.push(`단위세대 타입,층 그룹,층고(mm),${eaCols},${arCols},${cmpCols}`);
     for (const t of typeMatrix.types) {
       const rep = repElevByType(t.id);
       if (!rep) {
         missing.push(t.name);
         const dash = thks.map(() => "-").join(",");
-        rows.push(`${esc(t.name)},-,-,${dash},${dash},-,-,-,-`);
+        rows.push(`${esc(t.name)},-,-,${dash},${dash},${cmpDash}`);
         continue;
       }
       for (const g of activeGroupsFor(rep)) {
@@ -3747,9 +3779,10 @@ export default function ElevationGeneratorPage() {
         const gLabel = FLOOR_GROUPS.find(x => x.key === g)?.label ?? g;
         const ea = thks.map(x => tally?.get(x)?.ea ?? 0);
         const ar = thks.map(x => (tally?.get(x)?.areaM2 ?? 0).toFixed(2));
-        const gross = thks.reduce((s, x) => s + (tally?.get(x)?.areaM2 ?? 0), 0);
+        const gross = new Map<number, number>();
+        thks.forEach(x => gross.set(x, tally?.get(x)?.areaM2 ?? 0));
         rows.push(
-          `${esc(t.name)},${gLabel},${Math.round(fh)},${ea.join(",")},${ar.join(",")},${cmpCells(netOf(rep, fh) ?? 0, gross)}`
+          `${esc(t.name)},${gLabel},${Math.round(fh)},${ea.join(",")},${ar.join(",")},${cmpCells(netOf(rep, fh), gross)}`
         );
       }
     }
@@ -3762,9 +3795,8 @@ export default function ElevationGeneratorPage() {
     );
     const grand = new Map<number, number>();
     let grandUnits = 0;
-    // 전체 대비용 누계 — 세대수를 곱한 실면적/산출면적
-    let grandNet = 0;
-    let grandGross = 0;
+    // 전체 대비용 누계 — 세대수를 곱한 두께별 실면적
+    const grandNet = new Map<number, number>();
     for (const b of typeMatrix.buildings) {
       for (const t of typeMatrix.types) {
         const counts = typeMatrix.cells[cellKey(b.id, t.id)];
@@ -3778,7 +3810,8 @@ export default function ElevationGeneratorPage() {
         const src = elevForCell(b.id, t.id);
         // 그룹마다 층고가 다르므로 그룹별 물량 × 그 그룹 세대수 를 더한다
         const byThk = new Map<number, number>();
-        let cellNet = 0; // 이 (동,타입) 의 실면적 × 세대수
+        // 이 (동,타입) 의 두께별 실면적 × 세대수
+        const cellNet = new Map<number, number>();
         for (const g of FLOOR_GROUPS) {
           const n = counts[g.key] ?? 0;
           if (n <= 0) continue;
@@ -3788,28 +3821,26 @@ export default function ElevationGeneratorPage() {
             byThk.set(k, (byThk.get(k) ?? 0) + v.areaM2 * n)
           );
           if (src)
-            cellNet +=
-              (netOf(src, floorHeightFor(src, g.key, b.id)) ?? 0) * n;
+            netOf(src, floorHeightFor(src, g.key, b.id))?.forEach((v, k) =>
+              cellNet.set(k, (cellNet.get(k) ?? 0) + v * n)
+            );
         }
         const fhLabel = FLOOR_GROUPS.map(g =>
           src ? Math.round(floorHeightFor(src, g.key, b.id)) : "-"
         ).join("/");
-        let cellGross = 0;
         const ar = thks.map(x => {
           const a = byThk.get(x) ?? 0;
           grand.set(x, (grand.get(x) ?? 0) + a);
-          cellGross += a;
           return src ? a.toFixed(1) : "-";
         });
-        grandNet += cellNet;
-        grandGross += cellGross;
+        cellNet.forEach((v, k) => grandNet.set(k, (grandNet.get(k) ?? 0) + v));
         rows.push(
-          `${esc(b.name)},${esc(t.name)},${low},${roof},${base},${total},${fhLabel},${ar.join(",")},${src ? cmpCells(cellNet, cellGross) : "-,-,-,-"}`
+          `${esc(b.name)},${esc(t.name)},${low},${roof},${base},${total},${fhLabel},${ar.join(",")},${src ? cmpCells(cellNet, byThk) : cmpDash}`
         );
       }
     }
     rows.push(
-      `합계,,,,,${grandUnits},,${thks.map(t => (grand.get(t) ?? 0).toFixed(1)).join(",")},${cmpCells(grandNet, grandGross)}`
+      `합계,,,,,${grandUnits},,${thks.map(t => (grand.get(t) ?? 0).toFixed(1)).join(",")},${cmpCells(grandNet, grand)}`
     );
 
     if (missing.length > 0)
