@@ -436,9 +436,12 @@ function tileSiteConstructability(
 /**
  * 한 겹(ply)의 전개 입면 데이터 생성.
  *
- * 전개 길이 보정: 모서리에서 오프셋 면이 늘/줄어든다.
- *   세그먼트 길이 += refOffset * tan(turn/2)  (볼록: +, 오목: −)  를 양 끝 모서리에 분배.
- *   (직각 90°이면 tan(45°)=1 → 모서리당 양옆 +refOffset 씩, 합 +2·refOffset)
+ * 전개 길이 보정 2단계:
+ *  ① 겹 오프셋 — 2P 이상은 아래 겹 두께만큼 오프셋한 폴리라인에서 면 길이를 직접 측정.
+ *  ② 코너 처리 — 코너마다 한 면이 상대 면 두께(t)만큼 길이가 바뀐다.
+ *     볼록(바깥) 코너: 감아 도는 면이 **+t** (전개축이 길어짐)
+ *     오목(안쪽) 코너: 물러나는 면이 **−t** (타일링 범위가 줄어듦 = 먹힘/해치)
+ *     검산 — 한 변 L·두께 t 닫힌 사각: 볼록 4코너 = 둘레 +4t / 오목 4코너 = 둘레 −4t
  */
 export function developPly(params: DevelopPlyParams): PlyDevelopment {
   const {
@@ -507,19 +510,80 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     });
   }
 
+  // ── 코너 처리 배정 (볼록 = 감아 돌아 길어짐 / 오목 = 물러나 짧아짐) ──
+  // 코너에서 두 면의 단열재가 만나는 방식은 볼록·오목이 **정반대**다.
+  //  · 오목(안쪽): 코너의 (tA×tB) 정사각형을 두 면이 동시에 차지 → 겹친다.
+  //    한 면이 상대 면 두께만큼 물러난다 (길이 −).
+  //  · 볼록(바깥): 그 정사각형이 비어 있어 한 면이 감아 돌아 덮는다.
+  //    감는 면이 상대 면 두께만큼 길어진다 (길이 +). 상대 면은 그대로.
+  //
+  // 검산 — 한 변 L, 두께 t, 볼록 4코너 닫힌 사각의 실제 보드 총길이:
+  //   ((L+2t)² − L²) / t = 4L + 4t = 둘레 + 4t   → 코너당 +t 가 맞다.
+  //   오목 4코너면 (L² − (L−2t)²) / t = 4L − 4t  → 코너당 −t.
+  // 예전 코드는 볼록·오목 구분 없이 모든 꺾임에서 −t 라, 이어져야 할 240 면이 150 이 되고
+  // 볼록 코너마다 두께만큼 물량이 **과소 집계**됐다.
+  //
+  // 길이 변화 폭은 항상 **상대(옆) 면의 이 겹 두께**다 (90T 면이 50T 면과 만나면 50).
+  // 좌/우 교대는 corners 배열 인덱스가 아니라 실제 처리한 코너 순번으로 센다
+  // (classifyCorners 가 일직선 꼭짓점을 버리므로 배열 인덱스로 세면 위상이 뒤집힌다).
+  type CornerAct = {
+    vertexIndex: number;
+    convex: boolean;
+    /** 길이가 바뀌는(감거나 물러나는) 세그먼트 */
+    seg: number;
+    /** 그 세그먼트의 시작쪽 끝이면 true */
+    atStart: boolean;
+    /** 변화 폭(mm) = 상대 면의 이 겹 두께 */
+    w: number;
+  };
+  const acts: CornerAct[] = [];
+  let actTurn = 0;
+  for (const c of corners) {
+    const j = c.vertexIndex;
+    // 열린 폴리라인의 자유단(양 끝)은 코너가 아니다. 닫힘은 닫는 코너(j=0)도 정상 코너.
+    if (!closed && (j < 1 || j > segCount - 1)) continue;
+    const right = j % segCount; // 코너 오른쪽 면
+    const left = (j - 1 + segCount) % segCount; // 코너 왼쪽 면
+    const useRight = actTurn++ % 2 === 0; // 교대 배정
+    const w = segLapW(useRight ? left : right); // 상대 면 두께
+    if (w <= 1e-6) continue; // 이 겹 두께 0(예: 간접외기 2P=0) → 코너 처리 없음
+    acts.push({
+      vertexIndex: j,
+      convex: c.convex,
+      seg: useRight ? right : left,
+      atStart: useRight,
+      w,
+    });
+  }
+
+  // 볼록 코너의 '감아 도는' 길이는 전개축 자체를 늘린다 → segLengths 에 먼저 반영.
+  // (오목의 '먹힘'은 길이가 아니라 타일링 범위를 줄이는 것이라 아래에서 따로 처리)
+  const wrapStart = new Array<number>(segCount).fill(0);
+  const wrapEnd = new Array<number>(segCount).fill(0);
+  for (const a of acts) {
+    if (!a.convex) continue;
+    if (a.atStart) wrapStart[a.seg] += a.w;
+    else wrapEnd[a.seg] += a.w;
+  }
+  const hasWrap = wrapStart.some(v => v > 0) || wrapEnd.some(v => v > 0);
+  /** 코너 감김분을 뺀 순수 면 길이 — 오프닝 위치 매핑의 기준 */
+  const baseSegLengths = segLengths.map(v => Math.max(0, v));
+  segLengths = baseSegLengths.map((v, i) => v + wrapStart[i] + wrapEnd[i]);
+
   const baselineLength = segLengths.reduce((s, v) => s + Math.max(0, v), 0);
 
-  // 세그먼트(벽 면) 경계의 전개 누적 위치 (2P 는 오프셋 길이 반영)
+  // 세그먼트(벽 면) 경계의 전개 누적 위치 (2P 오프셋 길이 + 볼록 코너 감김 반영)
   const cumAtVertex: number[] = [0];
   for (let i = 0; i < segCount; i++) {
     cumAtVertex.push(cumAtVertex[i] + Math.max(0, segLengths[i]));
   }
 
-  // ── 오프닝(창)을 2P 전개좌표로 재매핑 (면 안 '비율' 유지) ──
-  // openings 는 1P(구조선) 전개좌표. 2P 는 면마다 길이가 달라지므로, 각 오프닝을
-  // 자기 면 안에서 같은 비율 위치로 옮긴다 → 항상 코너 사이에 남아 코너에 안 걸린다.
+  // ── 오프닝(창)을 이 겹의 전개좌표로 재매핑 ──
+  // openings 는 1P(구조선) 전개좌표. 면 길이가 달라지면(2P 오프셋 / 볼록 코너 감김)
+  // 각 오프닝을 자기 면 안에서 같은 비율 위치로 옮긴다 → 코너에 안 걸린다.
+  // 코너 감김분(wrapStart)은 면 '앞'에 덧붙은 구간이라 비율 배분 대상이 아니고 통째로 민다.
   let ops = openings;
-  if (ply >= 2 && openings.length > 0) {
+  if ((ply >= 2 || hasWrap) && openings.length > 0) {
     const structCum: number[] = [0];
     for (let i = 0; i < segCount; i++)
       structCum.push(structCum[i] + Math.max(0, rawSegLengths[i]));
@@ -528,8 +592,7 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
         if (x <= structCum[i + 1] + 1e-6) {
           const sf = Math.max(1e-6, rawSegLengths[i]);
           const frac = Math.min(1, Math.max(0, (x - structCum[i]) / sf));
-          const f2 = cumAtVertex[i + 1] - cumAtVertex[i];
-          return cumAtVertex[i] + frac * f2;
+          return cumAtVertex[i] + wrapStart[i] + frac * baseSegLengths[i];
         }
       }
       return cumAtVertex[segCount];
@@ -542,29 +605,25 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     }));
   }
 
-  // ── 모서리 겹침(랩) 배정 ──
-  // 각 꺾임에서 thickness(70) 폭이 옆 면 보드에 "먹힌다". 그 70 을 한쪽 면에
-  // 배정(교대)하고, 먹힌 면의 보드 나누기는 그 70 이후부터 시작한다.
+  // ── 오목 코너 겹침(먹힘) 반영 ──
+  // 물러나는 면의 보드 나누기를 상대 두께만큼 뒤에서 시작/앞에서 종료시킨다.
   const tileLo = cumAtVertex.slice(0, segCount); // 세그먼트별 타일링 시작
   const tileHi = cumAtVertex.slice(1, segCount + 1); // 세그먼트별 타일링 끝
   const cornerLaps: CornerLap[] = [];
-  corners.forEach((c, i) => {
-    const j = c.vertexIndex;
-    if (j < 1 || j > segCount - 1) return; // 내부 코너만(자유단 제외)
-    const pos = cumAtVertex[j];
-    const eatRight = i % 2 === 0; // 교대: 짝수 코너는 오른쪽 면이 먹힘
-    if (eatRight) {
-      const lapW = segLapW(j); // 먹히는 오른쪽 면(세그먼트 j)의 겹 두께
-      const newLo = Math.min(pos + lapW, tileHi[j]);
-      cornerLaps.push({ vertexIndex: j, x0: pos, x1: newLo });
-      tileLo[j] = newLo; // 오른쪽 면은 랩폭 뒤부터 나누기
+  for (const a of acts) {
+    if (a.convex) continue; // 볼록은 위에서 길이(+)로 이미 반영 — 먹힘 아님
+    if (a.atStart) {
+      const pos = tileLo[a.seg];
+      const newLo = Math.min(pos + a.w, tileHi[a.seg]);
+      cornerLaps.push({ vertexIndex: a.vertexIndex, x0: pos, x1: newLo });
+      tileLo[a.seg] = newLo;
     } else {
-      const lapW = segLapW(j - 1); // 먹히는 왼쪽 면(세그먼트 j-1)의 겹 두께
-      const newHi = Math.max(pos - lapW, tileLo[j - 1]);
-      cornerLaps.push({ vertexIndex: j, x0: newHi, x1: pos });
-      tileHi[j - 1] = newHi; // 왼쪽 면은 랩폭 앞에서 끝
+      const pos = tileHi[a.seg];
+      const newHi = Math.max(pos - a.w, tileLo[a.seg]);
+      cornerLaps.push({ vertexIndex: a.vertexIndex, x0: newHi, x1: pos });
+      tileHi[a.seg] = newHi;
     }
-  });
+  }
 
   // ── 배치 안함(선만 이음) 변: 타일링 범위 0으로 → 보드 없음(길이·코너는 유지) ──
   const segSkip = params.segSkip;
