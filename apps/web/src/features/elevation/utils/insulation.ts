@@ -545,7 +545,12 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     const right = j % segCount; // 코너 오른쪽 면
     const left = (j - 1 + segCount) % segCount; // 코너 왼쪽 면
     const useRight = actTurn++ % 2 === 0; // 교대 배정
-    const w = segLapW(useRight ? left : right); // 상대 면 두께
+    // 길이 변화 폭 = 상대 면 두께 × tan(꺾임각/2) — 마이터(빗겨 자름) 기하.
+    // 직각(90°)이면 tan(45°)=1 이라 두께 그대로지만, 45°·135° 사선 벽에서는 달라진다.
+    // (검산: 오프셋 폴리곤 면적 = A + t·P + t²·Σtan(θ/2) → 길이 보정 = t·tan(θ/2))
+    // 180°에 가까운 되꺾임은 tan 이 발산하므로 170°에서 자른다.
+    const half = Math.min(c.turn, (170 * Math.PI) / 180) / 2;
+    const w = segLapW(useRight ? left : right) * Math.tan(half);
     if (w <= 1e-6) continue; // 이 겹 두께 0(예: 간접외기 2P=0) → 코너 처리 없음
     acts.push({
       vertexIndex: j,
