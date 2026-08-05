@@ -3410,16 +3410,27 @@ export default function ElevationGeneratorPage() {
       }
       bx += segLen;
     });
+    // 버림(폐기) 자투리는 도면에서 뺀다 — 발주·시공 대상이 아닌데 번호·치수가 찍히면
+    // 현장에서 시공해야 할 조각으로 오독된다(물량 집계에서도 이미 제외돼 있다).
+    // 번호는 전체 셀 기준으로 먼저 매기고 인덱스로 걸러야 남는 조각 번호가 안 밀린다.
+    const allLabels = numberBoards(dev.cells, boardLength, boardHeight);
+    const keep: number[] = [];
+    dev.cells.forEach((c, i) => {
+      if (!c.discarded) keep.push(i);
+    });
     return {
       ply,
       boardLength,
       boardHeight,
-      cells: dev.cells.map(c => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
-      labels: numberBoards(dev.cells, boardLength, boardHeight),
+      cells: keep.map(i => {
+        const c = dev.cells[i];
+        return { x: c.x, y: c.y, w: c.w, h: c.h };
+      }),
+      labels: keep.map(i => allLabels[i]),
       // 번호를 두께별 색으로 — 60T 와 90T 는 서로 잘라 쓸 수 없는 다른 자재다
-      cellThk: dev.cells.map(c => Math.round(c.thickness)),
-      labelColors: dev.cells.map(c => thicknessStyle(c.thickness).hex),
-      labelAcis: dev.cells.map(c => thicknessStyle(c.thickness).aci),
+      cellThk: keep.map(i => Math.round(dev.cells[i].thickness)),
+      labelColors: keep.map(i => thicknessStyle(dev.cells[i].thickness).hex),
+      labelAcis: keep.map(i => thicknessStyle(dev.cells[i].thickness).aci),
       cornerXs: dev.cornerXs,
       cornerLaps: dev.cornerLaps.map(l => ({ x0: l.x0, x1: l.x1 })),
       exposureBands,
