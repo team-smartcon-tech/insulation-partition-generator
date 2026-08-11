@@ -6,9 +6,22 @@
  */
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { LogOut, ArrowRight, Search } from "lucide-react";
+import {
+  LogOut,
+  ArrowRight,
+  Search,
+  Plus,
+  LayoutGrid,
+  Eye,
+  Heart,
+  type LucideIcon,
+} from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
+import { useMarketApps } from "@/features/market/hooks";
 import { TOOLS, type ToolDef } from "./tools";
+
+/** 게시 권한 role — 최종 판정은 서버(market.ts)가 하고, 여기선 버튼 노출 여부만 본다. */
+const PUBLISH_ROLES = new Set(["super_admin", "system_admin"]);
 
 /** DCR role 코드 → 한국어 라벨 */
 const ROLE_LABEL: Record<string, string> = {
@@ -18,23 +31,89 @@ const ROLE_LABEL: Record<string, string> = {
   member: "회원",
 };
 
+/**
+ * 카드 1장의 표시 모델 — 코드에 박힌 내장 도구(TOOLS)와 게시된 도구(DB)를 같은 모양으로 그린다.
+ * 내장 도구 정의(tools.ts)는 그대로 두고 여기서 변환만 한다.
+ */
+interface HomeCard {
+  key: string;
+  name: string;
+  description: string;
+  tags: string[];
+  icon: LucideIcon;
+  available: boolean;
+  /** 카드 썸네일 (내장=public 경로, 게시=Storage signed URL) */
+  thumbnail?: string | null;
+  /** 카드 하단 좌측 표기 */
+  meta: string;
+  /** 클릭 시 이동할 내부 경로 (없으면 클릭 불가) */
+  href?: string;
+  stats?: { views: number; likes: number };
+}
+
+const toolToCard = (tool: ToolDef): HomeCard => ({
+  key: `tool:${tool.id}`,
+  name: tool.name,
+  description: tool.description,
+  tags: tool.tags ?? [],
+  icon: tool.icon,
+  available: tool.status === "available",
+  thumbnail: tool.thumbnail,
+  meta: "우미 · 오토콘",
+  href: tool.status === "available" ? tool.path : undefined,
+});
+
 export default function HomePage() {
   const [, navigate] = useLocation();
   const { user, logout } = useAuth();
 
   const roleLabel = user?.role ? ROLE_LABEL[user.role] ?? undefined : undefined;
 
+  const { data: market } = useMarketApps();
+  const marketApps = market?.apps ?? [];
+  // 목록 API가 실패해도(마이그레이션 전 등) 관리자에겐 버튼이 보여야 한다 → 세션 role 기준.
+  const canPublish = PUBLISH_ROLES.has(user?.role ?? "");
+
   const [query, setQuery] = useState("");
+
+  const cards = useMemo(() => {
+    const published = marketApps.map<HomeCard>((app) => ({
+      key: `market:${app.id}`,
+      name: app.title,
+      description: app.description ?? "",
+      tags: app.tags ?? [],
+      icon: LayoutGrid,
+      available: true,
+      thumbnail: app.thumbnail_url,
+      meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 오토콘",
+      href: `/market/${app.id}`,
+      stats: { views: app.view_count, likes: app.like_count },
+    }));
+
+    // 같은 이름으로 실제 게시되면 "준비 중" 자리표시자는 감춘다 (줄눈컷팅 등 중복 방지).
+    const publishedNames = new Set(published.map((c) => c.name.replace(/\s+/g, "")));
+    const builtIn = TOOLS.map(toolToCard).filter(
+      (c) => c.available || !publishedNames.has(c.name.replace(/\s+/g, "")),
+    );
+
+    // 사용 가능(내장 → 게시) 먼저, 준비 중 자리표시자는 뒤로.
+    return [
+      ...builtIn.filter((c) => c.available),
+      ...published,
+      ...builtIn.filter((c) => !c.available),
+    ];
+  }, [marketApps]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return TOOLS;
-    return TOOLS.filter(
-      (t) =>
-        t.name.toLowerCase().includes(q) ||
-        t.description.toLowerCase().includes(q) ||
-        (t.tags ?? []).some((tag) => tag.toLowerCase().includes(q))
+    if (!q) return cards;
+    return cards.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.description.toLowerCase().includes(q) ||
+        c.tags.some((tag) => tag.toLowerCase().includes(q))
     );
-  }, [query]);
+  }, [cards, query]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[#e6eefb] via-[#f2f6fd] to-[#e8f0fa] text-slate-800">
@@ -161,14 +240,27 @@ export default function HomePage() {
               시공 자동화 앱·도구 디렉터리
             </p>
           </div>
-          <div className="relative w-full max-w-sm">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="도구명 · 설명 · 태그 검색"
-              className="h-11 w-full rounded-xl border border-slate-200 bg-white/80 pl-10 pr-3 text-[14px] text-slate-800 shadow-sm outline-none backdrop-blur transition-all placeholder:text-slate-400 focus:border-[#0a63b8] focus:bg-white focus:ring-2 focus:ring-[#0a63b8]/15"
-            />
+          <div className="flex w-full max-w-2xl items-center gap-2.5 sm:w-auto">
+            <div className="relative w-full sm:w-80">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="도구명 · 설명 · 태그 검색"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white/80 pl-10 pr-3 text-[14px] text-slate-800 shadow-sm outline-none backdrop-blur transition-all placeholder:text-slate-400 focus:border-[#0a63b8] focus:bg-white focus:ring-2 focus:ring-[#0a63b8]/15"
+              />
+            </div>
+            {/* 게시하기 — 관리자만 노출 */}
+            {canPublish && (
+              <button
+                type="button"
+                onClick={() => navigate("/market/new")}
+                className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-[#0a63b8] px-4 text-[14px] font-bold text-white shadow-[0_10px_24px_-12px_rgba(10,99,184,0.9)] transition-colors hover:bg-[#004791]"
+              >
+                <Plus className="h-4 w-4" />
+                게시하기
+              </button>
+            )}
           </div>
         </div>
 
@@ -181,8 +273,12 @@ export default function HomePage() {
 
         {/* 카드 그리드 */}
         <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((tool) => (
-            <AppCard key={tool.id} tool={tool} onOpen={() => navigate(tool.path)} />
+          {filtered.map((card) => (
+            <AppCard
+              key={card.key}
+              card={card}
+              onOpen={() => card.href && navigate(card.href)}
+            />
           ))}
         </div>
         {filtered.length === 0 && (
@@ -215,12 +311,12 @@ function WoomiLogo() {
 }
 
 /** App Market 스타일 카드 — 썸네일 + 태그 + 상태 */
-function AppCard({ tool, onOpen }: { tool: ToolDef; onOpen: () => void }) {
-  const Icon = tool.icon;
-  const available = tool.status === "available";
+function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
+  const Icon = card.icon;
+  const available = card.available;
   // 실제 화면 썸네일 (로드 실패 시 아이콘 썸네일 폴백)
   const [thumbOk, setThumbOk] = useState(true);
-  const showThumb = available && !!tool.thumbnail && thumbOk;
+  const showThumb = available && !!card.thumbnail && thumbOk;
 
   const cardCls =
     "group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-[0_1px_3px_rgba(16,24,40,0.06),0_10px_24px_-14px_rgba(16,24,40,0.16)] transition-all duration-300" +
@@ -232,8 +328,8 @@ function AppCard({ tool, onOpen }: { tool: ToolDef; onOpen: () => void }) {
     <div className="relative h-40 w-full overflow-hidden">
       {showThumb ? (
         <img
-          src={tool.thumbnail}
-          alt={`${tool.name} 미리보기`}
+          src={card.thumbnail ?? undefined}
+          alt={`${card.name} 미리보기`}
           className="h-full w-full border-b border-slate-100 object-cover object-top transition-transform duration-300 group-hover:scale-[1.03]"
           loading="lazy"
           onError={() => setThumbOk(false)}
@@ -279,10 +375,10 @@ function AppCard({ tool, onOpen }: { tool: ToolDef; onOpen: () => void }) {
 
   const body = (
     <div className="flex flex-1 flex-col p-5">
-      <div className="text-[16px] font-bold tracking-tight text-slate-900">{tool.name}</div>
-      {tool.tags && tool.tags.length > 0 && (
+      <div className="text-[16px] font-bold tracking-tight text-slate-900">{card.name}</div>
+      {card.tags.length > 0 && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {tool.tags.map((tag) => (
+          {card.tags.map((tag) => (
             <span
               key={tag}
               className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500"
@@ -293,10 +389,24 @@ function AppCard({ tool, onOpen }: { tool: ToolDef; onOpen: () => void }) {
         </div>
       )}
       <p className="mt-2.5 flex-1 text-[13px] leading-relaxed text-slate-500">
-        {tool.description}
+        {card.description}
       </p>
       <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-        <span className="text-[12px] font-medium text-slate-400">우미 · 오토콘</span>
+        <span className="flex items-center gap-2.5 text-[12px] font-medium text-slate-400">
+          {card.meta}
+          {card.stats && (
+            <span className="inline-flex items-center gap-2 text-slate-400">
+              <span className="inline-flex items-center gap-1">
+                <Eye className="h-3.5 w-3.5" />
+                {card.stats.views}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Heart className="h-3.5 w-3.5" />
+                {card.stats.likes}
+              </span>
+            </span>
+          )}
+        </span>
         {available ? (
           <span className="inline-flex items-center gap-1 text-[13px] font-bold text-[#0a63b8]">
             열기

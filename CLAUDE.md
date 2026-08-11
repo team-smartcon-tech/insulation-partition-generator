@@ -29,11 +29,14 @@ pnpm -r typecheck
 - 저장: 같은 폴더 `api.ts`(REST 클라) · `hooks.ts`(react-query)
 - 계산·도면: `apps/web/src/features/elevation/utils/*`
 - Worker: `apps/worker/src/index.ts`(`/api/elevation-projects*`), 설정 `apps/worker/wrangler.jsonc`
+- 홈(런처): `apps/web/src/features/home/HomePage.tsx` + 내장 도구 목록 `features/home/tools.ts`
+- App Market(홈 게시 도구): `apps/web/src/features/market/*`(게시 폼·상세) + `apps/worker/src/market.ts`(`/api/market/*`).
+  테이블 `market_apps`/`market_app_versions`/`market_app_likes`, 버킷 `market-shots`(비공개). 게시·삭제는 관리자(super_admin·system_admin)만.
 - 공용 타입: `packages/shared/src/index.ts`(`ElevState` 등) — web의 `features/elevation/types.ts`가 재수출
 
 **인프라**
 
-- Supabase(전용): ref `yzercziwazfrjsjnmbhr` · 테이블 `elev_projects`/`elev_revisions` · 버킷 `elev-dxf`(private)
+- Supabase(전용): ref `yzercziwazfrjsjnmbhr` · 테이블 `elev_projects`/`elev_revisions`, `market_apps`/`market_app_versions`/`market_app_likes` · 버킷 `elev-dxf`·`market-shots`(둘 다 private)
 - Cloudflare 계정: Smarttech `2b025f536a98444871b3306efbfd6b2a` (wrangler.jsonc `account_id`)
 - Worker 시크릿: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Cloudflare Secrets)
 

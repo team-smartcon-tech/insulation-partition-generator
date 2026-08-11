@@ -26,6 +26,8 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY: string;
   /** DXF 저장 버킷 이름 (미설정 시 elev-dxf). */
   ELEV_DXF_BUCKET?: string;
+  /** App Market 스크린샷 버킷 이름 (미설정 시 market-shots). */
+  MARKET_SHOT_BUCKET?: string;
   /** 신규 앱 자체 세션 토큰 서명/검증 시크릿 — DCR 것과 별개! 필수(미설정 시 로그인 500). */
   IPG_JWT_SECRET?: string;
   /** DCR 로그인 백엔드 base URL. dev=dcr-app-dev, prod=dcr-app. DCR_APP 바인딩 없을 때 사용. */
