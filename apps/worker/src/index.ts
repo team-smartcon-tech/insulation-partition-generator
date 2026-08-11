@@ -22,6 +22,7 @@ import {
   checkLoginRateLimit,
   parseCookie,
 } from "./auth";
+import market from "./market";
 
 export type { Env };
 
@@ -178,6 +179,9 @@ app.get("/api/auth/me", async (c) => {
 
 // 이하 /api/* 는 로그인 필수 (/health, /api/auth/* 는 미들웨어 내부에서 통과)
 app.use("/api/*", authMiddleware());
+
+// App Market(홈 게시 도구) — /api/market/* . 단열재 나누기도 라우트와 분리된 신규 모듈.
+app.route("/api/market", market);
 
 /** GET /api/elevation-projects — 프로젝트 목록 */
 app.get("/api/elevation-projects", async (c) => {
