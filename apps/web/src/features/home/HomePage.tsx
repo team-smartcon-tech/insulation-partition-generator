@@ -60,7 +60,7 @@ const toolToCard = (tool: ToolDef): HomeCard => ({
   icon: tool.icon,
   available: tool.status === "available",
   thumbnail: tool.thumbnail,
-  meta: "우미 · 스마트플랜",
+  meta: "우미 · 스마트덱",
   href: tool.status === "available" ? tool.path : undefined,
 });
 
@@ -86,7 +86,7 @@ export default function HomePage() {
       icon: LayoutGrid,
       available: true,
       thumbnail: app.thumbnail_url,
-      meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 스마트플랜",
+      meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 스마트덱",
       href: `/market/${app.id}`,
       stats: { views: app.view_count, likes: app.like_count },
     }));
@@ -245,7 +245,7 @@ export default function HomePage() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="h-[2px] w-5 rounded-full bg-[#5cc8ff]" />
               <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-[#a9d8ff]">
-                SmartPlan · Tool Directory
+                SmartDeck · Tool Directory
               </span>
               {/* 요약 칩 — 배너에서 규모를 바로 보여준다 */}
               <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-white/12 px-2.5 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/25 backdrop-blur">

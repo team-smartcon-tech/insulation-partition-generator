@@ -1,7 +1,7 @@
 {
   "id": "/tools/insulation",
-  "name": "스마트플랜 (SmartPlan) — 세대 단열재 나누기도",
-  "short_name": "스마트플랜",
+  "name": "스마트덱 (SmartDeck) — 세대 단열재 나누기도",
+  "short_name": "스마트덱",
   "description": "DXF 평면 도면에서 세대 단열재 나누기도와 물량 산출서를 만드는 건설계획 자동화 도구",
   "start_url": "/tools/insulation",
   "scope": "/",

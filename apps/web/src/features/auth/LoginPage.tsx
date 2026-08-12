@@ -162,7 +162,7 @@ export default function LoginPage() {
         </form>
 
         <p className="mt-6 text-center text-[11px] text-slate-400">
-          © 우미건설 · 스마트플랜 (SmartPlan)
+          © 우미건설 · 스마트덱 (SmartDeck)
         </p>
       </div>
     </div>
