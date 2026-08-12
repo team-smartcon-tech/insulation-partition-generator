@@ -7,7 +7,7 @@
  *   3) App.tsx 에 <Route path="/tools/xxx"> 연결
  * → 홈(HomePage)은 이 배열을 읽어 카드를 자동으로 그린다.
  */
-import { Square, Scissors, Plus, type LucideIcon } from "lucide-react";
+import { Square, Scissors, type LucideIcon } from "lucide-react";
 
 export type ToolStatus = "available" | "comingSoon";
 
@@ -51,13 +51,5 @@ export const TOOLS: ToolDef[] = [
     status: "comingSoon",
     tags: ["타일", "컷팅"],
   },
-  // ── 준비 중 자리표시자 (도구가 늘어나면 위쪽 available 항목으로 대체) ──
-  {
-    id: "coming-1",
-    name: "준비 중",
-    description: "다음 시공 자동화 도구가 곧 추가됩니다.",
-    path: "",
-    icon: Plus,
-    status: "comingSoon",
-  },
+  // 빈 자리표시자 카드는 두지 않는다 — 홈은 "준비 중" 섹션에 컴팩트 타일로만 노출한다.
 ];

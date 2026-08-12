@@ -8,6 +8,7 @@ import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import BrandWordmark from "@/components/brand/BrandWordmark";
 import { useAuth } from "./AuthContext";
 import { AuthError } from "./authApi";
 
@@ -70,20 +71,7 @@ export default function LoginPage() {
             }
           />
           <div className="h-7 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent" />
-          <div className="flex flex-col leading-none">
-            <div
-              className="flex items-baseline gap-0.5"
-              style={{ fontFamily: "'Archivo Black', 'SUIT Variable', sans-serif" }}
-            >
-              <span className="text-[22px] tracking-tight text-slate-900">
-                Auto<span className="text-[#0a63b8]">Con</span>
-              </span>
-              <span className="text-[23px] leading-none text-[#1478d6]">.</span>
-            </div>
-            <span className="mt-[3px] text-[8.5px] font-bold uppercase tracking-[0.26em] text-slate-400">
-              Construction Automation
-            </span>
-          </div>
+          <BrandWordmark />
         </div>
 
         {/* 글래스 카드 */}
@@ -174,7 +162,7 @@ export default function LoginPage() {
         </form>
 
         <p className="mt-6 text-center text-[11px] text-slate-400">
-          © 우미건설 · 오토콘 (AutoCon)
+          © 우미건설 · 스마트플랜 (SmartPlan)
         </p>
       </div>
     </div>
