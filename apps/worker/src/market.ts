@@ -106,6 +106,45 @@ function extOf(name: string, mime: string): string {
   return "jpg";
 }
 
+/**
+ * form 의 shots 파일을 검증해 Storage 에 올리고 ShotRef 를 만든다.
+ * 올린 경로는 uploaded 에 누적하므로, 이후 단계에서 실패하면 호출부가 이를 지운다.
+ * 게시(POST)와 수정(PATCH)이 같은 규칙을 쓰도록 한 곳에 모아 둔다.
+ */
+async function uploadShotFiles(
+  env: Env,
+  bucket: string,
+  appId: string,
+  form: FormData,
+  uploaded: string[],
+): Promise<{ refs: ShotRef[] } | { error: string; status: 400 | 413 | 415 }> {
+  // workers-types 의 FormData 는 값 타입을 string 으로 선언하므로 typeof 로 파일을 가려낸다
+  // (index.ts 의 DXF 업로드와 동일한 처리).
+  const files = form
+    .getAll("shots")
+    .filter((entry) => !!entry && typeof entry !== "string") as unknown as File[];
+  if (files.length > MAX_SHOT_COUNT) {
+    return { error: `스크린샷은 최대 ${MAX_SHOT_COUNT}장까지 올릴 수 있습니다.`, status: 400 };
+  }
+
+  const refs: ShotRef[] = [];
+  for (const file of files) {
+    if (file.size === 0) continue;
+    if (file.size > MAX_SHOT_BYTES) {
+      return { error: `이미지 1장은 10MB 이하여야 합니다: ${file.name}`, status: 413 };
+    }
+    const mime = file.type || "image/png";
+    if (!ALLOWED_SHOT_MIME.has(mime)) {
+      return { error: `지원하지 않는 이미지 형식입니다: ${mime}`, status: 415 };
+    }
+    const objectPath = `market/${appId}/${crypto.randomUUID()}.${extOf(file.name, mime)}`;
+    await storageUpload(env, bucket, objectPath, await file.arrayBuffer(), mime);
+    uploaded.push(objectPath);
+    refs.push({ bucket, path: objectPath, name: file.name || "screenshot", size: file.size, mime });
+  }
+  return { refs };
+}
+
 /** screenshots(JSON) → signed URL 목록. 실패한 항목은 조용히 건너뛴다(카드가 깨지지 않도록). */
 async function signShots(env: Env, shots: ShotRef[] | null | undefined, limit?: number) {
   const list = Array.isArray(shots) ? shots.slice(0, limit ?? shots.length) : [];
@@ -113,14 +152,17 @@ async function signShots(env: Env, shots: ShotRef[] | null | undefined, limit?: 
     list.map(async (shot) => {
       try {
         const url = await storageSignedUrl(env, shot.bucket || "market-shots", shot.path);
-        return { url, name: shot.name, mime: shot.mime };
+        // path 는 수정 화면에서 "이 이미지를 유지" 를 지시할 때 쓴다(서명 URL 은 매번 바뀌므로 식별자로 못 씀).
+        return { url, path: shot.path, name: shot.name, mime: shot.mime };
       } catch (err) {
         console.error("[market/sign]", errMsg(err));
         return null;
       }
     }),
   );
-  return signed.filter((s): s is { url: string; name: string; mime: string } => s !== null);
+  return signed.filter(
+    (s): s is { url: string; path: string; name: string; mime: string } => s !== null,
+  );
 }
 
 /** 현재 사용자가 좋아요한 앱 id 집합 */
@@ -200,35 +242,12 @@ market.post("/apps", async (c) => {
     const appId = crypto.randomUUID();
 
     // 스크린샷 업로드 — 첫 장이 목록 썸네일
-    const shots: ShotRef[] = [];
-    // workers-types 의 FormData 는 값 타입을 string 으로 선언하므로 typeof 로 파일을 가려낸다
-    // (index.ts 의 DXF 업로드와 동일한 처리).
-    const files = form
-      .getAll("shots")
-      .filter((entry) => !!entry && typeof entry !== "string") as unknown as File[];
-    if (files.length > MAX_SHOT_COUNT) {
-      return c.json({ error: `스크린샷은 최대 ${MAX_SHOT_COUNT}장까지 올릴 수 있습니다.` }, 400);
+    const upload = await uploadShotFiles(c.env, bucket, appId, form, uploaded);
+    if ("error" in upload) {
+      await storageDelete(c.env, bucket, uploaded).catch(() => undefined);
+      return c.json({ error: upload.error }, upload.status);
     }
-    for (const file of files) {
-      if (file.size === 0) continue;
-      if (file.size > MAX_SHOT_BYTES) {
-        return c.json({ error: `이미지 1장은 10MB 이하여야 합니다: ${file.name}` }, 413);
-      }
-      const mime = file.type || "image/png";
-      if (!ALLOWED_SHOT_MIME.has(mime)) {
-        return c.json({ error: `지원하지 않는 이미지 형식입니다: ${mime}` }, 415);
-      }
-      const objectPath = `market/${appId}/${crypto.randomUUID()}.${extOf(file.name, mime)}`;
-      await storageUpload(c.env, bucket, objectPath, await file.arrayBuffer(), mime);
-      uploaded.push(objectPath);
-      shots.push({
-        bucket,
-        path: objectPath,
-        name: file.name || "screenshot",
-        size: file.size,
-        mime,
-      });
-    }
+    const shots = upload.refs;
     if (shots.length === 0) {
       return c.json({ error: "실제 실행 화면 스크린샷을 1장 이상 올려 주세요." }, 400);
     }
@@ -418,6 +437,133 @@ market.post("/apps/:appId/versions", async (c) => {
   } catch (err) {
     console.error("[market/versions POST]", errMsg(err));
     return c.json({ error: `등록 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/**
+ * PATCH /api/market/apps/:appId — 게시물 수정 (관리자 전용, multipart/form-data)
+ *
+ * 본문 필드는 POST 와 동일하고, 스크린샷만 규칙이 다르다.
+ *  - shots      : 새로 추가한 파일들
+ *  - shotOrder  : 최종 노출 순서. `keep:{기존 path}` 또는 `new:{shots 인덱스}` 토큰 배열.
+ *                 (서명 URL 은 매번 바뀌므로 기존 이미지는 Storage path 로 지목한다)
+ *                 비어 있으면 "기존 전부 + 새 파일" 순서로 본다.
+ * 최종 목록에서 빠진 기존 이미지는 Storage 에서 지운다.
+ */
+market.patch("/apps/:appId", async (c) => {
+  if (!adminOnly(c)) return c.json({ error: "수정 권한이 없습니다." }, 403);
+
+  const appId = c.req.param("appId");
+  const bucket = shotBucket(c.env);
+  const uploaded: string[] = [];
+  /** 이후 단계에서 실패하면 이번에 올린 파일만 되돌린다(기존 이미지는 건드리지 않는다). */
+  const rollback = () => storageDelete(c.env, bucket, uploaded).catch(() => undefined);
+
+  try {
+    const curRes = await supabaseRest(
+      c.env,
+      "GET",
+      `/market_apps?id=eq.${encodeURIComponent(appId)}&select=screenshots&limit=1`,
+    );
+    const current = curRes.ok ? (((await curRes.json()) as AppRow[])[0] ?? null) : null;
+    if (!current) return c.json({ error: "게시물을 찾을 수 없습니다." }, 404);
+    const currentShots = current.screenshots ?? [];
+
+    const form = await c.req.raw.formData();
+
+    const title = formText(form, "title");
+    if (!title) return c.json({ error: "제목을 입력하세요." }, 400);
+
+    const deployUrl = normalizeUrl(form.get("deployUrl"));
+    if (!deployUrl) {
+      return c.json({ error: "배포 URL 은 http(s) 주소여야 합니다." }, 400);
+    }
+    const repoUrlRaw = formText(form, "repoUrl");
+    if (repoUrlRaw && !normalizeUrl(repoUrlRaw)) {
+      return c.json({ error: "레포 URL 은 http(s) 주소여야 합니다." }, 400);
+    }
+
+    const upload = await uploadShotFiles(c.env, bucket, appId, form, uploaded);
+    if ("error" in upload) {
+      await rollback();
+      return c.json({ error: upload.error }, upload.status);
+    }
+
+    // 최종 스크린샷 목록 구성
+    const byPath = new Map(currentShots.map((s) => [s.path, s]));
+    const order = formStringArray(form, "shotOrder");
+    let shots: ShotRef[];
+    if (order.length > 0) {
+      shots = [];
+      for (const token of order) {
+        if (token.startsWith("keep:")) {
+          const ref = byPath.get(token.slice(5));
+          if (ref) shots.push(ref);
+        } else if (token.startsWith("new:")) {
+          const ref = upload.refs[Number(token.slice(4))];
+          if (ref) shots.push(ref);
+        }
+      }
+    } else {
+      shots = [...currentShots, ...upload.refs];
+    }
+
+    if (shots.length === 0) {
+      await rollback();
+      return c.json({ error: "스크린샷은 1장 이상 남겨 주세요." }, 400);
+    }
+    if (shots.length > MAX_SHOT_COUNT) {
+      await rollback();
+      return c.json({ error: `스크린샷은 최대 ${MAX_SHOT_COUNT}장까지 둘 수 있습니다.` }, 400);
+    }
+
+    const patch = {
+      title,
+      description: formText(form, "description"),
+      deploy_url: deployUrl,
+      repo_url: repoUrlRaw ? normalizeUrl(repoUrlRaw) : null,
+      platform_type: formText(form, "platformType") ?? "웹앱",
+      location: formText(form, "location") === "현장" ? "현장" : "본사",
+      category: formText(form, "category") ?? "웹앱",
+      version: formText(form, "version"),
+      team: formText(form, "team"),
+      owners: formStringArray(form, "owners"),
+      tags: formStringArray(form, "tags"),
+      screenshots: shots,
+      updated_at: new Date().toISOString(),
+    };
+
+    const res = await supabaseRest(
+      c.env,
+      "PATCH",
+      `/market_apps?id=eq.${encodeURIComponent(appId)}`,
+      patch,
+    );
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[market/app PATCH]", errText);
+      await rollback();
+      return c.json({ error: `수정 실패: ${errText}` }, res.status as 500);
+    }
+    const updated = ((await res.json()) as AppRow[])[0] ?? null;
+
+    // 최종 목록에서 빠진 이미지 정리 — 기존 것뿐 아니라, 올렸지만 순서에 안 들어간 새 파일도 지운다.
+    // 실패해도 고아 파일만 남으므로 응답을 막지 않는다.
+    const kept = new Set(shots.map((s) => s.path));
+    const removed = [...currentShots.map((s) => s.path), ...uploaded].filter(
+      (path) => !kept.has(path),
+    );
+    if (removed.length > 0) {
+      await storageDelete(c.env, bucket, removed).catch((err) =>
+        console.error("[market/app PATCH shots]", errMsg(err)),
+      );
+    }
+
+    return c.json({ app: updated });
+  } catch (err) {
+    console.error("[market/app PATCH]", errMsg(err));
+    await rollback();
+    return c.json({ error: `수정 실패: ${errMsg(err)}` }, 500);
   }
 });
 

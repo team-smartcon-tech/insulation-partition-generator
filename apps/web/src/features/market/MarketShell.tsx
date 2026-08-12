@@ -7,6 +7,7 @@ import { useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import { ArrowLeft, LogOut } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
+import BrandWordmark from "@/components/brand/BrandWordmark";
 
 const ROLE_LABEL: Record<string, string> = {
   super_admin: "최고 관리자",
@@ -52,20 +53,7 @@ export default function MarketShell({ children }: { children: ReactNode }) {
             </Link>
             <WoomiLogo />
             <div className="h-7 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent" />
-            <div className="flex flex-col leading-none">
-              <div
-                className="flex items-baseline gap-0.5"
-                style={{ fontFamily: "'Archivo Black', 'SUIT Variable', sans-serif" }}
-              >
-                <span className="text-[22px] tracking-tight text-slate-900">
-                  Auto<span className="text-[#0a63b8]">Con</span>
-                </span>
-                <span className="text-[23px] leading-none text-[#1478d6]">.</span>
-              </div>
-              <span className="mt-[3px] text-[8.5px] font-bold uppercase tracking-[0.26em] text-slate-400">
-                Construction Automation
-              </span>
-            </div>
+            <BrandWordmark />
           </div>
 
           <div className="flex items-center gap-3">

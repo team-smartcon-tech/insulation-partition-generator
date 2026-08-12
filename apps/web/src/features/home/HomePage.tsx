@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
+import BrandWordmark from "@/components/brand/BrandWordmark";
 import { useMarketApps } from "@/features/market/hooks";
 import { TOOLS, type ToolDef } from "./tools";
 
@@ -59,7 +60,7 @@ const toolToCard = (tool: ToolDef): HomeCard => ({
   icon: tool.icon,
   available: tool.status === "available",
   thumbnail: tool.thumbnail,
-  meta: "우미 · 오토콘",
+  meta: "우미 · 스마트덱",
   href: tool.status === "available" ? tool.path : undefined,
 });
 
@@ -85,7 +86,7 @@ export default function HomePage() {
       icon: LayoutGrid,
       available: true,
       thumbnail: app.thumbnail_url,
-      meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 오토콘",
+      meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 스마트덱",
       href: `/market/${app.id}`,
       stats: { views: app.view_count, likes: app.like_count },
     }));
@@ -114,6 +115,8 @@ export default function HomePage() {
         c.tags.some((tag) => tag.toLowerCase().includes(q))
     );
   }, [cards, query]);
+
+  const availableCount = useMemo(() => cards.filter((c) => c.available).length, [cards]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[#e6eefb] via-[#f2f6fd] to-[#e8f0fa] text-slate-800">
@@ -186,20 +189,7 @@ export default function HomePage() {
           <div className="flex items-center gap-4">
             <WoomiLogo />
             <div className="h-7 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent" />
-            <div className="flex flex-col leading-none">
-              <div
-                className="flex items-baseline gap-0.5"
-                style={{ fontFamily: "'Archivo Black', 'SUIT Variable', sans-serif" }}
-              >
-                <span className="text-[22px] tracking-tight text-slate-900">
-                  Auto<span className="text-[#0a63b8]">Con</span>
-                </span>
-                <span className="text-[23px] leading-none text-[#1478d6]">.</span>
-              </div>
-              <span className="mt-[3px] text-[8.5px] font-bold uppercase tracking-[0.26em] text-slate-400">
-                Construction Automation
-              </span>
-            </div>
+            <BrandWordmark />
           </div>
 
           {/* 우: 사용자 + 로그아웃 */}
@@ -225,29 +215,66 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* ── 본문 (App Market) ── */}
-      <main className="relative w-full px-8 py-10">
-        {/* 헤딩 + 검색 */}
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
+      {/* ── 히어로 배너 (풀블리드 딥블루) ── */}
+      <section className="relative z-10 w-full overflow-hidden bg-[linear-gradient(105deg,#00224a_0%,#0a5aa8_38%,#1478d6_62%,#043a74_100%)] shadow-[0_18px_40px_-24px_rgba(0,39,77,0.75)]">
+        {/* 블루프린트 그리드 */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.14]"
+          style={{
+            backgroundImage:
+              "linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)",
+            backgroundSize: "34px 34px",
+            maskImage: "radial-gradient(120% 130% at 78% 0%, #000 10%, transparent 72%)",
+            WebkitMaskImage:
+              "radial-gradient(120% 130% at 78% 0%, #000 10%, transparent 72%)",
+          }}
+        />
+        {/* 광원 + 상단 하이라이트 라인 */}
+        <div
+          className="pointer-events-none absolute -right-24 -top-40 h-[420px] w-[520px] rounded-full blur-[90px]"
+          style={{ background: "radial-gradient(circle, #4fc3ff 0%, transparent 70%)", opacity: 0.3 }}
+        />
+        <div
+          className="pointer-events-none absolute -bottom-32 left-[12%] h-[320px] w-[520px] rounded-full blur-[90px]"
+          style={{ background: "radial-gradient(ellipse, #0d2f66 0%, transparent 70%)", opacity: 0.55 }}
+        />
+        <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
+
+        <div className="relative mx-auto flex w-full max-w-[2100px] flex-wrap items-center justify-between gap-4 px-8 py-6">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="h-[2px] w-5 rounded-full bg-[#5cc8ff]" />
+              <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-[#a9d8ff]">
+                SmartDeck · Tool Directory
+              </span>
+              {/* 요약 칩 — 배너에서 규모를 바로 보여준다 */}
+              <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-white/12 px-2.5 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/25 backdrop-blur">
+                도구 {cards.length}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/12 px-2.5 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/25 backdrop-blur">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#5cffa8]" />
+                사용 가능 {availableCount}
+              </span>
+            </div>
             <h1
-              className="bg-gradient-to-r from-[#00274d] via-[#0a63b8] to-[#1478d6] bg-clip-text text-[34px] leading-tight text-transparent"
+              className="mt-1.5 text-[30px] leading-[1.12] text-white drop-shadow-[0_3px_14px_rgba(0,20,45,0.45)]"
               style={{ fontFamily: "'Black Han Sans', 'SUIT Variable', sans-serif" }}
             >
-              시공상세도 자동화 TOOL
+              건설계획 자동화 TOOL
             </h1>
-            <p className="mt-1.5 text-[14px] text-slate-500">
-              시공 자동화 앱·도구 디렉터리
+            <p className="mt-1.5 max-w-xl text-[13px] leading-snug text-white/75">
+              현장에서 바로 쓰는 시공 자동화 앱·도구를 한곳에서 찾고, 직접 만든 도구를 공유해 보세요.
             </p>
           </div>
+
           <div className="flex w-full max-w-2xl items-center gap-2.5 sm:w-auto">
             <div className="relative w-full sm:w-80">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="도구명 · 설명 · 태그 검색"
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white/80 pl-10 pr-3 text-[14px] text-slate-800 shadow-sm outline-none backdrop-blur transition-all placeholder:text-slate-400 focus:border-[#0a63b8] focus:bg-white focus:ring-2 focus:ring-[#0a63b8]/15"
+                className="h-11 w-full rounded-xl border border-white/25 bg-white/12 pl-10 pr-3 text-[14px] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] outline-none backdrop-blur transition-all placeholder:text-white/55 focus:border-white/60 focus:bg-white/20 focus:ring-2 focus:ring-white/25"
               />
             </div>
             {/* 게시하기 — 관리자만 노출 */}
@@ -255,7 +282,7 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => navigate("/market/new")}
-                className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-[#0a63b8] px-4 text-[14px] font-bold text-white shadow-[0_10px_24px_-12px_rgba(10,99,184,0.9)] transition-colors hover:bg-[#004791]"
+                className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-white px-5 text-[14px] font-bold text-[#0a5aa8] shadow-[0_14px_30px_-14px_rgba(0,20,45,0.9)] transition-all hover:-translate-y-0.5 hover:bg-[#f2f8ff]"
               >
                 <Plus className="h-4 w-4" />
                 게시하기
@@ -263,15 +290,14 @@ export default function HomePage() {
             )}
           </div>
         </div>
+      </section>
 
+      {/* ── 본문 (App Market) ── */}
+      <main className="relative mx-auto w-full max-w-[2100px] px-8 pb-14 pt-9">
         {/* 카테고리 헤더 */}
-        <div className="mt-8 flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[#0a63b8]" />
-          <span className="text-[14px] font-bold text-slate-700">시공 도구</span>
-          <span className="text-[13px] font-semibold text-slate-400">{filtered.length}</span>
-        </div>
+        <SectionHeading title="시공 도구" count={filtered.length} />
 
-        {/* 카드 그리드 */}
+        {/* 카드 그리드 — 준비 중 도구도 같은 크기 카드로 이어 붙인다 */}
         <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((card) => (
             <AppCard
@@ -281,6 +307,7 @@ export default function HomePage() {
             />
           ))}
         </div>
+
         {filtered.length === 0 && (
           <div className="mt-16 text-center text-[14px] text-slate-400">
             검색 결과가 없습니다.
@@ -310,6 +337,36 @@ function WoomiLogo() {
   );
 }
 
+/** 섹션 제목 — "시공 도구 5" 처럼 개수와 함께 위계를 준다. */
+function SectionHeading({
+  title,
+  count,
+  muted = false,
+}: {
+  title: string;
+  count: number;
+  muted?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span
+        className={"h-2 w-2 rounded-full " + (muted ? "bg-slate-300" : "bg-[#0a63b8]")}
+      />
+      <span
+        className={
+          "text-[15px] font-bold tracking-tight " + (muted ? "text-slate-400" : "text-slate-800")
+        }
+      >
+        {title}
+      </span>
+      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11.5px] font-bold text-slate-500">
+        {count}
+      </span>
+      <span className="ml-1 h-px flex-1 bg-gradient-to-r from-slate-200 to-transparent" />
+    </div>
+  );
+}
+
 /** App Market 스타일 카드 — 썸네일 + 태그 + 상태 */
 function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
   const Icon = card.icon;
@@ -325,7 +382,8 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
       : "");
 
   const thumb = (
-    <div className="relative h-40 w-full overflow-hidden">
+    // 16:10 고정 비율 — 화면 폭이 바뀌어도 썸네일이 잘리지 않는다.
+    <div className="relative aspect-[16/10] w-full overflow-hidden">
       {showThumb ? (
         <img
           src={card.thumbnail ?? undefined}
@@ -370,50 +428,55 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
         />
         {available ? "사용 가능" : "준비 중"}
       </span>
+      {/* 조회/좋아요는 썸네일 위로 — 카드 하단 줄을 모든 카드에서 동일하게 유지한다. */}
+      {card.stats && (
+        <span className="absolute bottom-3 left-3 inline-flex items-center gap-2.5 rounded-full bg-slate-900/55 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm backdrop-blur">
+          <span className="inline-flex items-center gap-1">
+            <Eye className="h-3.5 w-3.5" />
+            {card.stats.views}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Heart className="h-3.5 w-3.5" />
+            {card.stats.likes}
+          </span>
+        </span>
+      )}
     </div>
   );
 
   const body = (
     <div className="flex flex-1 flex-col p-5">
-      <div className="text-[16px] font-bold tracking-tight text-slate-900">{card.name}</div>
-      {card.tags.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {card.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-      <p className="mt-2.5 flex-1 text-[13px] leading-relaxed text-slate-500">
-        {card.description}
+      <div className="truncate text-[16px] font-bold tracking-tight text-slate-900">
+        {card.name}
+      </div>
+      {/* 태그 줄 — 태그가 없어도 높이를 차지해 카드 간 본문 위치를 맞춘다. */}
+      <div className="mt-2.5 flex min-h-[22px] flex-wrap gap-1.5">
+        {card.tags.map((tag) => (
+          <span
+            key={tag}
+            className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500"
+          >
+            {tag}
+          </span>
+        ))}
+      </div>
+      <p
+        className={
+          "mt-2.5 line-clamp-2 min-h-[40px] flex-1 text-[13px] leading-relaxed " +
+          (card.description ? "text-slate-500" : "text-slate-300")
+        }
+      >
+        {card.description || "소개 문구가 아직 등록되지 않았습니다."}
       </p>
-      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-        <span className="flex items-center gap-2.5 text-[12px] font-medium text-slate-400">
-          {card.meta}
-          {card.stats && (
-            <span className="inline-flex items-center gap-2 text-slate-400">
-              <span className="inline-flex items-center gap-1">
-                <Eye className="h-3.5 w-3.5" />
-                {card.stats.views}
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Heart className="h-3.5 w-3.5" />
-                {card.stats.likes}
-              </span>
-            </span>
-          )}
-        </span>
+      <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
+        <span className="truncate text-[12px] font-medium text-slate-400">{card.meta}</span>
         {available ? (
-          <span className="inline-flex items-center gap-1 text-[13px] font-bold text-[#0a63b8]">
+          <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-bold text-[#0a63b8]">
             열기
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </span>
         ) : (
-          <span className="text-[12px] font-medium text-slate-300">준비 중</span>
+          <span className="shrink-0 text-[12px] font-medium text-slate-300">준비 중</span>
         )}
       </div>
     </div>
