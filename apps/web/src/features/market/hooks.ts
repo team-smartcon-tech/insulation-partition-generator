@@ -10,6 +10,7 @@ import {
   listMarketApps,
   publishMarketApp,
   toggleMarketAppLike,
+  updateMarketApp,
 } from "./api";
 import type { MarketAppInput } from "./types";
 
@@ -45,6 +46,16 @@ export function usePublishMarketApp() {
   return useMutation({
     mutationFn: (args: { input: MarketAppInput; shots: File[] }) =>
       publishMarketApp(args.input, args.shots),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.all }),
+  });
+}
+
+/** 게시물 수정 — 성공 시 목록과 해당 상세를 모두 새로 받는다(썸네일 서명 URL 이 바뀌므로) */
+export function useUpdateMarketApp(appId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { input: MarketAppInput; newShots: File[]; shotOrder: string[] }) =>
+      updateMarketApp(appId, args.input, args.newShots, args.shotOrder),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.all }),
   });
 }

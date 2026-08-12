@@ -31,7 +31,10 @@ export interface MarketAppSummary {
 }
 
 export interface MarketShot {
+  /** 1시간짜리 임시 URL — 매번 바뀌므로 식별자로 쓰지 않는다 */
   url: string;
+  /** Storage 경로 — 수정 시 "이 이미지는 유지" 를 지시하는 식별자 */
+  path: string;
   name: string;
   mime: string;
 }

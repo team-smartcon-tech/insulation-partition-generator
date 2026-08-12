@@ -24,11 +24,18 @@ export default function App() {
             <ElevationGeneratorPage />
           </AuthGate>
         </Route>
-        {/* App Market — 게시하기 / 게시 도구 상세 (/market/new 가 :appId 보다 먼저) */}
+        {/* App Market — 게시/수정/상세 (구체적인 경로가 /market/:appId 보다 먼저 와야 한다) */}
         <Route path="/market/new">
           <AuthGate>
             <MarketPublishPage />
           </AuthGate>
+        </Route>
+        <Route path="/market/:appId/edit">
+          {(params) => (
+            <AuthGate>
+              <MarketPublishPage appId={params.appId} />
+            </AuthGate>
+          )}
         </Route>
         <Route path="/market/:appId">
           <AuthGate>

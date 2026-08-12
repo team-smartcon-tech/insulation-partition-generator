@@ -1,31 +1,37 @@
 /**
- * 게시하기 — 홈 카드로 노출할 외부 도구를 등록하는 폼. 관리자(super_admin·system_admin) 전용.
- * 등록하면 홈에 카드가 생기고, 카드를 누르면 상세(MarketAppDetailPage)로 간다.
+ * 게시하기 / 수정하기 — 홈 카드로 노출할 외부 도구를 등록·수정하는 폼.
+ * 관리자(super_admin·system_admin) 전용.
+ *
+ * appId 가 있으면 수정 모드다. 등록 때 넣은 내용과 이미지를 그대로 불러와 고칠 수 있고,
+ * 기존 이미지는 Storage path 로 유지 여부를 지시한다(서명 URL 은 매번 바뀌므로 식별자로 못 씀).
  */
-import { useCallback, useMemo, useRef, useState, type ClipboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { Check, ClipboardPaste, ImagePlus, LayoutGrid, Loader2, X } from "lucide-react";
+import { Check, ClipboardPaste, ImagePlus, LayoutGrid, Loader2, Star, X } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
 import { cn } from "@/lib/utils";
 import MarketShell from "./MarketShell";
-import { usePublishMarketApp } from "./hooks";
+import { useMarketApp, usePublishMarketApp, useUpdateMarketApp } from "./hooks";
 import { CATEGORIES, LOCATIONS, PLATFORM_TYPES, type MarketAppInput } from "./types";
 
 const ADMIN_ROLES = new Set(["super_admin", "system_admin"]);
 const MAX_SHOTS = 8;
 
-/** 미리보기 URL을 함께 들고 다니는 첨부 이미지 */
-interface Attachment {
-  key: string;
-  file: File;
-  preview: string;
-}
+/**
+ * 폼에 올라온 이미지 1장.
+ *  - new      : 이번에 고른 파일 (blob 미리보기)
+ *  - existing : 이미 게시된 이미지 (서명 URL 미리보기 + Storage path)
+ */
+type Attachment =
+  | { kind: "new"; key: string; file: File; preview: string; name: string }
+  | { kind: "existing"; key: string; path: string; preview: string; name: string };
 
-export default function MarketPublishPage() {
+export default function MarketPublishPage({ appId }: { appId?: string }) {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const canPublish = ADMIN_ROLES.has(user?.role ?? "");
+  const isEditing = !!appId;
 
   const [form, setForm] = useState<MarketAppInput>({
     title: "",
@@ -46,6 +52,40 @@ export default function MarketPublishPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const publish = usePublishMarketApp();
+  const update = useUpdateMarketApp(appId ?? "");
+  const saving = publish.isPending || update.isPending;
+
+  // 수정 모드 — 등록해 둔 내용·이미지를 그대로 불러와 폼을 채운다(최초 1회만).
+  const detail = useMarketApp(appId ?? null);
+  // 다른 게시물 수정으로 바로 넘어가도 다시 채워지도록 appId 로 잠근다.
+  const prefilledFor = useRef<string | null>(null);
+  useEffect(() => {
+    const app = detail.data?.app;
+    if (!app || !appId || prefilledFor.current === appId) return;
+    prefilledFor.current = appId;
+    setForm({
+      title: app.title,
+      deployUrl: app.deploy_url,
+      repoUrl: app.repo_url ?? "",
+      platformType: app.platform_type,
+      location: app.location,
+      category: app.category,
+      version: app.version ?? "",
+      team: app.team ?? "",
+      description: app.description ?? "",
+      owners: app.owners ?? [],
+      tags: app.tags ?? [],
+    });
+    setShots(
+      app.screenshots.map((shot) => ({
+        kind: "existing" as const,
+        key: shot.path,
+        path: shot.path,
+        preview: shot.url,
+        name: shot.name,
+      })),
+    );
+  }, [detail.data]);
 
   const set = <K extends keyof MarketAppInput>(key: K, value: MarketAppInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -59,9 +99,11 @@ export default function MarketPublishPage() {
         toast.error(`스크린샷은 최대 ${MAX_SHOTS}장까지 올릴 수 있습니다.`);
         return prev;
       }
-      const next = images.slice(0, room).map((file) => ({
+      const next = images.slice(0, room).map<Attachment>((file) => ({
+        kind: "new",
         key: `${file.name}-${file.size}-${crypto.randomUUID()}`,
         file,
+        name: file.name,
         preview: URL.createObjectURL(file),
       }));
       if (images.length > room) toast.error(`${MAX_SHOTS}장까지만 추가했습니다.`);
@@ -72,8 +114,17 @@ export default function MarketPublishPage() {
   const removeShot = (key: string) =>
     setShots((prev) => {
       const target = prev.find((s) => s.key === key);
-      if (target) URL.revokeObjectURL(target.preview);
+      // blob 미리보기만 해제한다(기존 이미지는 서명 URL 이라 해제 대상이 아니다).
+      if (target?.kind === "new") URL.revokeObjectURL(target.preview);
       return prev.filter((s) => s.key !== key);
+    });
+
+  /** 첫 번째 이미지가 목록 썸네일이 되므로, 맨 앞으로 옮기는 것으로 썸네일을 지정한다. */
+  const makeThumbnail = (key: string) =>
+    setShots((prev) => {
+      const target = prev.find((s) => s.key === key);
+      if (!target) return prev;
+      return [target, ...prev.filter((s) => s.key !== key)];
     });
 
   /** 클립보드 붙여넣기(캡처 → Ctrl+V) 지원 */
@@ -113,24 +164,44 @@ export default function MarketPublishPage() {
       toast.error(invalidReason);
       return;
     }
+    const input: MarketAppInput = {
+      ...form,
+      title: form.title.trim(),
+      deployUrl: form.deployUrl.trim(),
+      repoUrl: form.repoUrl.trim(),
+      version: form.version.trim(),
+      team: form.team.trim(),
+      description: form.description.trim(),
+    };
+    /** blob 미리보기 정리 — 화면을 떠나기 직전에만 부른다 */
+    const revokePreviews = () =>
+      shots.forEach((s) => s.kind === "new" && URL.revokeObjectURL(s.preview));
+
     try {
+      if (isEditing) {
+        // 화면에 보이는 순서 그대로 서버에 알린다 — 기존은 path, 새 파일은 업로드 순서로 지목.
+        const newShots: File[] = [];
+        const shotOrder = shots.map((shot) => {
+          if (shot.kind === "existing") return `keep:${shot.path}`;
+          return `new:${newShots.push(shot.file) - 1}`;
+        });
+        await update.mutateAsync({ input, newShots, shotOrder });
+        revokePreviews();
+        toast.success("수정했습니다.");
+        navigate(`/market/${appId}`);
+        return;
+      }
+
       const { app } = await publish.mutateAsync({
-        input: {
-          ...form,
-          title: form.title.trim(),
-          deployUrl: form.deployUrl.trim(),
-          repoUrl: form.repoUrl.trim(),
-          version: form.version.trim(),
-          team: form.team.trim(),
-          description: form.description.trim(),
-        },
-        shots: shots.map((s) => s.file),
+        input,
+        shots: shots.flatMap((s) => (s.kind === "new" ? [s.file] : [])),
       });
-      shots.forEach((s) => URL.revokeObjectURL(s.preview));
+      revokePreviews();
       toast.success("게시했습니다.");
       navigate(app?.id ? `/market/${app.id}` : "/");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "게시에 실패했습니다.");
+      const fallback = isEditing ? "수정에 실패했습니다." : "게시에 실패했습니다.";
+      toast.error(err instanceof Error ? err.message : fallback);
     }
   };
 
@@ -147,11 +218,52 @@ export default function MarketPublishPage() {
     );
   }
 
+  // 수정 모드에서 기존 내용을 불러오는 중 — 빈 폼이 잠깐 보였다가 채워지는 깜빡임을 막는다.
+  if (isEditing && detail.isLoading) {
+    return (
+      <MarketShell>
+        <div className="h-7 w-40 animate-pulse rounded bg-slate-200" />
+        <div className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="space-y-2">
+              <div className="h-3.5 w-20 animate-pulse rounded bg-slate-100" />
+              <div className="h-11 w-full animate-pulse rounded-lg bg-slate-100" />
+            </div>
+          ))}
+        </div>
+      </MarketShell>
+    );
+  }
+
+  if (isEditing && detail.isError) {
+    return (
+      <MarketShell>
+        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center">
+          <div className="text-[15px] font-bold text-slate-800">게시물을 불러오지 못했습니다.</div>
+          <p className="mt-2 text-[13px] text-slate-500">
+            잠시 후 다시 시도하거나, 목록에서 다시 들어와 주세요.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            className="mt-5 h-10 rounded-lg border border-slate-200 bg-white px-5 text-[13.5px] font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+          >
+            홈으로
+          </button>
+        </div>
+      </MarketShell>
+    );
+  }
+
   return (
     <MarketShell>
-      <h1 className="text-[26px] font-bold tracking-tight text-slate-900">게시하기</h1>
+      <h1 className="text-[26px] font-bold tracking-tight text-slate-900">
+        {isEditing ? "수정하기" : "게시하기"}
+      </h1>
       <p className="mt-1.5 text-[13.5px] text-slate-500">
-        사내에서 만든 앱·도구를 홈에 등록합니다. 등록하면 바로 카드로 노출됩니다.
+        {isEditing
+          ? "등록한 내용과 이미지를 고칠 수 있습니다. 저장하면 홈 카드에도 바로 반영됩니다."
+          : "사내에서 만든 앱·도구를 홈에 등록합니다. 등록하면 바로 카드로 노출됩니다."}
       </p>
 
       <div className="mt-6 flex items-center gap-2.5 rounded-xl border-2 border-[#0a63b8] bg-[#f4f8fd] px-4 py-3">
@@ -254,15 +366,21 @@ export default function MarketPublishPage() {
                   key={shot.key}
                   className="group relative h-[86px] w-[110px] overflow-hidden rounded-lg border border-slate-200 bg-white"
                 >
-                  <img
-                    src={shot.preview}
-                    alt={shot.file.name}
-                    className="h-full w-full object-cover"
-                  />
-                  {idx === 0 && (
+                  <img src={shot.preview} alt={shot.name} className="h-full w-full object-cover" />
+                  {idx === 0 ? (
                     <span className="absolute left-1 top-1 rounded bg-[#0a63b8] px-1.5 py-0.5 text-[10px] font-bold text-white">
                       썸네일
                     </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => makeThumbnail(shot.key)}
+                      className="absolute left-1 top-1 inline-flex items-center gap-1 rounded bg-slate-900/70 px-1.5 py-0.5 text-[10px] font-bold text-white opacity-0 transition-opacity group-hover:opacity-100"
+                      title="이 이미지를 썸네일로"
+                    >
+                      <Star className="h-2.5 w-2.5" />
+                      썸네일로
+                    </button>
                   )}
                   <button
                     type="button"
@@ -272,6 +390,11 @@ export default function MarketPublishPage() {
                   >
                     <X className="h-3 w-3" />
                   </button>
+                  {shot.kind === "existing" && (
+                    <span className="absolute bottom-1 left-1 rounded bg-white/85 px-1.5 py-0.5 text-[9.5px] font-semibold text-slate-500">
+                      등록됨
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -358,23 +481,19 @@ export default function MarketPublishPage() {
       <div className="mt-6 flex items-center justify-between">
         <button
           type="button"
-          onClick={() => navigate("/")}
+          onClick={() => navigate(isEditing ? `/market/${appId}` : "/")}
           className="h-11 rounded-lg border border-slate-200 bg-white px-5 text-[14px] font-semibold text-slate-600 transition-colors hover:bg-slate-50"
         >
-          이전
+          {isEditing ? "취소" : "이전"}
         </button>
         <button
           type="button"
           onClick={submit}
-          disabled={publish.isPending}
+          disabled={saving}
           className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#0a63b8] px-6 text-[14px] font-bold text-white shadow-[0_10px_24px_-12px_rgba(10,99,184,0.9)] transition-colors hover:bg-[#004791] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {publish.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Check className="h-4 w-4" />
-          )}
-          게시하기
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          {isEditing ? "저장하기" : "게시하기"}
         </button>
       </div>
     </MarketShell>

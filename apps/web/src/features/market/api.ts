@@ -59,9 +59,8 @@ export function getMarketApp(appId: string) {
   }>(`/apps/${encodeURIComponent(appId)}`);
 }
 
-/** 새 도구 게시 (관리자) */
-export function publishMarketApp(input: MarketAppInput, shots: File[]) {
-  const form = new FormData();
+/** 게시·수정 공통 본문 필드 */
+function appendAppFields(form: FormData, input: MarketAppInput) {
   form.append("title", input.title);
   form.append("deployUrl", input.deployUrl);
   form.append("repoUrl", input.repoUrl);
@@ -73,11 +72,40 @@ export function publishMarketApp(input: MarketAppInput, shots: File[]) {
   form.append("description", input.description);
   form.append("owners", JSON.stringify(input.owners));
   form.append("tags", JSON.stringify(input.tags));
+}
+
+/** 새 도구 게시 (관리자) */
+export function publishMarketApp(input: MarketAppInput, shots: File[]) {
+  const form = new FormData();
+  appendAppFields(form, input);
   for (const file of shots) form.append("shots", file, file.name);
 
   return marketFetch<{ app: MarketAppSummary }>(
     "/apps",
     { method: "POST", body: form },
+    true,
+  );
+}
+
+/**
+ * 게시물 수정 (관리자)
+ * @param newShots  새로 추가한 파일 (순서대로 new:0, new:1 … 로 지목된다)
+ * @param shotOrder 최종 노출 순서 토큰 배열 — `keep:{path}` 또는 `new:{index}`
+ */
+export function updateMarketApp(
+  appId: string,
+  input: MarketAppInput,
+  newShots: File[],
+  shotOrder: string[],
+) {
+  const form = new FormData();
+  appendAppFields(form, input);
+  form.append("shotOrder", JSON.stringify(shotOrder));
+  for (const file of newShots) form.append("shots", file, file.name);
+
+  return marketFetch<{ app: MarketAppSummary }>(
+    `/apps/${encodeURIComponent(appId)}`,
+    { method: "PATCH", body: form },
     true,
   );
 }

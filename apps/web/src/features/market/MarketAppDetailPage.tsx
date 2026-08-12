@@ -1,6 +1,6 @@
 /**
  * 게시 도구 상세 — 메타 + 바로가기 + 설명 + 화면(스크린샷) + 버전 이력.
- * 진입 시 조회수 1회 증가, 좋아요 토글 지원. 관리자는 버전 추가·게시 삭제 가능.
+ * 진입 시 조회수 1회 증가, 좋아요 토글 지원. 관리자는 버전 추가·수정(/market/:appId/edit)·삭제 가능.
  */
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -14,6 +14,7 @@ import {
   Heart,
   Loader2,
   MapPin,
+  Pencil,
   Plus,
   Tag,
   Trash2,
@@ -128,15 +129,25 @@ export default function MarketAppDetailPage() {
       <div className="flex items-start justify-between gap-4">
         <h1 className="text-[30px] font-bold tracking-tight text-slate-900">{app.title}</h1>
         {canManage && (
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={removeApp.isPending}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-[13px] font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-60"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            삭제
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(`/market/${appId}/edit`)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 transition-colors hover:border-[#0a63b8]/40 hover:text-[#0a63b8]"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              수정
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={removeApp.isPending}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-[13px] font-semibold text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-60"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              삭제
+            </button>
+          </div>
         )}
       </div>
 
