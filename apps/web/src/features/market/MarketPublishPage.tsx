@@ -352,21 +352,26 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex h-[86px] w-[110px] flex-col items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white text-[12px] font-medium text-slate-500 transition-colors hover:border-[#0a63b8]/40 hover:text-[#0a63b8]"
+                className="flex h-[80px] w-[128px] flex-col items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white text-[12px] font-medium text-slate-500 transition-colors hover:border-[#0a63b8]/40 hover:text-[#0a63b8]"
               >
                 <ImagePlus className="h-5 w-5" />
                 이미지 추가
               </button>
-              <div className="flex h-[86px] w-[110px] flex-col items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white text-[12px] font-medium text-slate-400">
+              <div className="flex h-[80px] w-[128px] flex-col items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white text-[12px] font-medium text-slate-400">
                 <ClipboardPaste className="h-5 w-5" />
                 붙여넣기
               </div>
               {shots.map((shot, idx) => (
                 <div
                   key={shot.key}
-                  className="group relative h-[86px] w-[110px] overflow-hidden rounded-lg border border-slate-200 bg-white"
+                  className="group relative h-[80px] w-[128px] overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
                 >
-                  <img src={shot.preview} alt={shot.name} className="h-full w-full object-cover" />
+                  {/* 홈 카드 썸네일과 같은 16:10 프레임 + object-contain — 여기서 보이는 그대로 목록에 나간다 */}
+                  <img
+                    src={shot.preview}
+                    alt={shot.name}
+                    className="h-full w-full object-contain object-center"
+                  />
                   {idx === 0 ? (
                     <span className="absolute left-1 top-1 rounded bg-[#0a63b8] px-1.5 py-0.5 text-[10px] font-bold text-white">
                       썸네일
