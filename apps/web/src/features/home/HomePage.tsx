@@ -382,13 +382,15 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
       : "");
 
   const thumb = (
-    // 16:10 고정 비율 — 화면 폭이 바뀌어도 썸네일이 잘리지 않는다.
-    <div className="relative aspect-[16/10] w-full overflow-hidden">
+    // 16:10 고정 프레임 — 카드 높이는 모든 카드에서 같게 유지한다.
+    // 이미지는 잘라내지 않고(object-contain) 프레임 안에 통째로 맞춘다:
+    // 올린 원본과 상세 "화면" 이 같은 비율로 보이게 하기 위함(정사각 로고가 카드에서만 잘리던 문제).
+    <div className="relative aspect-[16/10] w-full overflow-hidden border-b border-slate-100 bg-slate-50">
       {showThumb ? (
         <img
           src={card.thumbnail ?? undefined}
           alt={`${card.name} 미리보기`}
-          className="h-full w-full border-b border-slate-100 object-cover object-top transition-transform duration-300 group-hover:scale-[1.03]"
+          className="h-full w-full object-contain object-center transition-transform duration-300 group-hover:scale-[1.03]"
           loading="lazy"
           onError={() => setThumbOk(false)}
         />
