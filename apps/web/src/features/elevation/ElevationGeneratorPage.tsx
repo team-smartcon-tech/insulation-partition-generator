@@ -52,6 +52,7 @@ import {
   summarizeBoards,
   numberBoards,
   packCutBoards,
+  piecesPerBoard,
   groupKeyOf,
   thicknessStyle,
   type DevelopPlyParams,
@@ -742,7 +743,14 @@ export default function ElevationGeneratorPage() {
     {
       chainName: string;
       ply: number;
-      cells: { x: number; y: number; w: number; h: number; discarded?: boolean }[];
+      cells: {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        thickness: number;
+        discarded?: boolean;
+      }[];
       labels: string[];
     }[]
   >([]);
@@ -2290,7 +2298,7 @@ export default function ElevationGeneratorPage() {
           });
         }
 
-        // 보드 번호(원형) + 치수 — 정척="온장", 절단=전용그룹 N-1/N-2
+        // 보드 번호(원형) + 치수 — 정척="온장", 절단=규격별 번호(60-3 = 60T 특정 크기)
         const labels = numberBoards(dev.cells, boardLength, boardHeight);
         // 클릭 상세용 시트 등록 (fit 좌표계 히트 영역은 아래 forEach 에서 기록)
         const sheetIdx =
@@ -3556,23 +3564,38 @@ export default function ElevationGeneratorPage() {
           );
         });
 
-      // 절단판 — 한 온장에서 재단되는 조각 묶음 = 1판 (묶음은 두께 단일이 보장된다)
-      // 번호는 도면과 같은 규칙으로 두께별 시퀀스를 쓴다 → 도면의 90-2 와 표의 90-2 가 같은 판
+      // 절단 조각 — **도면 번호(= 조각 규격)별**로 낸다. 도면의 60-3 = 이 표의 60-3.
+      // 소요 판수는 규격 단위가 아니라 실제 재단(다른 규격을 한 온장에 섞어 자름) 기준이라
+      // 규격 행에는 조각수만 싣고, 판수는 아래 '절단 소요 온장' 행에 따로 싣는다.
       const bins = packCutBoards(cells, L, H);
-      const binSeq = new Map<number, number>();
-      bins.forEach(items => {
-        const thk = Math.round(cells[items[0]].thickness);
-        const no = (binSeq.get(thk) ?? 0) + 1;
-        binSeq.set(thk, no);
-        const pieces = items.map(
-          i => `${Math.round(cells[i].w)}x${Math.round(cells[i].h)}`
-        );
-        const area =
-          items.reduce((s, i) => s + cells[i].w * cells[i].h, 0) / 1_000_000;
-        rows.push(
-          `${name},절단판 ${thk}-${no},${thk},절단,${pieces.join(" / ")},${items.length},1,${area.toFixed(2)}`
-        );
+      const cutLabels = numberBoards(cells, L, H);
+      const byLabel = new Map<
+        string,
+        { thk: number; w: number; h: number; n: number }
+      >();
+      cells.forEach((c, i) => {
+        const lb = cutLabels[i];
+        if (!lb || lb === "온장" || lb === "버림") return;
+        const cur = byLabel.get(lb);
+        if (cur) cur.n += 1;
+        else
+          byLabel.set(lb, {
+            thk: Math.round(c.thickness),
+            w: Math.round(c.w),
+            h: Math.round(c.h),
+            n: 1,
+          });
       });
+      [...byLabel.entries()]
+        .sort((a, b) => b[1].thk - a[1].thk || b[1].w * b[1].h - a[1].w * a[1].h)
+        .forEach(([lb, v]) => {
+          const area = (v.n * v.w * v.h) / 1_000_000;
+          rows.push(
+            `${name},${lb},${v.thk},절단,${v.w}x${v.h},${v.n},,${area.toFixed(2)}`
+          );
+        });
+      if (bins.length > 0)
+        rows.push(`${name},절단 소요 온장,,절단,,,${bins.length},`);
 
       // 버림(폐기) 자투리 — 시공/발주 제외, 별도 표기. 두께별로 나눈다
       const discards = cells.filter(c => c.discarded);
@@ -5913,21 +5936,36 @@ export default function ElevationGeneratorPage() {
             const H = boardHeight;
             const close = () => setBoardDetail(null);
 
-            // 온장/버림/절단 그룹 분기 — 그룹 키는 "{두께}-{번호}" (예 90-3)
+            // 온장/버림/규격 분기 — 번호 "{두께}-{순번}"(예 90-3) = **조각 규격** 이다.
+            // 같은 번호 = 같은 두께·같은 크기 → 도면 어디에 있든 같은 판.
             const groupNo = groupKeyOf(label);
             const groupIdx: number[] = [];
             if (groupNo) {
               sh.labels.forEach((lb, i) => {
-                if (groupKeyOf(lb) === groupNo) groupIdx.push(i);
+                if (lb === label) groupIdx.push(i);
               });
             }
-            const pieces = groupIdx.map(i => ({
-              w: sh.cells[i].w,
-              h: sh.cells[i].h,
-              key: `${i}`,
-            }));
-            const placed = groupNo ? layoutCutPieces(pieces, L, H) : [];
-            const usedArea = pieces.reduce((a, p) => a + p.w * p.h, 0);
+            const pw = Math.round(cell?.w ?? 0);
+            const ph = Math.round(cell?.h ?? 0);
+            // 온장 1판에서 이 규격을 몇 개 재단하는지 → 필요 온장 판수
+            const perBoard = groupNo ? piecesPerBoard(pw, ph, L, H) : 0;
+            const cutCount = groupIdx.length;
+            const boardsNeeded =
+              perBoard > 0 ? Math.ceil(cutCount / perBoard) : 0;
+            // 재단 배치도는 '가득 찬 온장 1판' 기준 (마지막 판은 덜 찰 수 있다)
+            const onBoard = Math.min(perBoard, cutCount);
+            const placed = groupNo
+              ? layoutCutPieces(
+                  Array.from({ length: onBoard }, (_, k) => ({
+                    w: pw,
+                    h: ph,
+                    key: `${k}`,
+                  })),
+                  L,
+                  H
+                )
+              : [];
+            const usedArea = onBoard * pw * ph;
             const wasteArea = Math.max(0, L * H - usedArea);
             // SVG 배치도 스케일 (y 뒤집기: 패킹 y=아래 기준 → SVG 위 기준)
             const svgW = 420;
@@ -5945,7 +5983,7 @@ export default function ElevationGeneratorPage() {
                           ? "온장 (정척)"
                           : label === "버림"
                             ? "버림 조각 (폐기)"
-                            : `절단판 ${groupNo} — 재단 상세`}
+                            : `${groupNo} — ${pw}×${ph} 절단판`}
                       </h2>
                       <p className="mt-0.5 text-[11.5px] text-slate-400">
                         {sh.chainName} · {sh.ply}P · 온장 {L}×{H}mm
@@ -5987,80 +6025,74 @@ export default function ElevationGeneratorPage() {
                             className="block"
                           >
                             <rect x={0} y={0} width={L} height={H} fill="#e2e8f0" stroke="#94a3b8" strokeWidth={L / 200} />
-                            {placed.map(p => {
-                              const i = Number(p.key);
-                              const isSel = i === boardDetail.ci;
-                              return (
-                                <g key={p.key}>
-                                  <rect
-                                    x={p.x}
-                                    y={H - p.y - p.h}
-                                    width={p.w}
-                                    height={p.h}
-                                    fill={isSel ? "#1478d6" : "#bfdbfe"}
-                                    stroke="#1e5fa8"
-                                    strokeWidth={L / 300}
-                                  />
-                                  <text
-                                    x={p.x + p.w / 2}
-                                    y={H - p.y - p.h / 2}
-                                    textAnchor="middle"
-                                    dominantBaseline="central"
-                                    fontSize={Math.min(p.w, p.h) * 0.32 + 20}
-                                    fontWeight={700}
-                                    fill={isSel ? "#ffffff" : "#1e3a5f"}
-                                  >
-                                    {sh.labels[i]}
-                                  </text>
-                                </g>
-                              );
-                            })}
+                            {placed.map(p => (
+                              <g key={p.key}>
+                                <rect
+                                  x={p.x}
+                                  y={H - p.y - p.h}
+                                  width={p.w}
+                                  height={p.h}
+                                  fill="#bfdbfe"
+                                  stroke="#1e5fa8"
+                                  strokeWidth={L / 300}
+                                />
+                                <text
+                                  x={p.x + p.w / 2}
+                                  y={H - p.y - p.h / 2}
+                                  textAnchor="middle"
+                                  dominantBaseline="central"
+                                  fontSize={Math.min(p.w, p.h) * 0.32 + 20}
+                                  fontWeight={700}
+                                  fill="#1e3a5f"
+                                >
+                                  {label}
+                                </text>
+                              </g>
+                            ))}
                           </svg>
                           <p className="mt-1.5 text-[10.5px] text-slate-400">
-                            회색 = 잔재(자투리) · 파랑 = 재단 조각 · 진한 파랑 = 선택한 조각
+                            회색 = 잔재(자투리) · 파랑 = 재단 조각 (온장 1판 기준)
                           </p>
                         </div>
 
-                        {/* 조각 목록 */}
+                        {/* 규격 요약 */}
                         <div className="mt-3 overflow-hidden rounded-lg border border-slate-200">
                           <table className="w-full text-[12px]">
-                            <thead>
-                              <tr className="bg-slate-50 text-slate-500">
-                                <th className="px-3 py-1.5 text-left font-semibold">조각</th>
-                                <th className="px-3 py-1.5 text-right font-semibold">규격(mm)</th>
-                                <th className="px-3 py-1.5 text-right font-semibold">면적(㎡)</th>
-                              </tr>
-                            </thead>
                             <tbody>
-                              {groupIdx.map(i => (
-                                <tr
-                                  key={i}
-                                  className={cn(
-                                    "border-t border-slate-100",
-                                    i === boardDetail.ci && "bg-[#e8f1fd] font-bold text-[#0a63b8]"
-                                  )}
-                                >
-                                  <td className="px-3 py-1.5">{sh.labels[i]}</td>
-                                  <td className="px-3 py-1.5 text-right tabular-nums">
-                                    {Math.round(sh.cells[i].w)}×{Math.round(sh.cells[i].h)}
-                                  </td>
-                                  <td className="px-3 py-1.5 text-right tabular-nums">
-                                    {((sh.cells[i].w * sh.cells[i].h) / 1_000_000).toFixed(2)}
-                                  </td>
-                                </tr>
-                              ))}
+                              <tr>
+                                <td className="px-3 py-1.5 text-slate-500">조각 규격</td>
+                                <td className="px-3 py-1.5 text-right font-bold tabular-nums text-slate-800">
+                                  {pw}×{ph}mm · {Math.round(cell.thickness)}T
+                                </td>
+                              </tr>
+                              <tr className="border-t border-slate-100">
+                                <td className="px-3 py-1.5 text-slate-500">이 입면 사용 수량</td>
+                                <td className="px-3 py-1.5 text-right font-bold tabular-nums text-[#0a63b8]">
+                                  {cutCount}개
+                                </td>
+                              </tr>
+                              <tr className="border-t border-slate-100">
+                                <td className="px-3 py-1.5 text-slate-500">온장 1판 재단 수</td>
+                                <td className="px-3 py-1.5 text-right tabular-nums">{perBoard}개</td>
+                              </tr>
+                              <tr className="border-t border-slate-100">
+                                <td className="px-3 py-1.5 text-slate-500">필요 온장 판수</td>
+                                <td className="px-3 py-1.5 text-right tabular-nums">{boardsNeeded}판</td>
+                              </tr>
                               <tr className="border-t border-slate-200 bg-slate-50 text-slate-500">
-                                <td className="px-3 py-1.5">잔재(자투리)</td>
-                                <td className="px-3 py-1.5 text-right">—</td>
+                                <td className="px-3 py-1.5">1판당 잔재(자투리)</td>
                                 <td className="px-3 py-1.5 text-right tabular-nums">
-                                  {(wasteArea / 1_000_000).toFixed(2)}
+                                  {(wasteArea / 1_000_000).toFixed(2)}㎡
                                 </td>
                               </tr>
                             </tbody>
                           </table>
                         </div>
                         <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-                          온장 1판에서 위 조각들을 함께 재단합니다. (두께가 같은 조각끼리만 한 판에서 재단)
+                          번호 <b>{groupNo}</b> 는 <b>조각 규격</b>을 뜻합니다 — 도면에서 같은 번호가
+                          붙은 판은 크기·두께가 모두 같아 서로 바꿔 붙일 수 있습니다. 필요 판수는 같은
+                          규격끼리만 재단한 기준이라, 물량표의 판수(다른 규격과 섞어 재단)보다 클 수
+                          있습니다.
                         </p>
                       </>
                     )}

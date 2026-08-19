@@ -30,7 +30,7 @@ export interface InsulationExport {
   boardHeight: number;
   /** 전개면 보드 셀 (좌하단 기준 x,y + 크기) — 코너마다 끊김 */
   cells: { x: number; y: number; w: number; h: number }[];
-  /** 셀별 번호 라벨 (cells 와 같은 순서). 정척="온장", 절단="90-3-1" 등 */
+  /** 셀별 번호 라벨 (cells 와 같은 순서). 정척="온장", 절단=규격별 번호("90-3" 등) */
   labels?: string[];
   /**
    * 셀별 두께(mm) — 번호 색을 두께별로 갈라 그린다.

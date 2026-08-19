@@ -239,23 +239,6 @@ function tileRow(
   return cells;
 }
 
-type Rect = { x0: number; x1: number; y0: number; y1: number };
-
-/** 사각형 r 에서 구멍 h 를 뺀 나머지(최대 4조각). 겹침 없으면 [r] 그대로. */
-function subtractRect(r: Rect, h: Rect): Rect[] {
-  const ix0 = Math.max(r.x0, h.x0);
-  const ix1 = Math.min(r.x1, h.x1);
-  const iy0 = Math.max(r.y0, h.y0);
-  const iy1 = Math.min(r.y1, h.y1);
-  if (ix0 >= ix1 || iy0 >= iy1) return [r]; // 겹침 없음
-  const out: Rect[] = [];
-  if (r.y1 > iy1) out.push({ x0: r.x0, x1: r.x1, y0: iy1, y1: r.y1 }); // 위
-  if (r.y0 < iy0) out.push({ x0: r.x0, x1: r.x1, y0: r.y0, y1: iy0 }); // 아래
-  if (r.x0 < ix0) out.push({ x0: r.x0, x1: ix0, y0: iy0, y1: iy1 }); // 좌
-  if (r.x1 > ix1) out.push({ x0: ix1, x1: r.x1, y0: iy0, y1: iy1 }); // 우
-  return out;
-}
-
 /** 한 행(run) 양 끝의 슬리버를 옆 셀과 합쳐 시공 가능 크기로 조정 */
 function fixRunEnds(run: BoardCell[], L: number, minW: number) {
   // 마지막이 슬리버면 직전과 합쳐 균등(또는 한 장)으로
@@ -426,6 +409,149 @@ function tileSiteConstructability(
           }
         }
       }
+    }
+  }
+  return cells;
+}
+
+/**
+ * 밴드(개구부로 끊긴 실충전 세로구간) 하나를 켜(행)로 나눈다.
+ *
+ * 켜는 **항상 그 밴드 바닥에서부터** 쌓는다. 전역 격자(y=0 부터 H 씩)로 나누면
+ * 창 상단이 격자선과 안 맞을 때 한 장이면 끝날 구간이 두 켜로 갈라져
+ * 현장에서 "벽돌처럼" 위아래 두 번 붙이게 된다 → 금지.
+ * 그래서 밴드 높이가 H 이하면 **무조건 한 켜**, 넘으면 최소 켜 수(H + 나머지 1켜)다.
+ */
+function bandCourses(
+  y0: number,
+  y1: number,
+  H: number
+): { y: number; h: number }[] {
+  const EPS = 1e-6;
+  const out: { y: number; h: number }[] = [];
+  if (y1 - y0 <= EPS || H <= EPS) return out;
+  for (let y = y0; y < y1 - EPS; y += H)
+    out.push({ y, h: Math.min(H, y1 - y) });
+  return out;
+}
+
+/**
+ * 물량 최소(러닝본드) 배치 — **밴드 기준** 켜 나누기.
+ *
+ * 구조:
+ *  ① 세그먼트를 개구부 좌·우 x 라인으로 '열(column)'로 자른다.
+ *  ② 열마다 개구부에 막히지 않는 세로 밴드를 구하고, 밴드마다 켜를 나눈다(bandCourses).
+ *  ③ 켜 구성(높이·경계)이 **같은 인접 열**은 하나의 런(run)으로 이어 붙여
+ *     보드가 열 경계를 넘어가게 타일링한다(불필요한 세로 조인트를 안 만든다).
+ *     켜 구성이 다르면(예: 창 위 구간 vs 옆 구간) 보드가 물리적으로 못 넘으므로
+ *     그 경계에서 세로 일직선 조인트가 생긴다.
+ *  ④ 런마다 좌측부터 타일링 — 런이 바뀔 때 줄눈 위상을 새로 시작해
+ *     창 옆·창 위에서 온장 폭(L)이 최대한 나오게 한다(인접 구간 같은 판 사용).
+ *
+ * 러닝본드 엇갈림은 켜의 절대높이 기준 행번호(round(y/H))로 판정해
+ * 개구부가 없는 일반 벽에서는 기존(전역 격자) 결과와 동일하다.
+ */
+function tileBandRows(
+  tileLo: number[],
+  tileHi: number[],
+  segCount: number,
+  wallHeight: number,
+  L: number,
+  H: number,
+  openings: { x0: number; x1: number; y0: number; y1: number }[],
+  thicknessOf: (si: number) => number,
+  rowShiftOf: (row: number) => number
+): BoardCell[] {
+  const EPS = 1e-6;
+  const cells: BoardCell[] = [];
+
+  for (let si = 0; si < segCount; si++) {
+    const lo = tileLo[si];
+    const hi = tileHi[si];
+    if (hi - lo <= EPS) continue;
+
+    // 이 세그먼트에 걸치는 개구부만 [lo,hi]·[0,wallHeight] 로 클립
+    const segOps = openings
+      .map(o => ({
+        x0: Math.max(lo, o.x0),
+        x1: Math.min(hi, o.x1),
+        y0: Math.max(0, o.y0),
+        y1: Math.min(wallHeight, o.y1),
+      }))
+      .filter(o => o.x1 - o.x0 > EPS && o.y1 - o.y0 > EPS);
+
+    // ① 열 경계 = 세그먼트 양끝 + 개구부 좌·우 라인
+    const breakSet = new Set<number>([lo, hi]);
+    for (const o of segOps) {
+      if (o.x0 > lo + EPS && o.x0 < hi - EPS) breakSet.add(o.x0);
+      if (o.x1 > lo + EPS && o.x1 < hi - EPS) breakSet.add(o.x1);
+    }
+    const xs = [...breakSet].sort((a, b) => a - b);
+
+    // ② 열마다 밴드 → 켜 구성
+    type Col = {
+      x0: number;
+      x1: number;
+      courses: { y: number; h: number }[];
+      sig: string;
+    };
+    const cols: Col[] = [];
+    for (let ci = 0; ci < xs.length - 1; ci++) {
+      const cx0 = xs[ci];
+      const cx1 = xs[ci + 1];
+      if (cx1 - cx0 <= EPS) continue;
+
+      // 이 열을 x 범위로 완전히 덮는 개구부 → 막힌 y 구간
+      const blocks = segOps
+        .filter(o => o.x0 <= cx0 + EPS && o.x1 >= cx1 - EPS)
+        .map(o => ({ y0: o.y0, y1: o.y1 }))
+        .sort((a, b) => a.y0 - b.y0);
+
+      const bands: { y0: number; y1: number }[] = [];
+      let cursor = 0;
+      for (const b of blocks) {
+        if (b.y0 > cursor + EPS) bands.push({ y0: cursor, y1: b.y0 });
+        cursor = Math.max(cursor, b.y1);
+      }
+      if (wallHeight > cursor + EPS) bands.push({ y0: cursor, y1: wallHeight });
+
+      const courses = bands.flatMap(b => bandCourses(b.y0, b.y1, H));
+      cols.push({
+        x0: cx0,
+        x1: cx1,
+        courses,
+        sig: courses.map(c => `${Math.round(c.y)}:${Math.round(c.h)}`).join("|"),
+      });
+    }
+
+    // ③④ 켜 구성이 같은 인접 열을 런으로 묶어 타일링
+    let i = 0;
+    while (i < cols.length) {
+      let j = i;
+      while (
+        j + 1 < cols.length &&
+        cols[j + 1].sig === cols[i].sig &&
+        Math.abs(cols[j + 1].x0 - cols[j].x1) < EPS
+      )
+        j++;
+      const rx0 = cols[i].x0;
+      const rx1 = cols[j].x1;
+      for (const cs of cols[i].courses) {
+        const r = Math.round(cs.y / H);
+        for (const seg of tileRow(rx1 - rx0, L, rowShiftOf(r))) {
+          cells.push({
+            row: r,
+            x: rx0 + seg.x,
+            y: cs.y,
+            w: seg.w,
+            h: cs.h,
+            xRemainder: seg.remainder,
+            yRemainder: cs.h < H - EPS,
+            thickness: thicknessOf(si),
+          });
+        }
+      }
+      i = j + 1;
     }
   }
   return cells;
@@ -663,100 +789,29 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     for (let y = 0; y < wallHeight - 1e-6; y += H) rowJoints.push(y);
     rowJoints.push(wallHeight);
   } else {
-    // ── 물량 최소(러닝본드) 배치 ──
+    // ── 물량 최소(러닝본드) 배치 — 개구부로 끊긴 '밴드' 기준 ──
     // 보드는 코너를 못 넘음 + 겹침 70 은 옆 면 차지 → 세그먼트별 [tileLo,tileHi] 만 타일링.
-    const plyShift = (ply - 1) * plyStagger; // 겹 간 엇갈림
-    let r = 0;
-    for (let y = 0; y < wallHeight - 1e-6; y += H, r++) {
-      const h = Math.min(H, wallHeight - y);
-      rowJoints.push(y);
-      const rowShift =
-        (rowBond === "running" ? (r % 2) * (L / 2) : 0) + plyShift + startOffset;
-      for (let si = 0; si < segCount; si++) {
-        const lo = tileLo[si];
-        const segLen = tileHi[si] - lo;
-        if (segLen <= 1e-6) continue;
-        for (const seg of tileRow(segLen, L, rowShift)) {
-          cells.push({
-            row: r,
-            x: lo + seg.x,
-            y,
-            w: seg.w,
-            h,
-            xRemainder: seg.remainder,
-            yRemainder: h < H - 1e-6,
-            thickness: segLapW(si),
-          });
-        }
-      }
-    }
-    rowJoints.push(wallHeight);
-
-    // ── 오프닝(창/문) 뽕뚫기 ──
-    //  · min-waste, 그리고 2P(ply>=2): 개구부를 사각형으로 빼낸다.
-    //    2P 는 창을 물고 넘어간 보드를 '온장(F)'으로 두면 실제론 창을 잘라낸 조각인데
-    //    F 로 표기돼 혼동되고, 잘려나간 조각(재사용 가능)도 집계에서 빠진다.
-    //    → 창을 빼서 조각으로 잡는다. 조인트(수직줄눈) 위치는 러닝본드 그대로라
-    //      창을 빼도 1P 와의 엇갈림(결로 방지)은 유지된다.
-    //  · 1P 시공성 우선은 위 tileSiteConstructability(useSiteCut) 로 이미 처리(여기 안 옴).
     //
-    // ★ 2P 옆구리 예외: 창이 보드 '폭 전체'를 덮으면(중앙 열) 보드가 상하로 잘리므로
-    //   위/아래 '쪽'으로 분할한다. 하지만 창이 보드 '옆구리'만 걸치면(가장자리 열, 창
-    //   수직경계가 보드 안을 지남) 보드가 안 잘리고 이어지므로 → 한 장(온장 높이)으로
-    //   유지하고 현장에서 창 겹침 부분만 노치로 컷한다. (3조각으로 쪼개지 않음)
-    if (ops.length > 0 && (placement === "min-waste" || ply >= 2)) {
-      const eps = 1e-6;
-      const keepWholeOnSideClip = ply >= 2;
-      const cut: BoardCell[] = [];
-      for (const cell of cells) {
-        const cr: Rect = {
-          x0: cell.x,
-          x1: cell.x + cell.w,
-          y0: cell.y,
-          y1: cell.y + cell.h,
-        };
-        if (keepWholeOnSideClip) {
-          const overlapping = ops.filter(
-            op =>
-              op.x0 < cr.x1 - eps &&
-              op.x1 > cr.x0 + eps &&
-              op.y0 < cr.y1 - eps &&
-              op.y1 > cr.y0 + eps
-          );
-          // 창이 이 보드 폭을 완전히 덮는가(상하 절단) — 아니면 옆구리만 걸침
-          const hasFullSpan = overlapping.some(
-            op => op.x0 <= cr.x0 + eps && op.x1 >= cr.x1 - eps
-          );
-          if (overlapping.length > 0 && !hasFullSpan) {
-            cut.push(cell); // 옆구리 창 → 한 장 유지(현장 노치 컷)
-            continue;
-          }
-        }
-        let rects: Rect[] = [cr];
-        for (const op of ops) {
-          const next: Rect[] = [];
-          for (const rr of rects) next.push(...subtractRect(rr, op));
-          rects = next;
-          if (rects.length === 0) break;
-        }
-        for (const rr of rects) {
-          const w = rr.x1 - rr.x0;
-          const h = rr.y1 - rr.y0;
-          if (w < 30 || h < 30) continue; // 슬리버 제거
-          cut.push({
-            row: cell.row,
-            x: rr.x0,
-            y: rr.y0,
-            w,
-            h,
-            xRemainder: w < L - 1e-6,
-            yRemainder: h < H - 1e-6,
-            thickness: cell.thickness,
-          });
-        }
-      }
-      cells = cut;
-    }
+    // 예전에는 전역 격자(y=0 부터 H 씩)로 켜를 깔고 창을 사각형으로 빼냈다(뽕뚫기).
+    // 그러면 창 상단이 격자선과 안 맞을 때 창 위 구간이 240+200 처럼 두 켜로 갈라져
+    // 현장에서 벽돌 쌓듯 위아래 두 번 붙이게 된다 → 밴드 기준 배치로 교체했다.
+    // 대신 창 좌·우 라인에서는 켜 높이가 달라져 세로 조인트가 강제로 생긴다(불가피).
+    const plyShift = (ply - 1) * plyStagger; // 겹 간 엇갈림
+    const rowShiftOf = (r: number) =>
+      (rowBond === "running" ? (r % 2) * (L / 2) : 0) + plyShift + startOffset;
+    cells = tileBandRows(
+      tileLo,
+      tileHi,
+      segCount,
+      wallHeight,
+      L,
+      H,
+      ops,
+      segLapW,
+      rowShiftOf
+    );
+    for (let y = 0; y < wallHeight - 1e-6; y += H) rowJoints.push(y);
+    rowJoints.push(wallHeight);
   }
 
   // ── 모든 꺾임(코너) x 위치 — V 마크/끊김선용 (볼록·오목 모두) ──
@@ -990,13 +1045,38 @@ export function thicknessStyle(thk: number): { hex: string; aci: number } {
   }
 }
 
+/** 절단 조각 규격 키 — 같은 두께·같은 크기면 같은 판(번호) */
+export function cutTypeKeyOf(c: {
+  w: number;
+  h: number;
+  thickness: number;
+}): string {
+  return `${Math.round(c.thickness)}x${Math.round(c.w)}x${Math.round(c.h)}`;
+}
+
+/** 온장(L×H) 1판에서 w×h 조각을 몇 개 잘라낼 수 있는지 (회전 없음, 격자 재단) */
+export function piecesPerBoard(
+  w: number,
+  h: number,
+  L: number,
+  H: number
+): number {
+  const n = Math.floor((L + 1e-6) / w) * Math.floor((H + 1e-6) / h);
+  return Math.max(1, n);
+}
+
 /**
- * 보드 번호 매기기 (정척=공통 "온장", 절단=전용 그룹 "{두께}-{번호}[-{순번}]").
+ * 보드 번호 매기기 (정척=공통 "온장", 절단=**규격별** 번호 "{두께}-{번호}").
  *
- * 절단 조각은 packCutBoards 로 한 온장에 2D 재단되는 것끼리 묶는다.
+ * 번호는 "이 조각이 어느 온장에서 잘려 나오는가"가 아니라 **조각 규격(두께·가로·세로)**
+ * 을 가리킨다. 같은 크기 조각은 도면 어디에 있든 늘 같은 번호라, 인접 구간에 같은 판이
+ * 붙으면 번호도 같게 읽힌다. (예전 재단판 단위 번호는 900×200 이 나란히 붙어 있어도
+ * 60-10 / 60-11 / 60-12 로 흩어져 현장에서 번호가 중구난방으로 보였다.)
+ *
  * **번호는 두께별로 따로 매긴다** — 60T 와 90T 는 서로 잘라 쓸 수 없는 다른 자재라
- * 번호가 한 줄로 흐르면 현장에서 60T "3" 과 90T "3" 이 같은 묶음으로 읽힌다.
- * 그래서 라벨 앞에 두께를 박아 `60-3`, `90-3-1` 처럼 두께가 곧 번호의 일부가 되게 한다.
+ * 번호가 한 줄로 흐르면 현장에서 60T "3" 과 90T "3" 이 같은 판으로 읽힌다.
+ * 그래서 라벨 앞에 두께를 박아 `60-3` 처럼 두께가 곧 번호의 일부가 되게 한다.
+ * 번호 순서는 두께 큰 순 → 면적 큰 순(현장에서 큰 판부터 읽는다).
  */
 export function numberBoards(
   cells: BoardCell[],
@@ -1005,29 +1085,44 @@ export function numberBoards(
 ): string[] {
   const labels: string[] = new Array(cells.length).fill("");
   const isFull = (c: BoardCell) => c.w >= L - 1e-6 && c.h >= H - 1e-6;
+
+  // 절단 조각 규격 수집 (온장·버림 제외)
+  const types = new Map<string, { thk: number; w: number; h: number }>();
+  for (const c of cells) {
+    if (c.discarded || isFull(c)) continue;
+    types.set(cutTypeKeyOf(c), {
+      thk: Math.round(c.thickness),
+      w: Math.round(c.w),
+      h: Math.round(c.h),
+    });
+  }
+  const noOf = new Map<string, string>();
+  const seq = new Map<number, number>();
+  [...types.entries()]
+    .sort(
+      (a, b) =>
+        b[1].thk - a[1].thk ||
+        b[1].w * b[1].h - a[1].w * a[1].h ||
+        b[1].w - a[1].w ||
+        b[1].h - a[1].h
+    )
+    .forEach(([key, t]) => {
+      const no = (seq.get(t.thk) ?? 0) + 1;
+      seq.set(t.thk, no);
+      noOf.set(key, `${t.thk}-${no}`);
+    });
+
   cells.forEach((c, i) => {
     if (c.discarded) labels[i] = "버림";
     else if (isFull(c)) labels[i] = "온장";
-  });
-  const bins = packCutBoards(cells, L, H);
-  // 두께별 번호 카운터 — bin 은 packCutBoards 에서 이미 두께 단일로 만들어진다
-  const seq = new Map<number, number>();
-  bins.forEach(items => {
-    if (items.length === 0) return;
-    const thk = Math.round(cells[items[0]].thickness);
-    const no = (seq.get(thk) ?? 0) + 1;
-    seq.set(thk, no);
-    items.forEach((cellIdx, k) => {
-      labels[cellIdx] =
-        items.length > 1 ? `${thk}-${no}-${k + 1}` : `${thk}-${no}`;
-    });
+    else labels[i] = noOf.get(cutTypeKeyOf(c)) ?? "";
   });
   return labels;
 }
 
 /**
- * 라벨 → 재단 그룹 키. 같은 온장에서 함께 잘리는 조각끼리 같은 키를 갖는다.
- * `90-3-1` · `90-3` → `90-3` / 온장·버림은 그룹이 없어 null.
+ * 라벨 → 판 그룹 키. 같은 규격(같은 번호) 조각끼리 같은 키를 갖는다.
+ * `90-3` → `90-3` / 온장·버림은 그룹이 없어 null.
  */
 export function groupKeyOf(label: string): string | null {
   if (!label || label === "온장" || label === "버림") return null;
