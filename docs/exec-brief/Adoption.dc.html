@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; font-family: "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #4f46e5; } a:hover { color: #4338ca; }
+  </style>
+</helmet>
+<div style="width: 1280px; height: 720px; box-sizing: border-box; background: #ffffff; color: #0f172a; display: flex; flex-direction: column; padding: 56px 72px 32px;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 24px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="width: 4px; height: 22px; background: #4f46e5; border-radius: 2px;"></div>
+      <div style="font-size: 15px; font-weight: 700; color: #4f46e5;">도입 절차</div>
+    </div>
+    <div style="font-size: 14px; font-weight: 500; color: #64748b;">07 / 09</div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px;">
+    <div style="font-size: 38px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em;">세 단계, 첫 세팅은 10&ndash;15분입니다</div>
+    <div style="font-size: 18px; line-height: 1.7; color: #64748b; max-width: 960px;">담당자는 폴더를 준비하고 결정에만 답합니다. 나머지 실행은 AI가 직접 진행합니다.</div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 20px;">
+
+    <div style="display: flex; flex-direction: column; gap: 12px; padding: 24px 26px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">
+      <div style="font-size: 34px; font-weight: 700; color: #c7d2fe; line-height: 1;">01</div>
+      <div style="font-size: 20px; font-weight: 700; line-height: 1.4;">폴더 준비</div>
+      <div style="font-size: 15px; line-height: 1.7; color: #64748b;">저장소를 ZIP으로 받아 압축을 풀고, 폴더 이름을 내 프로젝트 이름으로 바꿉니다.</div>
+      <div style="margin-top: auto; padding-top: 10px; font-size: 14px; line-height: 1.6; color: #b45309;">복제(clone) 대신 ZIP &mdash; 내 작업이 템플릿 저장소로 올라가는 사고를 막습니다</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 12px; padding: 24px 26px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">
+      <div style="font-size: 34px; font-weight: 700; color: #c7d2fe; line-height: 1;">02</div>
+      <div style="font-size: 20px; font-weight: 700; line-height: 1.4;">안전장치 켜기</div>
+      <div style="font-size: 15px; line-height: 1.7; color: #64748b;">명령 한 줄로 내 컴퓨터의 차단 장치를 켜고, GitHub 저장소에 main 보호 규칙을 한 번 걸어 둡니다.</div>
+      <div style="margin-top: auto; padding-top: 10px; font-size: 14px; line-height: 1.6; color: #b45309;">이 단계를 건너뛰면 앞 장의 자동 차단이 전혀 작동하지 않습니다</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 12px; padding: 24px 26px; background: #eef2ff; border: 1px solid #4f46e5; border-radius: 8px;">
+      <div style="font-size: 34px; font-weight: 700; color: #4f46e5; line-height: 1;">03</div>
+      <div style="font-size: 20px; font-weight: 700; line-height: 1.4;">AI에게 맡기기</div>
+      <div style="font-size: 15px; line-height: 1.7; color: #4338ca;">Claude Code에 <span style="font-weight: 700; color: #0f172a;">/onboard</span> 한 줄. 환경 설정, 안전장치, 프로젝트 정보 입력, 화면 한 곳 수정, 첫 작업 기록까지 AI가 진행합니다.</div>
+      <div style="margin-top: auto; padding-top: 10px; font-size: 14px; line-height: 1.6; color: #4338ca;">Codex · Copilot은 준비된 시작 프롬프트를 붙여넣습니다</div>
+    </div>
+
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 20px;">
+    <div style="display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; background: #f1f5f9; border-radius: 8px;">
+      <div style="font-size: 13px; font-weight: 700; color: #64748b;">소요 시간</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #0f172a;">프로젝트당 10&ndash;15분</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; background: #f1f5f9; border-radius: 8px;">
+      <div style="font-size: 13px; font-weight: 700; color: #64748b;">담당자 역할</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #0f172a;">AI가 제시한 선택지에 답하기</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; background: #f1f5f9; border-radius: 8px;">
+      <div style="font-size: 13px; font-weight: 700; color: #64748b;">사전 설치</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #0f172a;">화면을 실행해 볼 때만 필요</div>
+    </div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+    <div style="font-size: 14px; color: #64748b;">Woomi 코딩 에이전트 템플릿 · 표준 2.16-draft</div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

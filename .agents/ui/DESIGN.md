@@ -21,6 +21,8 @@
 
 ## 2. Layout
 
+- 데스크톱 웹 화면은 항상 16:9 화면 비율을 기준으로 설계하고 검수한다. 기본 검수 해상도는 1920×1080이며, 1600×900과 1366×768에서도 핵심 콘텐츠와 주요 action이 잘리거나 겹치지 않아야 한다.
+- 16:9 기준은 브라우저 viewport의 설계·검수 기준이다. 앱 컨테이너에 고정 `aspect-ratio`를 적용해 스크롤이나 접근성을 제한하지 않는다.
 - 화면은 명확한 navigation, content, action 영역으로 나눈다.
 - dashboard는 요약, 목록, 주요 action이 한 화면에서 스캔 가능해야 한다.
 - form은 관련 필드를 묶고, 저장/취소 action 위치를 일관되게 둔다.
@@ -70,6 +72,9 @@
 
 ## 6. Responsive
 
+- 모바일 화면은 임의의 단일 너비만 기준으로 만들지 않는다. 최신 iPhone과 Galaxy의 대표적인 세로·가로 화면 비율과 viewport를 참고해 구현하고 검수한다.
+- 최소한 iPhone 계열의 19.5:9 화면과 Galaxy 계열의 19.5:9~20:9 화면을 포함해 확인하며, 특정 기기명이나 픽셀값에 종속된 레이아웃을 만들지 않는다.
+- notch, Dynamic Island, 카메라 홀, 홈 인디케이터가 콘텐츠와 action을 가리지 않도록 `env(safe-area-inset-*)`와 모바일 브라우저의 동적 viewport 높이를 고려한다.
 - 모바일에서 primary action이 손가락으로 누르기 쉬워야 한다.
 - sidebar가 있는 앱은 모바일에서 drawer, bottom nav, simplified nav 중 하나를 명확히 선택한다.
 - table은 모바일에서 card list, horizontal scroll, column priority 중 하나로 전환한다.

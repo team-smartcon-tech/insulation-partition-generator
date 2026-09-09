@@ -18,6 +18,7 @@ DB 변경이 생기기 전까지 프로젝트별 migration log는 비워둘 수 
 - migration은 가능한 작고 되돌릴 수 있게 나눈다.
 - schema 변경과 data backfill은 가능하면 분리한다.
 - production migration은 사용자 승인 없이 실행하지 않는다.
+- Supabase MCP가 연결되어 있으면 변경 전에 실제 스키마를 조회해 `.agents/data/DB_SCHEMA.md`와 대조한다. 문서와 실제가 다르면 **문서를 실제 DB에 맞춘 뒤** migration을 설계한다. 연결·권한 기준은 `.agents/TOOLING.md` 6장을 따른다.
 
 ---
 
@@ -33,6 +34,8 @@ DB 변경이 생기기 전까지 프로젝트별 migration log는 비워둘 수 
 6. local/dev에 적용해 검증한다.
 7. 관련 코드, API 계약, DB schema 문서를 함께 갱신한다.
 8. production 적용 전 rollback 계획을 작성한다.
+
+2단계 검증은 Supabase MCP(read-only)로 실제 스키마·advisor를 조회해 보강할 수 있다. 단 MCP는 **조회 전용**이다. 4~6단계의 migration 생성·적용은 항상 Supabase CLI로 한다.
 
 명령은 프로젝트의 Supabase CLI 버전에 따라 달라질 수 있으므로 실행 전 `--help`로 확인한다.
 

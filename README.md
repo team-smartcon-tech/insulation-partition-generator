@@ -31,18 +31,21 @@ pnpm install                 # 워크스페이스 전체
 # 1) 로컬 시크릿/변수 준비 (로그인·저장 동작에 필요)
 cp apps/worker/.dev.vars.example apps/worker/.dev.vars   # 값 채우기 (아래 "로컬 로그인" 참고)
 
-# 2) 로컬 개발환경 실행 — worker(8787) + web(5173) 동시 기동
-pnpm dev                     # → http://localhost:5173 (로그인 화면부터). /api 는 로컬 worker(8787)로 프록시
+# 2) 로컬 개발환경 실행 — worker(8887) + web(5973) 동시 기동
+pnpm dev                     # → http://localhost:5973 (로그인 화면부터). /api 는 로컬 worker(8887)로 프록시
 
 # 개별 실행이 필요하면:
-pnpm dev:web                 # 화면만 (Vite 5173)
-pnpm dev:worker              # Worker만 (wrangler 8787)
+pnpm dev:web                 # 화면만 (Vite 5973)
+pnpm dev:worker              # Worker만 (wrangler 8887)
 
 pnpm --filter web build      # 프로덕션 빌드(타입체크 포함)
 pnpm -r typecheck            # 전체 타입 검사
 
 # /api 프록시 타깃 변경(예: 배포된 Worker 로):  IPG_API_TARGET=<url> pnpm dev:web
 ```
+
+> `pnpm` 명령이 시스템에 없으면 `npm install -g pnpm@10.33.4`로 설치하세요.
+> 또는 루트에서 `npm install` 후 `npm run dev`를 사용할 수 있습니다.
 
 ### 로컬 로그인 (배포된 dcr-app 회원 인증 사용)
 
@@ -57,7 +60,7 @@ SUPABASE_URL=https://yzercziwazfrjsjnmbhr.supabase.co          # 저장/불러�
 SUPABASE_SERVICE_ROLE_KEY=<대시보드 service_role 키>           # 로그인만 볼 땐 비워도 됨
 ```
 
-→ `pnpm dev` 후 http://localhost:5173 에서 **DCR 계정(이메일·비밀번호, SSX 로그인과 동일)** 으로 로그인.
+→ `pnpm dev` 후 http://localhost:5973 에서 **DCR 계정(이메일·비밀번호, SSX 로그인과 동일)** 으로 로그인.
 
 ---
 

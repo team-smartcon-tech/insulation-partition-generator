@@ -1,0 +1,46 @@
+name: tag-version
+
+# CHANGELOG.md 최상단 버전으로 main 에 `v<버전>` 태그를 붙인다. AGENTS.md 10장의 수동 절차를 대체한다.
+# 버전이 그대로인 푸시에서는 아무것도 하지 않고 성공으로 끝나므로, 일반 머지에 빨간 X 가 생기지 않는다.
+
+on:
+  push:
+    branches: [main]
+
+# 이 저장소의 기본 GITHUB_TOKEN 권한이 read 라서 명시적으로 올린다. 없으면 태그 푸시가 403 이다.
+permissions:
+  contents: write
+
+# 연속 머지 시 같은 태그를 두 번 밀지 않도록 직렬화한다.
+concurrency:
+  group: tag-version
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 기존 태그를 조회하려면 전체 이력이 필요하다
+
+      - name: CHANGELOG 최상단 버전으로 태그 생성
+        run: |
+          version=$(grep -m1 -oP '^## \[\K[^]]+' CHANGELOG.md)
+          if [ -z "$version" ]; then
+            echo "::error file=CHANGELOG.md::최상단에서 '## [버전]' 형식을 찾지 못했습니다."
+            exit 1
+          fi
+
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag 는 이미 있습니다. 넘어갑니다."
+            echo "표준 버전 \`$version\` — 태그가 이미 있어 넘어갔습니다." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"
+          echo "**$tag** 태그를 붙였습니다." >> "$GITHUB_STEP_SUMMARY"

@@ -11,7 +11,7 @@
 - 기존 패턴을 먼저 찾고, 새 패턴은 마지막에 만든다.
 - 한 번의 작업은 가능한 작고 명확한 범위로 제한한다.
 - 코드 변경과 문서 변경이 함께 필요한 경우 같은 작업에서 함께 처리한다.
-- 사용자가 요청하지 않은 자동 커밋, 자동 푸시, 자동 배포는 하지 않는다.
+- 사용자가 요청하지 않은 자동 배포는 하지 않는다. 커밋과 푸시는 `AGENTS.md` 6장의 git 작업 경계를 따른다.
 - 불확실한 내용은 추측해서 확정하지 않고, 코드와 설정을 먼저 확인한다.
 
 ---
@@ -245,11 +245,10 @@ git status -sb
 - remote 대비 ahead/behind 있음
 - lint/typecheck/test/build 실패
 
+`git commit`, `git push`, `git pull`은 `AGENTS.md` 6장의 git 작업 경계를 따른다 — 커밋은 사전 승인, `push`·`pull`은 되돌리기 어렵다는 안내 후 진행. 단 위 보류 조건에 걸리면 안내가 아니라 **보류**다.
+
 사용자 승인 없이 실행하지 않는다.
 
-- `git commit`
-- `git push`
-- `git pull`
 - `pnpm deploy`
 - `wrangler deploy`
 - 운영 DB 변경
@@ -260,7 +259,7 @@ git status -sb
 
 PR과 push는 코드 변경을 팀과 공유하는 단계다. AI 에이전트가 이 단계를 맡는 경우가 많으므로, 아래 순서를 실행 checklist처럼 따른다.
 
-에이전트는 사용자가 명시적으로 요청하거나 승인한 경우에만 commit, push, PR 생성, merge를 수행한다. "수정해줘", "반영해줘"는 commit/push 승인으로 해석하지 않는다.
+승인 경계는 `AGENTS.md` 6장(Non-Negotiable Rules)의 "git 작업 경계"를 따른다. 저장소 안에서 끝나는 작업(브랜치 생성, `git add`, `git commit`)은 사전 승인된 것으로 보고, `push`·PR 생성은 되돌리기 어렵다는 사실을 알린 뒤 진행한다. **PR merge는 사용자가 명시적으로 요청하거나 승인한 경우에만 수행한다** — "수정해줘", "반영해줘"는 merge 승인으로 해석하지 않는다.
 
 작업 브랜치 기준:
 
@@ -432,9 +431,8 @@ Risks:
 
 금지:
 
-- 사용자 승인 없는 `git commit`
-- 사용자 승인 없는 `git push`
-- 사용자 승인 없는 PR 생성/merge
+- 되돌리기 어렵다는 안내 없이 실행하는 `git push`, PR 생성 (`AGENTS.md` 6장 git 작업 경계)
+- 사용자 승인 없는 PR merge
 - 검증 실패 상태에서 production 기준 브랜치로 push
 - GitHub Actions와 Cloudflare 자동 배포가 중복 실행되는 상태로 merge
 - secret 또는 `.env`가 포함된 commit 생성

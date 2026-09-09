@@ -97,8 +97,11 @@ strict mode는 타입을 복잡하게 만들라는 뜻이 아니다. 제품 코�
 
 - pnpm workspace
 - TypeScript project references
-- ESLint
-- Prettier
+- Vitest
+
+아래는 **프로젝트에서 도입한 경우에만** 기준으로 삼는다. 이 스캐폴드에는 설정 파일이 없다.
+
+- ESLint / Prettier — 타입 검사(`tsconfig.base.json` strict)로 커버하는 범위라면 굳이 추가하지 않는다.
 - GitHub Actions
 - Wrangler
 
@@ -116,3 +119,5 @@ NestJS를 사용하는 프로젝트는 `.agents/code/NEST_GUIDE.md`와 `.agents/
   - 사유: 이 프로젝트는 SSX의 기존 "단열재 나누기도" **단일 화면 도구를 "동작 그대로" 이관**하는 것이다. 원본이 Vite+wouter 기반이라 검증된 코드를 그대로 옮기는 편이 안전·신속하고, 화면이 사실상 1개라 RR v7의 이점이 작다.
   - 그 외 표준은 유지: TypeScript, TanStack Query(저장/불러오기), Zod, 서버=Hono/Cloudflare Worker, DB=Supabase, UI=Tailwind + shadcn/ui.
 - 상태 관리: 원본이 로컬 컴포넌트 상태 중심이므로 Zustand는 현재 미사용(필요 시 도입).
+- 테스트: 표준(Vitest) 대신 **`node:test`** 기반 `tests/*.test.mjs`. 현재 테스트가 소수라 러너를 추가하지 않는다.
+- 폴더 구조: 표준(`apps/web/app/` + `routes/`)이 아니라 **`apps/web/src/` + `features/`**. 위 프레임워크 오버라이드의 결과다.

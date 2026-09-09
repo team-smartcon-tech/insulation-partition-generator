@@ -1,0 +1,14 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "title": "01 · 표지", "x": 0, "y": 0, "w": 1280, "h": 720, "print": "fixed" },
+    { "file": "Problem.dc.html", "title": "02 · 배경", "x": 1380, "y": 0, "w": 1280, "h": 720, "print": "fixed" },
+    { "file": "Solution.dc.html", "title": "03 · 해결 방식", "x": 2760, "y": 0, "w": 1280, "h": 720, "print": "fixed" },
+    { "file": "Components.dc.html", "title": "04 · 구성 요소", "x": 0, "y": 880, "w": 1280, "h": 720, "print": "fixed" },
+    { "file": "HowItWorks.dc.html", "title": "05 · 작동 방식", "x": 1380, "y": 880, "w": 1280, "h": 720, "print": "fixed" },
+    { "file": "Safety.dc.html", "title": "06 · 리스크 관리", "x": 2760, "y": 880, "w": 1280, "h": 720, "print": "fixed" },
+    { "file": "Adoption.dc.html", "title": "07 · 도입 절차", "x": 0, "y": 1760, "w": 1280, "h": 720, "print": "fixed" },
+    { "file": "Maturity.dc.html", "title": "08 · 운영 현황", "x": 1380, "y": 1760, "w": 1280, "h": 720, "print": "fixed" },
+    { "file": "Summary.dc.html", "title": "09 · 정리", "x": 2760, "y": 1760, "w": 1280, "h": 720, "print": "fixed" }
+  ],
+  "launch": { "view": "canvas" }
+}

@@ -24,20 +24,34 @@
 - 기존 프로젝트라 같은 이름의 파일·폴더(특히 `.github/`, `.claude/`, `AGENTS.md`)가 이미 있으면 **통째로 덮어쓰지 말고 백업 후 병합**하세요. 안 그러면 기존 CI 설정이나 규칙이 사라질 수 있습니다. (프롬프트 A가 AI에게 이 점을 확인하게 합니다.)
 
 **2) 안전장치(훅) 켜기 — 권장**
-프로젝트 폴더에서 한 번 실행합니다.
+프로젝트 폴더에서 한 번 실행합니다. ZIP으로 시작했다면 Git 저장소가 아직 없으므로 `git init`을 먼저 실행합니다.
 
 ```text
+git init
 git config core.hooksPath .githooks
 ```
 
 - **Git Bash / WSL**을 쓴다면 실행 권한도 부여하세요: `chmod +x .githooks/*`
 - **Windows PowerShell만** 쓴다면 `chmod`는 필요 없습니다. 줄바꿈 문제는 이 저장소의 `.gitattributes`(`.githooks/* text eol=lf`)가 처리하지만, 그래도 켠 뒤에는 AI에게 "일부러 `.env`를 스테이징해서 커밋이 막히는지 확인해 줘"라고 시켜 실제로 작동하는지 한 번 점검하세요.
 - 이걸 켜지 **않으면** `.env`·비밀키 커밋 차단과 `main` 직접 push 차단이 **전혀 작동하지 않습니다.**
+- `pnpm install`을 한 번이라도 실행하면 이 설정이 자동으로 켜집니다(루트 `package.json`의 `prepare`). 그래도 위 명령을 직접 실행해 두는 편이 확실합니다.
+- 잘 켜졌는지 확인: `node scripts/agent-guard.cjs --selftest` 를 실행해 `agent-guard selftest OK` 가 나오면 AI 도구 쪽 차단 규칙이 정상입니다.
 
-**3) 도구 선택**
+**3) GitHub 저장소 보호 켜기 — 권장**
+위 2번은 **내 컴퓨터에만** 걸리는 잠금입니다. 팀원 컴퓨터에서 안 켜져 있으면 `main`에 바로 푸시할 수 있습니다. GitHub 웹에서 한 번 설정해 두면 누가 어떤 도구로 작업하든 막힙니다.
+
+GitHub 저장소 → **Settings → Branches → Add branch ruleset** → 대상 브랜치 `main`:
+
+- ☑ Require a pull request before merging
+- ☑ Block force pushes
+- **Bypass list는 비워 둡니다** (관리자도 예외 없이)
+
+이것이 Claude Code·Codex·Copilot 세 도구에 똑같이 적용되는 **유일한 우회 불가 장치**입니다.
+
+**4) 도구 선택**
 어떤 도구로 쓰든(Claude Code / Codex CLI / GitHub Copilot) 공통 1차 소스는 `AGENTS.md`라 동일하게 작동합니다. 단 **GitHub Copilot에는 위험 동작을 막는 자동 훅이 없으므로**, Copilot을 쓴다면 위 2번(`.githooks`)을 반드시 먼저 켜세요. Copilot에서는 `.githooks`가 사실상 유일한 자동 안전망입니다.
 
-> **안전장치의 솔직한 한계:** 자동 secret 차단은 흔한 키 패턴(AWS `AKIA`, GitHub `ghp_`, PEM PRIVATE KEY)만 잡습니다. **Supabase service role key·JWT secret 같은 값은 자동으로 안 걸립니다.** 또 `main` 직접 push 차단은 위 `.githooks`를 켰을 때만 완전히 작동합니다(도구 내장 차단은 명령에 'main' 글자가 있을 때만 막아, 그냥 `git push`는 통과할 수 있습니다). 결국 `.env`에 실제 키를 넣고 그 파일을 커밋에서 빼는 것은 **사람이 직접 확인**해야 합니다.
+> **안전장치의 솔직한 한계:** 자동 secret 차단은 알려진 키 패턴(AWS `AKIA`, GitHub `ghp_`, Supabase `sb_secret_`, JWT, PEM PRIVATE KEY)만 잡고, **커밋에 담긴 내용만** 봅니다. 채팅창에 붙여넣은 값, `wrangler.jsonc`의 `vars`, 이미 커밋 이력에 들어간 값, 형태가 일정하지 않은 비밀번호는 걸리지 않습니다. `main` 직접 push 차단도 위 `.githooks`를 켰을 때만 내 컴퓨터에서 작동하므로, 3번 GitHub 저장소 보호를 함께 켜야 팀 전체에 걸립니다. 결국 `.env`에 실제 키를 넣고 그 파일을 커밋에서 빼는 것은 **사람이 직접 확인**해야 합니다.
 
 ---
 
@@ -54,7 +68,8 @@ git config core.hooksPath .githooks
 
 가장 중요한 안전 규칙(반드시 지킬 것):
 - 이번 작업에서는 기존 코드를 절대 수정하지 마세요. 지금은 "읽고 분석하고 제안만" 하는 단계입니다.
-- 제 승인 없이 git commit, git push, git pull, 배포, 운영 데이터베이스(DB) 변경, 데이터를 지우는 마이그레이션을 절대 실행하지 마세요. 필요하면 실행할 명령어와 그게 무엇을 바꾸는지 먼저 쉬운 말로 보여주고 "진행할까요?"라고 물어보세요.
+- 배포, 운영 데이터베이스(DB) 변경, 데이터를 지우는 마이그레이션은 제 승인 없이 절대 실행하지 마세요. 필요하면 실행할 명령어와 그게 무엇을 바꾸는지 먼저 쉬운 말로 보여주고 "진행할까요?"라고 물어보세요.
+- 브랜치 만들기와 커밋은 물어보지 말고 바로 해도 됩니다. 다만 GitHub에 올리거나 내려받는 것(push/pull), PR 만들기는 되돌리기 어려우니 실행 직전에 한 줄로 알려 주세요.
 - git reset --hard 처럼 제 작업물을 되돌리거나 지우는 명령은 절대 쓰지 마세요. 필요하면 먼저 저에게 물어보세요.
 - 비밀값(API 키, service role 키, JWT secret 등)을 코드나 문서에 하드코딩하지 말고, 실제 값이 든 .env 파일을 커밋하지 마세요.
 - 템플릿 규칙을 실제 코드보다 기계적으로 우선시하지 마세요. 코드를 템플릿에 맞춰 뜯어고치는 게 아니라, 문서를 실제 코드에 맞추는 방향입니다.
@@ -64,7 +79,7 @@ git config core.hooksPath .githooks
 
 다음 순서대로 진행해 주세요. 각 단계가 끝나면 멈추고 저에게 확인받은 뒤 다음으로 넘어가세요. (참고: 1~3단계에서 package.json·tsconfig·wrangler.jsonc 같은 파일 이름이 나와도 그건 당신이 알아서 확인하는 것이니 제가 답하지 않아도 됩니다.)
 
-1단계 - 규칙 먼저 읽기: AGENTS.md(특히 0장 Project Overview, 2장 Task Routing, 6장 절대 금지, 8장 충돌 우선순위, 10장 Project Override)와 .agents/STACK.md, .agents/ARCHITECTURE.md 를 먼저 읽고, "이 템플릿이 가정하는 기본 규칙"을 비개발자가 알아들을 수 있게 한 문단으로 요약해 주세요. (이 단계는 당신이 읽는 단계이고, 제가 직접 읽을 필요는 없습니다.)
+1단계 - 규칙 먼저 읽기: AGENTS.md(특히 0장 Project Overview, 2장 Task Routing, 6장 절대 금지, 8장 충돌 우선순위, 11장 Project Override)와 .agents/STACK.md, .agents/ARCHITECTURE.md 를 먼저 읽고, "이 템플릿이 가정하는 기본 규칙"을 비개발자가 알아들을 수 있게 한 문단으로 요약해 주세요. (이 단계는 당신이 읽는 단계이고, 제가 직접 읽을 필요는 없습니다.)
 
 2단계 - 기존 코드 스캔(수정 금지): 제 프로젝트의 실제 모습을 스스로 파악해 주세요. package.json, pnpm-workspace.yaml, tsconfig, 프론트엔드 프레임워크(React Router v7인지 / Next.js인지 / 그냥 Vite인지 등), 백엔드(Hono/Cloudflare Worker인지 / NestJS인지 / Express인지 등), 데이터베이스(Supabase인지 다른 것인지), 폴더 구조(apps·packages로 나뉜 모노레포인지 단일 폴더인지), 배포 설정(wrangler.jsonc, .github/workflows), 기존 디자인 도구(MUI / Tailwind+shadcn/ui / Radix 등)를 확인해서 "실제 스택 목록"을 표로 정리해 주세요. 추측이 들어간 부분은 "확인 필요"라고 표시하세요.
 
@@ -99,7 +114,8 @@ git config core.hooksPath .githooks
 배경: 이 폴더는 "Woomi 코딩 에이전트 템플릿"으로 시작하는 새 프로젝트입니다. AGENTS.md가 모든 규칙의 1차 소스이고, .agents/ 폴더에 표준 문서들이 들어 있습니다. 중요한 점: AGENTS.md 4장이 그려놓은 폴더 구조(apps/, packages/, supabase/ 등)와 pnpm-workspace.yaml 은 아직 "문서로만" 존재하고 실제로는 만들어져 있지 않습니다. 즉 지금은 거의 빈 상태입니다.
 
 가장 중요한 안전 규칙(반드시 지킬 것):
-- 제 승인 없이 git commit, git push, git pull, 배포, 운영 데이터베이스(DB) 변경, 데이터를 지우는 마이그레이션을 절대 실행하지 마세요. 필요하면 실행할 명령어와 그게 무엇을 바꾸는지 먼저 쉬운 말로 보여주고 "진행할까요?"라고 물어보세요.
+- 배포, 운영 데이터베이스(DB) 변경, 데이터를 지우는 마이그레이션은 제 승인 없이 절대 실행하지 마세요. 필요하면 실행할 명령어와 그게 무엇을 바꾸는지 먼저 쉬운 말로 보여주고 "진행할까요?"라고 물어보세요.
+- 브랜치 만들기와 커밋은 물어보지 말고 바로 해도 됩니다. 다만 GitHub에 올리거나 내려받는 것(push/pull), PR 만들기는 되돌리기 어려우니 실행 직전에 한 줄로 알려 주세요.
 - git reset --hard 처럼 제 작업물을 되돌리거나 지우는 명령은 절대 쓰지 마세요.
 - 비밀값(API 키, service role 키, JWT secret 등)을 코드나 문서에 하드코딩하지 말고, 실제 값이 든 .env 파일을 커밋하지 마세요. 서버 비밀값을 프론트엔드 코드에 노출하지 마세요. 또 로그인/권한 없이 비공개 저장소(storage) 파일 주소를 그대로 발급하지 마세요.
 - "전부 알아서 다 만들어줘" 라고 제가 말해도, 한 번에 큰 덩어리를 만들지 말고 아래 단계대로 끊어서 진행하고 매 단계 제 확인을 받아 주세요.
@@ -147,7 +163,8 @@ git config core.hooksPath .githooks
 
 ## 5. 붙여넣은 뒤 비개발자가 할 일 / 주의
 
-- **AI는 당신 승인 없이 commit / push / pull / 배포 / DB 변경을 하지 않도록** 지시되어 있습니다. "알아서 다 해줘"라고 해도 위험한 작업은 먼저 물어봅니다. 이건 정상입니다. AI가 "그냥 알아서 커밋·푸시·배포할게요"라고 하면 멈추게 하세요.
+- **AI는 당신 승인 없이 배포 / DB 변경을 하지 않도록** 지시되어 있습니다. "알아서 다 해줘"라고 해도 위험한 작업은 먼저 물어봅니다. 이건 정상입니다.
+- **브랜치 만들기와 커밋은 AI가 물어보지 않고 합니다.** 이건 정상입니다 — 내 컴퓨터 안에만 남고 되돌릴 수 있어서, 오히려 커밋을 미루는 쪽이 작업을 잃기 쉽습니다. 다만 **GitHub로 올리고 내리는 것(push/pull)과 PR 만들기는 실행 직전에 알려 주도록** 되어 있습니다. 아무 말 없이 GitHub에 올렸다면 멈추게 하세요.
 - **되돌리기 주의:** "깨끗하게 되돌려줘" 같은 말은 작업물을 영영 삭제할 수 있습니다(`git reset --hard`). AI가 이런 걸 하려 하면 막도록 되어 있고, 당신도 함부로 요청하지 마세요.
 - **코드를 마음대로 고치지 못하게:** 특히 기존 프로젝트에서는 실제 코드가 항상 우선입니다. AI가 "표준에 맞춰 코드를 고치자"고 하면, 반대로 "문서를 코드에 맞춰 고쳐줘"라고 바로잡으세요. 단 보안·배포·데이터 손실 금지 규칙만큼은 어떤 경우에도 완화하지 않습니다.
 - **비밀값은 채팅창·코드에 붙여넣지 마세요.** 실제 API 키·비밀번호는 환경변수나 `.env`(커밋 금지)로만 다룹니다.
@@ -158,8 +175,8 @@ git config core.hooksPath .githooks
 
 ## 6. 도구별 한 줄 팁 (실재 명령만)
 
-- **Claude Code:** 위 프롬프트를 그대로 붙여넣으세요. 반복 작업은 슬래시 명령 `/new-feature`(새 화면), `/new-api`(새 서버 기능), `/review-pr`(코드 검토), `/commit`(커밋 정리)을 쓰고, "공통 컴포넌트 만들어줘"·"DB 스키마 바꿔줘"처럼 **자연어로 말하면** `component-generator` / `db-migration` 스킬이 작동합니다.
+- **Claude Code:** 처음이라면 프롬프트를 붙여넣는 대신 `/onboard`만 입력해도 됩니다 — 환경 설정부터 첫 커밋까지 AI가 직접 실행하며 데려갑니다. 반복 작업은 슬래시 명령 `/new-feature`(새 화면), `/new-api`(새 서버 기능), `/review-pr`(코드 검토), `/commit`(커밋 정리)을 쓰고, "공통 컴포넌트 만들어줘"·"DB 스키마 바꿔줘"처럼 **자연어로 말하면** `component-generator` / `db-migration` 스킬이 작동합니다.
 - **Codex CLI:** 같은 프롬프트를 그대로 붙여넣으세요. 같은 워크플로우가 `.codex/prompts/`·`.codex/skills/`에 들어 있습니다.
 - **GitHub Copilot:** 같은 프롬프트를 그대로 붙여넣으세요. 같은 워크플로우가 `.github/prompts/`·`.github/instructions/`에 있습니다. Copilot에는 자동 차단 훅이 없으니 위 2장(안전 훅)을 반드시 먼저 켜세요.
 
-> 이 템플릿에 실제로 있는 워크플로우는 위 4개 명령과 2개 스킬뿐입니다. `/deploy`, `/test` 같은 다른 명령은 **없으니**, AI가 지어내면 의심하세요.
+> 이 템플릿에 실제로 있는 워크플로우는 위 4개 명령과 2개 스킬, 그리고 Claude Code 전용인 `/onboard`와 위키 명령 4종뿐입니다. `/deploy`, `/test` 같은 다른 명령은 **없으니**, AI가 지어내면 의심하세요.

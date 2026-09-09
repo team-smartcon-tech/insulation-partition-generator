@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; font-family: "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #4f46e5; } a:hover { color: #4338ca; }
+  </style>
+</helmet>
+<div style="width: 1280px; height: 720px; box-sizing: border-box; background: #ffffff; color: #0f172a; display: flex; flex-direction: column; padding: 56px 72px 40px;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 24px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="width: 4px; height: 22px; background: #4f46e5; border-radius: 2px;"></div>
+      <div style="font-size: 15px; font-weight: 700; color: #4f46e5;">작동 방식</div>
+    </div>
+    <div style="font-size: 14px; font-weight: 500; color: #64748b;">05 / 09</div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 26px;">
+    <div style="font-size: 38px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em;">도구는 셋, 규칙의 원본은 하나입니다</div>
+    <div style="font-size: 18px; line-height: 1.7; color: #64748b; max-width: 940px;">원본 문서 한 곳을 고치면 세 도구가 같이 바뀝니다. 도구별 문서에는 그 도구에만 있는 것만 담습니다.</div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; align-items: stretch; margin-top: 30px;">
+
+    <div style="display: flex; align-items: center; justify-content: center; gap: 16px; padding: 20px 26px; background: #eef2ff; border: 1px solid #4f46e5; border-radius: 8px;">
+      <div style="font-size: 21px; font-weight: 700; color: #0f172a;">AGENTS.md + .agents/ 문서 22종</div>
+      <div style="width: 1px; height: 22px; background: #c7d2fe;"></div>
+      <div style="font-size: 16px; color: #4338ca; font-weight: 500;">모든 AI가 가장 먼저 읽는 1차 원본</div>
+    </div>
+
+    <svg width="1136" height="44" viewBox="0 0 1136 44" fill="none" stroke="#cbd5e1" stroke-width="1.5" style="display: block;">
+      <path d="M568 0 V16"></path>
+      <path d="M184 16 H952"></path>
+      <path d="M184 16 V37"></path>
+      <path d="M568 16 V37"></path>
+      <path d="M952 16 V37"></path>
+      <path d="M179 32 L184 38 L189 32"></path>
+      <path d="M563 32 L568 38 L573 32"></path>
+      <path d="M947 32 L952 38 L957 32"></path>
+    </svg>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <div style="font-size: 18px; font-weight: 700;">Claude Code</div>
+        <div style="font-size: 15px; line-height: 1.7; color: #64748b;">보충 규칙 <span style="color: #0f172a; font-weight: 500;">CLAUDE.md</span><br>명령 9개 · 스킬 2개 · 위험 동작 차단 훅</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <div style="font-size: 18px; font-weight: 700;">Codex</div>
+        <div style="font-size: 15px; line-height: 1.7; color: #64748b;">보충 규칙 <span style="color: #0f172a; font-weight: 500;">CODEX.md</span><br>같은 워크플로우를 프롬프트로 제공</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <div style="font-size: 18px; font-weight: 700;">GitHub Copilot</div>
+        <div style="font-size: 15px; line-height: 1.7; color: #64748b;">보충 규칙 <span style="color: #0f172a; font-weight: 500;">copilot-instructions</span><br>같은 워크플로우를 프롬프트로 제공</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="display: flex; align-items: flex-start; gap: 18px; margin-top: 24px; padding: 18px 24px; background: #f1f5f9; border-radius: 8px;">
+    <div style="font-size: 14px; font-weight: 700; color: #4f46e5; white-space: nowrap; padding-top: 2px;">운영 원칙</div>
+    <div style="font-size: 17px; line-height: 1.6; color: #0f172a;">규칙이 서로 충돌하면 <strong style="font-weight: 700;">원본이 이깁니다.</strong> 중요한 규칙을 특정 도구의 문서에만 숨겨 두지 않습니다 &mdash; 도구를 바꾸는 순간 사라지기 때문입니다.</div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+    <div style="font-size: 14px; color: #64748b;">Woomi 코딩 에이전트 템플릿 · 표준 2.16-draft</div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
