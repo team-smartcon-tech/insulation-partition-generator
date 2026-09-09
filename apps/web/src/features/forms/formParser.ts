@@ -241,16 +241,14 @@ export function parseFormSheet(worksheet: any): FormSheet {
       if (!box || box.minRow !== row || box.minCol !== col) continue;
 
       const cell = worksheet.getCell(row, col);
-      const text = cellText(cell.value);
       cells.push({
         key: `${row}:${col}`,
         row,
         col,
         rowSpan: box.maxRow - box.minRow + 1,
         colSpan: box.maxCol - box.minCol + 1,
-        text,
+        text: cellText(cell.value),
         style: readStyle(cell),
-        input: text.trim() === "",
       });
     }
   }

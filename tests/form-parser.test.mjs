@@ -68,18 +68,16 @@ test('병합에 가려진 칸은 표에 다시 나오지 않는다', async () =>
   }
 });
 
-test('비어 있는 칸만 입력칸으로 잡는다', async () => {
+test('셀 글자는 원본 그대로 담는다', async () => {
   const sheet = await loadSample();
+
+  assert.equal(cellAt(sheet, 3, 3).text, '부산 장안지구 B1BL 우미린 공동주택 신축공사');
+  assert.equal(cellAt(sheet, 3, 2).text, '공 사 명');
 
   // ③ 방문근거 / ④ 업무 수행내용 / ⑤ 지시사항 — 원본이 비어 있는 세 칸.
   for (const row of [12, 13, 14]) {
-    assert.equal(cellAt(sheet, row, 2).input, true, `${row}행 값칸은 입력칸이어야 한다`);
+    assert.equal(cellAt(sheet, row, 2).text.trim(), '', `${row}행 값칸은 원본이 비어 있다`);
   }
-
-  // 값이 이미 적힌 칸은 입력칸이 아니다(관리자가 나중에 켤 수 있다).
-  assert.equal(cellAt(sheet, 3, 3).input, false);
-  assert.equal(cellAt(sheet, 3, 3).text, '부산 장안지구 B1BL 우미린 공동주택 신축공사');
-  assert.equal(cellAt(sheet, 3, 2).input, false);
 });
 
 test('행·열 크기와 글꼴·정렬·테두리를 함께 가져온다', async () => {

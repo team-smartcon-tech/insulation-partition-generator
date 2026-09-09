@@ -1,27 +1,15 @@
 /**
- * 우미 양식 모음집 — 3단계 임시 화면.
+ * 우미 양식 모음집 — 엑셀 양식을 올려 내용을 채우는 화면.
  *
- * 엑셀을 올려 "원본대로 그려지는지" 눈으로 확인하는 것까지만 한다.
- * 입력·저장과 프로토타입의 폴더/즐겨찾기 구조는 다음 단계에서 얹는다.
+ * 양식(병합·테두리·칸 크기·글꼴)은 엑셀 원본 그대로 고정하고, 글자는 어느 칸이든
+ * 고칠 수 있다. 저장·불러오기와 양식 목록은 다음 단계에서 얹는다.
  */
 import { useRef, useState } from "react";
 import { Link } from "wouter";
-import { ArrowLeft, FileSpreadsheet, Upload } from "lucide-react";
+import { ArrowLeft, FileSpreadsheet, RotateCcw, Upload } from "lucide-react";
 import { parseFormWorkbook } from "./formParser";
-import FormSheetView, { type FormMode } from "./FormSheetView";
-import type { FormInputOverrides, FormSheet } from "./types";
-
-const MODE_LABELS: Record<FormMode, string> = {
-  view: "보기",
-  fill: "채우기",
-  design: "입력칸 지정",
-};
-
-const MODE_HINTS: Record<FormMode, string> = {
-  view: "원본 그대로 봅니다.",
-  fill: "파란 칸에 값을 적습니다. 한 칸에 여러 자리가 있으면 자리마다 따로 적을 수 있습니다.",
-  design: "칸을 누르면 입력칸으로 켜지거나 꺼집니다. 이미 글자가 적힌 칸도 입력칸으로 만들 수 있습니다.",
-};
+import FormSheetView from "./FormSheetView";
+import type { FormSheet, FormValues } from "./types";
 
 type LoadState =
   | { status: "idle" }
@@ -29,14 +17,14 @@ type LoadState =
   | { status: "error"; message: string }
   | { status: "ready"; fileName: string; sheets: FormSheet[] };
 
+const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.5];
+
 export default function FormsPage() {
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [activeSheet, setActiveSheet] = useState(0);
-  const [highlightInputs, setHighlightInputs] = useState(true);
   const [scale, setScale] = useState(1);
-  const [mode, setMode] = useState<FormMode>("fill");
-  const [overrides, setOverrides] = useState<FormInputOverrides>({});
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [editable, setEditable] = useState(true);
+  const [values, setValues] = useState<FormValues>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -47,8 +35,7 @@ export default function FormsPage() {
 
     setState({ status: "loading" });
     setActiveSheet(0);
-    // 다른 양식을 올리면 앞 양식의 지정·입력값은 의미가 없다.
-    setOverrides({});
+    // 다른 양식을 올리면 앞 양식에 적은 값은 의미가 없다.
     setValues({});
     try {
       const sheets = await parseFormWorkbook(await file.arrayBuffer());
@@ -69,6 +56,7 @@ export default function FormsPage() {
   }
 
   const sheet = state.status === "ready" ? state.sheets[activeSheet] : null;
+  const editedCount = Object.keys(values).length;
 
   return (
     <div className="min-h-screen bg-slate-100 px-6 py-10 text-slate-800">
@@ -83,7 +71,8 @@ export default function FormsPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">FORMS</p>
           <h1 className="mt-2 text-3xl font-bold">우미 양식 모음집</h1>
           <p className="mt-2 text-sm text-slate-600">
-            엑셀 양식을 올리면 셀 병합·테두리·글꼴까지 원본 그대로 화면에 옮깁니다.
+            엑셀 양식을 올리면 셀 병합·테두리·글꼴까지 원본 그대로 옮기고,{" "}
+            <strong className="font-semibold text-slate-800">글자는 어느 칸이든 바로 고칠 수 있습니다.</strong>
           </p>
         </header>
 
@@ -112,29 +101,52 @@ export default function FormsPage() {
                   <FileSpreadsheet size={15} className="text-slate-400" />
                   {state.fileName}
                 </span>
-                <label className="ml-auto inline-flex cursor-pointer items-center gap-2 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={highlightInputs}
-                    onChange={(event) => setHighlightInputs(event.target.checked)}
-                    className="size-4 accent-blue-600"
-                  />
-                  입력칸으로 잡힌 곳 표시
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-600">
-                  배율
-                  <select
-                    value={scale}
-                    onChange={(event) => setScale(Number(event.target.value))}
-                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
-                  >
-                    {[0.8, 0.9, 1, 1.1, 1.25, 1.5].map((value) => (
-                      <option key={value} value={value}>
-                        {Math.round(value * 100)}%
-                      </option>
+
+                <div className="ml-auto flex flex-wrap items-center gap-3">
+                  <div className="inline-flex overflow-hidden rounded-lg ring-1 ring-slate-300">
+                    {[
+                      { value: true, label: "편집" },
+                      { value: false, label: "보기" },
+                    ].map((option) => (
+                      <button
+                        key={option.label}
+                        type="button"
+                        onClick={() => setEditable(option.value)}
+                        className={
+                          editable === option.value
+                            ? "bg-slate-800 px-3 py-1.5 text-xs font-medium text-white"
+                            : "bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                        }
+                      >
+                        {option.label}
+                      </button>
                     ))}
-                  </select>
-                </label>
+                  </div>
+
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+                    배율
+                    <select
+                      value={scale}
+                      onChange={(event) => setScale(Number(event.target.value))}
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
+                    >
+                      {SCALES.map((value) => (
+                        <option key={value} value={value}>
+                          {Math.round(value * 100)}%
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => setValues({})}
+                    disabled={editedCount === 0}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200"
+                  >
+                    <RotateCcw size={13} /> 원본으로 되돌리기
+                  </button>
+                </div>
               </>
             )}
           </div>
@@ -173,55 +185,23 @@ export default function FormsPage() {
               </div>
             )}
 
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              {(Object.keys(MODE_LABELS) as FormMode[]).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setMode(value)}
-                  className={
-                    value === mode
-                      ? "rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white"
-                      : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
-                  }
-                >
-                  {MODE_LABELS[value]}
-                </button>
-              ))}
-              <span className="text-xs text-slate-500">{MODE_HINTS[mode]}</span>
-            </div>
-
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
               <span>시트 “{sheet.name}”</span>
               <span>
                 {sheet.rowCount}행 × {sheet.colCount}열
               </span>
               <span>병합 {sheet.cells.filter((c) => c.rowSpan > 1 || c.colSpan > 1).length}곳</span>
-              <span>
-                입력칸 {sheet.cells.filter((c) => overrides[c.key] ?? c.input).length}개
-                {Object.keys(overrides).length > 0 && ` (직접 지정 ${Object.keys(overrides).length}곳)`}
-              </span>
+              {editedCount > 0 && <span className="text-blue-600">고친 칸 {editedCount}개</span>}
+              {editable && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
             </div>
 
             <FormSheetView
               sheet={sheet}
-              mode={mode}
-              overrides={overrides}
-              onToggleInput={(cellKey) =>
-                setOverrides((prev) => {
-                  const cell = sheet.cells.find((c) => c.key === cellKey);
-                  if (!cell) return prev;
-                  const next = { ...prev };
-                  const current = prev[cellKey] ?? cell.input;
-                  // 기본 판정으로 되돌아가면 항목을 지워 "직접 지정" 수를 정확히 유지한다.
-                  if (!current === cell.input) delete next[cellKey];
-                  else next[cellKey] = !current;
-                  return next;
-                })
-              }
+              editable={editable}
               values={values}
-              onChangeValue={(key, value) => setValues((prev) => ({ ...prev, [key]: value }))}
-              highlightInputs={highlightInputs}
+              onChangeValue={(cellKey, value) =>
+                setValues((prev) => ({ ...prev, [cellKey]: value }))
+              }
               scale={scale}
             />
           </section>

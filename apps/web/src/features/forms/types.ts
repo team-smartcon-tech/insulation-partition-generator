@@ -44,7 +44,7 @@ export interface FormCellStyle {
 }
 
 export interface FormCell {
-  /** 병합 대표 칸의 좌표로 만든 안정적인 키. 입력칸 지정을 여기에 붙인다. */
+  /** 병합 대표 칸의 좌표로 만든 안정적인 키. 고친 글자를 여기에 붙여 저장한다. */
   key: string;
   /** 1부터 시작 */
   row: number;
@@ -52,13 +52,9 @@ export interface FormCell {
   col: number;
   rowSpan: number;
   colSpan: number;
+  /** 엑셀 원본 글자. 사용자가 고친 값은 따로 보관하고 이건 그대로 둔다. */
   text: string;
   style: FormCellStyle;
-  /**
-   * 채워 넣는 칸인지. 기본값은 "원본이 비어 있으면 입력칸".
-   * 다 채워진 예시 파일이 올라올 수 있어서 관리자가 켜고 끌 수 있다.
-   */
-  input: boolean;
 }
 
 export interface FormSheet {
@@ -73,5 +69,5 @@ export interface FormSheet {
   cells: FormCell[];
 }
 
-/** 관리자가 기본값을 뒤집은 칸만 기록한다. key → 입력칸 여부 */
-export type FormInputOverrides = Record<string, boolean>;
+/** 사용자가 고친 글자만 담는다. 셀 키 → 고친 값. 손대지 않은 칸은 여기 없다. */
+export type FormValues = Record<string, string>;

@@ -1,10 +1,13 @@
 /**
- * 셀 하나의 내용을 그린다 — 읽기만 할 때는 글자, 채울 때는 입력칸.
+ * 셀 하나의 내용을 그린다.
  *
- * 적는 자리(공백 덩어리)가 있는 셀은 그 자리마다 작은 입력칸을 넣어 원본 구조를 지킨다.
- * 자리가 없는 셀(③④⑤처럼 통째로 빈 칸)은 칸 전체가 하나의 입력 상자가 된다.
+ * 양식(병합·테두리·칸 크기·글꼴)은 엑셀 원본 그대로 고정하고, **글자는 어느 칸이든
+ * 자유롭게 고칠 수 있게** 한다. 그래서 편집 중에는 모든 칸이 입력 상자다.
+ *
+ * 입력 상자는 평소에 보이지 않는다 — 테두리·배경 없이 원본 글자와 똑같이 보이다가
+ * 마우스를 올리거나 누를 때만 표시된다. 그래야 "양식을 보는 화면"이 유지된다.
  */
-import { splitCellText, slotKey } from "./formSlots";
+import { useLayoutEffect, useRef } from "react";
 import type { FormCell } from "./types";
 
 /**
@@ -19,68 +22,51 @@ export function displayText(text: string): string {
     .join("\n");
 }
 
-const SLOT_INPUT_CLASS =
-  "inline-block border-0 border-b border-dashed border-blue-400 bg-blue-50/60 px-1 " +
-  "text-inherit outline-none focus:border-solid focus:border-blue-600 focus:bg-blue-50";
-
 interface FormCellContentProps {
   cell: FormCell;
-  /** 채워 넣는 중인지. false 면 글자만 보여준다. */
+  /** false 면 글자만 보여준다(인쇄·검토용). */
   editable: boolean;
-  values: Record<string, string>;
-  onChange: (key: string, value: string) => void;
+  /** 고친 값. 없으면 엑셀 원본 글자를 쓴다. */
+  value: string | undefined;
+  onChange: (value: string) => void;
 }
 
 export default function FormCellContent({
   cell,
   editable,
-  values,
+  value,
   onChange,
 }: FormCellContentProps) {
-  if (!editable || !cell.input) {
-    return <>{displayText(cell.text)}</>;
-  }
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const text = value ?? displayText(cell.text);
 
-  const lines = splitCellText(displayText(cell.text));
-  const hasSlots = lines.some((segments) => segments.some((s) => s.type === "slot"));
+  // 글이 길어지면 칸이 함께 늘어나야 잘리지 않는다. textarea 는 스스로 늘지 않는다.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [text, editable]);
 
-  // 적는 자리가 없는 빈 칸은 칸 전체가 입력 상자다.
-  if (!hasSlots) {
-    const key = slotKey(cell.key, 0);
-    return (
-      <textarea
-        value={values[key] ?? ""}
-        onChange={(event) => onChange(key, event.target.value)}
-        rows={1}
-        className="block h-full w-full resize-none border-0 bg-blue-50/60 p-0 text-inherit outline-none focus:bg-blue-50"
-        style={{ fontFamily: "inherit", fontSize: "inherit", minHeight: "1.4em" }}
-      />
-    );
-  }
+  if (!editable) return <>{text}</>;
 
   return (
-    <>
-      {lines.map((segments, lineIndex) => (
-        <span key={lineIndex} className="block" style={{ minHeight: "1.2em" }}>
-          {segments.map((segment, index) => {
-            if (segment.type === "text") {
-              return <span key={`t${index}`}>{segment.text}</span>;
-            }
-            const key = slotKey(cell.key, segment.index);
-            return (
-              <input
-                key={`s${segment.index}`}
-                type="text"
-                value={values[key] ?? ""}
-                onChange={(event) => onChange(key, event.target.value)}
-                // 원본 공백 수만큼 폭을 준다 — 그래야 칸이 원래 자리에 남는다.
-                style={{ width: `${segment.spaces}ch`, fontFamily: "inherit", fontSize: "inherit" }}
-                className={SLOT_INPUT_CLASS}
-              />
-            );
-          })}
-        </span>
-      ))}
-    </>
+    <textarea
+      ref={ref}
+      value={text}
+      onChange={(event) => onChange(event.target.value)}
+      rows={1}
+      spellCheck={false}
+      className="block w-full resize-none overflow-hidden rounded-sm border-0 bg-transparent p-0 outline-none transition-colors hover:bg-blue-50/70 focus:bg-blue-50 focus:ring-1 focus:ring-blue-400"
+      style={{
+        // 표의 글꼴·크기·정렬·색을 그대로 물려받아야 원본과 같아 보인다.
+        font: "inherit",
+        color: "inherit",
+        textAlign: "inherit",
+        lineHeight: "inherit",
+        letterSpacing: "inherit",
+        whiteSpace: "pre-wrap",
+      }}
+    />
   );
 }

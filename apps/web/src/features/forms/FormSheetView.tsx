@@ -7,7 +7,7 @@
  */
 import type { CSSProperties } from "react";
 import FormCellContent from "./FormCellContent";
-import type { FormBorder, FormCell, FormCellStyle, FormInputOverrides, FormSheet } from "./types";
+import type { FormBorder, FormCell, FormCellStyle, FormSheet, FormValues } from "./types";
 
 /** 엑셀 테두리 굵기 → CSS. 굵기만 다르고 색은 셀에서 따로 온다. */
 const BORDER_WIDTH: Record<FormBorder["style"], string> = {
@@ -72,31 +72,22 @@ function cellCss(style: FormCellStyle): CSSProperties {
   };
 }
 
-/** view = 보기만, fill = 채워 넣기, design = 어느 칸을 입력칸으로 쓸지 지정 */
-export type FormMode = "view" | "fill" | "design";
-
 interface FormSheetViewProps {
   sheet: FormSheet;
-  mode?: FormMode;
-  /** 관리자가 기본 판정을 뒤집은 칸. 셀 키 → 입력칸 여부 */
-  overrides?: FormInputOverrides;
-  onToggleInput?: (cellKey: string) => void;
-  values?: Record<string, string>;
-  onChangeValue?: (key: string, value: string) => void;
-  /** 입력칸으로 잡힌 곳을 색으로 표시한다(판정이 맞는지 눈으로 보려고). */
-  highlightInputs?: boolean;
+  /** true 면 모든 칸의 글자를 고칠 수 있다. false 는 인쇄·검토용 보기. */
+  editable?: boolean;
+  /** 고친 글자만 담긴다. 셀 키 → 값 */
+  values?: FormValues;
+  onChangeValue?: (cellKey: string, value: string) => void;
   /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
   scale?: number;
 }
 
 export default function FormSheetView({
   sheet,
-  mode = "view",
-  overrides = {},
-  onToggleInput,
+  editable = false,
   values = {},
   onChangeValue,
-  highlightInputs = false,
   scale = 1,
 }: FormSheetViewProps) {
   if (sheet.rowCount === 0) {
@@ -133,31 +124,21 @@ export default function FormSheetView({
         <tbody>
           {rows.map((cells, rowIndex) => (
             <tr key={rowIndex} style={{ height: sheet.rowHeights[rowIndex] }}>
-              {cells.map((cell) => {
-                const isInput = overrides[cell.key] ?? cell.input;
-                return (
-                  <td
-                    key={cell.key}
-                    colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
-                    rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-                    onClick={mode === "design" ? () => onToggleInput?.(cell.key) : undefined}
-                    style={{
-                      ...cellCss(cell.style),
-                      ...(mode === "design" ? { cursor: "pointer" } : null),
-                      ...(highlightInputs && isInput
-                        ? { background: "#dbeafe", outline: "1px dashed #3b82f6", outlineOffset: -2 }
-                        : null),
-                    }}
-                  >
-                    <FormCellContent
-                      cell={{ ...cell, input: isInput }}
-                      editable={mode === "fill"}
-                      values={values}
-                      onChange={(key, value) => onChangeValue?.(key, value)}
-                    />
-                  </td>
-                );
-              })}
+              {cells.map((cell) => (
+                <td
+                  key={cell.key}
+                  colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
+                  rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
+                  style={cellCss(cell.style)}
+                >
+                  <FormCellContent
+                    cell={cell}
+                    editable={editable}
+                    value={values[cell.key]}
+                    onChange={(value) => onChangeValue?.(cell.key, value)}
+                  />
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
