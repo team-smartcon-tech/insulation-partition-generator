@@ -1,11 +1,12 @@
 import { Route, Switch } from "wouter";
 import { Toaster } from "sonner";
+import AnnouncementsPage from "@/features/announcements/AnnouncementsPage";
 import ElevationGeneratorPage from "@/features/elevation/ElevationGeneratorPage";
 import LoginPage from "@/features/auth/LoginPage";
 import AuthGate from "@/features/auth/AuthGate";
+import FormsPage from "@/features/forms/FormsPage";
 import HomePage from "@/features/home/HomePage";
-import MarketPublishPage from "@/features/market/MarketPublishPage";
-import MarketAppDetailPage from "@/features/market/MarketAppDetailPage";
+import NewItemPage from "@/features/new-item";
 
 export default function App() {
   return (
@@ -24,22 +25,20 @@ export default function App() {
             <ElevationGeneratorPage />
           </AuthGate>
         </Route>
-        {/* App Market — 게시/수정/상세 (구체적인 경로가 /market/:appId 보다 먼저 와야 한다) */}
-        <Route path="/market/new">
+        <Route path="/tools/announcements">
           <AuthGate>
-            <MarketPublishPage />
+            <AnnouncementsPage />
           </AuthGate>
         </Route>
-        <Route path="/market/:appId/edit">
-          {(params) => (
-            <AuthGate>
-              <MarketPublishPage appId={params.appId} />
-            </AuthGate>
-          )}
-        </Route>
-        <Route path="/market/:appId">
+        <Route path="/tools/new-item">
           <AuthGate>
-            <MarketAppDetailPage />
+            <NewItemPage />
+          </AuthGate>
+        </Route>
+        {/* 도구: 우미 양식 모음집 */}
+        <Route path="/tools/forms">
+          <AuthGate>
+            <FormsPage />
           </AuthGate>
         </Route>
         <Route>

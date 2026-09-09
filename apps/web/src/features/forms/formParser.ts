@@ -269,8 +269,10 @@ export function parseFormSheet(worksheet: any): FormSheet {
 
 /** .xlsx 파일 내용을 시트 목록으로 바꾼다. 시트가 여러 개면 전부 돌려준다. */
 export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]> {
-  const { default: ExcelJS } = await import("exceljs");
+  // 브라우저용 exceljs 는 UMD 번들이라 default 로 감싸질 때와 아닐 때가 갈린다.
+  const module = (await import("exceljs")) as unknown as Record<string, any>;
+  const ExcelJS = module.default ?? module;
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(data);
-  return workbook.worksheets.map((worksheet) => parseFormSheet(worksheet));
+  return workbook.worksheets.map((worksheet: any) => parseFormSheet(worksheet));
 }
