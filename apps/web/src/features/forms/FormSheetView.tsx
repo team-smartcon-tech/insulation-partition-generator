@@ -47,13 +47,13 @@ function borderCss(border: FormBorder | undefined): string | undefined {
   return `${BORDER_WIDTH[border.style]} ${border.color ?? DEFAULT_BORDER_COLOR}`;
 }
 
-function cellCss(style: FormCellStyle): CSSProperties {
+function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProperties {
   return {
     borderTop: borderCss(style.borders.top),
     borderRight: borderCss(style.borders.right),
     borderBottom: borderCss(style.borders.bottom),
     borderLeft: borderCss(style.borders.left),
-    textAlign: style.align,
+    textAlign: align,
     verticalAlign: style.valign ?? "middle",
     fontWeight: style.bold ? 700 : undefined,
     fontStyle: style.italic ? "italic" : undefined,
@@ -63,13 +63,26 @@ function cellCss(style: FormCellStyle): CSSProperties {
     fontFamily: fontStack(style.fontFamily),
     color: style.color,
     background: style.background,
-    // 셀 안 줄바꿈(\n)과 들여쓰기 공백을 살리면서 칸을 넘치면 접는다.
-    whiteSpace: "pre-wrap",
+    // 엑셀의 "자동 줄바꿈" 설정을 그대로 따른다. 끄여 있는 칸까지 접으면
+    // 한 줄로 적힌 항목(예: "소속: … 직급: … 성명: … (서명 또는 날인)")이 쪼개진다.
+    // 접지 않는 칸이 넘칠 때는 FormCellContent 가 글자를 줄여 맞춘다.
+    whiteSpace: style.wrap ? "pre-wrap" : "pre",
     // 한글은 어절 단위로 끊어야 한다. break-word 만 쓰면 "특기사항"이 "특기사"+"항"으로 쪼개진다.
     wordBreak: "keep-all",
     overflowWrap: "break-word",
-    padding: "1px 3px",
+    // 칸이 좁아 글자가 접히는 것을 막으려고 여백을 최소로 둔다.
+    padding: "1px 2px",
   };
+}
+
+/**
+ * 첫 열은 구분 제목(①②③…)이 들어가는 자리다. 엑셀 원본은 가로 정렬을 지정하지 않아
+ * 왼쪽에 붙는데, 제목이 줄바꿈되면 들쭉날쭉해 보인다. 원본에 지정이 없을 때만 가운데로
+ * 맞춘다 — 엑셀이 명시한 정렬은 그대로 따른다.
+ */
+function effectiveAlign(cell: FormCell): FormCellStyle["align"] {
+  if (cell.style.align) return cell.style.align;
+  return cell.col === 1 ? "center" : undefined;
 }
 
 interface FormSheetViewProps {
@@ -105,7 +118,8 @@ export default function FormSheetView({
   const totalWidth = sheet.colWidths.reduce((a, b) => a + b, 0);
 
   return (
-    <div className="overflow-x-auto">
+    // 가로 스크롤 영역이 표의 바깥 테두리를 1px 잘라먹어, 그만큼 안쪽 여백을 준다.
+    <div className="overflow-x-auto p-0.5">
       <table
         className="border-collapse bg-white"
         style={{
@@ -129,7 +143,7 @@ export default function FormSheetView({
                   key={cell.key}
                   colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
                   rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-                  style={cellCss(cell.style)}
+                  style={cellCss(cell.style, effectiveAlign(cell))}
                 >
                   <FormCellContent
                     cell={cell}

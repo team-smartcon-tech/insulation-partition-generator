@@ -102,6 +102,23 @@ test('행·열 크기와 글꼴·정렬·테두리를 함께 가져온다', asyn
   assert.equal(label.style.borders.bottom.style, 'thin');
 });
 
+test('병합된 칸의 바깥 테두리는 모서리 칸에서 읽는다', async () => {
+  const sheet = await loadSample();
+
+  // B11:G11 병합. 오른쪽 선은 대표 칸 B11 이 아니라 맨 오른쪽 G11 에 들어 있다.
+  // 대표 칸만 보면 병합 줄의 오른쪽 테두리가 통째로 사라진다.
+  const visitPeriod = cellAt(sheet, 11, 2);
+  assert.equal(visitPeriod.colSpan, 6);
+  assert.equal(visitPeriod.style.borders.right.style, 'thin', '병합 줄의 오른쪽 테두리가 있어야 한다');
+  assert.equal(visitPeriod.style.borders.left.style, 'thin');
+  assert.equal(visitPeriod.style.borders.top.style, 'thin');
+
+  // A3:A10 세로 병합 — 아래쪽 선은 맨 아래 A10 에 있다.
+  const section = cellAt(sheet, 3, 1);
+  assert.equal(section.rowSpan, 8);
+  assert.equal(section.style.borders.bottom.style, 'thin', '세로 병합의 아래 테두리가 있어야 한다');
+});
+
 test('줄바꿈이 든 셀 값은 그대로 보존한다', async () => {
   const sheet = await loadSample();
 

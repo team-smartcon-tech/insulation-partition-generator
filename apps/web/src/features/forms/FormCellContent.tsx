@@ -10,9 +10,14 @@
 import { useLayoutEffect, useRef } from "react";
 import type { FormCell } from "./types";
 
+/** 글자를 줄여 맞출 때의 하한. 이보다 작아지면 읽을 수 없어 그냥 넘치게 둔다. */
+const MIN_FONT_PX = 7;
+/** 한 번에 줄이는 폭(px). 작을수록 원본에 가깝지만 재계산이 늘어난다. */
+const SHRINK_STEP_PX = 0.5;
+
 /**
  * 엑셀 셀에는 칸을 맞추려고 넣은 공백이 줄 끝에 붙어 있다. 엑셀은 줄 끝 공백을 폭으로
- * 치지 않지만 CSS pre-wrap 은 폭으로 쳐서, 그 공백 때문에 글자가 다음 줄로 밀린다.
+ * 치지 않지만 CSS 는 폭으로 쳐서, 그 공백 때문에 글자가 다음 줄로 밀린다.
  * 줄 끝만 걷어내고 들여쓰기용 앞 공백은 원본대로 남긴다.
  */
 export function displayText(text: string): string {
@@ -20,6 +25,25 @@ export function displayText(text: string): string {
     .split("\n")
     .map((line) => line.replace(/\s+$/, ""))
     .join("\n");
+}
+
+/**
+ * 줄바꿈을 끈 칸이 가로로 넘치면 글자를 조금씩 줄여 맞춘다(엑셀의 "축소하여 맞춤").
+ *
+ * 엑셀과 브라우저는 같은 "바탕 11pt" 라도 글자 폭이 미세하게 달라, 원본에서 한 줄에
+ * 들어가던 항목이 여기서는 넘칠 수 있다. 넘친 채로 두면 잘리거나 옆 칸을 침범한다.
+ */
+function fitToCell(element: HTMLElement | null): void {
+  if (!element) return;
+  element.style.fontSize = "";
+  // 넘치지 않으면 원본 크기 그대로 둔다.
+  if (element.scrollWidth <= element.clientWidth) return;
+
+  let size = Number.parseFloat(window.getComputedStyle(element).fontSize);
+  while (element.scrollWidth > element.clientWidth && size > MIN_FONT_PX) {
+    size -= SHRINK_STEP_PX;
+    element.style.fontSize = `${size}px`;
+  }
 }
 
 interface FormCellContentProps {
@@ -38,17 +62,29 @@ export default function FormCellContent({
   onChange,
 }: FormCellContentProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const readonlyRef = useRef<HTMLSpanElement>(null);
   const text = value ?? displayText(cell.text);
+  const wraps = cell.style.wrap === true;
 
-  // 글이 길어지면 칸이 함께 늘어나야 잘리지 않는다. textarea 는 스스로 늘지 않는다.
   useLayoutEffect(() => {
     const element = ref.current;
-    if (!element) return;
+    if (!element) {
+      if (!wraps) fitToCell(readonlyRef.current);
+      return;
+    }
+    // 글이 길어지면 칸이 함께 늘어나야 잘리지 않는다. textarea 는 스스로 늘지 않는다.
     element.style.height = "auto";
     element.style.height = `${element.scrollHeight}px`;
-  }, [text, editable]);
+    if (!wraps) fitToCell(element);
+  }, [text, editable, wraps]);
 
-  if (!editable) return <>{text}</>;
+  if (!editable) {
+    return (
+      <span ref={readonlyRef} className="block overflow-hidden">
+        {text}
+      </span>
+    );
+  }
 
   return (
     <textarea
@@ -57,6 +93,7 @@ export default function FormCellContent({
       onChange={(event) => onChange(event.target.value)}
       rows={1}
       spellCheck={false}
+      wrap={wraps ? "soft" : "off"}
       className="block w-full resize-none overflow-hidden rounded-sm border-0 bg-transparent p-0 outline-none transition-colors hover:bg-blue-50/70 focus:bg-blue-50 focus:ring-1 focus:ring-blue-400"
       style={{
         // 표의 글꼴·크기·정렬·색을 그대로 물려받아야 원본과 같아 보인다.
@@ -65,7 +102,7 @@ export default function FormCellContent({
         textAlign: "inherit",
         lineHeight: "inherit",
         letterSpacing: "inherit",
-        whiteSpace: "pre-wrap",
+        whiteSpace: "inherit",
       }}
     />
   );

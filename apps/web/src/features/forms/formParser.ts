@@ -13,8 +13,14 @@ import type {
   FormSheet,
 } from "./types";
 
-/** 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀 */
-const COL_UNIT_PX = 7;
+/**
+ * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀.
+ *
+ * 흔히 쓰는 값 7 은 Calibri 11pt 기준이다. 국내 공문서 양식은 바탕·굴림 계열을
+ * 쓰고 숫자가 더 넓어, 7 로 환산하면 실제보다 좁아져 글자가 원본보다 더 접힌다.
+ * 좁아서 줄이 깨지는 쪽이 넓어서 여백이 남는 쪽보다 훨씬 눈에 띄므로 8 을 쓴다.
+ */
+const COL_UNIT_PX = 8;
 /** 엑셀이 열에 항상 더하는 좌우 여백 */
 const COL_PADDING_PX = 5;
 /** 엑셀 기본 열 너비(문자 단위) */
@@ -176,6 +182,30 @@ interface SpanBox {
   maxCol: number;
 }
 
+/**
+ * 병합된 칸의 바깥 테두리를 네 모서리 칸에서 각각 읽는다.
+ *
+ * 엑셀은 테두리를 칸마다 따로 저장한다. `B11:G11` 병합이라면 오른쪽 선은 대표 칸인
+ * `B11` 이 아니라 맨 오른쪽 `G11` 에 들어 있다. 대표 칸만 보면 병합 줄의 오른쪽·아래
+ * 선이 통째로 사라진다.
+ */
+function readMergedBorders(worksheet: any, box: SpanBox): FormCellBorders {
+  const topLeft = worksheet.getCell(box.minRow, box.minCol);
+  const topRight = worksheet.getCell(box.minRow, box.maxCol);
+  const bottomLeft = worksheet.getCell(box.maxRow, box.minCol);
+
+  const borders: FormCellBorders = {};
+  const top = readBorder(topLeft.border?.top);
+  const left = readBorder(topLeft.border?.left);
+  const right = readBorder(topRight.border?.right);
+  const bottom = readBorder(bottomLeft.border?.bottom);
+  if (top) borders.top = top;
+  if (left) borders.left = left;
+  if (right) borders.right = right;
+  if (bottom) borders.bottom = bottom;
+  return borders;
+}
+
 /** exceljs Worksheet 하나를 격자 구조로 바꾼다. */
 export function parseFormSheet(worksheet: any): FormSheet {
   // 1) 실제로 내용이 있는 범위를 먼저 구한다.
@@ -241,14 +271,20 @@ export function parseFormSheet(worksheet: any): FormSheet {
       if (!box || box.minRow !== row || box.minCol !== col) continue;
 
       const cell = worksheet.getCell(row, col);
+      const rowSpan = box.maxRow - box.minRow + 1;
+      const colSpan = box.maxCol - box.minCol + 1;
+      const style = readStyle(cell);
+      // 병합된 칸은 바깥 테두리를 모서리 칸들에서 다시 읽는다.
+      if (rowSpan > 1 || colSpan > 1) style.borders = readMergedBorders(worksheet, box);
+
       cells.push({
         key: `${row}:${col}`,
         row,
         col,
-        rowSpan: box.maxRow - box.minRow + 1,
-        colSpan: box.maxCol - box.minCol + 1,
+        rowSpan,
+        colSpan,
         text: cellText(cell.value),
-        style: readStyle(cell),
+        style,
       });
     }
   }
