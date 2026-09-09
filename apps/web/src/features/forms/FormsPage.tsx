@@ -8,8 +8,20 @@ import { useRef, useState } from "react";
 import { Link } from "wouter";
 import { ArrowLeft, FileSpreadsheet, Upload } from "lucide-react";
 import { parseFormWorkbook } from "./formParser";
-import FormSheetView from "./FormSheetView";
-import type { FormSheet } from "./types";
+import FormSheetView, { type FormMode } from "./FormSheetView";
+import type { FormInputOverrides, FormSheet } from "./types";
+
+const MODE_LABELS: Record<FormMode, string> = {
+  view: "보기",
+  fill: "채우기",
+  design: "입력칸 지정",
+};
+
+const MODE_HINTS: Record<FormMode, string> = {
+  view: "원본 그대로 봅니다.",
+  fill: "파란 칸에 값을 적습니다. 한 칸에 여러 자리가 있으면 자리마다 따로 적을 수 있습니다.",
+  design: "칸을 누르면 입력칸으로 켜지거나 꺼집니다. 이미 글자가 적힌 칸도 입력칸으로 만들 수 있습니다.",
+};
 
 type LoadState =
   | { status: "idle" }
@@ -21,6 +33,10 @@ export default function FormsPage() {
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [activeSheet, setActiveSheet] = useState(0);
   const [highlightInputs, setHighlightInputs] = useState(true);
+  const [scale, setScale] = useState(1);
+  const [mode, setMode] = useState<FormMode>("fill");
+  const [overrides, setOverrides] = useState<FormInputOverrides>({});
+  const [values, setValues] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -31,6 +47,9 @@ export default function FormsPage() {
 
     setState({ status: "loading" });
     setActiveSheet(0);
+    // 다른 양식을 올리면 앞 양식의 지정·입력값은 의미가 없다.
+    setOverrides({});
+    setValues({});
     try {
       const sheets = await parseFormWorkbook(await file.arrayBuffer());
       if (sheets.length === 0) {
@@ -102,6 +121,20 @@ export default function FormsPage() {
                   />
                   입력칸으로 잡힌 곳 표시
                 </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+                  배율
+                  <select
+                    value={scale}
+                    onChange={(event) => setScale(Number(event.target.value))}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
+                  >
+                    {[0.8, 0.9, 1, 1.1, 1.25, 1.5].map((value) => (
+                      <option key={value} value={value}>
+                        {Math.round(value * 100)}%
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </>
             )}
           </div>
@@ -140,16 +173,57 @@ export default function FormsPage() {
               </div>
             )}
 
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {(Object.keys(MODE_LABELS) as FormMode[]).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setMode(value)}
+                  className={
+                    value === mode
+                      ? "rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white"
+                      : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
+                  }
+                >
+                  {MODE_LABELS[value]}
+                </button>
+              ))}
+              <span className="text-xs text-slate-500">{MODE_HINTS[mode]}</span>
+            </div>
+
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
               <span>시트 “{sheet.name}”</span>
               <span>
                 {sheet.rowCount}행 × {sheet.colCount}열
               </span>
               <span>병합 {sheet.cells.filter((c) => c.rowSpan > 1 || c.colSpan > 1).length}곳</span>
-              <span>입력칸 {sheet.cells.filter((c) => c.input).length}개</span>
+              <span>
+                입력칸 {sheet.cells.filter((c) => overrides[c.key] ?? c.input).length}개
+                {Object.keys(overrides).length > 0 && ` (직접 지정 ${Object.keys(overrides).length}곳)`}
+              </span>
             </div>
 
-            <FormSheetView sheet={sheet} highlightInputs={highlightInputs} />
+            <FormSheetView
+              sheet={sheet}
+              mode={mode}
+              overrides={overrides}
+              onToggleInput={(cellKey) =>
+                setOverrides((prev) => {
+                  const cell = sheet.cells.find((c) => c.key === cellKey);
+                  if (!cell) return prev;
+                  const next = { ...prev };
+                  const current = prev[cellKey] ?? cell.input;
+                  // 기본 판정으로 되돌아가면 항목을 지워 "직접 지정" 수를 정확히 유지한다.
+                  if (!current === cell.input) delete next[cellKey];
+                  else next[cellKey] = !current;
+                  return next;
+                })
+              }
+              values={values}
+              onChangeValue={(key, value) => setValues((prev) => ({ ...prev, [key]: value }))}
+              highlightInputs={highlightInputs}
+              scale={scale}
+            />
           </section>
         )}
       </div>

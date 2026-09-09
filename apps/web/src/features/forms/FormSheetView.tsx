@@ -6,7 +6,8 @@
  * 셀마다 테두리·글꼴이 달라 Tailwind 클래스로는 표현할 수 없다.
  */
 import type { CSSProperties } from "react";
-import type { FormBorder, FormCell, FormCellStyle, FormSheet } from "./types";
+import FormCellContent from "./FormCellContent";
+import type { FormBorder, FormCell, FormCellStyle, FormInputOverrides, FormSheet } from "./types";
 
 /** 엑셀 테두리 굵기 → CSS. 굵기만 다르고 색은 셀에서 따로 온다. */
 const BORDER_WIDTH: Record<FormBorder["style"], string> = {
@@ -47,7 +48,7 @@ function borderCss(border: FormBorder | undefined): string | undefined {
 }
 
 function cellCss(style: FormCellStyle): CSSProperties {
-  const css: CSSProperties = {
+  return {
     borderTop: borderCss(style.borders.top),
     borderRight: borderCss(style.borders.right),
     borderBottom: borderCss(style.borders.bottom),
@@ -62,21 +63,42 @@ function cellCss(style: FormCellStyle): CSSProperties {
     fontFamily: fontStack(style.fontFamily),
     color: style.color,
     background: style.background,
-    // 셀 안 줄바꿈(\n)을 살리면서 칸을 넘치면 접는다.
+    // 셀 안 줄바꿈(\n)과 들여쓰기 공백을 살리면서 칸을 넘치면 접는다.
     whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-    padding: "2px 4px",
+    // 한글은 어절 단위로 끊어야 한다. break-word 만 쓰면 "특기사항"이 "특기사"+"항"으로 쪼개진다.
+    wordBreak: "keep-all",
+    overflowWrap: "break-word",
+    padding: "1px 3px",
   };
-  return css;
 }
+
+/** view = 보기만, fill = 채워 넣기, design = 어느 칸을 입력칸으로 쓸지 지정 */
+export type FormMode = "view" | "fill" | "design";
 
 interface FormSheetViewProps {
   sheet: FormSheet;
-  /** 자동으로 입력칸이라 판정된 곳을 색으로 표시한다(판정이 맞는지 눈으로 보려고). */
+  mode?: FormMode;
+  /** 관리자가 기본 판정을 뒤집은 칸. 셀 키 → 입력칸 여부 */
+  overrides?: FormInputOverrides;
+  onToggleInput?: (cellKey: string) => void;
+  values?: Record<string, string>;
+  onChangeValue?: (key: string, value: string) => void;
+  /** 입력칸으로 잡힌 곳을 색으로 표시한다(판정이 맞는지 눈으로 보려고). */
   highlightInputs?: boolean;
+  /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
+  scale?: number;
 }
 
-export default function FormSheetView({ sheet, highlightInputs = false }: FormSheetViewProps) {
+export default function FormSheetView({
+  sheet,
+  mode = "view",
+  overrides = {},
+  onToggleInput,
+  values = {},
+  onChangeValue,
+  highlightInputs = false,
+  scale = 1,
+}: FormSheetViewProps) {
   if (sheet.rowCount === 0) {
     return (
       <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
@@ -89,11 +111,19 @@ export default function FormSheetView({ sheet, highlightInputs = false }: FormSh
   const rows: FormCell[][] = Array.from({ length: sheet.rowCount }, () => []);
   for (const cell of sheet.cells) rows[cell.row - 1].push(cell);
 
+  const totalWidth = sheet.colWidths.reduce((a, b) => a + b, 0);
+
   return (
     <div className="overflow-x-auto">
       <table
         className="border-collapse bg-white"
-        style={{ tableLayout: "fixed", width: sheet.colWidths.reduce((a, b) => a + b, 0) }}
+        style={{
+          tableLayout: "fixed",
+          width: totalWidth,
+          transform: scale === 1 ? undefined : `scale(${scale})`,
+          transformOrigin: "top left",
+          marginBottom: scale === 1 ? undefined : `${(scale - 1) * 400}px`,
+        }}
       >
         <colgroup>
           {sheet.colWidths.map((width, index) => (
@@ -103,21 +133,31 @@ export default function FormSheetView({ sheet, highlightInputs = false }: FormSh
         <tbody>
           {rows.map((cells, rowIndex) => (
             <tr key={rowIndex} style={{ height: sheet.rowHeights[rowIndex] }}>
-              {cells.map((cell) => (
-                <td
-                  key={cell.key}
-                  colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
-                  rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-                  style={{
-                    ...cellCss(cell.style),
-                    ...(highlightInputs && cell.input
-                      ? { background: "#dbeafe", outline: "1px dashed #3b82f6", outlineOffset: -2 }
-                      : null),
-                  }}
-                >
-                  {cell.text}
-                </td>
-              ))}
+              {cells.map((cell) => {
+                const isInput = overrides[cell.key] ?? cell.input;
+                return (
+                  <td
+                    key={cell.key}
+                    colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
+                    rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
+                    onClick={mode === "design" ? () => onToggleInput?.(cell.key) : undefined}
+                    style={{
+                      ...cellCss(cell.style),
+                      ...(mode === "design" ? { cursor: "pointer" } : null),
+                      ...(highlightInputs && isInput
+                        ? { background: "#dbeafe", outline: "1px dashed #3b82f6", outlineOffset: -2 }
+                        : null),
+                    }}
+                  >
+                    <FormCellContent
+                      cell={{ ...cell, input: isInput }}
+                      editable={mode === "fill"}
+                      values={values}
+                      onChange={(key, value) => onChangeValue?.(key, value)}
+                    />
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
