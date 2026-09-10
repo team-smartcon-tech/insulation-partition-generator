@@ -106,6 +106,10 @@ export interface FormShape {
   line?: string;
   /** 선 굵기(px) */
   lineWidth: number;
+  /** 선 모양. 워터마크·보조선에 점선이 자주 쓰인다. */
+  dash?: "solid" | "dashed" | "dotted";
+  /** 시계방향 회전(도). 워터마크가 비스듬히 걸려 있는 경우. */
+  rotation?: number;
   fontSize?: number;
   fontFamily?: string;
   bold?: boolean;

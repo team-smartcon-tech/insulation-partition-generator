@@ -107,32 +107,118 @@ function unescapeXml(text: string): string {
     .replace(/&amp;/g, "&");
 }
 
+// ─── 색 ────────────────────────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  const value = hex.replace("#", "");
+  return [
+    Number.parseInt(value.slice(0, 2), 16),
+    Number.parseInt(value.slice(2, 4), 16),
+    Number.parseInt(value.slice(4, 6), 16),
+  ];
+}
+
+/** 밝기 보정은 HSL 의 L 에만 걸리므로 RGB↔HSL 을 오간다. */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const [rn, gn, bn] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0);
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+  return [h / 6, s, l];
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return [v, v, v];
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const channel = (t: number) => {
+    let x = t;
+    if (x < 0) x += 1;
+    if (x > 1) x -= 1;
+    if (x < 1 / 6) return p + (q - p) * 6 * x;
+    if (x < 1 / 2) return q;
+    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
+    return p;
+  };
+  return [
+    Math.round(channel(h + 1 / 3) * 255),
+    Math.round(channel(h) * 255),
+    Math.round(channel(h - 1 / 3) * 255),
+  ];
+}
+
+/** 백분율 속성(`val="75000"` = 75%)을 0~1 로. 없으면 null. */
+function percent(chunk: string, name: string): number | null {
+  const match = new RegExp(`<([A-Za-z0-9_]+:)?${name}\\s+val="(-?\\d+)"`).exec(chunk);
+  return match ? Number(match[2]) / 100000 : null;
+}
+
 /**
- * 색 조각에서 #RRGGBB 를 뽑는다.
+ * 색 조각에서 CSS 색을 뽑는다.
  *
- * `lumMod`/`lumOff` 는 테마색을 밝게·어둡게 하는 보정이다. 검정 계열에 자주 붙는데
- * (연결선의 "검정, 텍스트 1, 25% 더 밝게") 이걸 무시하면 회색 화살표가 새까맣게 나온다.
+ * 엑셀은 기준색 하나에 보정을 얹어 색을 만든다. 이걸 무시하면 원본과 전혀 다른 색이 된다.
+ *  - `lumMod`/`lumOff`: 밝기 보정. "검정, 25% 더 밝게"(#404040)나 워터마크의 연분홍이 이것.
+ *    이걸 빼먹으면 워터마크 배경이 글자와 같은 진한 색이 되어 **글자가 안 보인다.**
+ *  - `alpha`: 투명도. 워터마크가 표를 가리지 않고 비쳐 보이게 하는 값이다.
+ *
+ * 보정은 **그 색 요소 안쪽에서만** 찾는다. 조각 전체에서 찾으면 옆에 있는 다른 색의
+ * 보정값을 끌어다 쓴다(예: 글자 서식 안에 윤곽선 색과 채움 색이 함께 있는 경우).
  */
 function readColor(chunk: string | undefined): string | undefined {
   if (!chunk) return undefined;
 
-  const srgb = /<([A-Za-z0-9_]+:)?srgbClr\s+val="([0-9A-Fa-f]{6})"/.exec(chunk);
-  if (srgb) return `#${srgb[2].toLowerCase()}`;
+  const open = /<([A-Za-z0-9_]+:)?(srgbClr|sysClr|schemeClr)(\s[^>]*?)?(\/)?>/.exec(chunk);
+  if (!open) return undefined;
+  const [matched, prefix = "", tag, attrs = "", selfClosing] = open;
 
-  const sys = /<([A-Za-z0-9_]+:)?sysClr[^>]*\blastClr="([0-9A-Fa-f]{6})"/.exec(chunk);
-  if (sys) return `#${sys[2].toLowerCase()}`;
-
-  const scheme = /<([A-Za-z0-9_]+:)?schemeClr\s+val="([A-Za-z0-9]+)"/.exec(chunk);
-  if (!scheme) return undefined;
-  const base = SCHEME_COLORS[scheme[2]] ?? "#000000";
-
-  const lumOff = /lumOff\s+val="(\d+)"/.exec(chunk);
-  if (lumOff && base === "#000000") {
-    const level = Math.round((255 * Number(lumOff[1])) / 100000);
-    const hex = level.toString(16).padStart(2, "0");
-    return `#${hex}${hex}${hex}`;
+  let inner = "";
+  if (!selfClosing) {
+    const close = `</${prefix}${tag}>`;
+    const end = chunk.indexOf(close, open.index);
+    if (end >= 0) inner = chunk.slice(open.index + matched.length, end);
   }
-  return base;
+
+  let base: string | undefined;
+  if (tag === "srgbClr") base = /\bval="([0-9A-Fa-f]{6})"/.exec(attrs)?.[1];
+  else if (tag === "sysClr") base = /\blastClr="([0-9A-Fa-f]{6})"/.exec(attrs)?.[1];
+  else {
+    const name = /\bval="([A-Za-z0-9]+)"/.exec(attrs)?.[1];
+    base = (SCHEME_COLORS[name ?? ""] ?? "#000000").replace("#", "");
+  }
+  if (!base) return undefined;
+
+  let [r, g, b] = hexToRgb(base);
+
+  const lumMod = percent(inner, "lumMod");
+  const lumOff = percent(inner, "lumOff");
+  if (lumMod !== null || lumOff !== null) {
+    const [h, s, l] = rgbToHsl(r, g, b);
+    const lit = Math.min(1, Math.max(0, l * (lumMod ?? 1) + (lumOff ?? 0)));
+    [r, g, b] = hslToRgb(h, s, lit);
+  }
+
+  const alpha = percent(inner, "alpha");
+  if (alpha !== null && alpha < 1) return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+
+  const hex = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+/** 엑셀 선 모양 → 화면. 종류가 많지만 화면에서 구분되는 것은 실선·파선·점선뿐이다. */
+function readDash(value: string | undefined): FormShape["dash"] {
+  if (!value || value === "solid") return undefined;
+  if (value.toLowerCase().includes("dot") && !value.toLowerCase().includes("dash")) return "dotted";
+  return "dashed";
 }
 
 /** 도형 안 글자. 문단(`a:p`)은 줄바꿈으로, 문단 안 조각(`a:r`)은 이어 붙인다. */
@@ -146,6 +232,16 @@ function readText(txBody: string | undefined): string {
     )
     .join("\n")
     .replace(/\n+$/, "");
+}
+
+/** 60000분의 1도 → 도. -180~180 으로 좁혀 CSS 회전에 그대로 쓴다. */
+function rotationDegrees(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const degrees = Number(raw) / 60000;
+  if (!Number.isFinite(degrees)) return undefined;
+  const normalized = ((degrees % 360) + 360) % 360;
+  const signed = normalized > 180 ? normalized - 360 : normalized;
+  return Math.abs(signed) < 0.01 ? undefined : Math.round(signed * 100) / 100;
 }
 
 interface Anchor {
@@ -234,6 +330,9 @@ function readShape(
     line: readColor(lineBlock) ?? "#000000",
     lineWidth:
       (lineWidthEmu > 0 ? lineWidthEmu / EMU_PER_PT : DEFAULT_LINE_PT) * PT_TO_PX,
+    dash: readDash(attrOf(lineBlock, "prstDash", "val")),
+    // 회전은 60000분의 1도 단위로 들어온다. 워터마크가 비스듬히 걸려 있는 경우다.
+    rotation: rotationDegrees(attrOf(spPr, "xfrm", "rot")),
     fontSize: sizeHundredths > 0 ? sizeHundredths / 100 : undefined,
     fontFamily: attrOf(firstRun, "latin", "typeface"),
     bold: attrOf(txBody ?? "", "rPr", "b") === "1",

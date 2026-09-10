@@ -17,6 +17,22 @@ const MIN_LINE_PX = 1;
 /** 색을 CSS id 로 쓸 수 있게 다듬는다(`#404040` → `404040`). */
 const colorKey = (color: string) => color.replace(/[^a-zA-Z0-9]/g, "");
 
+/** 회전한 도형을 SVG 에서 같은 자리에 돌린다(가운데 축 — CSS 와 기준을 맞춘다). */
+function svgRotate(shape: FormShape): string | undefined {
+  if (!shape.rotation) return undefined;
+  const cx = shape.left + shape.width / 2;
+  const cy = shape.top + shape.height / 2;
+  return `rotate(${shape.rotation} ${cx} ${cy})`;
+}
+
+/** 점선 간격은 선 굵기에 비례해야 굵은 선에서도 점선으로 보인다. */
+function dashArray(shape: FormShape): string | undefined {
+  const width = Math.max(MIN_LINE_PX, shape.lineWidth);
+  if (shape.dash === "dashed") return `${width * 3} ${width * 2}`;
+  if (shape.dash === "dotted") return `${width} ${width * 2}`;
+  return undefined;
+}
+
 /**
  * 네모·타원으로 안 되는 도형의 윤곽선(SVG path).
  *
@@ -81,9 +97,11 @@ function boxCss(shape: FormShape): CSSProperties {
     height: shape.height,
     background: shape.fill ?? "transparent",
     border: shape.line
-      ? `${Math.max(MIN_LINE_PX, shape.lineWidth)}px solid ${shape.line}`
+      ? `${Math.max(MIN_LINE_PX, shape.lineWidth)}px ${shape.dash ?? "solid"} ${shape.line}`
       : undefined,
     borderRadius: radius,
+    // 회전은 도형 가운데를 축으로 돈다. 엑셀도 같은 기준이라 자리가 어긋나지 않는다.
+    transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
     // 도형 안의 글자는 가운데가 기본이다(엑셀도 그렇다).
     display: "flex",
     alignItems: "center",
@@ -162,7 +180,9 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
               fill={shape.fill ?? "none"}
               stroke={shape.line ?? "#000000"}
               strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
+              strokeDasharray={dashArray(shape)}
               strokeLinejoin="round"
+              transform={svgRotate(shape)}
             />
           ))}
 
@@ -179,8 +199,10 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
                 y2={y2}
                 stroke={color}
                 strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
+                strokeDasharray={dashArray(shape)}
                 markerStart={shape.arrowStart ? marker : undefined}
                 markerEnd={shape.arrowEnd ? marker : undefined}
+                transform={svgRotate(shape)}
               />
             );
           })}

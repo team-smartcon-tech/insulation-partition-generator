@@ -163,3 +163,38 @@ test('인쇄 영역이 내용보다 넓으면 알리지 않는다', async () => 
   // 잘리지 않았는데 "인쇄 영역까지만 표시"라고 하면 사용자를 헷갈리게 한다.
   assert.equal(sheets.find((s) => s.name === 'QA-7.3.-1').printArea, undefined);
 });
+
+test('워터마크의 회전·투명도·점선·밝기 보정을 그대로 읽는다', async () => {
+  const sheets = await loadSample();
+  const watermark = sheets.find((s) => s.name === '견본').shapes[0];
+
+  assert.equal(watermark.text, 'Sample');
+
+  // 배경은 기준색 C0504D 에 밝기 보정(20%+80%)과 투명도(75%)가 걸린 연분홍이다.
+  // 보정을 빼먹으면 배경이 글자와 같은 진한 색이 되어 글자가 통째로 안 보인다.
+  assert.match(watermark.fill, /^rgba\(/, '투명도가 있으면 rgba 로 나와야 한다');
+  assert.equal(watermark.fill, 'rgba(242, 220, 219, 0.75)');
+  assert.notEqual(watermark.fill, watermark.color, '배경과 글자색이 같으면 글자가 안 보인다');
+
+  // 테두리·글자는 같은 기준색을 75% 밝기로 낮춘 진한 붉은색.
+  assert.equal(watermark.line, '#953735');
+  assert.equal(watermark.color, '#953735');
+  assert.equal(watermark.dash, 'dashed');
+
+  // rot="20503159" = 341.7도 → 화면에서는 -18.28도로 눕는다.
+  assert.ok(watermark.rotation < -15 && watermark.rotation > -22, `회전이 ${watermark.rotation}도`);
+
+  assert.equal(watermark.fontSize, 36);
+  assert.equal(watermark.bold, true);
+});
+
+test('회전·점선이 없는 도형에는 값을 붙이지 않는다', async () => {
+  const sheet = await processSheet();
+
+  // 순서도 상자·연결선은 똑바로 서 있고 실선이다. 여기에 값이 붙으면
+  // 화면에서 쓸데없이 회전 변환과 점선이 걸린다.
+  for (const shape of sheet.shapes) {
+    assert.equal(shape.rotation, undefined, `${shape.text || shape.kind} 에 회전이 붙었다`);
+    assert.equal(shape.dash, undefined, `${shape.text || shape.kind} 에 점선이 붙었다`);
+  }
+});
