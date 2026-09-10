@@ -21,14 +21,25 @@ const STORE = "forms";
 /** 마지막으로 열어 본 양식. 새로고침하면 이걸 다시 연다. */
 const LAST_OPENED_KEY = "ipg-forms:last-opened";
 
+/** 분류를 아직 정하지 않은 양식이 들어가는 자리. 빈 문자열 대신 이름을 준다. */
+export const UNCATEGORIZED = "미분류";
+
 /** 저장소에 들어가는 한 건. */
 export interface StoredForm {
   id: string;
   fileName: string;
+  /** 화면에 보일 이름. 비어 있으면 파일 이름을 쓴다. */
+  title: string;
+  /** 서류 분류(탭). 사용자가 직접 만든다. */
+  category: string;
+  /** 즐겨찾기(카드 모서리의 별) */
+  favorite: boolean;
   /** 처음 올린 시각(ms) */
   uploadedAt: number;
   /** 마지막으로 고친 시각(ms) */
   updatedAt: number;
+  /** 마지막으로 연 시각(ms). "최근 사용" 정렬에 쓴다 — 열어만 봐도 갱신된다. */
+  openedAt: number;
   /** 엑셀 원본 바이트. 다시 파싱하거나 나중에 서버로 올릴 때 쓴다. */
   bytes: ArrayBuffer;
   /** 저장 당시 파서로 읽은 결과 */
@@ -43,18 +54,42 @@ export interface StoredForm {
 export interface FormSummary {
   id: string;
   fileName: string;
+  title: string;
+  category: string;
+  favorite: boolean;
   uploadedAt: number;
   updatedAt: number;
+  openedAt: number;
   sheetNames: string[];
   editedCount: number;
+}
+
+/**
+ * 저장소에서 읽은 값에 빠진 항목을 채운다.
+ *
+ * 분류·즐겨찾기는 나중에 생긴 항목이라, 그 전에 올린 양식에는 없다. 읽는 쪽마다
+ * `?? 기본값`을 흩뿌리는 대신 들어오는 길목 한 곳에서 모양을 맞춘다.
+ */
+function normalize(raw: StoredForm): StoredForm {
+  return {
+    ...raw,
+    title: raw.title || raw.fileName,
+    category: raw.category || UNCATEGORIZED,
+    favorite: raw.favorite ?? false,
+    openedAt: raw.openedAt ?? raw.updatedAt,
+  };
 }
 
 function summarize(form: StoredForm): FormSummary {
   return {
     id: form.id,
     fileName: form.fileName,
+    title: form.title,
+    category: form.category,
+    favorite: form.favorite,
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
+    openedAt: form.openedAt,
     sheetNames: form.sheets.map((sheet) => sheet.name),
     editedCount: Object.keys(form.values).length,
   };
@@ -120,10 +155,10 @@ async function run<T>(
   });
 }
 
-/** 저장된 양식 목록. 최근에 고친 것이 위로 온다. */
+/** 저장된 양식 목록. 정렬·분류·검색은 화면에서 한다(건수가 적어 서버 정렬이 필요 없다). */
 export async function listForms(): Promise<FormSummary[]> {
   const forms = await run<StoredForm[]>("readonly", (store) => store.getAll());
-  return forms.map(summarize).sort((a, b) => b.updatedAt - a.updatedAt);
+  return forms.map((form) => summarize(normalize(form))).sort((a, b) => b.openedAt - a.openedAt);
 }
 
 /**
@@ -134,8 +169,9 @@ export async function listForms(): Promise<FormSummary[]> {
  * 붙어 있어 그대로 살아남는다.
  */
 export async function getForm(id: string): Promise<StoredForm | null> {
-  const form = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
-  if (!form) return null;
+  const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
+  if (!raw) return null;
+  const form = normalize(raw);
   if (form.parserVersion === PARSER_VERSION) return form;
 
   try {
@@ -154,13 +190,19 @@ export async function saveForm(input: {
   fileName: string;
   bytes: ArrayBuffer;
   sheets: FormSheet[];
+  category?: string;
 }): Promise<StoredForm> {
   const now = Date.now();
   const form: StoredForm = {
     id: crypto.randomUUID(),
     fileName: input.fileName,
+    // 파일 이름에서 확장자만 뗀다. 보기 이름은 나중에 바꿀 수 있다.
+    title: input.fileName.replace(/\.xlsx$/i, ""),
+    category: input.category || UNCATEGORIZED,
+    favorite: false,
     uploadedAt: now,
     updatedAt: now,
+    openedAt: now,
     bytes: input.bytes,
     sheets: input.sheets,
     parserVersion: PARSER_VERSION,
@@ -171,26 +213,53 @@ export async function saveForm(input: {
 }
 
 /**
- * 고친 글자만 갱신한다.
+ * 한 건을 읽어 일부만 바꿔 쓴다.
  *
- * 읽기·쓰기를 한 트랜잭션 안에서 처리해, 저장 도중 다른 탭이 끼어들어도 원본 바이트나
- * 격자가 덮어써지지 않는다. 사이에 삭제된 양식이면 아무것도 하지 않는다.
+ * 읽기·쓰기를 **한 트랜잭션 안에서** 처리해, 저장 도중 다른 탭이 끼어들어도 원본
+ * 바이트나 격자가 덮어써지지 않는다. 사이에 삭제된 양식이면 아무것도 하지 않는다.
  */
-export async function updateFormValues(id: string, values: FormValues): Promise<void> {
+async function patchForm(
+  id: string,
+  change: (form: StoredForm) => Partial<StoredForm>,
+): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(STORE, "readwrite");
     const store = transaction.objectStore(STORE);
     const request = store.get(id);
     request.onsuccess = () => {
-      const form = request.result as StoredForm | undefined;
-      if (!form) return; // 지워진 양식 — 되살리지 않는다.
-      store.put({ ...form, values, updatedAt: Date.now() });
+      const raw = request.result as StoredForm | undefined;
+      if (!raw) return; // 지워진 양식 — 되살리지 않는다.
+      const form = normalize(raw);
+      store.put({ ...form, ...change(form) });
     };
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error ?? new Error("저장이 취소되었습니다."));
   });
+}
+
+/** 고친 글자만 갱신한다. */
+export async function updateFormValues(id: string, values: FormValues): Promise<void> {
+  await patchForm(id, () => ({ values, updatedAt: Date.now() }));
+}
+
+/**
+ * 이름·분류·즐겨찾기를 바꾼다.
+ *
+ * `updatedAt`(마지막으로 고친 시각)은 건드리지 않는다 — 별을 누른 것은 서류 내용을
+ * 고친 게 아니라서, 여기서 시각을 밀면 "최근 수정" 목록이 사실과 달라진다.
+ */
+export async function updateFormMeta(
+  id: string,
+  patch: { title?: string; category?: string; favorite?: boolean },
+): Promise<void> {
+  await patchForm(id, () => patch);
+}
+
+/** 양식을 열었다고 표시한다. "최근 사용" 정렬의 기준. */
+export async function touchForm(id: string): Promise<void> {
+  await patchForm(id, () => ({ openedAt: Date.now() }));
 }
 
 /** 한 건을 지운다. 되돌릴 수 없으므로 화면에서 먼저 확인을 받는다. */

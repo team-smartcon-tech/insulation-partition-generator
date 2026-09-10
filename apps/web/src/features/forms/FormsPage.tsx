@@ -3,7 +3,8 @@
  *
  * 양식(병합·테두리·칸 크기·글꼴)은 엑셀 원본 그대로 고정하고, 글자는 어느 칸이든
  * 고칠 수 있다. 올린 양식과 고친 글자는 브라우저에 저장돼 새로고침해도 남는다
- * ({@link ./formStore}). 서버 저장·공유는 다음 단계에서 이 위에 얹는다.
+ * ({@link ./formStore}). 목록은 분류 탭·즐겨찾기로 고르는 서식함 모양이다
+ * ({@link ./FormGallery}). 서버 저장·공유는 다음 단계에서 이 위에 얹는다.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
@@ -11,12 +12,12 @@ import {
   ArrowLeft,
   Check,
   FileSpreadsheet,
+  Pencil,
   RotateCcw,
-  Trash2,
   TriangleAlert,
-  Upload,
 } from "lucide-react";
 import { parseFormWorkbook } from "./formParser";
+import FormGallery from "./FormGallery";
 import FormSheetView from "./FormSheetView";
 import {
   deleteForm,
@@ -25,6 +26,8 @@ import {
   listForms,
   readLastOpenedId,
   saveForm,
+  touchForm,
+  updateFormMeta,
   updateFormValues,
   writeLastOpenedId,
   type FormSummary,
@@ -35,25 +38,13 @@ type LoadState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; id: string; fileName: string; sheets: FormSheet[] };
+  | { status: "ready"; id: string; fileName: string; title: string; sheets: FormSheet[] };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.5];
 /** 글자를 칠 때마다 저장하면 과하다. 손을 멈춘 뒤 이만큼 있다가 저장한다. */
 const SAVE_DELAY_MS = 400;
-
-function formatWhen(time: number): string {
-  const date = new Date(time);
-  const today = new Date();
-  const sameDay =
-    date.getFullYear() === today.getFullYear() &&
-    date.getMonth() === today.getMonth() &&
-    date.getDate() === today.getDate();
-  const clock = date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
-  if (sameDay) return `오늘 ${clock}`;
-  return `${date.toLocaleDateString("ko-KR", { month: "long", day: "numeric" })} ${clock}`;
-}
 
 export default function FormsPage() {
   const [state, setState] = useState<LoadState>({ status: "idle" });
@@ -87,8 +78,16 @@ export default function FormsPage() {
     justLoadedRef.current = { id: form.id, values: form.values };
     setValues(form.values);
     setActiveSheet(0);
-    setState({ status: "ready", id: form.id, fileName: form.fileName, sheets: form.sheets });
+    setState({
+      status: "ready",
+      id: form.id,
+      fileName: form.fileName,
+      title: form.title,
+      sheets: form.sheets,
+    });
     writeLastOpenedId(form.id);
+    // "최근 사용" 정렬의 기준. 실패해도 여는 것 자체는 성공이므로 막지 않는다.
+    void touchForm(form.id).catch(() => {});
     return true;
   }, []);
 
@@ -193,7 +192,13 @@ export default function FormsPage() {
         );
       }
       justLoadedRef.current = { id, values: emptyValues };
-      setState({ status: "ready", id, fileName: file.name, sheets });
+      setState({
+        status: "ready",
+        id,
+        fileName: file.name,
+        title: file.name.replace(/\.xlsx$/i, ""),
+        sheets,
+      });
     } catch (error) {
       setState({
         status: "error",
@@ -218,14 +223,40 @@ export default function FormsPage() {
     } catch (error) {
       setState({
         status: "error",
-        message: error instanceof Error ? `양식을 열지 못했습니다: ${error.message}` : "양식을 열지 못했습니다.",
+        message:
+          error instanceof Error ? `양식을 열지 못했습니다: ${error.message}` : "양식을 열지 못했습니다.",
       });
     }
   }
 
+  /** 이름·분류·즐겨찾기 바꾸기. 끝나면 목록을 되읽어 화면과 저장소를 다시 맞춘다. */
+  async function patchMeta(
+    id: string,
+    patch: { title?: string; category?: string; favorite?: boolean },
+  ) {
+    try {
+      await updateFormMeta(id, patch);
+      if (patch.title && state.status === "ready" && state.id === id) {
+        setState({ ...state, title: patch.title });
+      }
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `바꾸지 못했습니다: ${error.message}` : "바꾸지 못했습니다.",
+      );
+    }
+    void refreshList();
+  }
+
+  function handleRename() {
+    if (state.status !== "ready") return;
+    const next = window.prompt("서류 이름을 바꿉니다.", state.title)?.trim();
+    if (!next || next === state.title) return;
+    void patchMeta(state.id, { title: next });
+  }
+
   async function handleDelete(summary: FormSummary) {
     const ok = window.confirm(
-      `“${summary.fileName}”을(를) 지웁니다.\n적어 둔 내용도 함께 사라지고 되돌릴 수 없습니다. 계속할까요?`,
+      `“${summary.title}”을(를) 지웁니다.\n적어 둔 내용도 함께 사라지고 되돌릴 수 없습니다. 계속할까요?`,
     );
     if (!ok) return;
     try {
@@ -268,6 +299,15 @@ export default function FormsPage() {
           </p>
         </header>
 
+        {/* 파일 고르기 상자는 보이지 않는다. 목록의 "양식 올리기"가 이걸 누른다. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xlsx"
+          className="hidden"
+          onChange={handleFile}
+        />
+
         {storageWarning && (
           <p className="mb-6 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
             <TriangleAlert size={16} className="mt-0.5 shrink-0" />
@@ -275,158 +315,95 @@ export default function FormsPage() {
           </p>
         )}
 
-        <section className="mb-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={state.status === "loading"}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              <Upload size={15} />
-              {state.status === "loading" ? "읽는 중..." : "엑셀 양식 올리기"}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx"
-              className="hidden"
-              onChange={handleFile}
-            />
-
-            {state.status === "ready" && (
-              <>
-                <span className="inline-flex items-center gap-1.5 text-sm text-slate-600">
-                  <FileSpreadsheet size={15} className="text-slate-400" />
-                  {state.fileName}
-                </span>
-                {saveState === "saving" && <span className="text-xs text-slate-400">저장 중...</span>}
-                {saveState === "saved" && (
-                  <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
-                    <Check size={13} /> 저장됨
-                  </span>
-                )}
-
-                <div className="ml-auto flex flex-wrap items-center gap-3">
-                  <div className="inline-flex overflow-hidden rounded-lg ring-1 ring-slate-300">
-                    {[
-                      { value: true, label: "편집" },
-                      { value: false, label: "보기" },
-                    ].map((option) => (
-                      <button
-                        key={option.label}
-                        type="button"
-                        onClick={() => setEditable(option.value)}
-                        className={
-                          editable === option.value
-                            ? "bg-slate-800 px-3 py-1.5 text-xs font-medium text-white"
-                            : "bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                        }
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <label className="inline-flex items-center gap-2 text-sm text-slate-600">
-                    배율
-                    <select
-                      value={scale}
-                      onChange={(event) => setScale(Number(event.target.value))}
-                      className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
-                    >
-                      {SCALES.map((value) => (
-                        <option key={value} value={value}>
-                          {Math.round(value * 100)}%
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => setValues({})}
-                    disabled={editedCount === 0}
-                    className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200"
-                  >
-                    <RotateCcw size={13} /> 원본으로 되돌리기
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          {state.status === "error" && (
-            <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              {state.message}
-            </p>
-          )}
-
-          {state.status === "idle" && forms.length === 0 && (
-            <p className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-              아직 올린 양식이 없습니다. `.xlsx` 파일을 올리면 여기에 표시됩니다.
-            </p>
-          )}
-        </section>
-
-        {forms.length > 0 && (
-          <section className="mb-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <h2 className="text-sm font-semibold text-slate-700">
-              저장된 양식 <span className="font-normal text-slate-400">{forms.length}개</span>
-            </h2>
-            <p className="mt-1 text-xs text-slate-500">
-              이 PC의 이 브라우저에 저장돼 있습니다. 다른 기기에서는 보이지 않습니다.
-            </p>
-            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-              {forms.map((form) => {
-                const isOpen = state.status === "ready" && state.id === form.id;
-                return (
-                  <li
-                    key={form.id}
-                    className={
-                      isOpen
-                        ? "flex items-center gap-3 rounded-xl bg-blue-50 p-3 ring-1 ring-blue-300"
-                        : "flex items-center gap-3 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200"
-                    }
-                  >
-                    <button
-                      type="button"
-                      onClick={() => void handleOpen(form.id)}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-                    >
-                      <FileSpreadsheet
-                        size={18}
-                        className={isOpen ? "shrink-0 text-blue-500" : "shrink-0 text-slate-400"}
-                      />
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-slate-800">
-                          {form.fileName}
-                        </span>
-                        <span className="block truncate text-xs text-slate-500">
-                          {formatWhen(form.updatedAt)}
-                          {form.editedCount > 0 && ` · 고친 칸 ${form.editedCount}개`}
-                          {form.sheetNames.length > 1 && ` · 시트 ${form.sheetNames.length}개`}
-                        </span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDelete(form)}
-                      aria-label={`${form.fileName} 지우기`}
-                      title="지우기"
-                      className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
+        {state.status === "error" && (
+          <p className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {state.message}
+          </p>
         )}
+
+        <div className="mb-6">
+          <FormGallery
+            forms={forms}
+            activeId={state.status === "ready" ? state.id : null}
+            busy={state.status === "loading"}
+            onOpen={(id) => void handleOpen(id)}
+            onToggleFavorite={(form) => void patchMeta(form.id, { favorite: !form.favorite })}
+            onChangeCategory={(form, category) => void patchMeta(form.id, { category })}
+            onDelete={(form) => void handleDelete(form)}
+            onUpload={() => fileInputRef.current?.click()}
+          />
+        </div>
 
         {state.status === "ready" && sheet && (
           <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            {/* 열려 있는 서류의 도구 줄 */}
+            <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-slate-200 pb-4">
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                <FileSpreadsheet size={15} className="text-slate-400" />
+                {state.title}
+              </span>
+              <button
+                type="button"
+                onClick={handleRename}
+                title="서류 이름 바꾸기"
+                className="rounded p-1 text-slate-300 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <Pencil size={13} />
+              </button>
+              {saveState === "saving" && <span className="text-xs text-slate-400">저장 중...</span>}
+              {saveState === "saved" && (
+                <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
+                  <Check size={13} /> 저장됨
+                </span>
+              )}
+
+              <div className="ml-auto flex flex-wrap items-center gap-3">
+                <div className="inline-flex overflow-hidden rounded-lg ring-1 ring-slate-300">
+                  {[
+                    { value: true, label: "편집" },
+                    { value: false, label: "보기" },
+                  ].map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      onClick={() => setEditable(option.value)}
+                      className={
+                        editable === option.value
+                          ? "bg-slate-800 px-3 py-1.5 text-xs font-medium text-white"
+                          : "bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      }
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+                  배율
+                  <select
+                    value={scale}
+                    onChange={(event) => setScale(Number(event.target.value))}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
+                  >
+                    {SCALES.map((value) => (
+                      <option key={value} value={value}>
+                        {Math.round(value * 100)}%
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setValues({})}
+                  disabled={editedCount === 0}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200"
+                >
+                  <RotateCcw size={13} /> 원본으로 되돌리기
+                </button>
+              </div>
+            </div>
+
             {state.sheets.length > 1 && (
               <div className="mb-4 flex flex-wrap gap-2">
                 {state.sheets.map((item, index) => (
