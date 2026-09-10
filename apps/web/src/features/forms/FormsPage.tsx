@@ -13,6 +13,7 @@ import {
   Check,
   FileSpreadsheet,
   Pencil,
+  RefreshCw,
   RotateCcw,
   TriangleAlert,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
   isStorageAvailable,
   listForms,
   readLastOpenedId,
+  reparseForm,
   saveForm,
   touchForm,
   updateFormMeta,
@@ -269,6 +271,25 @@ export default function FormsPage() {
     void refreshList();
   }
 
+  /** 저장된 엑셀 원본에서 다시 읽는다. "그림·순서도가 안 보인다" 할 때의 탈출구. */
+  async function handleReparse() {
+    if (state.status !== "ready") return;
+    setStorageWarning(null);
+    try {
+      const form = await reparseForm(state.id);
+      if (!form) {
+        setStorageWarning("그 양식은 이미 지워졌습니다.");
+        return;
+      }
+      setState({ ...state, sheets: form.sheets });
+      setStorageWarning(form.upgradeError ?? null);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `다시 읽지 못했습니다: ${error.message}` : "다시 읽지 못했습니다.",
+      );
+    }
+  }
+
   function handleRename() {
     if (state.status !== "ready") return;
     const next = window.prompt("서류 이름을 바꿉니다.", state.title)?.trim();
@@ -436,6 +457,15 @@ export default function FormsPage() {
                   className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200"
                 >
                   <RotateCcw size={13} /> 원본으로 되돌리기
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleReparse()}
+                  title="저장된 엑셀 파일에서 표·그림·순서도를 다시 읽습니다. 적어 둔 글자는 그대로입니다."
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50"
+                >
+                  <RefreshCw size={13} /> 엑셀에서 다시 읽기
                 </button>
               </div>
             </div>

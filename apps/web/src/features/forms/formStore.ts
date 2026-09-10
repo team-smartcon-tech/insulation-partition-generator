@@ -283,6 +283,30 @@ export async function updateFormMeta(
   await patchForm(id, () => patch);
 }
 
+/**
+ * 저장된 엑셀 원본에서 다시 읽어 화면용 격자를 갈아 끼운다.
+ *
+ * 판 번호가 같아도 강제로 다시 읽는다 — 저장된 결과가 어떤 이유로든 낡았을 때
+ * 사용자가 직접 누를 수 있는 탈출구다. 적어 둔 글자(values)는 건드리지 않는다.
+ */
+export async function reparseForm(id: string): Promise<LoadedForm | null> {
+  const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
+  if (!raw) return null;
+  const form = normalize(raw);
+
+  if (!form.bytes || form.bytes.byteLength === 0) {
+    return {
+      ...form,
+      upgradeError: "저장된 엑셀 원본이 비어 있습니다. 이 양식을 다시 올려 주세요.",
+    };
+  }
+
+  const sheets = await parseFormWorkbook(form.bytes);
+  const updated: StoredForm = { ...form, sheets, parserVersion: PARSER_VERSION };
+  await run("readwrite", (store) => store.put(updated));
+  return updated;
+}
+
 /** 양식을 열었다고 표시한다. "최근 사용" 정렬의 기준. */
 export async function touchForm(id: string): Promise<void> {
   await patchForm(id, () => ({ openedAt: Date.now() }));
