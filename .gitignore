@@ -33,3 +33,6 @@ engine/*.egg-info/
 
 # 양식 미리보기 도구가 만드는 임시 결과물(scripts/form-preview.mjs)
 tmp-preview.html
+
+# 엑셀이 파일을 열어둘 때 만드는 잠금 파일
+~$*

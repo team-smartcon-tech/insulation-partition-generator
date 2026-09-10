@@ -22,7 +22,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 7;
+export const PARSER_VERSION = 8;
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀.
@@ -326,6 +326,9 @@ function readImages(
   for (const item of worksheet.getImages() ?? []) {
     try {
       const media = workbook.getImage(Number(item.imageId));
+      // EMF/WMF 는 윈도우 전용 그림 형식이라 브라우저가 못 연다. 넣어 봐야 깨진
+      // 그림이 되고, alt 가 비어 있어 화면에서는 "아무것도 없는 것"으로 보인다.
+      if (["emf", "wmf"].includes(String(media?.extension).toLowerCase())) continue;
       // exceljs 판에 따라 바이트가 buffer/data 중 어디에 오는지 갈린다.
       const raw = media?.buffer ?? media?.data;
       const src = toDataUrl(raw, media?.extension);

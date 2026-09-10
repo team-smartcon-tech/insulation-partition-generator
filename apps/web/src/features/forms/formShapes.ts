@@ -269,36 +269,16 @@ function toPx(sizes: number[], fallback: number, index: number, offsetEmu: numbe
   return px + offsetEmu / EMU_PER_PX;
 }
 
-/** 앵커 하나(도형 하나)를 화면에 그릴 값으로 바꾼다. */
-function readShape(
-  block: string,
-  colWidths: number[],
-  rowHeights: number[],
-  defaultCol: number,
-  defaultRow: number,
-): FormShape | null {
-  // 그림(pic)은 exceljs 가 이미 주므로 여기서 다시 담지 않는다 — 두 번 그려진다.
-  const isShape = /<([A-Za-z0-9_]+:)?(sp|cxnSp)(\s|>)/.test(block);
-  if (!isShape) return null;
+interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
 
-  const from = readAnchor(block, "from");
-  if (!from) return null;
-  const left = toPx(colWidths, defaultCol, from.col, from.colOff);
-  const top = toPx(rowHeights, defaultRow, from.row, from.rowOff);
-
-  const to = readAnchor(block, "to");
-  let width: number;
-  let height: number;
-  if (to) {
-    width = toPx(colWidths, defaultCol, to.col, to.colOff) - left;
-    height = toPx(rowHeights, defaultRow, to.row, to.rowOff) - top;
-  } else {
-    // 한 칸에 고정된 도형은 크기를 따로 적는다.
-    const ext = findBlocks(block, "spPr")[0] ?? "";
-    width = Number(attrOf(ext, "ext", "cx") ?? 0) / EMU_PER_PX;
-    height = Number(attrOf(ext, "ext", "cy") ?? 0) / EMU_PER_PX;
-  }
-
+/** 도형 하나(`sp`/`cxnSp`)의 서식을 읽는다. 자리·크기는 부르는 쪽이 정해 넘긴다. */
+function buildShape(block: string, rect: Rect): FormShape {
+  const { left, top, width, height } = rect;
   const spPr = findBlocks(block, "spPr")[0] ?? "";
   const lineBlock = findBlocks(spPr, "ln")[0] ?? "";
   // 선 색과 채움 색이 둘 다 solidFill 이라, 선 부분을 들어낸 나머지에서 채움을 찾는다.
@@ -339,6 +319,96 @@ function readShape(
     color: readColor(firstRun) ?? undefined,
     align: algn === "ctr" ? "center" : algn === "r" ? "right" : algn === "l" ? "left" : undefined,
   };
+}
+
+/**
+ * 그룹으로 묶인 도형들을 푼다.
+ *
+ * 엑셀에서 도형 여러 개를 묶으면(`grpSp`) 안쪽 도형의 좌표가 **그룹만의 좌표계**로
+ * 바뀐다. 그룹의 `chOff`/`chExt` 가 그 좌표계의 원점과 크기이고, 화면에서 그룹이
+ * 차지하는 자리는 앵커가 정한다. 둘 사이를 비례로 옮겨야 제자리에 온다.
+ *
+ * 그룹을 통째로 건너뛰면 묶인 상자들이 화면에서 사라진다 — 순서도의 첫 상자가
+ * 글자 없는 빈 네모로 나오던 원인이 이것이었다.
+ */
+function readGroup(group: string, box: Rect): FormShape[] {
+  const xfrm = findBlocks(findBlocks(group, "grpSpPr")[0] ?? "", "xfrm")[0] ?? "";
+  const childX = Number(attrOf(xfrm, "chOff", "x") ?? 0);
+  const childY = Number(attrOf(xfrm, "chOff", "y") ?? 0);
+  const childW = Number(attrOf(xfrm, "chExt", "cx") ?? 0);
+  const childH = Number(attrOf(xfrm, "chExt", "cy") ?? 0);
+  // 자식 좌표계 크기를 모르면 비례를 낼 수 없다. 그때는 손대지 않는다.
+  if (!(childW > 0) || !(childH > 0)) return [];
+
+  const scaleX = box.width / childW;
+  const scaleY = box.height / childH;
+
+  // 안쪽에 또 묶인 그룹이 있으면 먼저 떼어 내 재귀로 풀고, 남은 것에서 도형을 찾는다.
+  let rest = group;
+  const shapes: FormShape[] = [];
+  for (const inner of findBlocks(group.slice(group.indexOf(">") + 1), "grpSp")) {
+    rest = rest.replace(inner, "");
+    const innerXfrm = findBlocks(findBlocks(inner, "grpSpPr")[0] ?? "", "xfrm")[0] ?? "";
+    shapes.push(
+      ...readGroup(inner, {
+        left: box.left + (Number(attrOf(innerXfrm, "off", "x") ?? 0) - childX) * scaleX,
+        top: box.top + (Number(attrOf(innerXfrm, "off", "y") ?? 0) - childY) * scaleY,
+        width: Number(attrOf(innerXfrm, "ext", "cx") ?? 0) * scaleX,
+        height: Number(attrOf(innerXfrm, "ext", "cy") ?? 0) * scaleY,
+      }),
+    );
+  }
+
+  for (const child of [...findBlocks(rest, "sp"), ...findBlocks(rest, "cxnSp")]) {
+    const childXfrm = findBlocks(findBlocks(child, "spPr")[0] ?? "", "xfrm")[0] ?? "";
+    const width = Number(attrOf(childXfrm, "ext", "cx") ?? 0) * scaleX;
+    const height = Number(attrOf(childXfrm, "ext", "cy") ?? 0) * scaleY;
+    if (!(width > 0) && !(height > 0)) continue;
+    shapes.push(
+      buildShape(child, {
+        left: box.left + (Number(attrOf(childXfrm, "off", "x") ?? 0) - childX) * scaleX,
+        top: box.top + (Number(attrOf(childXfrm, "off", "y") ?? 0) - childY) * scaleY,
+        width,
+        height,
+      }),
+    );
+  }
+  return shapes;
+}
+
+/** 앵커 하나를 화면에 그릴 도형들로 바꾼다. 그룹이면 여러 개가 나온다. */
+function readAnchorShapes(
+  block: string,
+  colWidths: number[],
+  rowHeights: number[],
+  defaultCol: number,
+  defaultRow: number,
+): FormShape[] {
+  // 그림(pic)은 exceljs 가 이미 주므로 여기서 다시 담지 않는다 — 두 번 그려진다.
+  if (!/<([A-Za-z0-9_]+:)?(sp|cxnSp|grpSp)(\s|>)/.test(block)) return [];
+
+  const from = readAnchor(block, "from");
+  if (!from) return [];
+  const left = toPx(colWidths, defaultCol, from.col, from.colOff);
+  const top = toPx(rowHeights, defaultRow, from.row, from.rowOff);
+
+  const to = readAnchor(block, "to");
+  let width: number;
+  let height: number;
+  if (to) {
+    width = toPx(colWidths, defaultCol, to.col, to.colOff) - left;
+    height = toPx(rowHeights, defaultRow, to.row, to.rowOff) - top;
+  } else {
+    // 한 칸에 고정된 도형은 크기를 따로 적는다.
+    const spPr = findBlocks(block, "spPr")[0] ?? findBlocks(block, "grpSpPr")[0] ?? "";
+    width = Number(attrOf(spPr, "ext", "cx") ?? 0) / EMU_PER_PX;
+    height = Number(attrOf(spPr, "ext", "cy") ?? 0) / EMU_PER_PX;
+  }
+  const box: Rect = { left, top, width: Math.abs(width), height: Math.abs(height) };
+
+  const group = findBlocks(block, "grpSp")[0];
+  if (group) return readGroup(group, box);
+  return [buildShape(block, box)];
 }
 
 /** 안쪽 도형이 바깥 도형에 완전히 들어가 있나. 손으로 그린 값이라 1px 은 봐준다. */
@@ -460,9 +530,16 @@ export async function parseWorkbookShapes(
     const shapes: FormShape[] = [];
     for (const kind of ["twoCellAnchor", "oneCellAnchor"]) {
       for (const block of findBlocks(drawingXml, kind)) {
-        const shape = readShape(block, colWidths, rowHeights, defaults.col, defaults.row);
-        // 세로선은 너비가, 가로선은 높이가 0 이다. 둘 다 0 일 때만 버린다.
-        if (shape && (shape.width > 0 || shape.height > 0)) shapes.push(shape);
+        for (const shape of readAnchorShapes(
+          block,
+          colWidths,
+          rowHeights,
+          defaults.col,
+          defaults.row,
+        )) {
+          // 세로선은 너비가, 가로선은 높이가 0 이다. 둘 다 0 일 때만 버린다.
+          if (shape.width > 0 || shape.height > 0) shapes.push(shape);
+        }
       }
     }
     if (shapes.length > 0) result.set(unescapeXml(name), mergeDecorativeFrames(shapes));
