@@ -459,18 +459,8 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
 
   const body = (
     <div className="flex flex-1 flex-col p-5">
-      <div className="flex items-center gap-2">
-        {card.logo && (
-          <img
-            src={card.logo}
-            alt=""
-            className="h-5 w-5 shrink-0 rounded-[6px]"
-            loading="lazy"
-          />
-        )}
-        <div className="truncate text-[16px] font-bold tracking-tight text-slate-900">
-          {card.name}
-        </div>
+      <div className="truncate text-[16px] font-bold tracking-tight text-slate-900">
+        {card.name}
       </div>
       {/* 태그 줄 — 태그가 없어도 높이를 차지해 카드 간 본문 위치를 맞춘다. */}
       <div className="mt-2.5 flex min-h-[22px] flex-wrap gap-1.5">

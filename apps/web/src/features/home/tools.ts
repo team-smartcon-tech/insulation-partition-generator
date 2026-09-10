@@ -41,7 +41,7 @@ export const TOOLS: ToolDef[] = [
     icon: Square,
     status: "available",
     tags: ["단열", "도면·산출", "웹앱"],
-    thumbnail: "/thumbs/insulation.png",
+    thumbnail: "/thumbs/insulation-logo.png",
     logo: "/brand/mark-insul-layout.svg",
   },
   // ── 준비 중 (개발 예정) ──
