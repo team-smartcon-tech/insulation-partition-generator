@@ -170,15 +170,19 @@ export default function FormSheetView({
             : { width: totalWidth * effectiveScale, height: table.height * effectiveScale }
         }
       >
-      <table
+      {/* 표와 그림을 함께 담아 한 번에 배율을 건다 — 따로 걸면 그림 자리가 어긋난다. */}
+      <div
         ref={tableRef}
-        className="border-collapse bg-white"
+        className="relative"
         style={{
-          tableLayout: "fixed",
           width: totalWidth,
           transform: effectiveScale === 1 ? undefined : `scale(${effectiveScale})`,
           transformOrigin: "top left",
         }}
+      >
+      <table
+        className="border-collapse bg-white"
+        style={{ tableLayout: "fixed", width: totalWidth }}
       >
         <colgroup>
           {sheet.colWidths.map((width, index) => (
@@ -207,6 +211,28 @@ export default function FormSheetView({
           ))}
         </tbody>
       </table>
+
+      {/*
+        그림(로고·도장)은 칸 안이 아니라 격자 위에 떠 있다. 클릭이 통과하도록
+        pointer-events 를 꺼 둬야 그림에 가린 칸도 눌러서 고칠 수 있다.
+      */}
+      {(sheet.images ?? []).map((image, index) => (
+        <img
+          key={index}
+          src={image.src}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className="pointer-events-none absolute select-none"
+          style={{
+            left: image.left,
+            top: image.top,
+            width: image.width,
+            height: image.height,
+          }}
+        />
+      ))}
+      </div>
       </div>
     </div>
   );

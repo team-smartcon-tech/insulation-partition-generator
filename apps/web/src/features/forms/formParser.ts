@@ -10,6 +10,7 @@ import type {
   FormCell,
   FormCellBorders,
   FormCellStyle,
+  FormImage,
   FormSheet,
 } from "./types";
 
@@ -20,7 +21,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 1;
+export const PARSER_VERSION = 2;
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀.
@@ -215,8 +216,91 @@ function readMergedBorders(worksheet: any, box: SpanBox): FormCellBorders {
   return borders;
 }
 
+/** 엑셀 도면 좌표 단위(EMU) → px. 914400 EMU = 1인치, 화면은 96dpi. */
+const EMU_PER_PX = 914400 / 96;
+
+/** 바이트 뭉치를 `<img src>` 에 바로 넣을 수 있는 data: URL 로 만든다. */
+function toDataUrl(data: Uint8Array | ArrayBuffer, extension: string): string {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  // 한 번에 넘기면 인자 개수 제한에 걸려 큰 그림에서 터진다. 잘라서 붙인다.
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  const mime = extension === "jpg" ? "jpeg" : extension || "png";
+  return `data:image/${mime};base64,${btoa(binary)}`;
+}
+
+/**
+ * 그림의 모서리 좌표(몇 번째 칸 + 그 칸 안에서의 치우침)를 px 로 바꾼다.
+ *
+ * 내용 범위 밖을 가리킬 수 있어(그림이 표보다 오른쪽·아래로 삐져나온 경우)
+ * 모르는 칸은 기본 크기로 친다.
+ */
+function anchorToPx(sizes: number[], fallback: number, index: number, offsetEmu: number): number {
+  let px = 0;
+  for (let i = 0; i < index; i++) px += sizes[i] ?? fallback;
+  return px + (offsetEmu ?? 0) / EMU_PER_PX;
+}
+
+/**
+ * 시트에 얹힌 그림을 꺼낸다.
+ *
+ * 엑셀의 "그림"과 "도형"은 다르다 — 여기서 나오는 건 붙여넣은 **그림**(로고·도장·
+ * 캡처)뿐이고, 도형으로 그린 순서도는 exceljs 가 아예 내주지 않아 담기지 않는다.
+ */
+function readImages(
+  worksheet: any,
+  workbook: any,
+  colWidths: number[],
+  rowHeights: number[],
+): FormImage[] {
+  if (!workbook || typeof worksheet.getImages !== "function") return [];
+
+  const defaultCol = colWidthToPx(undefined);
+  const defaultRow = rowHeightToPx(undefined);
+  const images: FormImage[] = [];
+
+  for (const item of worksheet.getImages() ?? []) {
+    try {
+      const media = workbook.getImage(Number(item.imageId));
+      if (!media?.buffer) continue;
+
+      const tl = item.range?.tl;
+      if (!tl) continue;
+      const left = anchorToPx(colWidths, defaultCol, tl.nativeCol ?? 0, tl.nativeColOff ?? 0);
+      const top = anchorToPx(rowHeights, defaultRow, tl.nativeRow ?? 0, tl.nativeRowOff ?? 0);
+
+      // 두 모서리로 잡힌 그림(twoCellAnchor)이면 br 로, 크기가 고정된 그림이면 ext 로 잰다.
+      const br = item.range?.br;
+      let width: number;
+      let height: number;
+      if (br) {
+        width = anchorToPx(colWidths, defaultCol, br.nativeCol ?? 0, br.nativeColOff ?? 0) - left;
+        height = anchorToPx(rowHeights, defaultRow, br.nativeRow ?? 0, br.nativeRowOff ?? 0) - top;
+      } else {
+        width = (item.range?.ext?.width ?? 0) / EMU_PER_PX;
+        height = (item.range?.ext?.height ?? 0) / EMU_PER_PX;
+      }
+      if (!(width > 0) || !(height > 0)) continue;
+
+      images.push({
+        src: toDataUrl(media.buffer, media.extension),
+        left,
+        top,
+        width,
+        height,
+      });
+    } catch {
+      // 그림 하나를 못 읽는다고 양식 전체를 못 열면 안 된다. 그 그림만 건너뛴다.
+    }
+  }
+  return images;
+}
+
 /** exceljs Worksheet 하나를 격자 구조로 바꾼다. */
-export function parseFormSheet(worksheet: any): FormSheet {
+export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
   // 1) 실제로 내용이 있는 범위를 먼저 구한다.
   let maxRow = 0;
   let maxCol = 0;
@@ -244,7 +328,15 @@ export function parseFormSheet(worksheet: any): FormSheet {
   }
 
   if (maxRow === 0 || maxCol === 0) {
-    return { name: worksheet.name, rowCount: 0, colCount: 0, colWidths: [], rowHeights: [], cells: [] };
+    return {
+      name: worksheet.name,
+      rowCount: 0,
+      colCount: 0,
+      colWidths: [],
+      rowHeights: [],
+      cells: [],
+      images: [],
+    };
   }
 
   // 2) 병합 대표 칸별로 차지하는 사각형을 모은다.
@@ -307,7 +399,15 @@ export function parseFormSheet(worksheet: any): FormSheet {
     rowHeights.push(rowHeightToPx(worksheet.getRow(row).height));
   }
 
-  return { name: worksheet.name, rowCount: maxRow, colCount: maxCol, colWidths, rowHeights, cells };
+  return {
+    name: worksheet.name,
+    rowCount: maxRow,
+    colCount: maxCol,
+    colWidths,
+    rowHeights,
+    cells,
+    images: readImages(worksheet, workbook, colWidths, rowHeights),
+  };
 }
 
 /** .xlsx 파일 내용을 시트 목록으로 바꾼다. 시트가 여러 개면 전부 돌려준다. */
@@ -317,5 +417,5 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
   const ExcelJS = module.default ?? module;
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(data);
-  return workbook.worksheets.map((worksheet: any) => parseFormSheet(worksheet));
+  return workbook.worksheets.map((worksheet: any) => parseFormSheet(worksheet, workbook));
 }

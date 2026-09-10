@@ -469,8 +469,8 @@ export default function FormsPage() {
                 <TriangleAlert size={16} className="mt-0.5 shrink-0" />
                 <span>
                   이 시트에서 글자가 든 칸은 {textCells}개뿐입니다. 엑셀에서{" "}
-                  <strong className="font-semibold">도형·그림으로 그린 그림(순서도 등)은 화면에 옮기지 못합니다.</strong>{" "}
-                  칸에 적힌 글자만 가져옵니다.
+                  <strong className="font-semibold">도형으로 그린 그림(순서도 등)은 화면에 옮기지 못합니다.</strong>{" "}
+                  칸에 적힌 글자와 붙여넣은 그림만 가져옵니다.
                 </span>
               </p>
             )}

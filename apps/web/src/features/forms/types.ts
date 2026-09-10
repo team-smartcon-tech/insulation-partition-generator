@@ -57,6 +57,21 @@ export interface FormCell {
   style: FormCellStyle;
 }
 
+/**
+ * 시트에 얹힌 그림(로고·도장·캡처).
+ *
+ * 그림은 칸에 들어가는 게 아니라 격자 **위에 떠 있다**. 그래서 행·열이 아니라
+ * 격자 왼쪽 위에서부터의 픽셀 좌표로 잡는다.
+ */
+export interface FormImage {
+  /** data: URL. 저장해 두면 그대로 다시 뜬다(blob URL 은 새로고침하면 죽는다). */
+  src: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export interface FormSheet {
   name: string;
   rowCount: number;
@@ -67,6 +82,8 @@ export interface FormSheet {
   rowHeights: number[];
   /** 병합에 가려진 칸은 제외하고 대표 칸만 담는다. 행→열 순서 */
   cells: FormCell[];
+  /** 격자 위에 떠 있는 그림. 없으면 빈 배열 */
+  images: FormImage[];
 }
 
 /** 사용자가 고친 글자만 담는다. 셀 키 → 고친 값. 손대지 않은 칸은 여기 없다. */
