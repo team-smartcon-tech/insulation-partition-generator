@@ -25,9 +25,33 @@ const textOf = (shapes) => shapes.map((s) => s.text).filter(Boolean);
 test('도형으로 그린 순서도를 상자와 연결선으로 읽어 온다', async () => {
   const sheet = await processSheet();
 
-  // 도형 8개 + 연결선 6개. exceljs 는 하나도 주지 않아 압축을 직접 열어 읽는다.
-  assert.equal(sheet.shapes.length, 14);
+  // 원본은 도형 8개 + 연결선 6개. 그중 장식용 테두리 한 쌍이 하나로 합쳐져 13개다.
+  assert.equal(sheet.shapes.length, 13);
   assert.equal(sheet.shapes.filter((s) => s.kind === 'line').length, 6);
+});
+
+test('장식용 테두리 안의 글자 상자는 하나로 합친다', async () => {
+  const sheet = await processSheet();
+
+  // 원본에는 "문서" 기호(글자 없음) 안에 둥근 사각형(글자 있음)이 겹쳐 있다.
+  // 그대로 옮기면 네모 안에 네모가 되어 지저분하다 — 바깥 윤곽선 + 안쪽 글자로 합친다.
+  const documents = sheet.shapes.filter((s) => s.kind === 'document');
+  assert.equal(documents.length, 1);
+  assert.equal(documents[0].text, '현장 지식관리대장 작성');
+
+  // 안쪽 둥근 사각형은 사라져야 한다.
+  assert.equal(sheet.shapes.filter((s) => s.kind === 'roundBox').length, 0);
+  // 글자가 두 번 나오면 합치기가 아니라 겹쳐 그린 것이다.
+  const sameText = sheet.shapes.filter((s) => s.text === '현장 지식관리대장 작성');
+  assert.equal(sameText.length, 1);
+});
+
+test('나란히 놓인 상자들은 합쳐지지 않는다', async () => {
+  const sheet = await processSheet();
+
+  // 본줄의 상자 6개는 서로 포함 관계가 아니므로 그대로 남아야 한다.
+  // 합치기 규칙이 과하게 작동하면 여기서 개수가 줄어든다.
+  assert.equal(sheet.shapes.filter((s) => s.kind === 'box' && s.text).length, 6);
 });
 
 test('순서도의 글자를 순서대로 다 가져온다', async () => {

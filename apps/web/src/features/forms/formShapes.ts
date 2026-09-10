@@ -242,6 +242,59 @@ function readShape(
   };
 }
 
+/** 안쪽 도형이 바깥 도형에 완전히 들어가 있나. 손으로 그린 값이라 1px 은 봐준다. */
+function contains(outer: FormShape, inner: FormShape): boolean {
+  const slack = 1;
+  return (
+    inner.left >= outer.left - slack &&
+    inner.top >= outer.top - slack &&
+    inner.left + inner.width <= outer.left + outer.width + slack &&
+    inner.top + inner.height <= outer.top + outer.height + slack
+  );
+}
+
+/**
+ * 글자 없는 도형 안에 글자 도형이 하나 들어 있으면 둘을 하나로 합친다.
+ *
+ * 엑셀에서 흔한 패턴이다 — 모양을 내려고 장식용 도형(순서도 "문서" 기호 등)을 두고,
+ * 그 안에 글자용 사각형을 얹는다. 엑셀 화면에서는 테두리가 겹쳐도 티가 잘 안 나지만,
+ * 그대로 옮기면 **네모 안에 네모**가 되어 지저분하다.
+ *
+ * 바깥 윤곽선을 남기고 안쪽 글자를 그 자리에 넣는다. 바깥에 이미 글자가 있거나
+ * 안에 글자 도형이 둘 이상이면 손대지 않는다 — 그건 겹쳐 놓은 의도가 따로 있는 것이다.
+ */
+function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
+  const absorbed = new Set<number>();
+  const result = shapes.map((shape) => ({ ...shape }));
+
+  result.forEach((outer, outerIndex) => {
+    if (outer.kind === "line" || outer.text !== "") return;
+
+    const insiders = result
+      .map((shape, index) => ({ shape, index }))
+      .filter(
+        ({ shape, index }) =>
+          index !== outerIndex &&
+          !absorbed.has(index) &&
+          shape.kind !== "line" &&
+          shape.text !== "" &&
+          contains(outer, shape),
+      );
+    if (insiders.length !== 1) return;
+
+    const { shape: inner, index } = insiders[0];
+    absorbed.add(index);
+    outer.text = inner.text;
+    outer.fontSize = inner.fontSize;
+    outer.fontFamily = inner.fontFamily;
+    outer.bold = inner.bold;
+    outer.color = inner.color;
+    outer.align = inner.align;
+  });
+
+  return result.filter((_, index) => !absorbed.has(index));
+}
+
 /** 상대 경로(`../drawings/drawing1.xml`)를 압축파일 안의 절대 경로로 편다. */
 function resolvePath(base: string, target: string): string {
   if (target.startsWith("/")) return target.slice(1);
@@ -313,7 +366,7 @@ export async function parseWorkbookShapes(
         if (shape && (shape.width > 0 || shape.height > 0)) shapes.push(shape);
       }
     }
-    if (shapes.length > 0) result.set(unescapeXml(name), shapes);
+    if (shapes.length > 0) result.set(unescapeXml(name), mergeDecorativeFrames(shapes));
   }
 
   return result;
