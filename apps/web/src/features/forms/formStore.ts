@@ -14,6 +14,7 @@
  */
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
+import { isWatermark } from "./formShapes.ts";
 import type { FormSheet, FormValues } from "./types";
 
 /**
@@ -144,9 +145,33 @@ export function withCustomSheets(sheets: FormSheet[], custom: CustomSheet[]): Fo
   for (const item of custom) {
     const source = sheets.find((sheet) => sheet.name === item.source);
     if (!source) continue;
-    result.push({ ...source, name: item.name, custom: true });
+    result.push({
+      ...source,
+      name: item.name,
+      custom: true,
+      // 견본 시트의 "Sample" 워터마크는 실제 문서로 넘어오면 안 된다 — 인쇄물에 찍힌다.
+      // 원본 견본 시트에는 그대로 남는다.
+      shapes: source.shapes.filter((shape) => !isWatermark(shape)),
+    });
   }
   return result;
+}
+
+/**
+ * 새 장을 만들 때 복사해 올 "빈 양식" 시트를 고른다.
+ *
+ * 직전에 보던 시트를 복사하면 지난달 내용이 그대로 딸려 온다. 업무 양식에는 대개
+ * 빈 서식용 시트가 따로 있으므로(견본·샘플·양식…) 그것을 먼저 찾는다.
+ * 없으면 부르는 쪽이 지금 보는 시트로 대신한다.
+ */
+export function findTemplateSheet(sheets: FormSheet[]): FormSheet | undefined {
+  const words = ["견본", "샘플", "서식", "양식", "sample", "template", "form"];
+  return sheets.find((sheet) => {
+    // 사용자가 더한 장은 후보가 아니다 — 그건 이미 작성 중인 문서다.
+    if (sheet.custom) return false;
+    const name = sheet.name.trim().toLowerCase();
+    return words.some((word) => name.includes(word));
+  });
 }
 
 function summarize(form: StoredForm): FormSummary {

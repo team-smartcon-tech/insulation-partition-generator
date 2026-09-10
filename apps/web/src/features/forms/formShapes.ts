@@ -464,6 +464,29 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
   return result.filter((_, index) => !absorbed.has(index));
 }
 
+/** 견본 표시로 자주 쓰이는 말. 대소문자·앞뒤 공백은 무시하고 본다. */
+const WATERMARK_WORDS = ["sample", "견본", "샘플", "예시", "specimen", "draft"];
+
+/**
+ * 이 도형이 "견본" 워터마크인가.
+ *
+ * 빈 양식 시트에는 실수로 그대로 쓰지 말라고 비스듬한 워터마크가 얹혀 있다. 그 시트를
+ * 복사해 실제 문서를 만들 때는 지워져야 한다 — 남아 있으면 인쇄물에 "Sample" 이 찍힌다.
+ *
+ * 두 가지 중 하나면 워터마크로 본다:
+ *  - 글자가 견본을 뜻하는 말이다(`Sample`, `견본` …)
+ *  - **비스듬히 눕고 + 반투명**이다. 이 조합은 본문 도형에는 거의 없다 — 순서도 상자는
+ *    똑바로 서 있고 불투명하다. 둘 중 하나만으로는 안 된다(기울기만 보면 비스듬한
+ *    라벨이, 투명도만 보면 옅은 음영 상자가 함께 지워진다).
+ */
+export function isWatermark(shape: FormShape): boolean {
+  const text = shape.text.trim().toLowerCase();
+  if (text && WATERMARK_WORDS.some((word) => text === word || text.includes(word))) return true;
+
+  const translucent = typeof shape.fill === "string" && shape.fill.startsWith("rgba(");
+  return Boolean(shape.rotation) && translucent;
+}
+
 /** 상대 경로(`../drawings/drawing1.xml`)를 압축파일 안의 절대 경로로 편다. */
 function resolvePath(base: string, target: string): string {
   if (target.startsWith("/")) return target.slice(1);

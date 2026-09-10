@@ -25,6 +25,7 @@ import FormSheetView, { type FormScale } from "./FormSheetView";
 import {
   addCustomSheet,
   deleteForm,
+  findTemplateSheet,
   getForm,
   removeCustomSheet,
   renameCustomSheet,
@@ -339,15 +340,18 @@ export default function FormsPage() {
 
   async function handleAddSheet() {
     if (state.status !== "ready" || !sheet) return;
+    // 지금 보는 시트가 아니라 **빈 양식(견본)** 을 복사한다. 직전 시트를 복사하면
+    // 지난달 내용이 그대로 딸려 온다.
+    const source = template ?? sheet;
     const name = window
       .prompt(
-        `“${sheet.name}” 시트와 같은 양식으로 새 장을 만듭니다.\n새 시트 이름을 적어 주세요. (예: 2026-07)`,
+        `“${source.name}” 시트의 빈 양식으로 새 장을 만듭니다.\n새 시트 이름을 적어 주세요. (예: 2026-07)`,
         "",
       )
       ?.trim();
     if (!name) return;
     try {
-      await addCustomSheet(state.id, { name, source: sheet.name });
+      await addCustomSheet(state.id, { name, source: source.name });
       await reloadSheets(name);
     } catch (error) {
       setStorageWarning(error instanceof Error ? error.message : "시트를 더하지 못했습니다.");
@@ -381,6 +385,8 @@ export default function FormsPage() {
   }
 
   const sheet = state.status === "ready" ? state.sheets[activeSheet] : null;
+  // 새 장을 만들 때 복사해 올 빈 양식. 없으면 지금 보는 시트를 쓴다.
+  const template = state.status === "ready" ? findTemplateSheet(state.sheets) : undefined;
   // 고친 글자는 시트마다 따로 담긴다. 화면에는 지금 보는 시트 것만 넘긴다.
   const sheetValues = sheet ? (values[sheet.name] ?? {}) : {};
   const editedCount = Object.keys(sheetValues).length;
@@ -569,7 +575,7 @@ export default function FormsPage() {
               <button
                 type="button"
                 onClick={() => void handleAddSheet()}
-                title={`“${sheet.name}” 시트와 같은 양식으로 새 장을 만듭니다. 월별로 늘려 쓸 때 사용하세요.`}
+                title={`“${(template ?? sheet).name}” 시트의 빈 양식으로 새 장을 만듭니다(견본 표시는 지워집니다). 월별로 늘려 쓸 때 사용하세요.`}
                 className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-dashed ring-slate-300 transition hover:bg-slate-50"
               >
                 <Plus size={13} /> 시트 추가

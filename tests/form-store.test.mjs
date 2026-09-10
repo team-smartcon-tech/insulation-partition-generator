@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  findTemplateSheet,
   normalizeValues,
   withCustomSheets,
 } from '../apps/web/src/features/forms/formStore.ts';
@@ -86,4 +87,75 @@ test('원본 시트 목록은 건드리지 않는다', () => {
 
   // 저장소에는 원본 시트만 담긴다. 여기서 원본 배열이 늘어나면 더한 시트가 저장본에 섞인다.
   assert.equal(sheets.length, 1);
+});
+
+// ─── 새 장은 빈 양식(견본)에서 만든다 ─────────────────────────
+
+const withShapes = (name, shapes) => ({ ...sheet(name), shapes });
+const watermark = {
+  kind: 'box',
+  left: 0,
+  top: 0,
+  width: 100,
+  height: 40,
+  text: 'Sample',
+  fill: 'rgba(242, 220, 219, 0.75)',
+  line: '#953735',
+  lineWidth: 2,
+  rotation: -18.28,
+};
+const normalBox = {
+  kind: 'box',
+  left: 0,
+  top: 0,
+  width: 100,
+  height: 40,
+  text: '필요 지식의 파악',
+  line: '#000000',
+  lineWidth: 1,
+};
+
+test('빈 양식 시트를 이름으로 찾는다', () => {
+  const sheets = [sheet('QA-4.2-1'), sheet('견본'), sheet('QA-4.2-2 (25.06)')];
+
+  // 직전 시트를 복사하면 지난달 내용이 딸려 온다. 빈 서식용 시트를 먼저 찾는다.
+  assert.equal(findTemplateSheet(sheets)?.name, '견본');
+  assert.equal(findTemplateSheet([sheet('Sample Form')])?.name, 'Sample Form');
+  // 없으면 부르는 쪽이 지금 보는 시트로 대신한다.
+  assert.equal(findTemplateSheet([sheet('1월'), sheet('2월')]), undefined);
+});
+
+test('사용자가 더한 장은 빈 양식 후보가 아니다', () => {
+  const added = { ...sheet('견본 복사'), custom: true };
+  // 더한 장은 이미 작성 중인 문서다. 그걸 복사하면 다시 내용이 딸려 온다.
+  assert.equal(findTemplateSheet([added]), undefined);
+});
+
+test('새 장을 만들 때 견본 워터마크는 지워진다', () => {
+  const sheets = [withShapes('견본', [watermark, normalBox])];
+  const result = withCustomSheets(sheets, [{ name: '2026-07', source: '견본' }]);
+
+  // 남아 있으면 인쇄물에 "Sample" 이 찍힌다.
+  assert.deepEqual(
+    result[1].shapes.map((s) => s.text),
+    ['필요 지식의 파악'],
+  );
+});
+
+test('원본 견본 시트의 워터마크는 그대로 둔다', () => {
+  const sheets = [withShapes('견본', [watermark, normalBox])];
+  const result = withCustomSheets(sheets, [{ name: '2026-07', source: '견본' }]);
+
+  // 견본은 견본으로 남아야 한다 — 실수로 그대로 쓰지 말라는 표시다.
+  assert.equal(result[0].shapes.length, 2);
+});
+
+test('비스듬하기만 하거나 반투명하기만 한 도형은 워터마크가 아니다', () => {
+  const tilted = { ...normalBox, rotation: -20 };
+  const faint = { ...normalBox, fill: 'rgba(0, 0, 0, 0.1)' };
+  const sheets = [withShapes('견본', [tilted, faint])];
+  const result = withCustomSheets(sheets, [{ name: '2026-07', source: '견본' }]);
+
+  // 기울기만 보면 비스듬한 라벨이, 투명도만 보면 옅은 음영 상자가 함께 지워진다.
+  assert.equal(result[1].shapes.length, 2);
 });
