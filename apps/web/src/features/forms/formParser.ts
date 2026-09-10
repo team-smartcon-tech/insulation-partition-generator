@@ -219,9 +219,32 @@ function readMergedBorders(worksheet: any, box: SpanBox): FormCellBorders {
 /** 엑셀 도면 좌표 단위(EMU) → px. 914400 EMU = 1인치, 화면은 96dpi. */
 const EMU_PER_PX = 914400 / 96;
 
-/** 바이트 뭉치를 `<img src>` 에 바로 넣을 수 있는 data: URL 로 만든다. */
-function toDataUrl(data: Uint8Array | ArrayBuffer, extension: string): string {
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+/**
+ * exceljs 가 주는 그림 바이트를 Uint8Array 로 맞춘다.
+ *
+ * 실행 환경마다 모양이 다르다 — Node 는 Buffer, 브라우저 번들은 Buffer 폴리필이나
+ * 순수 Uint8Array, 직렬화를 거치면 `{ type:'Buffer', data:[...] }` 로도 온다.
+ * 모르는 모양을 `new Uint8Array(x)` 에 그냥 넣으면 **길이 0 짜리가 조용히 만들어져**
+ * 깨진 그림이 되고, `alt=""` 라 화면에서는 아무것도 없는 것처럼 보인다.
+ */
+function toBytes(data: unknown): Uint8Array | null {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) {
+    const view = data as ArrayBufferView;
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  }
+  if (Array.isArray(data)) return Uint8Array.from(data as number[]);
+  if (data && typeof data === "object" && Array.isArray((data as any).data)) {
+    return Uint8Array.from((data as any).data as number[]);
+  }
+  return null;
+}
+
+/** 바이트 뭉치를 `<img src>` 에 바로 넣을 수 있는 data: URL 로 만든다. 못 만들면 빈 문자열. */
+function toDataUrl(data: unknown, extension: string): string {
+  const bytes = toBytes(data);
+  if (!bytes || bytes.length === 0) return "";
   // 한 번에 넘기면 인자 개수 제한에 걸려 큰 그림에서 터진다. 잘라서 붙인다.
   const CHUNK = 0x8000;
   let binary = "";
@@ -265,7 +288,11 @@ function readImages(
   for (const item of worksheet.getImages() ?? []) {
     try {
       const media = workbook.getImage(Number(item.imageId));
-      if (!media?.buffer) continue;
+      // exceljs 판에 따라 바이트가 buffer/data 중 어디에 오는지 갈린다.
+      const raw = media?.buffer ?? media?.data;
+      const src = toDataUrl(raw, media?.extension);
+      // 못 읽은 그림을 넣으면 화면에 보이지 않는 <img> 만 남아 원인 찾기가 어려워진다.
+      if (!src) continue;
 
       const tl = item.range?.tl;
       if (!tl) continue;
@@ -285,13 +312,7 @@ function readImages(
       }
       if (!(width > 0) || !(height > 0)) continue;
 
-      images.push({
-        src: toDataUrl(media.buffer, media.extension),
-        left,
-        top,
-        width,
-        height,
-      });
+      images.push({ src, left, top, width, height });
     } catch {
       // 그림 하나를 못 읽는다고 양식 전체를 못 열면 안 된다. 그 그림만 건너뛴다.
     }

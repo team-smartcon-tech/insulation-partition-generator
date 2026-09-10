@@ -106,6 +106,8 @@ export default function FormsPage() {
       sheets: form.sheets,
     });
     writeLastOpenedId(form.id);
+    // 저장본을 새 파서로 다시 읽지 못했으면 알린다. 조용히 넘기면 "기능이 안 되는" 걸로만 보인다.
+    setStorageWarning(form.upgradeError ?? null);
     // "최근 사용" 정렬의 기준. 실패해도 여는 것 자체는 성공이므로 막지 않는다.
     void touchForm(form.id).catch(() => {});
     return true;
@@ -460,6 +462,8 @@ export default function FormsPage() {
                 {sheet.rowCount}행 × {sheet.colCount}열
               </span>
               <span>병합 {sheet.cells.filter((c) => c.rowSpan > 1 || c.colSpan > 1).length}곳</span>
+              {/* 그림이 안 보일 때 "못 읽은 것"인지 "그렸는데 안 보이는 것"인지 가른다. */}
+              {(sheet.images?.length ?? 0) > 0 && <span>그림 {sheet.images.length}개</span>}
               {editedCount > 0 && <span className="text-blue-600">고친 칸 {editedCount}개</span>}
               {editable && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
             </div>

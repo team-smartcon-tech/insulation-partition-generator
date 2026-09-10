@@ -50,6 +50,15 @@ export interface StoredForm {
   values: FormValues;
 }
 
+/**
+ * 화면으로 넘어가는 한 건. 저장본과 같되, 이번에 열면서 생긴 문제를 함께 들고 간다.
+ * `upgradeError` 는 저장되지 않는다 — 다음에 열 때 다시 판단할 값이다.
+ */
+export interface LoadedForm extends StoredForm {
+  /** 새 파서로 다시 읽지 못했을 때의 사유. 화면이 이걸 사용자에게 알린다. */
+  upgradeError?: string;
+}
+
 /** 목록에 뿌릴 요약. 원본 바이트·격자는 빼고 가볍게 넘긴다. */
 export interface FormSummary {
   id: string;
@@ -168,20 +177,35 @@ export async function listForms(): Promise<FormSummary[]> {
  * 반영하고, 그 결과를 저장소에도 덮어쓴다. 사용자가 고친 글자(values)는 셀 키에
  * 붙어 있어 그대로 살아남는다.
  */
-export async function getForm(id: string): Promise<StoredForm | null> {
+export async function getForm(id: string): Promise<LoadedForm | null> {
   const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
   if (!raw) return null;
   const form = normalize(raw);
   if (form.parserVersion === PARSER_VERSION) return form;
+
+  // 원본 바이트가 비어 있으면 다시 읽을 방법이 없다. 여기서 걸러야 원인이 드러난다.
+  if (!form.bytes || form.bytes.byteLength === 0) {
+    return {
+      ...form,
+      upgradeError:
+        "저장된 엑셀 원본이 비어 있어 새 기능(그림 표시 등)을 반영하지 못했습니다. 이 양식을 다시 올려 주세요.",
+    };
+  }
 
   try {
     const sheets = await parseFormWorkbook(form.bytes);
     const upgraded: StoredForm = { ...form, sheets, parserVersion: PARSER_VERSION };
     await run("readwrite", (store) => store.put(upgraded));
     return upgraded;
-  } catch {
+  } catch (error) {
     // 다시 읽지 못해도 예전 결과로 열어 준다. 못 여는 것보다 낫다.
-    return form;
+    // 다만 **조용히** 넘기지 않는다 — 그러면 "기능이 안 되는" 것으로만 보인다.
+    return {
+      ...form,
+      upgradeError: `저장된 엑셀 원본을 다시 읽지 못해 예전 결과로 엽니다: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
   }
 }
 
@@ -196,6 +220,8 @@ export async function saveForm(input: {
   const form: StoredForm = {
     id: crypto.randomUUID(),
     fileName: input.fileName,
+    // 원본은 **복사해서** 담는다. 파싱에 넘긴 버퍼를 그대로 저장하면, 라이브러리가
+    // 그것을 소유·이관해 비워 버렸을 때 "원본이 빈" 양식이 저장된다.
     // 파일 이름에서 확장자만 뗀다. 보기 이름은 나중에 바꿀 수 있다.
     title: input.fileName.replace(/\.xlsx$/i, ""),
     category: input.category || UNCATEGORIZED,
@@ -203,7 +229,7 @@ export async function saveForm(input: {
     uploadedAt: now,
     updatedAt: now,
     openedAt: now,
-    bytes: input.bytes,
+    bytes: input.bytes.slice(0),
     sheets: input.sheets,
     parserVersion: PARSER_VERSION,
     values: {},
