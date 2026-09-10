@@ -136,7 +136,21 @@ export interface FormSheet {
    * 안 그러면 원본에 있던 줄이 왜 없는지 알 방법이 없다. 지정이 없으면 undefined.
    */
   printArea?: string;
+  /**
+   * 사용자가 앱에서 더한 시트(원본 엑셀에는 없다). 월별로 장을 늘려 쓰는 용도.
+   * 원본 시트와 구분해야 이름 바꾸기·지우기를 여기에만 허용할 수 있다.
+   */
+  custom?: boolean;
 }
 
-/** 사용자가 고친 글자만 담는다. 셀 키 → 고친 값. 손대지 않은 칸은 여기 없다. */
-export type FormValues = Record<string, string>;
+/** 한 시트 안에서 고친 글자. 셀 키 → 값. 손대지 않은 칸은 여기 없다. */
+export type FormCellValues = Record<string, string>;
+
+/**
+ * 시트 이름 → 그 시트에서 고친 글자.
+ *
+ * **시트별로 나눠 담아야 한다.** 셀 키가 `행:열` 이라 한 덩어리에 담으면 3행 2열에
+ * 적은 글자가 모든 시트의 3행 2열에 함께 나타난다. 월별로 시트를 나눠 쓰는 양식에서는
+ * 이게 곧 지난달 내용이 이번 달에 겹쳐 보이는 것이 된다.
+ */
+export type FormValues = Record<string, FormCellValues>;

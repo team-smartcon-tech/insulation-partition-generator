@@ -8,7 +8,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import FormCellContent from "./FormCellContent";
 import FormShapeLayer from "./FormShapeLayer";
-import type { FormBorder, FormCell, FormCellStyle, FormSheet, FormValues } from "./types";
+import type { FormBorder, FormCell, FormCellStyle, FormCellValues, FormSheet } from "./types";
 
 /** 엑셀 테두리 굵기 → CSS. 굵기만 다르고 색은 셀에서 따로 온다. */
 const BORDER_WIDTH: Record<FormBorder["style"], string> = {
@@ -93,8 +93,8 @@ interface FormSheetViewProps {
   sheet: FormSheet;
   /** true 면 모든 칸의 글자를 고칠 수 있다. false 는 인쇄·검토용 보기. */
   editable?: boolean;
-  /** 고친 글자만 담긴다. 셀 키 → 값 */
-  values?: FormValues;
+  /** 이 시트에서 고친 글자만 담긴다. 셀 키 → 값 */
+  values?: FormCellValues;
   onChangeValue?: (cellKey: string, value: string) => void;
   /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
   scale?: FormScale;

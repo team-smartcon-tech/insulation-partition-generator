@@ -12,8 +12,22 @@
  * 이 저장소는 이 PC의 이 브라우저 안에만 있다. 다른 기기와 공유하려면 서버 저장이
  * 필요하고, 그건 이 파일 위에 얹는다 — 화면은 아래 함수들만 보므로 바뀌지 않는다.
  */
-import { PARSER_VERSION, parseFormWorkbook } from "./formParser";
+// Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
+import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import type { FormSheet, FormValues } from "./types";
+
+/**
+ * 사용자가 더한 시트. 격자를 복사해 담지 않고 **"어느 시트의 복사본인가"만** 적는다.
+ *
+ * 격자를 통째로 담으면 파서가 좋아져도 더한 시트만 옛 모양으로 굳는다. 원본 시트
+ * 이름만 들고 있으면 다시 읽을 때마다 최신 격자로 다시 만들어진다.
+ */
+export interface CustomSheet {
+  /** 새 시트 이름(탭에 보이는 이름) */
+  name: string;
+  /** 복사해 온 원본 시트 이름 */
+  source: string;
+}
 
 const DB_NAME = "ipg-forms";
 const DB_VERSION = 1;
@@ -46,8 +60,10 @@ export interface StoredForm {
   sheets: FormSheet[];
   /** sheets 를 만든 파서 판 번호 */
   parserVersion: number;
-  /** 사용자가 고친 글자 */
+  /** 사용자가 고친 글자. 시트 이름 → 셀 키 → 값 */
   values: FormValues;
+  /** 사용자가 더한 시트(원본 엑셀에는 없다) */
+  customSheets: CustomSheet[];
 }
 
 /**
@@ -79,6 +95,31 @@ export interface FormSummary {
  * 분류·즐겨찾기는 나중에 생긴 항목이라, 그 전에 올린 양식에는 없다. 읽는 쪽마다
  * `?? 기본값`을 흩뿌리는 대신 들어오는 길목 한 곳에서 모양을 맞춘다.
  */
+/**
+ * 옛 저장본의 고친 글자를 시트별 구조로 옮긴다.
+ *
+ * 처음에는 시트 구분 없이 `셀 키 → 값` 한 덩어리로 담았는데, 그러면 3행 2열에 적은
+ * 글자가 모든 시트의 3행 2열에 함께 나타난다. 이미 저장된 값을 버리지 않도록
+ * **첫 시트의 것으로 본다** — 시트가 하나뿐인 양식이 대부분이라 그때는 정확하고,
+ * 여러 장인 양식도 값이 사라지는 것보다는 낫다.
+ */
+export function normalizeValues(raw: unknown, sheets: FormSheet[]): FormValues {
+  if (!raw || typeof raw !== "object") return {};
+  const record = raw as Record<string, unknown>;
+  const isFlat = Object.values(record).some((value) => typeof value === "string");
+  if (!isFlat) return record as FormValues;
+
+  const firstSheet = sheets[0]?.name;
+  if (!firstSheet) return {};
+  return { [firstSheet]: record as Record<string, string> };
+}
+
+/**
+ * 저장소에서 읽은 값에 빠진 항목을 채운다.
+ *
+ * 분류·즐겨찾기·시트별 값처럼 나중에 생긴 항목은 그 전에 올린 양식에 없다. 읽는 쪽마다
+ * `?? 기본값`을 흩뿌리는 대신 들어오는 길목 한 곳에서 모양을 맞춘다.
+ */
 function normalize(raw: StoredForm): StoredForm {
   return {
     ...raw,
@@ -86,7 +127,26 @@ function normalize(raw: StoredForm): StoredForm {
     category: raw.category || UNCATEGORIZED,
     favorite: raw.favorite ?? false,
     openedAt: raw.openedAt ?? raw.updatedAt,
+    customSheets: raw.customSheets ?? [],
+    values: normalizeValues(raw.values, raw.sheets ?? []),
   };
+}
+
+/**
+ * 원본 시트 뒤에 사용자가 더한 시트를 붙인다.
+ *
+ * 더한 시트는 원본 시트의 격자를 그대로 쓰되 이름만 다르다. 격자를 통째로 저장하지
+ * 않고 여기서 만들기 때문에, 파서가 좋아지면 더한 시트도 함께 새 모양이 된다.
+ * 복사해 온 원본 시트가 사라졌으면(엑셀을 다시 올린 경우) 조용히 건너뛴다.
+ */
+export function withCustomSheets(sheets: FormSheet[], custom: CustomSheet[]): FormSheet[] {
+  const result = [...sheets];
+  for (const item of custom) {
+    const source = sheets.find((sheet) => sheet.name === item.source);
+    if (!source) continue;
+    result.push({ ...source, name: item.name, custom: true });
+  }
+  return result;
 }
 
 function summarize(form: StoredForm): FormSummary {
@@ -99,8 +159,12 @@ function summarize(form: StoredForm): FormSummary {
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
-    sheetNames: form.sheets.map((sheet) => sheet.name),
-    editedCount: Object.keys(form.values).length,
+    sheetNames: withCustomSheets(form.sheets, form.customSheets).map((sheet) => sheet.name),
+    // 시트마다 따로 담기므로 전부 더해야 "고친 칸 수"가 된다.
+    editedCount: Object.values(form.values).reduce(
+      (sum, cells) => sum + Object.keys(cells).length,
+      0,
+    ),
   };
 }
 
@@ -181,12 +245,18 @@ export async function getForm(id: string): Promise<LoadedForm | null> {
   const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
   if (!raw) return null;
   const form = normalize(raw);
-  if (form.parserVersion === PARSER_VERSION) return form;
+  // 화면에는 원본 시트 + 사용자가 더한 시트를 함께 넘긴다. 저장소에는 원본만 담긴다.
+  const expand = (f: StoredForm): LoadedForm => ({
+    ...f,
+    sheets: withCustomSheets(f.sheets, f.customSheets),
+  });
+
+  if (form.parserVersion === PARSER_VERSION) return expand(form);
 
   // 원본 바이트가 비어 있으면 다시 읽을 방법이 없다. 여기서 걸러야 원인이 드러난다.
   if (!form.bytes || form.bytes.byteLength === 0) {
     return {
-      ...form,
+      ...expand(form),
       upgradeError:
         "저장된 엑셀 원본이 비어 있어 새 기능(그림 표시 등)을 반영하지 못했습니다. 이 양식을 다시 올려 주세요.",
     };
@@ -196,12 +266,12 @@ export async function getForm(id: string): Promise<LoadedForm | null> {
     const sheets = await parseFormWorkbook(form.bytes);
     const upgraded: StoredForm = { ...form, sheets, parserVersion: PARSER_VERSION };
     await run("readwrite", (store) => store.put(upgraded));
-    return upgraded;
+    return expand(upgraded);
   } catch (error) {
     // 다시 읽지 못해도 예전 결과로 열어 준다. 못 여는 것보다 낫다.
     // 다만 **조용히** 넘기지 않는다 — 그러면 "기능이 안 되는" 것으로만 보인다.
     return {
-      ...form,
+      ...expand(form),
       upgradeError: `저장된 엑셀 원본을 다시 읽지 못해 예전 결과로 엽니다: ${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -233,6 +303,7 @@ export async function saveForm(input: {
     sheets: input.sheets,
     parserVersion: PARSER_VERSION,
     values: {},
+    customSheets: [],
   };
   await run("readwrite", (store) => store.put(form));
   return form;
@@ -253,21 +324,111 @@ async function patchForm(
     const transaction = db.transaction(STORE, "readwrite");
     const store = transaction.objectStore(STORE);
     const request = store.get(id);
+    // change() 가 "이미 있는 이름입니다" 같은 사유로 거절할 수 있다. IndexedDB 이벤트
+    // 안에서 던진 오류는 밖으로 나오지 못하고 트랜잭션만 취소되므로, 사유를 따로 들고
+    // 있다가 거절할 때 함께 넘긴다 — 안 그러면 사용자가 이유를 못 본다.
+    let failure: unknown;
     request.onsuccess = () => {
       const raw = request.result as StoredForm | undefined;
       if (!raw) return; // 지워진 양식 — 되살리지 않는다.
       const form = normalize(raw);
-      store.put({ ...form, ...change(form) });
+      try {
+        store.put({ ...form, ...change(form) });
+      } catch (error) {
+        failure = error;
+        transaction.abort();
+      }
     };
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error ?? new Error("저장이 취소되었습니다."));
+    transaction.onerror = () => reject(failure ?? transaction.error);
+    transaction.onabort = () =>
+      reject(failure ?? transaction.error ?? new Error("저장이 취소되었습니다."));
   });
 }
 
 /** 고친 글자만 갱신한다. */
 export async function updateFormValues(id: string, values: FormValues): Promise<void> {
   await patchForm(id, () => ({ values, updatedAt: Date.now() }));
+}
+
+/** 이 양식에서 이미 쓰이고 있는 시트 이름(원본 + 더한 것). */
+function usedSheetNames(form: StoredForm): string[] {
+  return withCustomSheets(form.sheets, form.customSheets).map((sheet) => sheet.name);
+}
+
+/**
+ * 시트를 하나 더한다. `source` 시트의 양식을 그대로 쓰는 빈 장이 생긴다.
+ *
+ * 월별로 장을 늘려 쓰는 용도다(2025-06, 2025-09 …). 고친 글자는 시트별로 따로
+ * 담기므로 새 장은 원본 시트의 엑셀 글자만 가진 채로 시작한다.
+ */
+export async function addCustomSheet(id: string, sheet: CustomSheet): Promise<void> {
+  const name = sheet.name.trim();
+  if (!name) throw new Error("시트 이름을 적어 주세요.");
+
+  await patchForm(id, (form) => {
+    if (usedSheetNames(form).includes(name)) {
+      throw new Error(`“${name}” 시트가 이미 있습니다. 다른 이름을 적어 주세요.`);
+    }
+    if (!usedSheetNames(form).includes(sheet.source)) {
+      throw new Error(`복사할 “${sheet.source}” 시트를 찾지 못했습니다.`);
+    }
+    return {
+      customSheets: [...form.customSheets, { name, source: sheet.source }],
+      updatedAt: Date.now(),
+    };
+  });
+}
+
+/**
+ * 더한 시트의 이름을 바꾼다. 적어 둔 글자도 새 이름으로 함께 옮긴다 —
+ * 값이 시트 이름에 붙어 있어서, 이름만 바꾸면 그 장의 내용이 통째로 사라진다.
+ */
+export async function renameCustomSheet(
+  id: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  const name = to.trim();
+  if (!name) throw new Error("시트 이름을 적어 주세요.");
+
+  await patchForm(id, (form) => {
+    if (name === from) return {};
+    if (usedSheetNames(form).includes(name)) {
+      throw new Error(`“${name}” 시트가 이미 있습니다. 다른 이름을 적어 주세요.`);
+    }
+    const target = form.customSheets.find((item) => item.name === from);
+    if (!target) throw new Error("원본 엑셀에 있던 시트는 이름을 바꿀 수 없습니다.");
+
+    const values = { ...form.values };
+    if (values[from]) {
+      values[name] = values[from];
+      delete values[from];
+    }
+    return {
+      customSheets: form.customSheets.map((item) =>
+        item.name === from ? { ...item, name } : item,
+      ),
+      values,
+      updatedAt: Date.now(),
+    };
+  });
+}
+
+/** 더한 시트를 지운다. 그 장에 적어 둔 글자도 함께 사라진다. */
+export async function removeCustomSheet(id: string, name: string): Promise<void> {
+  await patchForm(id, (form) => {
+    if (!form.customSheets.some((item) => item.name === name)) {
+      throw new Error("원본 엑셀에 있던 시트는 지울 수 없습니다.");
+    }
+    const values = { ...form.values };
+    delete values[name];
+    return {
+      customSheets: form.customSheets.filter((item) => item.name !== name),
+      values,
+      updatedAt: Date.now(),
+    };
+  });
 }
 
 /**
@@ -304,7 +465,7 @@ export async function reparseForm(id: string): Promise<LoadedForm | null> {
   const sheets = await parseFormWorkbook(form.bytes);
   const updated: StoredForm = { ...form, sheets, parserVersion: PARSER_VERSION };
   await run("readwrite", (store) => store.put(updated));
-  return updated;
+  return { ...updated, sheets: withCustomSheets(sheets, updated.customSheets) };
 }
 
 /** 양식을 열었다고 표시한다. "최근 사용" 정렬의 기준. */

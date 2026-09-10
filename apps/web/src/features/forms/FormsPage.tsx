@@ -13,16 +13,21 @@ import {
   Check,
   FileSpreadsheet,
   Pencil,
+  Plus,
   RefreshCw,
   RotateCcw,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import { parseFormWorkbook } from "./formParser";
 import FormGallery from "./FormGallery";
 import FormSheetView, { type FormScale } from "./FormSheetView";
 import {
+  addCustomSheet,
   deleteForm,
   getForm,
+  removeCustomSheet,
+  renameCustomSheet,
   isStorageAvailable,
   listForms,
   readLastOpenedId,
@@ -319,8 +324,67 @@ export default function FormsPage() {
     }
   }
 
+  /** 시트를 더하거나 지운 뒤 화면의 시트 목록을 저장소와 다시 맞춘다. */
+  async function reloadSheets(keepName?: string) {
+    if (state.status !== "ready") return;
+    const form = await getForm(state.id);
+    if (!form) return;
+    justLoadedRef.current = { id: form.id, values: form.values };
+    setValues(form.values);
+    setState({ ...state, sheets: form.sheets });
+    const index = keepName ? form.sheets.findIndex((s) => s.name === keepName) : -1;
+    setActiveSheet(index >= 0 ? index : Math.min(activeSheet, form.sheets.length - 1));
+    void refreshList();
+  }
+
+  async function handleAddSheet() {
+    if (state.status !== "ready" || !sheet) return;
+    const name = window
+      .prompt(
+        `“${sheet.name}” 시트와 같은 양식으로 새 장을 만듭니다.\n새 시트 이름을 적어 주세요. (예: 2026-07)`,
+        "",
+      )
+      ?.trim();
+    if (!name) return;
+    try {
+      await addCustomSheet(state.id, { name, source: sheet.name });
+      await reloadSheets(name);
+    } catch (error) {
+      setStorageWarning(error instanceof Error ? error.message : "시트를 더하지 못했습니다.");
+    }
+  }
+
+  async function handleRenameSheet() {
+    if (state.status !== "ready" || !sheet?.custom) return;
+    const name = window.prompt("시트 이름을 바꿉니다.", sheet.name)?.trim();
+    if (!name || name === sheet.name) return;
+    try {
+      await renameCustomSheet(state.id, sheet.name, name);
+      await reloadSheets(name);
+    } catch (error) {
+      setStorageWarning(error instanceof Error ? error.message : "이름을 바꾸지 못했습니다.");
+    }
+  }
+
+  async function handleDeleteSheet() {
+    if (state.status !== "ready" || !sheet?.custom) return;
+    const ok = window.confirm(
+      `“${sheet.name}” 시트를 지웁니다.\n이 장에 적어 둔 내용도 함께 사라지고 되돌릴 수 없습니다. 계속할까요?`,
+    );
+    if (!ok) return;
+    try {
+      await removeCustomSheet(state.id, sheet.name);
+      await reloadSheets();
+    } catch (error) {
+      setStorageWarning(error instanceof Error ? error.message : "시트를 지우지 못했습니다.");
+    }
+  }
+
   const sheet = state.status === "ready" ? state.sheets[activeSheet] : null;
-  const editedCount = Object.keys(values).length;
+  // 고친 글자는 시트마다 따로 담긴다. 화면에는 지금 보는 시트 것만 넘긴다.
+  const sheetValues = sheet ? (values[sheet.name] ?? {}) : {};
+  const editedCount = Object.keys(sheetValues).length;
+  const totalEdited = Object.values(values).reduce((sum, v) => sum + Object.keys(v).length, 0);
 
   // 글자도 그림도 도형도 거의 없는 큰 시트 — 우리가 못 읽는 것(SmartArt·차트·그룹
   // 도형)으로 그렸을 가능성이 높다. 도형을 읽어 냈다면 안내할 이유가 없다.
@@ -452,11 +516,20 @@ export default function FormsPage() {
 
                 <button
                   type="button"
-                  onClick={() => setValues({})}
+                  onClick={() =>
+                    // 지금 보는 시트만 되돌린다. 다른 장에 적어 둔 내용까지 지우면
+                    // 되돌릴 수 없는 사고가 된다.
+                    setValues((prev) => {
+                      const next = { ...prev };
+                      if (sheet) delete next[sheet.name];
+                      return next;
+                    })
+                  }
                   disabled={editedCount === 0}
+                  title="지금 보고 있는 시트만 엑셀 원본 상태로 되돌립니다."
                   className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200"
                 >
-                  <RotateCcw size={13} /> 원본으로 되돌리기
+                  <RotateCcw size={13} /> 이 시트 되돌리기
                 </button>
 
                 <button
@@ -470,24 +543,59 @@ export default function FormsPage() {
               </div>
             </div>
 
-            {state.sheets.length > 1 && (
-              <div className="mb-4 flex flex-wrap gap-2">
-                {state.sheets.map((item, index) => (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {state.sheets.map((item, index) => (
+                <button
+                  key={item.name}
+                  type="button"
+                  onClick={() => setActiveSheet(index)}
+                  title={item.custom ? "앱에서 더한 시트입니다." : "원본 엑셀의 시트입니다."}
+                  className={
+                    index === activeSheet
+                      ? "rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
+                      : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
+                  }
+                >
+                  {item.name}
+                  {/* 원본 엑셀에 없던 장은 표시해 둔다 — 이름 바꾸기·지우기가 여기에만 된다. */}
+                  {item.custom && (
+                    <span className={index === activeSheet ? "ml-1 text-blue-200" : "ml-1 text-slate-400"}>
+                      +
+                    </span>
+                  )}
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => void handleAddSheet()}
+                title={`“${sheet.name}” 시트와 같은 양식으로 새 장을 만듭니다. 월별로 늘려 쓸 때 사용하세요.`}
+                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-dashed ring-slate-300 transition hover:bg-slate-50"
+              >
+                <Plus size={13} /> 시트 추가
+              </button>
+
+              {sheet.custom && (
+                <>
                   <button
-                    key={item.name}
                     type="button"
-                    onClick={() => setActiveSheet(index)}
-                    className={
-                      index === activeSheet
-                        ? "rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
-                        : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
-                    }
+                    onClick={() => void handleRenameSheet()}
+                    title="이 시트 이름 바꾸기"
+                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                   >
-                    {item.name}
+                    <Pencil size={13} />
                   </button>
-                ))}
-              </div>
-            )}
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteSheet()}
+                    title="이 시트 지우기"
+                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </>
+              )}
+            </div>
 
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
               <span>시트 “{sheet.name}”</span>
@@ -504,6 +612,9 @@ export default function FormsPage() {
                 </span>
               )}
               {editedCount > 0 && <span className="text-blue-600">고친 칸 {editedCount}개</span>}
+              {totalEdited > editedCount && (
+                <span className="text-slate-400">전체 {totalEdited}개</span>
+              )}
               {editable && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
             </div>
 
@@ -522,9 +633,12 @@ export default function FormsPage() {
             <FormSheetView
               sheet={sheet}
               editable={editable}
-              values={values}
+              values={sheetValues}
               onChangeValue={(cellKey, value) =>
-                setValues((prev) => ({ ...prev, [cellKey]: value }))
+                setValues((prev) => ({
+                  ...prev,
+                  [sheet.name]: { ...(prev[sheet.name] ?? {}), [cellKey]: value },
+                }))
               }
               scale={scale}
             />
