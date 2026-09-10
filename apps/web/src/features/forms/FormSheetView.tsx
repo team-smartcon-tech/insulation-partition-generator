@@ -7,6 +7,7 @@
  */
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import FormCellContent from "./FormCellContent";
+import FormShapeLayer from "./FormShapeLayer";
 import type { FormBorder, FormCell, FormCellStyle, FormSheet, FormValues } from "./types";
 
 /** 엑셀 테두리 굵기 → CSS. 굵기만 다르고 색은 셀에서 따로 온다. */
@@ -216,6 +217,8 @@ export default function FormSheetView({
         그림(로고·도장)은 칸 안이 아니라 격자 위에 떠 있다. 클릭이 통과하도록
         pointer-events 를 꺼 둬야 그림에 가린 칸도 눌러서 고칠 수 있다.
       */}
+      <FormShapeLayer shapes={sheet.shapes ?? []} />
+
       {(sheet.images ?? []).map((image, index) => (
         <img
           key={index}

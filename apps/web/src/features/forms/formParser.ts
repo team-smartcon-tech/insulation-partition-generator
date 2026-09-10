@@ -4,6 +4,7 @@
  * exceljs 는 무거워서(약 1MB) 최상단에서 import 하지 않고 파싱할 때만 동적으로 불러온다.
  * 양식 화면에 들어오지 않는 사용자가 이 비용을 내지 않게 하기 위해서다.
  */
+import { parseWorkbookShapes } from "./formShapes.ts";
 import type {
   FormBorder,
   FormBorderStyle,
@@ -21,7 +22,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 2;
+export const PARSER_VERSION = 3;
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀.
@@ -357,6 +358,7 @@ export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
       rowHeights: [],
       cells: [],
       images: [],
+      shapes: [],
     };
   }
 
@@ -428,6 +430,8 @@ export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
     rowHeights,
     cells,
     images: readImages(worksheet, workbook, colWidths, rowHeights),
+    // 도형은 exceljs 가 내주지 않아 원본 파일에서 따로 읽는다(parseFormWorkbook).
+    shapes: [],
   };
 }
 
@@ -437,6 +441,29 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
   const module = (await import("exceljs")) as unknown as Record<string, any>;
   const ExcelJS = module.default ?? module;
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(data);
-  return workbook.worksheets.map((worksheet: any) => parseFormSheet(worksheet, workbook));
+  // exceljs 가 버퍼를 소유·이관해 비워 버려도 도형을 읽을 수 있게 복사본을 넘긴다.
+  await workbook.xlsx.load(data.slice(0));
+  const sheets: FormSheet[] = workbook.worksheets.map((worksheet: any) =>
+    parseFormSheet(worksheet, workbook),
+  );
+
+  // 도형은 exceljs 가 내주지 않으므로 원본 압축을 직접 열어 읽는다.
+  // 실패해도 셀·그림은 이미 다 읽었으니 양식은 그대로 열어 준다.
+  try {
+    const sizes = new Map(
+      sheets.map((sheet) => [
+        sheet.name,
+        { colWidths: sheet.colWidths, rowHeights: sheet.rowHeights },
+      ]),
+    );
+    const shapes = await parseWorkbookShapes(data, sizes, {
+      col: colWidthToPx(undefined),
+      row: rowHeightToPx(undefined),
+    });
+    for (const sheet of sheets) sheet.shapes = shapes.get(sheet.name) ?? [];
+  } catch {
+    // 도형을 못 읽는 것은 양식을 못 여는 것보다 가볍다.
+  }
+
+  return sheets;
 }

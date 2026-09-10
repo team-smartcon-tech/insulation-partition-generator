@@ -301,11 +301,14 @@ export default function FormsPage() {
   const sheet = state.status === "ready" ? state.sheets[activeSheet] : null;
   const editedCount = Object.keys(values).length;
 
-  // 글자가 거의 없는 큰 시트 — 엑셀에서 도형·그림으로 그린 부분은 옮기지 못한다.
+  // 글자도 그림도 도형도 거의 없는 큰 시트 — 우리가 못 읽는 것(SmartArt·차트·그룹
+  // 도형)으로 그렸을 가능성이 높다. 도형을 읽어 냈다면 안내할 이유가 없다.
   const textCells = sheet ? sheet.cells.filter((c) => c.text.trim() !== "").length : 0;
   const looksDrawn =
     sheet !== null &&
     textCells <= SPARSE_TEXT_CELLS &&
+    (sheet.shapes?.length ?? 0) === 0 &&
+    (sheet.images?.length ?? 0) === 0 &&
     sheet.rowCount * sheet.colCount >= SPARSE_MIN_AREA;
 
   return (
@@ -464,6 +467,7 @@ export default function FormsPage() {
               <span>병합 {sheet.cells.filter((c) => c.rowSpan > 1 || c.colSpan > 1).length}곳</span>
               {/* 그림이 안 보일 때 "못 읽은 것"인지 "그렸는데 안 보이는 것"인지 가른다. */}
               {(sheet.images?.length ?? 0) > 0 && <span>그림 {sheet.images.length}개</span>}
+              {(sheet.shapes?.length ?? 0) > 0 && <span>도형 {sheet.shapes.length}개</span>}
               {editedCount > 0 && <span className="text-blue-600">고친 칸 {editedCount}개</span>}
               {editable && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
             </div>
@@ -472,9 +476,10 @@ export default function FormsPage() {
               <p className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                 <TriangleAlert size={16} className="mt-0.5 shrink-0" />
                 <span>
-                  이 시트에서 글자가 든 칸은 {textCells}개뿐입니다. 엑셀에서{" "}
-                  <strong className="font-semibold">도형으로 그린 그림(순서도 등)은 화면에 옮기지 못합니다.</strong>{" "}
-                  칸에 적힌 글자와 붙여넣은 그림만 가져옵니다.
+                  이 시트에서 글자가 든 칸은 {textCells}개뿐이고, 그림·도형도 찾지 못했습니다.
+                  엑셀의{" "}
+                  <strong className="font-semibold">SmartArt·차트·여러 도형을 그룹으로 묶은 것은 화면에 옮기지 못합니다.</strong>{" "}
+                  묶음을 풀어 저장하면 나올 수 있습니다.
                 </span>
               </p>
             )}

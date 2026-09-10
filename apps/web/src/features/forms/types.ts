@@ -72,6 +72,40 @@ export interface FormImage {
   height: number;
 }
 
+/**
+ * 도형의 모양. 엑셀에는 수백 가지 도형이 있지만 업무 양식의 순서도에 실제로 쓰이는
+ * 것은 몇 가지뿐이다. 모르는 도형은 네모로 떨어뜨린다 — 안 그리는 것보다 낫다.
+ */
+export type FormShapeKind = "box" | "roundBox" | "ellipse" | "diamond" | "line";
+
+/** 격자 위에 떠 있는 도형(순서도 상자·화살표 등). 그림과 달리 글자를 품는다. */
+export interface FormShape {
+  kind: FormShapeKind;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  /** 선일 때 좌상→우하가 아니라 뒤집혀 그려지는지 */
+  flipH?: boolean;
+  flipV?: boolean;
+  /** 선 끝의 화살촉 */
+  arrowStart?: boolean;
+  arrowEnd?: boolean;
+  /** 도형 안 글자. 줄바꿈은 \n */
+  text: string;
+  /** 채움색 #RRGGBB. 없으면 투명 */
+  fill?: string;
+  /** 선·테두리 색 */
+  line?: string;
+  /** 선 굵기(px) */
+  lineWidth: number;
+  fontSize?: number;
+  fontFamily?: string;
+  bold?: boolean;
+  color?: string;
+  align?: "left" | "center" | "right";
+}
+
 export interface FormSheet {
   name: string;
   rowCount: number;
@@ -84,6 +118,8 @@ export interface FormSheet {
   cells: FormCell[];
   /** 격자 위에 떠 있는 그림. 없으면 빈 배열 */
   images: FormImage[];
+  /** 격자 위에 떠 있는 도형(순서도 등). 없으면 빈 배열 */
+  shapes: FormShape[];
 }
 
 /** 사용자가 고친 글자만 담는다. 셀 키 → 고친 값. 손대지 않은 칸은 여기 없다. */
