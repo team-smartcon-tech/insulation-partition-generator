@@ -1,4 +1,7 @@
-# 단열재 나누기도 생성기 (insulation-partition-generator)
+# 단열 Layout (insulation-partition-generator)
+
+> 표시명 **단열 Layout** (2026-09-10 확정). 구 명칭 "단열재 나누기도 생성기".
+> 코드 식별자(`insulation`, `elev_*`, 라우트 `/tools/insulation`)는 바꾸지 않는다 — 라우트·DB를 건드리면 위험만 커진다.
 
 DXF 도면에서 외벽을 트레이싱해 **세대 단열재 나누기도**(입면 전개 + 단열재 보드 분할)를 만들고,
 동·타입·세대수 매트릭스로 물량 산출서를 뽑아 DXF/SVG/CSV/XLSX/ZIP로 내보내는 웹 앱입니다.

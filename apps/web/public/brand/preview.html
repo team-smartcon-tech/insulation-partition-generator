@@ -1,0 +1,54 @@
+<!doctype html><html lang="ko"><meta charset="utf-8">
+<title>단열 Layout — 로고 시안</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+  :root{--navy:#004791;--ink:#0F2A4A;--line:#e4eaf2}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'SUIT Variable','SUIT','Pretendard',-apple-system,system-ui,sans-serif;color:var(--ink);background:#fff}
+  header{padding:28px 32px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:18px;font-weight:800}
+  p.sub{margin:6px 0 0;font-size:13px;color:#5C6E82}
+  section{padding:28px 32px;border-bottom:1px solid var(--line)}
+  section.dark{background:#0D1B2A;border-color:rgba(255,255,255,.1)}
+  section.gray{background:#F4F6F9}
+  .lab{font-size:11px;font-weight:700;letter-spacing:.14em;color:#9aa7b5;margin-bottom:16px}
+  .icons{display:flex;align-items:flex-end;gap:26px;flex-wrap:wrap}
+  img{display:block;max-width:100%}
+  .note{font-size:12.5px;color:#5C6E82;line-height:1.7;margin-top:14px}
+  code{background:#F4F6F9;padding:1px 6px;border-radius:4px;font-size:12px}
+</style>
+<header>
+  <h1>단열 Layout — 로고 시안</h1>
+  <p class="sub">Insulation Layout &amp; Takeoff System · 파일 위치 <code>apps/web/public/brand/</code></p>
+</header>
+
+<section>
+  <div class="lab">LOCKUP — 기본 (밝은 배경)</div>
+  <img src="/brand/logo-insul-layout.svg" width="620" alt="단열 Layout 로고">
+</section>
+
+<section class="dark">
+  <div class="lab" style="color:#7f93a8">LOCKUP — 다크 (툴 타이틀바·다크 셸용)</div>
+  <img src="/brand/logo-insul-layout-dark.svg" width="620" alt="단열 Layout 로고 다크">
+</section>
+
+<section class="gray">
+  <div class="lab">SYMBOL — 앱 아이콘·런처 카드 (128 / 64 / 40 / 28px)</div>
+  <div class="icons">
+    <img src="/brand/mark-insul-layout.svg" width="128" alt=""><img src="/brand/mark-insul-layout.svg" width="64" alt="">
+    <img src="/brand/mark-insul-layout.svg" width="40" alt=""><img src="/brand/mark-insul-layout.svg" width="28" alt="">
+  </div>
+  <p class="note">40px까지는 읽히고 <b>28px에선 뭉갭니다</b> — 파비콘까지 쓰려면 보드를 3장으로 줄인 초소형 전용 버전이 하나 더 필요합니다.</p>
+</section>
+
+<section>
+  <div class="lab">마크가 담은 것 — 실제 작업 순서 그대로</div>
+  <p class="note">
+    ① 점선 L자 = 평면 도면(입력, 아직 펼치기 전) → ② 주황 점선 호 = 펼침(전개) →
+    ③ 격자 패널 = 전개된 외벽, 세로 조인트가 켜마다 엇갈림(실제 시공 방식) →
+    ④ 주황 보드 2장 = 나누기 결과(색은 여기만) → ⑤ 창호 오프닝 = 보드가 이걸 피해 잘림 →
+    ⑥ 아래 치수선 = 물량 산출까지.
+  </p>
+</section>
+</html>

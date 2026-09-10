@@ -45,6 +45,8 @@ interface HomeCard {
   available: boolean;
   /** 카드 썸네일 (내장=public 경로, 게시=Storage signed URL) */
   thumbnail?: string | null;
+  /** 도구 전용 로고(심볼). 있으면 제목 앞·썸네일 폴백에서 lucide 아이콘을 대신한다 */
+  logo?: string | null;
   /** 카드 하단 좌측 표기 */
   meta: string;
   /** 클릭 시 이동할 내부 경로 (없으면 클릭 불가) */
@@ -60,6 +62,7 @@ const toolToCard = (tool: ToolDef): HomeCard => ({
   icon: tool.icon,
   available: tool.status === "available",
   thumbnail: tool.thumbnail,
+  logo: tool.logo,
   meta: "우미 · 스마트덱",
   href: tool.status === "available" ? tool.path : undefined,
 });
@@ -405,10 +408,18 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
             }}
           />
           <span className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#22c1ff] via-white/70 to-[#22c1ff]" />
-          <Icon
-            className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 text-white/90 drop-shadow transition-transform duration-300 group-hover:scale-110"
-            strokeWidth={1.6}
-          />
+          {card.logo ? (
+            <img
+              src={card.logo}
+              alt=""
+              className="absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-[14px] shadow-lg transition-transform duration-300 group-hover:scale-110"
+            />
+          ) : (
+            <Icon
+              className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 text-white/90 drop-shadow transition-transform duration-300 group-hover:scale-110"
+              strokeWidth={1.6}
+            />
+          )}
         </div>
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
@@ -448,8 +459,18 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
 
   const body = (
     <div className="flex flex-1 flex-col p-5">
-      <div className="truncate text-[16px] font-bold tracking-tight text-slate-900">
-        {card.name}
+      <div className="flex items-center gap-2">
+        {card.logo && (
+          <img
+            src={card.logo}
+            alt=""
+            className="h-5 w-5 shrink-0 rounded-[6px]"
+            loading="lazy"
+          />
+        )}
+        <div className="truncate text-[16px] font-bold tracking-tight text-slate-900">
+          {card.name}
+        </div>
       </div>
       {/* 태그 줄 — 태그가 없어도 높이를 차지해 카드 간 본문 위치를 맞춘다. */}
       <div className="mt-2.5 flex min-h-[22px] flex-wrap gap-1.5">

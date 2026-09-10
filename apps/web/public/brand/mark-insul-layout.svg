@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="단열 Layout 심볼">
+  <title>단열 Layout — 심볼</title>
+  <defs>
+    <linearGradient id="m-warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F79236"/><stop offset="1" stop-color="#EC6A16"/>
+    </linearGradient>
+    <clipPath id="m-panel"><rect x="112" y="112" width="288" height="288" rx="10"/></clipPath>
+  </defs>
+  <!-- 아이콘은 32px 에서도 읽혀야 한다 — 평면·펼침 호는 빼고 '나눠진 벽' 한 덩어리만 남긴다 -->
+  <rect width="512" height="512" rx="112" fill="#0D1B2A"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g clip-path="url(#m-panel)">
+      <rect x="112" y="112" width="288" height="288" fill="#12253A"/>
+      <rect x="208" y="184" width="96" height="72" fill="url(#m-warm)"/>
+      <rect x="112" y="256" width="96" height="72" fill="url(#m-warm)" opacity="0.45"/>
+      <g stroke="#7CC0FF" stroke-width="7" opacity="0.9">
+        <path d="M112 184h288M112 256h288M112 328h288"/>
+        <path d="M208 112v72M304 112v72"/>
+        <path d="M160 184v72M256 184v72M352 184v72"/>
+        <path d="M208 256v72M304 256v72"/>
+        <path d="M160 328v72M256 328v72M352 328v72"/>
+      </g>
+    </g>
+    <rect x="112" y="112" width="288" height="288" rx="10" stroke="#FFFFFF" stroke-width="14"/>
+    <rect x="272" y="272" width="80" height="72" rx="4" fill="#0D1B2A" stroke="#FFFFFF" stroke-width="11"/>
+    <path d="M312 272v72" stroke="#FFFFFF" stroke-width="6"/>
+  </g>
+</svg>

@@ -28,18 +28,21 @@ export interface ToolDef {
   tags?: string[];
   /** 카드 썸네일 이미지 경로(public 기준). 없거나 로드 실패 시 아이콘 썸네일로 폴백 */
   thumbnail?: string;
+  /** 도구 전용 로고(심볼) 경로. 있으면 카드 제목 앞과 썸네일 폴백에 lucide 아이콘 대신 쓴다 */
+  logo?: string;
 }
 
 export const TOOLS: ToolDef[] = [
   {
     id: "insulation",
-    name: "단열재 나누기도",
+    name: "단열 Layout",
     description: "외벽선을 트레이싱해 전개 입면을 만들고, 세대별 단열재·오프닝을 배치합니다.",
     path: "/tools/insulation",
     icon: Square,
     status: "available",
     tags: ["단열", "도면·산출", "웹앱"],
     thumbnail: "/thumbs/insulation.png",
+    logo: "/brand/mark-insul-layout.svg",
   },
   // ── 준비 중 (개발 예정) ──
   {

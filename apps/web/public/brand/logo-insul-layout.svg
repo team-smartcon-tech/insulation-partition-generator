@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 250" width="880" height="250" role="img" aria-label="단열 Layout — Insulation Layout & Takeoff System">
+  <title>단열 Layout</title>
+  <defs>
+    <linearGradient id="il-warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F79236"/><stop offset="1" stop-color="#EC6A16"/>
+    </linearGradient>
+    <clipPath id="il-panel"><rect x="112" y="44" width="132" height="124" rx="4"/></clipPath>
+  </defs>
+
+  <!-- ── 마크: 평면(점선) → 펼침 → 전개된 외벽의 보드 분할 ── -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- 청사진 바탕 (아주 옅게) -->
+    <g stroke="#004791" opacity="0.09" stroke-width="1">
+      <path d="M120 36V200M152 36V200M184 36V200M216 36V200"/>
+      <path d="M108 44H250M108 76H250M108 108H250M108 140H250M108 172H250"/>
+    </g>
+
+    <!-- 1) 평면 도면(입력) — L자 외벽. 점선 = 아직 펼치기 전 -->
+    <g stroke="#004791" opacity="0.6">
+      <path d="M34 208v-30h30v-20h28" stroke-width="2.5" stroke-dasharray="7 5"/>
+      <circle cx="34" cy="208" r="3.5" fill="#004791" stroke="none"/>
+      <circle cx="92" cy="158" r="3.5" fill="#004791" stroke="none"/>
+    </g>
+
+    <!-- 2) 펼침 — 평면에서 입면으로. 패널 바깥으로 돌아 들어간다 -->
+    <path d="M96 150c14-8 12-30 8-44" stroke="url(#il-warm)" stroke-width="2.5" stroke-dasharray="6 5"/>
+    <path d="M96 112l8-14 10 8" stroke="url(#il-warm)" stroke-width="2.5"/>
+
+    <!-- 3) 전개된 외벽 + 나눠진 보드 (세로 조인트를 켜마다 엇갈리게) -->
+    <g clip-path="url(#il-panel)">
+      <rect x="112" y="44" width="132" height="124" fill="#FFFFFF"/>
+      <rect x="156" y="75" width="44" height="31" fill="url(#il-warm)"/>
+      <rect x="112" y="106" width="44" height="31" fill="url(#il-warm)" opacity="0.45"/>
+      <g stroke="#004791" stroke-width="2">
+        <path d="M112 75h132M112 106h132M112 137h132"/>
+        <path d="M156 44v31M200 44v31"/>
+        <path d="M134 75v31M178 75v31M222 75v31"/>
+        <path d="M156 106v31M200 106v31"/>
+        <path d="M134 137v31M178 137v31M222 137v31"/>
+      </g>
+    </g>
+    <rect x="112" y="44" width="132" height="124" rx="4" stroke="#004791" stroke-width="4"/>
+
+    <!-- 4) 오프닝(창호) — 보드가 이걸 피해 잘린다 -->
+    <rect x="186" y="112" width="40" height="34" rx="2.5" fill="#FFFFFF" stroke="#004791" stroke-width="3.5"/>
+    <path d="M206 112v34" stroke="#004791" stroke-width="2"/>
+
+    <!-- 5) 치수선 — 나누기에서 물량 산출까지 -->
+    <g stroke="#004791" opacity="0.7" stroke-width="2">
+      <path d="M112 188h132M112 182v12M244 182v12"/>
+    </g>
+  </g>
+
+  <!-- ── 워드마크 ── -->
+  <g font-family="'SUIT Variable','SUIT','Pretendard Variable','Pretendard',-apple-system,'Segoe UI',sans-serif">
+    <text x="296" y="128" font-size="76" font-weight="800" fill="#0F2A4A" letter-spacing="-1">단열</text>
+    <text x="440" y="128" font-size="76" font-weight="500" fill="#0F2A4A" letter-spacing="-0.5">Layout</text>
+    <rect x="298" y="150" width="80" height="4" rx="2" fill="url(#il-warm)"/>
+    <text x="298" y="184" font-size="19" font-weight="500" fill="#5C6E82" letter-spacing="2.2">Insulation Layout &amp; Takeoff System</text>
+  </g>
+</svg>

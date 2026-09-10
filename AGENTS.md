@@ -16,7 +16,7 @@ Woomi 표준 웹 서비스 프로젝트에서 모든 AI 에이전트가 먼저 �
 프로젝트 시작 시 비개발자도 답할 수 있는 항목만 먼저 채운다.
 
 ```txt
-Project name: insulation-partition-generator (표시명: 단열재 나누기도 생성기)
+Project name: insulation-partition-generator (표시명: **단열 Layout** — 구 "단열재 나누기도 생성기")
 What it does: DXF 도면으로 외단열재 나누기도와 자재 물량을 자동 산출해 도면/엑셀로 내보내는 웹 도구
 Main users: 단열재 물량·시공도면 담당자 (원래 SSX 본사 메뉴 기능)
 Core workflows: DXF 업로드 → 외벽 그리기 → 창/문 배치 → 보드 규격·정책 설정 → 나누기도 미리보기 → DXF/SVG/CSV/XLSX/ZIP 내보내기 → (선택) 프로젝트 저장/불러오기
