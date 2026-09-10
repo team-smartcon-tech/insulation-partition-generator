@@ -374,7 +374,7 @@ export default function CadRibbon(p: CadRibbonProps) {
 
         <div className="flex flex-1 items-center justify-center gap-2 truncate px-4">
           <span className="text-[12px] font-bold tracking-tight text-white/90">
-            세대 단열재 나누기도
+            단열 Layout
           </span>
           <span className="truncate rounded-full bg-white/12 px-2.5 py-0.5 text-[11.5px] font-medium text-white/85 ring-1 ring-white/15">
             {docTitle}

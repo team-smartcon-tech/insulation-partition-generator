@@ -6113,7 +6113,7 @@ export default function ElevationGeneratorPage() {
                       How to use
                     </div>
                     <h2 className="mt-1 text-[19px] font-extrabold text-white">
-                      세대 단열재 나누기도 — 사용법
+                      단열 Layout — 사용법
                     </h2>
                     <p className="mt-1 text-[12.5px] text-white/70">
                       아래 순서대로 진행하면 도면 업로드부터 산출·저장까지 완료됩니다.
