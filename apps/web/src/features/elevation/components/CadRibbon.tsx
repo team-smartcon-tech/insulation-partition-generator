@@ -331,13 +331,31 @@ export default function CadRibbon(p: CadRibbonProps) {
     <div className="shrink-0 select-none">
       {/* ① 타이틀바 + 퀵액세스 툴바 */}
       <div
-        className="flex h-10 items-center gap-2 px-2.5 text-white"
+        className="flex h-[52px] items-center gap-2 px-2.5 text-white"
         style={{
           background: "var(--ipg-rail)",
           borderBottom: "1px solid rgba(255,255,255,.08)",
         }}
       >
-        <SdMark className="h-6 w-6 shrink-0" />
+        <SdMark className="h-7 w-7 shrink-0" />
+        {/* 우미 로고 — 원본이 회색+네이비 2색이라 다크 바에서 묻힌다.
+            brightness(0) invert(1) 로 흰색 실루엣으로 반전해 얹는다. */}
+        <img
+          src="/woomi_short.png"
+          alt="우미"
+          className="h-[22px] w-auto shrink-0 opacity-90"
+          style={{ filter: "brightness(0) invert(1)" }}
+          onError={e => {
+            const el = e.currentTarget;
+            if (!el.dataset.fallback) {
+              el.dataset.fallback = "1";
+              el.src = "/woomi_logo.png";
+            } else {
+              el.style.display = "none";
+            }
+          }}
+        />
+        <span className="mx-0.5 h-5 w-px shrink-0 bg-white/15" />
         <div className="flex items-center gap-0.5">
           <QatBtn
             icon={Building2}
