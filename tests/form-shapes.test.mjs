@@ -131,3 +131,35 @@ test('그림은 도형 목록에 섞여 들어가지 않는다', async () => {
   assert.equal(sample.shapes.length, 1);
   assert.equal(sample.shapes[0].text, 'Sample');
 });
+
+test('인쇄 영역 밖은 옮기지 않는다', async () => {
+  const sheets = await loadSample();
+  const daejang = sheets.find((s) => s.name === 'QA-7.3-2');
+
+  // 원본 내용은 49행 × 21열까지 뻗어 있지만, 인쇄 영역은 A1:N29 다.
+  // 밖에는 메모용 도형 4개와 번호만 남은 껍데기 줄 20개가 있어 그대로 옮기면 지저분하다.
+  assert.equal(daejang.rowCount, 29);
+  assert.equal(daejang.colCount, 14);
+  assert.equal(daejang.printArea, 'A1:N29', '잘라냈다는 사실을 화면에 알려야 한다');
+
+  // 인쇄 영역 밖에 있던 도형은 따라오지 않는다.
+  assert.equal(daejang.shapes.length, 0);
+  // 안쪽에 있는 로고는 그대로 남는다.
+  assert.equal(daejang.images.length, 1);
+
+  // 잘라낸 뒤에도 각 행의 칸 합이 열 수와 같아야 표가 어긋나지 않는다.
+  for (let row = 1; row <= daejang.rowCount; row++) {
+    const spanned = daejang.cells
+      .filter((c) => c.row <= row && c.row + c.rowSpan - 1 >= row)
+      .reduce((sum, c) => sum + c.colSpan, 0);
+    assert.equal(spanned, daejang.colCount, `${row}행의 칸 합이 열 수와 다르다`);
+  }
+});
+
+test('인쇄 영역이 내용보다 넓으면 알리지 않는다', async () => {
+  const sheets = await loadSample();
+
+  // QA-7.3.-1 은 인쇄 영역(A1:L46)이 내용 범위와 같아 잘린 것이 없다.
+  // 잘리지 않았는데 "인쇄 영역까지만 표시"라고 하면 사용자를 헷갈리게 한다.
+  assert.equal(sheets.find((s) => s.name === 'QA-7.3.-1').printArea, undefined);
+});

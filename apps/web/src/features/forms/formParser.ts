@@ -22,7 +22,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 5;
+export const PARSER_VERSION = 6;
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀.
@@ -186,6 +186,43 @@ function isMeaningful(cell: {
   return Boolean(fill && fill.type === "pattern" && fill.pattern !== "none");
 }
 
+/** `N29` 같은 셀 주소를 행·열 번호로. 못 읽으면 null. */
+function parseCellRef(ref: string | undefined): { row: number; col: number } | null {
+  const match = /^\$?([A-Z]+)\$?(\d+)$/.exec((ref ?? "").trim());
+  if (!match) return null;
+  let col = 0;
+  for (const ch of match[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
+  return { row: Number(match[2]), col };
+}
+
+/**
+ * 시트의 인쇄 영역(끝 행·열).
+ *
+ * 업무 양식에는 인쇄 영역 **밖에** 메모용 도형이나 다 쓴 껍데기 줄이 남아 있는 일이
+ * 흔하다. 엑셀에서는 회색으로 가려져 안 보이지만 그대로 옮기면 화면에 딸려 온다.
+ * "인쇄했을 때 나오는 것"이 곧 양식이라고 보는 게 사용자의 감각에 맞다.
+ *
+ * 시작점은 보지 않고 **끝만** 자른다. 시작을 옮기면 행·열 번호가 밀려 이미 적어 둔
+ * 글자(셀 좌표로 붙어 있다)가 엉뚱한 칸으로 간다. 실제 양식은 거의 A1 에서 시작한다.
+ */
+function readPrintArea(worksheet: any): { maxRow: number; maxCol: number } | null {
+  const area: string | undefined = worksheet.pageSetup?.printArea;
+  if (!area) return null;
+
+  let maxRow = 0;
+  let maxCol = 0;
+  // 인쇄 영역이 여러 조각일 수 있다(`A1:N29,P1:R9`). 전부 감싸는 크기로 잡는다.
+  for (const part of area.split(",")) {
+    const [start, end] = part.split(":");
+    for (const ref of [parseCellRef(end), parseCellRef(start)]) {
+      if (!ref) continue;
+      if (ref.row > maxRow) maxRow = ref.row;
+      if (ref.col > maxCol) maxCol = ref.col;
+    }
+  }
+  return maxRow > 0 && maxCol > 0 ? { maxRow, maxCol } : null;
+}
+
 interface SpanBox {
   minRow: number;
   maxRow: number;
@@ -337,16 +374,18 @@ export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
   // 병합 범위가 내용 범위 밖으로 뻗어 있으면 거기까지 포함한다.
   const merges: string[] = worksheet.model?.merges ?? [];
   for (const range of merges) {
-    const end = range.split(":")[1];
+    const end = parseCellRef(range.split(":")[1]);
     if (!end) continue;
-    const match = /^([A-Z]+)(\d+)$/.exec(end);
-    if (!match) continue;
-    const [, letters, digits] = match;
-    let col = 0;
-    for (const ch of letters) col = col * 26 + (ch.charCodeAt(0) - 64);
-    const row = Number(digits);
-    if (row > maxRow) maxRow = row;
-    if (col > maxCol) maxCol = col;
+    if (end.row > maxRow) maxRow = end.row;
+    if (end.col > maxCol) maxCol = end.col;
+  }
+
+  // 인쇄 영역이 정해져 있으면 거기까지만 옮긴다.
+  const printArea = readPrintArea(worksheet);
+  const trimmed = Boolean(printArea && (printArea.maxRow < maxRow || printArea.maxCol < maxCol));
+  if (printArea) {
+    maxRow = Math.min(maxRow, printArea.maxRow);
+    maxCol = Math.min(maxCol, printArea.maxCol);
   }
 
   if (maxRow === 0 || maxCol === 0) {
@@ -429,10 +468,34 @@ export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
     colWidths,
     rowHeights,
     cells,
-    images: readImages(worksheet, workbook, colWidths, rowHeights),
+    // 인쇄 영역 밖에 놓인 그림은 격자 밖으로 계산되므로 여기서 걸러진다.
+    images: withinGrid(
+      readImages(worksheet, workbook, colWidths, rowHeights),
+      colWidths,
+      rowHeights,
+    ),
     // 도형은 exceljs 가 내주지 않아 원본 파일에서 따로 읽는다(parseFormWorkbook).
     shapes: [],
+    // 실제로 잘라낸 경우에만 알린다. 인쇄 영역이 내용보다 넓으면 알릴 것이 없다.
+    printArea: trimmed ? worksheet.pageSetup?.printArea : undefined,
   };
+}
+
+/**
+ * 격자 밖에 놓인 것을 걸러낸다.
+ *
+ * 인쇄 영역으로 표를 자르면 그 밖의 도형·그림은 좌표가 표 오른쪽·아래로 넘어간다.
+ * 그대로 두면 화면 옆에 둥둥 떠서 보인다. 시작점이 표 안에 있는 것만 남긴다 —
+ * 표에 걸쳐 있는 것은 원본에서도 걸쳐 있는 것이라 남겨야 한다.
+ */
+function withinGrid<T extends { left: number; top: number }>(
+  items: T[],
+  colWidths: number[],
+  rowHeights: number[],
+): T[] {
+  const width = colWidths.reduce((a, b) => a + b, 0);
+  const height = rowHeights.reduce((a, b) => a + b, 0);
+  return items.filter((item) => item.left < width && item.top < height);
 }
 
 /** .xlsx 파일 내용을 시트 목록으로 바꾼다. 시트가 여러 개면 전부 돌려준다. */
@@ -460,7 +523,9 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
       col: colWidthToPx(undefined),
       row: rowHeightToPx(undefined),
     });
-    for (const sheet of sheets) sheet.shapes = shapes.get(sheet.name) ?? [];
+    for (const sheet of sheets) {
+      sheet.shapes = withinGrid(shapes.get(sheet.name) ?? [], sheet.colWidths, sheet.rowHeights);
+    }
   } catch {
     // 도형을 못 읽는 것은 양식을 못 여는 것보다 가볍다.
   }

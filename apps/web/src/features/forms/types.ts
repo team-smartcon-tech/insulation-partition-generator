@@ -127,6 +127,11 @@ export interface FormSheet {
   images: FormImage[];
   /** 격자 위에 떠 있는 도형(순서도 등). 없으면 빈 배열 */
   shapes: FormShape[];
+  /**
+   * 엑셀에 지정된 인쇄 영역(`A1:N29`). 이만큼만 옮겼다는 뜻이라 화면에 알려 준다 —
+   * 안 그러면 원본에 있던 줄이 왜 없는지 알 방법이 없다. 지정이 없으면 undefined.
+   */
+  printArea?: string;
 }
 
 /** 사용자가 고친 글자만 담는다. 셀 키 → 고친 값. 손대지 않은 칸은 여기 없다. */

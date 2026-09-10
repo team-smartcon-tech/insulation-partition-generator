@@ -498,6 +498,11 @@ export default function FormsPage() {
               {/* 그림이 안 보일 때 "못 읽은 것"인지 "그렸는데 안 보이는 것"인지 가른다. */}
               {(sheet.images?.length ?? 0) > 0 && <span>그림 {sheet.images.length}개</span>}
               {(sheet.shapes?.length ?? 0) > 0 && <span>도형 {sheet.shapes.length}개</span>}
+              {sheet.printArea && (
+                <span title="엑셀에 지정된 인쇄 영역 밖은 옮기지 않았습니다.">
+                  인쇄 영역 {sheet.printArea}까지만 표시
+                </span>
+              )}
               {editedCount > 0 && <span className="text-blue-600">고친 칸 {editedCount}개</span>}
               {editable && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
             </div>
