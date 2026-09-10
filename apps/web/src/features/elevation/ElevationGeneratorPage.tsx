@@ -5048,24 +5048,30 @@ export default function ElevationGeneratorPage() {
                       {/* 세대수 3칸이 무슨 칸인지 몰라 헤매던 문제 → 고정 열 머리글.
                           내부 스크롤(max-h)은 없앤다 — 패널 본문 스크롤 하나로 충분하고,
                           짧은 창 안에서 매트릭스만 갇혀 아래가 텅 비어 보였다. */}
-                      <div className="overflow-hidden rounded border border-slate-200 divide-y divide-slate-200">
-                        <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-slate-200 bg-slate-50 px-2 py-1 text-[9.5px] font-bold text-slate-500">
-                          <span className="flex-1">타입</span>
+                      {/* 표선이 없어 어느 숫자가 어느 열인지 못 따라가던 문제 →
+                          머리글 고정 + 행 구분선 + 지브라(.ipg-matrix*).
+                          머리글과 본문의 열 폭·좌우 여백이 같은 값이어야 줄이 맞는다.
+                          (기존엔 머리글 '입면' 이 w-9, 본문 태그가 w-12 라 한 칸씩 밀려 있었다) */}
+                      <div className="ipg-matrix">
+                        <div className="ipg-matrix-head sticky top-0 z-10 flex items-center gap-1 px-2 py-1 text-[9.5px] font-bold">
+                          {/* 본문 행 맨 앞 체크박스 폭만큼 밀어야 '타입' 이 이름 열과 맞는다 */}
+                          <span className="w-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1">타입</span>
                           {FLOOR_GROUPS.map(g => (
-                            <span key={g.key} className="w-14 text-center">
+                            <span key={g.key} className="w-14 shrink-0 text-center">
                               {g.label}
                             </span>
                           ))}
-                          <span className="w-9 text-center">입면</span>
+                          <span className="w-12 shrink-0 text-right">입면</span>
                         </div>
                         {typeMatrix.buildings.map(b => (
-                          <div key={b.id} className="p-1">
-                            <div className="flex items-center gap-1 px-1 pb-0.5">
-                              <span className="text-[10.5px] font-bold text-[#004791] shrink-0">
+                          <div key={b.id} className="ipg-matrix-group">
+                            <div className="ipg-matrix-bldg flex items-center gap-1 px-2 py-1">
+                              <span className="shrink-0 text-[10.5px] font-bold text-[#004791]">
                                 {b.name}
                               </span>
                               {/* 이 동만 층고가 다를 때 예외 입력 — 비우면 전역 층고를 따른다 */}
-                              <span className="ml-auto text-[11px] text-slate-400 shrink-0">
+                              <span className="ml-auto shrink-0 text-[11px] text-slate-400">
                                 층고예외
                               </span>
                               {FLOOR_GROUPS.map(g => (
@@ -5084,9 +5090,11 @@ export default function ElevationGeneratorPage() {
                                     )
                                   }
                                   title={`${b.name} ${g.label} 층고(mm) — 비우면 전역 ${groupHeightValue(g.key)}mm`}
-                                  className="w-14 border border-slate-200 rounded px-1 h-5 bg-white text-center text-slate-700 tabular-nums text-[9.5px] placeholder:text-slate-300"
+                                  className="w-14 shrink-0 border border-slate-300 rounded px-1 h-5 bg-white text-center text-slate-700 tabular-nums text-[9.5px] placeholder:text-slate-300"
                                 />
                               ))}
+                              {/* 입면 열 자리맞춤 */}
+                              <span className="w-12 shrink-0" />
                             </div>
                             {typeMatrix.types.map(t => {
                               const key = cellKey(b.id, t.id);
@@ -5105,17 +5113,17 @@ export default function ElevationGeneratorPage() {
                               return (
                                 <div
                                   key={t.id}
-                                  className="flex items-center gap-1 px-1 py-0.5"
+                                  className="ipg-matrix-row flex items-center gap-1 px-2 py-0.5"
                                 >
                                   <input
                                     type="checkbox"
                                     checked={on}
                                     onChange={() => toggleCell(b.id, t.id)}
-                                    className="accent-[#004791] shrink-0"
+                                    className="w-3.5 shrink-0 accent-[#004791]"
                                   />
                                   <span
                                     className={cn(
-                                      "flex-1 min-w-0 truncate text-[10.5px]",
+                                      "min-w-0 flex-1 truncate text-[10.5px]",
                                       on ? "text-slate-700" : "text-slate-400"
                                     )}
                                   >
@@ -5135,7 +5143,7 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-14 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:border-[#7c3aed] focus:outline-none"
+                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:outline-none"
                                       />
                                       <input
                                         type="number"
@@ -5149,7 +5157,7 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-14 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:border-[#7c3aed] focus:outline-none"
+                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:outline-none"
                                       />
                                       <input
                                         type="number"
@@ -5163,7 +5171,7 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-14 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:border-[#7c3aed] focus:outline-none"
+                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:outline-none"
                                       />
                                       <span
                                         className={cn(
@@ -5178,9 +5186,13 @@ export default function ElevationGeneratorPage() {
                                       </span>
                                     </>
                                   ) : (
-                                    <span className="text-[9px] text-slate-600">
-                                      미배분
-                                    </span>
+                                    <>
+                                      {/* 숫자 3열 폭(3×w-14 + gap 2칸)만큼 비우고 열을 유지한다 */}
+                                      <span className="w-[11rem] shrink-0 text-center text-[9px] text-slate-400">
+                                        미배분
+                                      </span>
+                                      <span className="w-12 shrink-0" />
+                                    </>
                                   )}
                                 </div>
                               );
