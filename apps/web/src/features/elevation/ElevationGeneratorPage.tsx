@@ -4632,12 +4632,16 @@ export default function ElevationGeneratorPage() {
                  모달(도면 가림) 이 아니라 캔버스 옆 칸에 도킹한다 — 도면을 보면서 편집. ── */}
           {dlg && (
             <aside
-              className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ipg-r-lg)] bg-white [&_option]:text-slate-900"
-              style={{ border: "1px solid var(--ipg-line)", boxShadow: "var(--ipg-shadow-2)" }}
+              className="ipg-dark ipg-scroll-dark flex min-h-0 flex-col overflow-hidden rounded-[var(--ipg-r-lg)]"
+              style={{
+                background: "var(--ipg-surface-1)",
+                border: "1px solid var(--ipg-d-line)",
+                boxShadow: "0 24px 60px -20px rgba(0,0,0,.6)",
+              }}
             >
               <div
                 className="relative flex items-center gap-2 border-b border-slate-200 px-3 py-2"
-                style={{ backgroundColor: DLG_META[dlg].accent + "0f" }}
+                style={{ backgroundColor: DLG_META[dlg].accent + "26" }}
               >
                 <span
                   className="absolute left-0 top-0 h-full w-[3px]"
@@ -4670,7 +4674,7 @@ export default function ElevationGeneratorPage() {
                   </button>
                 </div>
               </div>
-            <div className="ipg-scroll min-h-0 flex-1 overflow-y-auto">
+            <div className="ipg-scroll-dark min-h-0 flex-1 overflow-y-auto">
             {/* 단열재 나누기도 (추가 기능) */}
             {dlg === "insul" && (
             <>

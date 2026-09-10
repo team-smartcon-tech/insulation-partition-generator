@@ -17,6 +17,8 @@ import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from
 import {
   ArrowRight,
   Blocks,
+  ChevronLeft,
+  ChevronRight,
   Check,
   CornerDownLeft,
   FileSpreadsheet,
@@ -174,8 +176,15 @@ export default function WorkflowRail(p: WorkflowRailProps) {
     if (picked != null && steps.find(x => x.no === picked)?.locked) setPicked(null);
   }, [steps, picked]);
 
+  /** 인스펙터를 옆에 도킹하면 캔버스가 좁아진다 — 단계 패널을 접어 308px 를 돌려준다 */
+  const [collapsed, setCollapsed] = useState(false);
+  const pick = (no: number) => {
+    setPicked(no);
+    setCollapsed(false); // 접힌 상태에서 단계를 누르면 다시 편다
+  };
+
   return (
-    <div className="ipg-panel flex min-h-0 shrink-0">
+    <div className="flex min-h-0 shrink-0">
       {/* ── 레일 ── */}
       <nav
         className="flex w-[72px] shrink-0 flex-col py-2"
@@ -189,7 +198,7 @@ export default function WorkflowRail(p: WorkflowRailProps) {
               active={s.no === selNo}
               isCurrent={s.no === currentNo}
               last={i === steps.length - 1}
-              onClick={() => setPicked(s.no)}
+              onClick={() => pick(s.no)}
             />
           ))}
         </div>
@@ -212,13 +221,20 @@ export default function WorkflowRail(p: WorkflowRailProps) {
             onClick={p.onToggleAdvanced}
             title="측정·도면 편집·개별 출력 등 전체 명령 리본 펼치기"
           />
+          <RailButton
+            icon={collapsed ? ChevronRight : ChevronLeft}
+            label={collapsed ? "펴기" : "접기"}
+            onClick={() => setCollapsed(c => !c)}
+            title={collapsed ? "단계 패널 펴기" : "단계 패널 접기 — 도면을 넓게"}
+          />
         </div>
       </nav>
 
       {/* ── 단계 패널 ── */}
+      {collapsed ? null : (
       <section
-        className="flex w-[308px] shrink-0 flex-col"
-        style={{ background: "var(--ipg-panel)", borderRight: "1px solid var(--ipg-line)" }}
+        className="ipg-dark flex w-[308px] shrink-0 flex-col"
+        style={{ background: "var(--ipg-surface-1)", borderRight: "1px solid var(--ipg-d-line)" }}
       >
         {/* 헤더 — 단계 번호 · 제목 · 진행 */}
         <header className="shrink-0 px-4 pb-3 pt-3.5">
@@ -226,7 +242,7 @@ export default function WorkflowRail(p: WorkflowRailProps) {
             <StepBadge no={sel.no} done={sel.done} />
             <h2
               className="min-w-0 flex-1 truncate font-bold tracking-tight"
-              style={{ fontSize: "var(--ipg-t-lg)", color: "var(--ipg-ink)" }}
+              style={{ fontSize: "var(--ipg-t-lg)", color: "var(--ipg-d-ink)" }}
             >
               {sel.title}
             </h2>
@@ -234,7 +250,7 @@ export default function WorkflowRail(p: WorkflowRailProps) {
           </div>
           <p
             className="mt-1.5 leading-relaxed"
-            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-ink-2)" }}
+            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-2)" }}
           >
             {sel.hint}
           </p>
@@ -249,19 +265,19 @@ export default function WorkflowRail(p: WorkflowRailProps) {
                     ? "var(--ipg-ok)"
                     : s.no === selNo
                       ? "var(--ipg-accent)"
-                      : "var(--ipg-line)",
+                      : "var(--ipg-d-line)",
                 }}
               />
             ))}
           </div>
         </header>
 
-        <div className="h-px shrink-0" style={{ background: "var(--ipg-line)" }} />
+        <div className="h-px shrink-0" style={{ background: "var(--ipg-d-line)" }} />
 
         {/* 본문 */}
         <div className="ipg-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
           {sel.locked ? (
-            <LockedNotice step={sel} steps={steps} onGo={setPicked} />
+            <LockedNotice step={sel} steps={steps} onGo={pick} />
           ) : (
             <>
               {sel.key === "dxf" && <StepDxf p={p} />}
@@ -278,7 +294,7 @@ export default function WorkflowRail(p: WorkflowRailProps) {
         {selNo < steps.length && (
           <div
             className="shrink-0 px-4 py-3"
-            style={{ borderTop: "1px solid var(--ipg-line)" }}
+            style={{ borderTop: "1px solid var(--ipg-d-line)" }}
           >
             <button
               type="button"
@@ -292,8 +308,8 @@ export default function WorkflowRail(p: WorkflowRailProps) {
               )}
               style={{
                 fontSize: "var(--ipg-t-md)",
-                background: sel.done ? "var(--ipg-accent-deep)" : "var(--ipg-panel-sub)",
-                color: sel.done ? "#fff" : "var(--ipg-ink-3)",
+                background: sel.done ? "var(--ipg-accent-deep)" : "var(--ipg-surface-2)",
+                color: sel.done ? "#fff" : "var(--ipg-d-ink-3)",
                 boxShadow: sel.done ? "var(--ipg-shadow-1)" : undefined,
               }}
             >
@@ -312,7 +328,7 @@ export default function WorkflowRail(p: WorkflowRailProps) {
         {/* 화면 도구 — 어느 단계에서나 쓴다 */}
         <footer
           className="shrink-0 px-3 py-2"
-          style={{ borderTop: "1px solid var(--ipg-line)", background: "var(--ipg-panel-sub)" }}
+          style={{ borderTop: "1px solid var(--ipg-d-line)", background: "var(--ipg-surface-2)" }}
         >
           <div className="flex items-center gap-0.5">
             <MiniBtn
@@ -336,6 +352,7 @@ export default function WorkflowRail(p: WorkflowRailProps) {
           <div className="mt-1.5">{p.layerControl}</div>
         </footer>
       </section>
+      )}
     </div>
   );
 }
@@ -348,22 +365,22 @@ function StepDxf({ p }: { p: WorkflowRailProps }) {
       <Field label="현재 문서">
         <div
           className="rounded-[var(--ipg-r-md)] px-3 py-2.5"
-          style={{ background: "var(--ipg-panel-sub)", border: "1px solid var(--ipg-line)" }}
+          style={{ background: "var(--ipg-surface-2)", border: "1px solid var(--ipg-d-line)" }}
         >
           <div
             className="truncate font-bold"
-            style={{ fontSize: "var(--ipg-t-md)", color: "var(--ipg-ink)" }}
+            style={{ fontSize: "var(--ipg-t-md)", color: "var(--ipg-d-ink)" }}
           >
             {p.activeProjectName ?? "열린 프로젝트 없음"}
           </div>
           <div
             className="mt-0.5 truncate"
-            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-ink-2)" }}
+            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-2)" }}
           >
             {p.activeProjectName ? (
               <>
                 {p.activeSiteName ?? "미분류"}
-                <span style={{ color: "var(--ipg-ink-3)" }}> · </span>
+                <span style={{ color: "var(--ipg-d-ink-3)" }}> · </span>
                 <span className="ipg-num">REV {p.activeRevNo ?? 0}</span>
               </>
             ) : (
@@ -386,7 +403,7 @@ function StepDxf({ p }: { p: WorkflowRailProps }) {
         {p.dxfName && (
           <div
             className="mt-2 flex items-center gap-1.5 truncate"
-            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-ink-2)" }}
+            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-2)" }}
           >
             <Check className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--ipg-ok)" }} />
             <span className="truncate">{p.dxfName}</span>
@@ -413,19 +430,19 @@ function StepWall({ p }: { p: WorkflowRailProps }) {
         <div
           className="rounded-[var(--ipg-r-md)] p-3"
           style={{
-            background: "var(--ipg-accent-soft)",
-            border: "1px solid var(--ipg-accent-line)",
+            background: "rgba(26,126,224,.14)",
+            border: "1px solid rgba(26,126,224,.38)",
           }}
         >
           <div
             className="ipg-num font-bold"
-            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-accent-deep)" }}
+            style={{ fontSize: "var(--ipg-t-sm)", color: "#7cc0ff" }}
           >
             그리는 중 · 점 {p.draftCount}개
           </div>
           <p
             className="mt-1 leading-relaxed"
-            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-ink-2)" }}
+            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-2)" }}
           >
             외벽 모서리를 순서대로 클릭하고, 끝나면 확정하세요.
           </p>
@@ -437,7 +454,7 @@ function StepWall({ p }: { p: WorkflowRailProps }) {
               className="flex h-8 flex-1 items-center justify-center gap-1 rounded-[var(--ipg-r-sm)] font-bold text-white transition-all disabled:cursor-not-allowed"
               style={{
                 fontSize: "var(--ipg-t-md)",
-                background: p.draftCount >= 2 ? "var(--ipg-ok)" : "var(--ipg-line-strong)",
+                background: p.draftCount >= 2 ? "var(--ipg-ok)" : "var(--ipg-d-line-strong)",
               }}
             >
               <Check className="h-3.5 w-3.5" /> 입면 확정
@@ -446,8 +463,12 @@ function StepWall({ p }: { p: WorkflowRailProps }) {
               type="button"
               onClick={p.onUndoDraftPoint}
               title="마지막 점 취소"
-              className="flex h-8 w-9 items-center justify-center rounded-[var(--ipg-r-sm)] bg-white transition-colors hover:bg-slate-50"
-              style={{ border: "1px solid var(--ipg-line-strong)", color: "var(--ipg-ink-2)" }}
+              className="flex h-8 w-9 items-center justify-center rounded-[var(--ipg-r-sm)] transition-colors hover:brightness-125"
+              style={{
+                background: "var(--ipg-surface-2)",
+                border: "1px solid var(--ipg-d-line-strong)",
+                color: "var(--ipg-d-ink-2)",
+              }}
             >
               <Undo2 className="h-3.5 w-3.5" />
             </button>
@@ -474,7 +495,7 @@ function StepOpening({ p }: { p: WorkflowRailProps }) {
       <Field label="창 종류 · 치수">
         <div
           className="rounded-[var(--ipg-r-md)] p-2.5"
-          style={{ border: "1px solid var(--ipg-line)" }}
+          style={{ border: "1px solid var(--ipg-d-line)" }}
         >
           {p.presetControl}
         </div>
@@ -540,7 +561,7 @@ function StepType({ p }: { p: WorkflowRailProps }) {
       <Field label="층고 (층 그룹별)">
         <div
           className="rounded-[var(--ipg-r-md)] p-2.5"
-          style={{ border: "1px solid var(--ipg-line)" }}
+          style={{ border: "1px solid var(--ipg-d-line)" }}
         >
           {p.floorHeightInput}
         </div>
@@ -563,20 +584,20 @@ function StepInsul({ p }: { p: WorkflowRailProps }) {
         className="flex items-center gap-2 rounded-[var(--ipg-r-md)] px-3 py-2.5 font-semibold"
         style={{
           fontSize: "var(--ipg-t-md)",
-          background: p.insulOn ? "#eafaf4" : "var(--ipg-panel-sub)",
-          border: `1px solid ${p.insulOn ? "#a7e5cd" : "var(--ipg-line)"}`,
-          color: p.insulOn ? "var(--ipg-ok)" : "var(--ipg-ink-3)",
+          background: p.insulOn ? "rgba(15,157,110,.16)" : "var(--ipg-surface-2)",
+          border: `1px solid ${p.insulOn ? "rgba(15,157,110,.45)" : "var(--ipg-d-line)"}`,
+          color: p.insulOn ? "#4fd6a8" : "var(--ipg-d-ink-3)",
         }}
       >
         <span
           className="h-2 w-2 rounded-full"
-          style={{ background: p.insulOn ? "var(--ipg-ok)" : "var(--ipg-line-strong)" }}
+          style={{ background: p.insulOn ? "var(--ipg-ok)" : "var(--ipg-d-line-strong)" }}
         />
         {p.insulOn ? "나누기 계산 켜짐" : "아직 꺼져 있습니다"}
       </div>
       <p
         className="leading-relaxed"
-        style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-ink-2)" }}
+        style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-2)" }}
       >
         설정 창에서 보드 규격(길이·높이·두께)과 조인트·최소 조각 폭을 정하면 화면의 전개
         입면에 나누기 결과가 바로 그려집니다.
@@ -603,7 +624,7 @@ function StepOutput({ p }: { p: WorkflowRailProps }) {
       />
       <PanelBtn icon={Blocks} label="마감 물량 · 기성 관리" onClick={p.onOpenTakeoff} />
 
-      <div className="pt-1" style={{ borderTop: "1px solid var(--ipg-line)" }}>
+      <div className="pt-1" style={{ borderTop: "1px solid var(--ipg-d-line)" }}>
         <div className="pt-3">
           <Field label="저장">
             <PanelBtn
@@ -622,8 +643,8 @@ function StepOutput({ p }: { p: WorkflowRailProps }) {
         </div>
       </div>
 
-      <p style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-ink-3)" }}>
-        DXF·SVG 개별 출력은 왼쪽 <b style={{ color: "var(--ipg-ink-2)" }}>고급</b> 에서 열 수 있습니다.
+      <p style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-3)" }}>
+        DXF·SVG 개별 출력은 왼쪽 <b style={{ color: "var(--ipg-d-ink-2)" }}>고급</b> 에서 열 수 있습니다.
       </p>
     </Stack>
   );
@@ -642,14 +663,14 @@ function LockedNotice({
   return (
     <div
       className="flex flex-col items-center gap-3 rounded-[var(--ipg-r-lg)] px-4 py-10 text-center"
-      style={{ border: "1px dashed var(--ipg-line-strong)", background: "var(--ipg-panel-sub)" }}
+      style={{ border: "1px dashed var(--ipg-d-line-strong)", background: "var(--ipg-surface-2)" }}
     >
-      <Lock className="h-7 w-7" strokeWidth={1.5} style={{ color: "var(--ipg-ink-3)" }} />
+      <Lock className="h-7 w-7" strokeWidth={1.5} style={{ color: "var(--ipg-d-ink-3)" }} />
       <p
         className="leading-relaxed"
-        style={{ fontSize: "var(--ipg-t-md)", color: "var(--ipg-ink-2)" }}
+        style={{ fontSize: "var(--ipg-t-md)", color: "var(--ipg-d-ink-2)" }}
       >
-        <b style={{ color: "var(--ipg-ink)" }}>
+        <b style={{ color: "var(--ipg-d-ink)" }}>
           {blocker.no} {blocker.title}
         </b>
         을(를) 먼저 끝내야 합니다.
@@ -818,8 +839,8 @@ function PanelBtn({
     ? "var(--ipg-accent)"
     : primary
       ? "var(--ipg-accent-deep)"
-      : "#fff";
-  const fg = active || primary ? "#fff" : "var(--ipg-ink)";
+      : "var(--ipg-surface-2)";
+  const fg = active || primary ? "#fff" : "var(--ipg-d-ink)";
   return (
     <button
       type="button"
@@ -829,14 +850,14 @@ function PanelBtn({
       className={cn(
         "flex h-[34px] items-center gap-2 rounded-[var(--ipg-r-md)] px-3 font-semibold transition-all",
         compact ? "flex-1 justify-center" : "w-full",
-        !disabled && (active || primary ? "hover:brightness-110" : "hover:bg-slate-50"),
+        !disabled && "hover:brightness-125",
         disabled && "cursor-not-allowed opacity-40"
       )}
       style={{
         fontSize: "var(--ipg-t-md)",
         background: bg,
         color: fg,
-        border: active || primary ? "1px solid transparent" : "1px solid var(--ipg-line-strong)",
+        border: active || primary ? "1px solid transparent" : "1px solid var(--ipg-d-line-strong)",
         boxShadow: active || primary ? "var(--ipg-shadow-1)" : undefined,
       }}
     >
@@ -863,13 +884,13 @@ function FileBtn({
     <label
       className={cn(
         "flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[var(--ipg-r-md)] px-3 font-semibold transition-all",
-        primary ? "hover:brightness-110" : "hover:bg-slate-50"
+        "hover:brightness-125"
       )}
       style={{
         fontSize: "var(--ipg-t-md)",
-        background: primary ? "var(--ipg-accent-deep)" : "#fff",
-        color: primary ? "#fff" : "var(--ipg-ink)",
-        border: primary ? "1px solid transparent" : "1px solid var(--ipg-line-strong)",
+        background: primary ? "var(--ipg-accent-deep)" : "var(--ipg-surface-2)",
+        color: primary ? "#fff" : "var(--ipg-d-ink)",
+        border: primary ? "1px solid transparent" : "1px solid var(--ipg-d-line-strong)",
         boxShadow: primary ? "var(--ipg-shadow-1)" : undefined,
       }}
     >
@@ -909,16 +930,16 @@ function CountRow({
   return (
     <div
       className="flex items-center justify-between rounded-[var(--ipg-r-md)] px-3 py-2"
-      style={{ border: "1px solid var(--ipg-line)" }}
+      style={{ border: "1px solid var(--ipg-d-line)" }}
     >
-      <span style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-ink-2)" }}>{label}</span>
+      <span style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-2)" }}>{label}</span>
       <div className="flex items-center gap-2">
         <span
           className="ipg-num font-bold"
-          style={{ fontSize: "13.5px", color: count > 0 ? "var(--ipg-ink)" : "var(--ipg-ink-3)" }}
+          style={{ fontSize: "13.5px", color: count > 0 ? "var(--ipg-d-ink)" : "var(--ipg-d-ink-3)" }}
         >
           {count}
-          <span className="ml-0.5 text-[11px] font-medium" style={{ color: "var(--ipg-ink-3)" }}>
+          <span className="ml-0.5 text-[11px] font-medium" style={{ color: "var(--ipg-d-ink-3)" }}>
             {unit}
           </span>
         </span>
@@ -932,9 +953,9 @@ function CountRow({
               count === 0 && "cursor-not-allowed opacity-40"
             )}
             style={{
-              border: `1px solid ${active ? "var(--ipg-accent)" : "var(--ipg-line-strong)"}`,
-              background: active ? "var(--ipg-accent-soft)" : "#fff",
-              color: active ? "var(--ipg-accent-deep)" : "var(--ipg-ink-2)",
+              border: `1px solid ${active ? "var(--ipg-accent)" : "var(--ipg-d-line-strong)"}`,
+              background: active ? "rgba(26,126,224,.20)" : "transparent",
+              color: active ? "#8ecbff" : "var(--ipg-d-ink-2)",
             }}
           >
             {Icon && <Icon className="h-3 w-3" />}
@@ -961,7 +982,7 @@ function TextLink({
       onClick={onClick}
       disabled={disabled}
       className="inline-flex items-center gap-1 self-start font-bold transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-35"
-      style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-accent-deep)" }}
+      style={{ fontSize: "var(--ipg-t-sm)", color: "#7cc0ff" }}
     >
       {children}
       <ArrowRight className="h-3 w-3" />
@@ -990,13 +1011,13 @@ function MiniBtn({
       title={label}
       className={cn(
         "flex h-7 items-center gap-1 rounded-[var(--ipg-r-sm)] px-2 font-semibold transition-colors",
-        !disabled && !active && "hover:bg-white",
+        !disabled && !active && "hover:brightness-125",
         disabled && "cursor-not-allowed opacity-35"
       )}
       style={{
         fontSize: "var(--ipg-t-sm)",
         background: active ? "var(--ipg-accent)" : "transparent",
-        color: active ? "#fff" : "var(--ipg-ink-2)",
+        color: active ? "#fff" : "var(--ipg-d-ink-2)",
       }}
     >
       <Icon className="h-3.5 w-3.5" />

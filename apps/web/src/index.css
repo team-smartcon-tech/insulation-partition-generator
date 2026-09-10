@@ -238,3 +238,121 @@
   outline: 2px solid color-mix(in srgb, var(--ipg-accent) 55%, transparent);
   outline-offset: 1px;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   다크 인스펙터 (.ipg-dark)
+   캔버스·레일·상태바가 다크인데 패널만 흰색이라 눈이 튀었다. 통일한다.
+   패널 내부는 원래 라이트 기준으로 쓰인 유틸 클래스가 수백 군데라, 클래스
+   문자열을 전부 고치는 대신 **쓰이는 17종만** 이 스코프에서 뒤집는다.
+   (새 코드는 아래 --ipg-surface-*/--ipg-d-* 토큰을 직접 쓸 것)
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  --ipg-surface-1: #111f2c; /* 패널 본체 */
+  --ipg-surface-2: #0d1926; /* 헤더·보조 영역 */
+  --ipg-surface-3: #0a1521; /* 입력칸 */
+  --ipg-d-ink: #e8eef6;
+  --ipg-d-ink-2: #a3b4c6;
+  --ipg-d-ink-3: #74889f;
+  --ipg-d-line: rgba(255, 255, 255, 0.09);
+  --ipg-d-line-strong: rgba(255, 255, 255, 0.17);
+}
+
+.ipg-dark {
+  color: var(--ipg-d-ink);
+}
+
+/* 표면 */
+.ipg-dark .bg-white {
+  background-color: var(--ipg-surface-1) !important;
+}
+.ipg-dark .bg-slate-50,
+.ipg-dark .bg-slate-50\/70,
+.ipg-dark .bg-slate-100 {
+  background-color: var(--ipg-surface-2) !important;
+}
+.ipg-dark .hover\:bg-slate-100:hover,
+.ipg-dark .hover\:bg-slate-50:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+.ipg-dark .hover\:bg-slate-200:hover {
+  background-color: rgba(255, 255, 255, 0.11) !important;
+}
+/* Section 헤더의 흰 그라디언트 — 다크에선 단색으로 */
+.ipg-dark .from-slate-50 {
+  background-image: none !important;
+  background-color: var(--ipg-surface-2) !important;
+}
+
+/* 선 */
+.ipg-dark .border-slate-200,
+.ipg-dark .divide-slate-200 > * + * {
+  border-color: var(--ipg-d-line) !important;
+}
+.ipg-dark .border-slate-300 {
+  border-color: var(--ipg-d-line-strong) !important;
+}
+
+/* 글자 */
+.ipg-dark .text-slate-900,
+.ipg-dark .text-slate-800,
+.ipg-dark .text-slate-700 {
+  color: var(--ipg-d-ink) !important;
+}
+.ipg-dark .text-slate-600,
+.ipg-dark .text-slate-500 {
+  color: var(--ipg-d-ink-2) !important;
+}
+.ipg-dark .text-slate-400,
+.ipg-dark .text-slate-300 {
+  color: var(--ipg-d-ink-3) !important;
+}
+.ipg-dark .hover\:text-slate-700:hover {
+  color: var(--ipg-d-ink) !important;
+}
+.ipg-dark .ipg-label {
+  color: var(--ipg-d-ink-3);
+}
+
+/* 입력칸 — 다크에서는 바닥을 파고, 포커스만 살린다 */
+.ipg-dark input[type="text"],
+.ipg-dark input[type="number"],
+.ipg-dark select,
+.ipg-dark textarea {
+  background-color: var(--ipg-surface-3) !important;
+  border-color: var(--ipg-d-line-strong) !important;
+  color: var(--ipg-d-ink) !important;
+}
+.ipg-dark input::placeholder {
+  color: var(--ipg-d-ink-3) !important;
+}
+.ipg-dark input[type="text"]:hover,
+.ipg-dark input[type="number"]:hover,
+.ipg-dark select:hover {
+  border-color: rgba(255, 255, 255, 0.28) !important;
+}
+.ipg-dark input[type="text"]:focus,
+.ipg-dark input[type="number"]:focus,
+.ipg-dark select:focus {
+  border-color: var(--ipg-accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ipg-accent) 26%, transparent) !important;
+}
+.ipg-dark option {
+  color: var(--ipg-d-ink);
+  background: var(--ipg-surface-1);
+}
+/* 강조 배경(연한 파랑·호박 등)은 다크에서 그대로 두면 눈이 아프다 */
+.ipg-dark .bg-\[\#004791\]\/8 {
+  background-color: rgba(26, 126, 224, 0.18) !important;
+}
+
+/* 리본과 공유하는 컨트롤(창 프리셋 칩·층 그룹 버튼)의 선택 상태는 밝은 하늘색
+   하드코딩이라 다크 패널에서 종이처럼 튄다 — 같은 강조를 어두운 톤으로 바꾼다. */
+.ipg-dark .bg-\[\#cfe3f7\] {
+  background-color: rgba(26, 126, 224, 0.24) !important;
+}
+.ipg-dark .border-\[\#7fb3e0\] {
+  border-color: rgba(26, 126, 224, 0.55) !important;
+}
+.ipg-dark .text-\[\#0a4a86\] {
+  color: #8ecbff !important;
+}
