@@ -1,4 +1,4 @@
-import { Route, Switch } from "wouter";
+import { Redirect, Route, Switch } from "wouter";
 import { Toaster } from "sonner";
 import AnnouncementsPage from "@/features/announcements/AnnouncementsPage";
 import ElevationGeneratorPage from "@/features/elevation/ElevationGeneratorPage";
@@ -6,7 +6,6 @@ import LoginPage from "@/features/auth/LoginPage";
 import AuthGate from "@/features/auth/AuthGate";
 import FormsPage from "@/features/forms/FormsPage";
 import HomePage from "@/features/home/HomePage";
-import NewItemPage from "@/features/new-item";
 
 export default function App() {
   return (
@@ -30,10 +29,10 @@ export default function App() {
             <AnnouncementsPage />
           </AuthGate>
         </Route>
+        {/* 옛 "새 아이템" 자리 — 우미 양식 모음집이 대체했다.
+            이미 이 주소로 열어 둔 탭·북마크가 있어 없는 페이지로 보내지 않는다. */}
         <Route path="/tools/new-item">
-          <AuthGate>
-            <NewItemPage />
-          </AuthGate>
+          <Redirect to="/tools/forms" replace />
         </Route>
         {/* 도구: 우미 양식 모음집 */}
         <Route path="/tools/forms">
