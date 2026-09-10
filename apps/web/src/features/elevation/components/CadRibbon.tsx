@@ -182,18 +182,18 @@ function BigBtn({
         "flex w-[54px] shrink-0 flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 transition-colors",
         "text-[10px] font-medium leading-tight",
         active
-          ? "bg-[#cfe3f7] text-[#0a4a86] ring-1 ring-[#7fb3e0]"
-          : "text-slate-700 hover:bg-[#e3ecf6]",
+          ? "bg-[var(--ipg-accent-soft)] text-[var(--ipg-accent-deep)] ring-1 ring-[var(--ipg-accent-line)]"
+          : "text-[var(--ipg-ink)] hover:bg-[var(--ipg-panel-sub)]",
         disabled && "cursor-not-allowed opacity-35 hover:bg-transparent"
       )}
     >
       <Icon
         className={cn(
           "h-[20px] w-[20px]",
-          tone === "primary" && "text-[#0a63b8]",
+          tone === "primary" && "text-[var(--ipg-accent)]",
           tone === "danger" && "text-rose-600",
           tone === "success" && "text-emerald-600",
-          active && "text-[#0a4a86]"
+          active && "text-[var(--ipg-accent-deep)]"
         )}
       />
       <span className="w-full whitespace-pre-line break-keep text-center">
@@ -230,8 +230,8 @@ function SmallBtn({
       className={cn(
         "flex h-[20px] items-center gap-1.5 rounded px-1.5 text-[10.5px] font-medium transition-colors",
         active
-          ? "bg-[#cfe3f7] text-[#0a4a86] ring-1 ring-[#7fb3e0]"
-          : "text-slate-700 hover:bg-[#e3ecf6]",
+          ? "bg-[var(--ipg-accent-soft)] text-[var(--ipg-accent-deep)] ring-1 ring-[var(--ipg-accent-line)]"
+          : "text-[var(--ipg-ink)] hover:bg-[var(--ipg-panel-sub)]",
         disabled && "cursor-not-allowed opacity-35 hover:bg-transparent"
       )}
     >
@@ -258,7 +258,7 @@ function Group({
   wide?: boolean;
 }) {
   return (
-    <div className="flex h-full min-w-0 shrink-0 flex-col border-r border-[#c9d2dc] px-2 pb-0.5 pt-1">
+    <div className="flex h-full min-w-0 shrink-0 flex-col border-r border-[var(--ipg-line)] px-2 pb-0.5 pt-1">
       <div
         className={cn(
           "flex min-h-0 flex-1 items-start gap-1.5 overflow-hidden",
@@ -267,9 +267,7 @@ function Group({
       >
         {children}
       </div>
-      <div className="shrink-0 pt-1 text-center text-[10px] font-medium leading-none text-slate-400">
-        {title}
-      </div>
+      <div className="ipg-label shrink-0 pt-1 text-center leading-none">{title}</div>
     </div>
   );
 }
@@ -298,7 +296,7 @@ function FileBigBtn({
   return (
     <label
       title={title ?? label}
-      className="flex w-[54px] shrink-0 cursor-pointer flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 text-[10px] font-medium leading-tight text-slate-700 transition-colors hover:bg-[#e3ecf6]"
+      className="flex w-[54px] shrink-0 cursor-pointer flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 text-[10px] font-medium leading-tight text-[var(--ipg-ink)] transition-colors hover:bg-[var(--ipg-panel-sub)]"
     >
       <Icon
         className={cn("h-[20px] w-[20px]", tone === "primary" && "text-[#0a63b8]")}
@@ -332,7 +330,13 @@ export default function CadRibbon(p: CadRibbonProps) {
   return (
     <div className="shrink-0 select-none">
       {/* ① 타이틀바 + 퀵액세스 툴바 */}
-      <div className="flex h-10 items-center gap-2 bg-gradient-to-r from-[#06203f] via-[#0a3567] to-[#0d4a8f] px-2.5 text-white">
+      <div
+        className="flex h-10 items-center gap-2 px-2.5 text-white"
+        style={{
+          background: "var(--ipg-rail)",
+          borderBottom: "1px solid rgba(255,255,255,.08)",
+        }}
+      >
         <SdMark className="h-6 w-6 shrink-0" />
         <div className="flex items-center gap-0.5">
           <QatBtn
@@ -426,7 +430,7 @@ export default function CadRibbon(p: CadRibbonProps) {
       {/* ② 리본 탭 — compact(기본) 이면 접는다. 좌측 단계 레일이 기본 안내를 맡는다. */}
       {p.compact ? null : (
       <>
-      <div className="flex items-end gap-0.5 border-b border-[#dde5ef] bg-[#eef3f9] px-2 pt-1">
+      <div className="flex items-end gap-0.5 border-b border-[var(--ipg-line)] bg-[var(--ipg-panel-sub)] px-2 pt-1">
         {TABS.map(t => (
           <button
             key={t}
@@ -435,7 +439,7 @@ export default function CadRibbon(p: CadRibbonProps) {
             className={cn(
               "relative rounded-t-lg px-3.5 py-1.5 text-[12px] font-semibold transition-colors",
               tab === t
-                ? "bg-white text-[#0a4a86] shadow-[0_-1px_0_#dde5ef_inset]"
+                ? "bg-white text-[var(--ipg-accent-deep)] shadow-[0_-1px_0_var(--ipg-line)_inset]"
                 : "text-slate-500 hover:bg-white/60 hover:text-slate-700"
             )}
           >
@@ -445,7 +449,7 @@ export default function CadRibbon(p: CadRibbonProps) {
       </div>
 
       {/* ③ 리본 패널 */}
-      <div className="flex h-[96px] items-stretch overflow-x-auto overflow-y-hidden border-b border-[#dde5ef] bg-white px-1">
+      <div className="ipg-scroll flex h-[96px] items-stretch overflow-x-auto overflow-y-hidden border-b border-[var(--ipg-line)] bg-white px-1">
         {tab === "홈" && (
           <>
             <Group title="그리기">

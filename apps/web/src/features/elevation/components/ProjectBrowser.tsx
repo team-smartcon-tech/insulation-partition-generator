@@ -186,10 +186,16 @@ export default function ProjectBrowser({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
-      <div className="flex h-[min(92vh,900px)] w-[min(1480px,96vw)] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_40px_120px_-20px_rgba(3,15,35,0.7)]">
+    <div className="ipg-ui fixed inset-0 z-[90] flex items-center justify-center bg-[#050d16]/70 p-4 backdrop-blur-sm">
+      <div
+        className="flex h-[min(92vh,900px)] w-[min(1480px,96vw)] flex-col overflow-hidden rounded-[18px] bg-white"
+        style={{ boxShadow: "0 40px 120px -24px rgba(3,15,35,.75)" }}
+      >
         {/* ── 헤더 (네이비 배너) ── */}
-        <header className="relative shrink-0 overflow-hidden bg-gradient-to-r from-[#06203f] via-[#0a3c74] to-[#0a63b8] px-6 py-4 text-white">
+        <header
+          className="relative shrink-0 overflow-hidden px-6 py-4 text-white"
+          style={{ background: "var(--ipg-rail)" }}
+        >
           <div
             className="pointer-events-none absolute inset-0 opacity-[0.18]"
             style={{
@@ -251,7 +257,7 @@ export default function ProjectBrowser({
                 <button
                   type="button"
                   onClick={() => addProject(openSiteId === UNASSIGNED ? null : openSiteId)}
-                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[13px] font-bold text-[#0a5aa8] transition-transform hover:-translate-y-0.5"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[13px] font-bold text-[var(--ipg-accent-deep)] transition-transform hover:-translate-y-0.5"
                 >
                   <FolderPlus className="h-4 w-4" />
                   세부 프로젝트 추가
@@ -260,7 +266,7 @@ export default function ProjectBrowser({
                 <button
                   type="button"
                   onClick={() => setSiteForm({ id: null, name: "", thumb: null })}
-                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[13px] font-bold text-[#0a5aa8] transition-transform hover:-translate-y-0.5"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[13px] font-bold text-[var(--ipg-accent-deep)] transition-transform hover:-translate-y-0.5"
                 >
                   <Plus className="h-4 w-4" />
                   현장 추가
@@ -279,7 +285,7 @@ export default function ProjectBrowser({
         </header>
 
         {/* ── 본문 ── */}
-        <div className="flex-1 overflow-auto bg-slate-50 px-6 py-5">
+        <div className="ipg-scroll flex-1 overflow-auto px-6 py-5" style={{ background: "var(--ipg-panel-sub)" }}>
           {/* 현장 목록을 못 읽는 상황(마이그레이션 전 등) — 기존 프로젝트는 미분류로 계속 열 수 있다 */}
           {sitesError && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">
@@ -423,7 +429,7 @@ export default function ProjectBrowser({
                         setQuery("");
                         setOpenSiteId(UNASSIGNED);
                       }}
-                      className="flex flex-col overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-white/60 text-left transition-colors hover:border-[#0a63b8]/50 hover:bg-white"
+                      className="flex flex-col overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-white/60 text-left transition-colors hover:border-[var(--ipg-accent)]/50 hover:bg-white"
                     >
                       <div className="flex aspect-[16/10] w-full items-center justify-center bg-slate-100/70">
                         <Layers className="h-10 w-10 text-slate-300" strokeWidth={1.6} />
@@ -471,8 +477,8 @@ function SiteCard({
   return (
     <div
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-2xl border bg-white text-left shadow-[0_1px_3px_rgba(16,24,40,0.06),0_10px_24px_-14px_rgba(16,24,40,0.16)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_24px_48px_-16px_rgba(0,71,145,0.35)]",
-        hasActive ? "border-[#0a63b8]" : "border-slate-200"
+        "group relative flex flex-col overflow-hidden rounded-2xl border bg-white text-left shadow-[0_1px_3px_rgba(16,24,40,0.06),0_10px_24px_-14px_rgba(16,24,40,0.16)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[var(--ipg-shadow-2)]",
+        hasActive ? "border-[var(--ipg-accent)]" : "border-slate-200"
       )}
     >
       <button type="button" onClick={onOpen} className="text-left">
@@ -502,7 +508,7 @@ function SiteCard({
             </div>
           )}
           {hasActive && (
-            <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/92 px-2.5 py-1 text-[11px] font-bold text-[#0a63b8] shadow-sm">
+            <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/92 px-2.5 py-1 text-[11px] font-bold text-[var(--ipg-accent-deep)] shadow-sm">
               <Check className="h-3 w-3" />열림
             </span>
           )}
@@ -512,9 +518,9 @@ function SiteCard({
             {site.name}
           </div>
           <div className="mt-1.5 flex items-center gap-2 text-[12.5px] text-slate-500">
-            <span className="font-semibold text-slate-600">세부 {stat.projectCount}</span>
+            <span className="ipg-num font-semibold text-slate-600">세부 {stat.projectCount}</span>
             <span className="text-slate-300">·</span>
-            <span>REV {stat.revTotal}</span>
+            <span className="ipg-num">REV {stat.revTotal}</span>
             <span className="text-slate-300">·</span>
             <span className="text-slate-400">{fmtDate(stat.latestAt)}</span>
           </div>
@@ -554,7 +560,7 @@ function ProjectCard({
     <div
       className={cn(
         "flex flex-col overflow-hidden rounded-xl border bg-white shadow-sm transition-colors",
-        active ? "border-[#0a63b8] ring-1 ring-[#0a63b8]/25" : "border-slate-200"
+        active ? "border-[var(--ipg-accent)] ring-1 ring-[var(--ipg-accent)]/25" : "border-slate-200"
       )}
     >
       <div className="flex items-start gap-3 p-4">
@@ -565,7 +571,7 @@ function ProjectCard({
           <div className="flex items-center gap-2">
             <span className="truncate text-[15px] font-bold text-slate-900">{project.name}</span>
             {active && (
-              <span className="shrink-0 rounded-full bg-[#0a63b8]/10 px-2 py-0.5 text-[10.5px] font-bold text-[#0a63b8]">
+              <span className="shrink-0 rounded-full bg-[#0a63b8]/10 px-2 py-0.5 text-[10.5px] font-bold text-[var(--ipg-accent-deep)]">
                 열림
               </span>
             )}
@@ -583,7 +589,7 @@ function ProjectCard({
         <button
           type="button"
           onClick={() => onOpen(null)}
-          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#004791] px-3 text-[12.5px] font-bold text-white transition-colors hover:bg-[#003a78]"
+          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-3 text-[12.5px] font-bold text-white transition-all hover:brightness-110"
         >
           열기
           {project.latest_rev_no > 0 && (
@@ -614,7 +620,7 @@ function ProjectCard({
         <select
           value={project.site_id ?? ""}
           onChange={(e) => onMove(e.target.value || null)}
-          className="h-7 flex-1 rounded border border-slate-200 bg-white px-1.5 text-[12px] text-slate-700 outline-none focus:border-[#0a63b8]"
+          className="h-7 flex-1 rounded border border-slate-200 bg-white px-1.5 text-[12px] text-slate-700 outline-none focus:border-[var(--ipg-accent)]"
         >
           <option value="">미분류</option>
           {sites.map((s) => (
@@ -723,7 +729,7 @@ function SiteForm({
   );
 
   return (
-    <div className="mb-5 rounded-xl border border-[#0a63b8]/25 bg-white p-4 shadow-sm">
+    <div className="mb-5 rounded-xl border border-[var(--ipg-accent)]/25 bg-white p-4 shadow-sm">
       <div className="mb-3 text-[13.5px] font-bold text-slate-800">
         {form.id ? "현장 정보 수정" : "새 현장 추가"}
       </div>
@@ -732,7 +738,7 @@ function SiteForm({
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
-          className="relative h-[92px] w-[148px] shrink-0 overflow-hidden rounded-lg border border-dashed border-slate-300 bg-slate-50 transition-colors hover:border-[#0a63b8]"
+          className="relative h-[92px] w-[148px] shrink-0 overflow-hidden rounded-lg border border-dashed border-slate-300 bg-slate-50 transition-colors hover:border-[var(--ipg-accent)]"
         >
           {previewUrl ? (
             <img src={previewUrl} alt="미리보기" className="h-full w-full object-cover" />
@@ -766,7 +772,7 @@ function SiteForm({
               if (e.key === "Escape") onCancel();
             }}
             placeholder="예: 화성남양 2차"
-            className="h-10 w-full rounded-lg border border-slate-300 px-3 text-[13.5px] outline-none focus:border-[#0a63b8] focus:ring-1 focus:ring-[#0a63b8]/25"
+            className="h-10 w-full rounded-lg border border-slate-300 px-3 text-[13.5px] outline-none focus:border-[var(--ipg-accent)]"
           />
         </div>
 
@@ -775,7 +781,7 @@ function SiteForm({
             type="button"
             onClick={onSubmit}
             disabled={busy}
-            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#004791] px-5 text-[13px] font-bold text-white transition-colors hover:bg-[#003a78] disabled:opacity-60"
+            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-5 text-[13px] font-bold text-white transition-all hover:brightness-110 disabled:opacity-60"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
             저장
@@ -823,7 +829,7 @@ function IconBtn({
         danger
           ? "border-rose-200 text-rose-500 hover:bg-rose-50"
           : active
-            ? "border-[#0a63b8] bg-blue-50 text-[#0a63b8]"
+            ? "border-[var(--ipg-accent)] bg-blue-50 text-[var(--ipg-accent-deep)]"
             : "border-slate-200 text-slate-500 hover:bg-slate-100",
         disabled && "cursor-not-allowed opacity-40 hover:bg-white/95"
       )}
@@ -855,7 +861,7 @@ function EmptyState({
         <button
           type="button"
           onClick={onAction}
-          className="mt-5 inline-flex h-10 items-center gap-1.5 rounded-lg bg-[#004791] px-5 text-[13px] font-bold text-white transition-colors hover:bg-[#003a78]"
+          className="mt-5 inline-flex h-10 items-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-5 text-[13px] font-bold text-white transition-all hover:brightness-110"
         >
           <Plus className="h-4 w-4" />
           {actionLabel}

@@ -4171,7 +4171,7 @@ export default function ElevationGeneratorPage() {
                     ] as const
                   ).map(([lab, val, on]) => (
                     <div key={lab} className={stacked ? "w-full" : "w-[62px]"}>
-                      <div className="mb-[2px] text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+                      <div className="ipg-label mb-[2px]">
                         {lab}
                       </div>
                       <NumberInput value={val} onChange={on} suffix="mm" step={50} compact />
@@ -4853,7 +4853,7 @@ export default function ElevationGeneratorPage() {
                     </div>
                   </div>
                   <div className="col-span-2 flex flex-col gap-1 rounded-md border border-slate-200 p-1.5">
-                    <span className="text-[9.5px] text-slate-400 font-semibold uppercase">
+                    <span className="ipg-label">
                       노출 프리셋 (1P / 2P 두께 mm)
                     </span>
                     {exposurePresets.map((p, pi) => (
@@ -4876,7 +4876,7 @@ export default function ElevationGeneratorPage() {
                           }
                           className="flex-1 min-w-0 border border-slate-300 rounded px-1 h-6 bg-white text-slate-700"
                         />
-                        <span className="w-8 text-right text-[9px] text-slate-400 tabular-nums">
+                        <span className="w-8 text-right text-[11px] text-slate-400 tabular-nums">
                           {p.ply1 + p.ply2}T
                         </span>
                         <input
@@ -4939,7 +4939,7 @@ export default function ElevationGeneratorPage() {
                 {/* 동 목록 */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-[9.5px] text-slate-400 font-semibold uppercase">
+                    <span className="ipg-label">
                       동 목록
                     </span>
                     <div className="flex items-center gap-1">
@@ -4995,7 +4995,7 @@ export default function ElevationGeneratorPage() {
                 {/* 타입 목록 */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-[9.5px] text-slate-400 font-semibold uppercase">
+                    <span className="ipg-label">
                       타입 목록
                     </span>
                     <button
@@ -5038,7 +5038,7 @@ export default function ElevationGeneratorPage() {
                 {typeMatrix.buildings.length > 0 &&
                   typeMatrix.types.length > 0 && (
                     <div className="space-y-1">
-                      <span className="text-[9.5px] text-slate-400 font-semibold uppercase">
+                      <span className="ipg-label">
                         동별 타입 배분 · 세대수
                       </span>
                       {/* 세대수 3칸이 무슨 칸인지 몰라 헤매던 문제 → 고정 열 머리글.
@@ -5061,7 +5061,7 @@ export default function ElevationGeneratorPage() {
                                 {b.name}
                               </span>
                               {/* 이 동만 층고가 다를 때 예외 입력 — 비우면 전역 층고를 따른다 */}
-                              <span className="ml-auto text-[9px] text-slate-400 shrink-0">
+                              <span className="ml-auto text-[11px] text-slate-400 shrink-0">
                                 층고예외
                               </span>
                               {FLOOR_GROUPS.map(g => (
@@ -5311,7 +5311,7 @@ export default function ElevationGeneratorPage() {
                         적용값만 읽기 전용으로 보여준다(어느 값이 적용되는지 헷갈리지 않게). */}
                     {hasGroupHeights ? (
                       <div className="col-span-2 rounded border border-slate-200 bg-slate-50 px-1.5 py-1">
-                        <div className="text-[9.5px] text-slate-400 font-semibold uppercase">
+                        <div className="ipg-label">
                           층고 (층 그룹)
                         </div>
                         <div className="text-[10.5px] text-slate-700 tabular-nums">
@@ -5321,7 +5321,7 @@ export default function ElevationGeneratorPage() {
                           ).join(" · ")}
                           mm
                         </div>
-                        <div className="text-[9px] text-slate-500">
+                        <div className="text-[11.5px] text-slate-500">
                           리본 '설정 &gt; 층고'에서 변경 · 동별 예외는 '동·타입 설정'
                         </div>
                       </div>
@@ -5487,7 +5487,7 @@ export default function ElevationGeneratorPage() {
                                 </div>
                               ))}
                             </div>
-                            <span className="text-[9px] text-slate-500">
+                            <span className="text-[11.5px] text-slate-500">
                               S# = 변 · 우측 두 칸 = 1P/2P 두께(mm). 커스텀은 직접 입력.
                             </span>
                           </div>
@@ -5746,22 +5746,158 @@ export default function ElevationGeneratorPage() {
                 </div>
               </div>
             )}
+            {/* 프리셋 */}
+            {dlg === "preset" && (
+            <>
+            <div className="px-2 py-1.5 space-y-1">
+              {presets.map(p => {
+                const active = p.id === selectedPresetId;
+                return (
+                  <div
+                    key={p.id}
+                    className={cn(
+                      "rounded-md border transition-colors overflow-hidden",
+                      active
+                        ? "border-[#2a86e0] shadow-sm shadow-blue-900/20"
+                        : "border-slate-200"
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPresetId(p.id)}
+                      className={cn(
+                        "w-full text-left px-2 py-1.5 text-[11px] flex items-center justify-between gap-2 transition-colors",
+                        active
+                          ? "bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white"
+                          : "hover:bg-slate-100"
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm border"
+                          style={{
+                            backgroundColor: KIND_COLOR[p.kind] + "44",
+                            borderColor: KIND_COLOR[p.kind],
+                          }}
+                        />
+                        <b>{p.label}</b>
+                        <span className={active ? "text-blue-100" : "text-slate-400"}>
+                          ({KIND_LABEL[p.kind]})
+                        </span>
+                      </span>
+                      <span
+                        className={cn(
+                          "font-mono text-[10px]",
+                          active ? "text-blue-100" : "text-slate-500"
+                        )}
+                      >
+                        {p.width}×{p.height}
+                        {p.sill ? ` ↑${p.sill}` : ""}
+                      </span>
+                    </button>
+                    {active && (
+                      <div className="grid grid-cols-3 gap-1.5 px-2 py-2 bg-white border-t border-slate-200">
+                        <LabelInput
+                          label="폭"
+                          control={
+                            <NumberInput
+                              value={p.width}
+                              onChange={v => updatePreset(p.id, { width: v })}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                        <LabelInput
+                          label="높이"
+                          control={
+                            <NumberInput
+                              value={p.height}
+                              onChange={v => updatePreset(p.id, { height: v })}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                        <LabelInput
+                          label="SILL"
+                          control={
+                            <NumberInput
+                              value={p.sill}
+                              onChange={v => updatePreset(p.id, { sill: v })}
+                              suffix="mm"
+                              step={50}
+                              compact
+                            />
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="px-3 py-1.5 border-t border-slate-200 space-y-1.5">
+              <label className="flex items-center gap-2 text-[11px] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoExtract}
+                  onChange={ev => setAutoExtract(ev.target.checked)}
+                  className="w-3.5 h-3.5"
+                />
+                <Wand2 className="w-3 h-3 text-slate-500" />
+                <span className="text-slate-700">
+                  근처 TEXT에서 폭×높이 자동 추출
+                </span>
+              </label>
+              {autoExtract && (
+                <div className="pl-5">
+                  <LabelInput
+                    label="기본 SILL (자동 인식 시 적용)"
+                    control={
+                      <NumberInput
+                        value={defaultSill}
+                        onChange={setDefaultSill}
+                        suffix="mm"
+                        step={50}
+                        compact
+                      />
+                    }
+                  />
+                  <p className="mt-1 text-[10px] text-slate-400 leading-tight">
+                    평면도의 창호 라벨(예: 18×11.8)을 클릭하면 폭/높이는 자동
+                    인식되고, sill 만 위 값으로 적용됩니다.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            </>
+            )}
             </div>
             </aside>
         )}
         </div>
         </div>
 
+        {/* 선택 오프닝 정보 — 상태바 바로 위에 붙는 다크 크롬 줄.
+            (밝은 배경 기준으로 쓰여 있어 다크 셸에서 거의 안 보이던 것을 고침) */}
         {selectedOpening && (
-          <div className="text-[11px] text-slate-500 flex items-center gap-2">
-            <Info className="w-3.5 h-3.5" />
-            선택됨: <b className="text-slate-700">{selectedOpening.label}</b> ·
+          <div
+            className="ipg-num flex shrink-0 items-center gap-2 px-3 py-1.5 text-[11.5px] text-white/60"
+            style={{ background: "var(--ipg-rail)", borderTop: "1px solid rgba(255,255,255,.08)" }}
+          >
+            <Info className="h-3.5 w-3.5 shrink-0 text-white/35" />
+            선택됨: <b className="text-white/90">{selectedOpening.label}</b> ·
             폭 {selectedOpening.width}mm · 높이 {selectedOpening.height}mm ·
             sill {selectedOpening.sill}mm
             <button
               type="button"
               onClick={() => setSelectedOpeningId(null)}
-              className="ml-2 inline-flex items-center gap-0.5 text-slate-400 hover:text-slate-700"
+              className="ml-2 inline-flex items-center gap-0.5 text-white/40 transition-colors hover:text-white/90"
             >
               <X className="w-3 h-3" /> 해제
             </button>
@@ -6213,138 +6349,6 @@ export default function ElevationGeneratorPage() {
               </div>
             );
           })()}
-
-        {/* 프리셋 */}
-        {dlg === "preset" && (
-        <Section icon={Square} title="오프닝 프리셋" accent="#d97706">
-        <div className="px-2 py-1.5 space-y-1">
-          {presets.map(p => {
-            const active = p.id === selectedPresetId;
-            return (
-              <div
-                key={p.id}
-                className={cn(
-                  "rounded-md border transition-colors overflow-hidden",
-                  active
-                    ? "border-[#2a86e0] shadow-sm shadow-blue-900/20"
-                    : "border-slate-200"
-                )}
-              >
-                <button
-                  type="button"
-                  onClick={() => setSelectedPresetId(p.id)}
-                  className={cn(
-                    "w-full text-left px-2 py-1.5 text-[11px] flex items-center justify-between gap-2 transition-colors",
-                    active
-                      ? "bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white"
-                      : "hover:bg-slate-100"
-                  )}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <span
-                      className="w-2.5 h-2.5 rounded-sm border"
-                      style={{
-                        backgroundColor: KIND_COLOR[p.kind] + "44",
-                        borderColor: KIND_COLOR[p.kind],
-                      }}
-                    />
-                    <b>{p.label}</b>
-                    <span className={active ? "text-blue-100" : "text-slate-400"}>
-                      ({KIND_LABEL[p.kind]})
-                    </span>
-                  </span>
-                  <span
-                    className={cn(
-                      "font-mono text-[10px]",
-                      active ? "text-blue-100" : "text-slate-500"
-                    )}
-                  >
-                    {p.width}×{p.height}
-                    {p.sill ? ` ↑${p.sill}` : ""}
-                  </span>
-                </button>
-                {active && (
-                  <div className="grid grid-cols-3 gap-1.5 px-2 py-2 bg-white border-t border-slate-200">
-                    <LabelInput
-                      label="폭"
-                      control={
-                        <NumberInput
-                          value={p.width}
-                          onChange={v => updatePreset(p.id, { width: v })}
-                          suffix="mm"
-                          step={50}
-                          compact
-                        />
-                      }
-                    />
-                    <LabelInput
-                      label="높이"
-                      control={
-                        <NumberInput
-                          value={p.height}
-                          onChange={v => updatePreset(p.id, { height: v })}
-                          suffix="mm"
-                          step={50}
-                          compact
-                        />
-                      }
-                    />
-                    <LabelInput
-                      label="SILL"
-                      control={
-                        <NumberInput
-                          value={p.sill}
-                          onChange={v => updatePreset(p.id, { sill: v })}
-                          suffix="mm"
-                          step={50}
-                          compact
-                        />
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="px-3 py-1.5 border-t border-slate-200 space-y-1.5">
-          <label className="flex items-center gap-2 text-[11px] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoExtract}
-              onChange={ev => setAutoExtract(ev.target.checked)}
-              className="w-3.5 h-3.5"
-            />
-            <Wand2 className="w-3 h-3 text-slate-500" />
-            <span className="text-slate-700">
-              근처 TEXT에서 폭×높이 자동 추출
-            </span>
-          </label>
-          {autoExtract && (
-            <div className="pl-5">
-              <LabelInput
-                label="기본 SILL (자동 인식 시 적용)"
-                control={
-                  <NumberInput
-                    value={defaultSill}
-                    onChange={setDefaultSill}
-                    suffix="mm"
-                    step={50}
-                    compact
-                  />
-                }
-              />
-              <p className="mt-1 text-[10px] text-slate-400 leading-tight">
-                평면도의 창호 라벨(예: 18×11.8)을 클릭하면 폭/높이는 자동
-                인식되고, sill 만 위 값으로 적용됩니다.
-              </p>
-            </div>
-          )}
-        </div>
-
-        </Section>
-        )}
 
         {/* ── 하단 상태바 (AutoCAD 모형/배치 탭 + 명령행 자리) ── */}
         <CadStatusBar
