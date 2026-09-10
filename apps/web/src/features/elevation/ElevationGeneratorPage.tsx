@@ -95,14 +95,15 @@ import type {
 import {
   useElevProjects,
   useElevProject,
-  useCreateElevProject,
+  useElevSites,
   useSaveElevRevision,
   useDeleteElevRevision,
   useDeleteElevProject,
 } from "./hooks";
-import { getElevRevision, fetchDxfText } from "./api";
+import { getElevRevision, getElevProject, fetchDxfText } from "./api";
 import OutputPanel from "./components/OutputPanel";
 import CadRibbon from "./components/CadRibbon";
+import ProjectBrowser from "./components/ProjectBrowser";
 import CadStatusBar from "./components/CadStatusBar";
 import { useFullscreen } from "./useFullscreen";
 import TakeoffPanel from "@/features/takeoff/TakeoffPanel";
@@ -769,10 +770,18 @@ export default function ElevationGeneratorPage() {
   // 내보내기(.swelev.json)용 원본 DXF 텍스트 — 업로드/REV 로드/불러오기 시 보관.
   const [rawDxfText, setRawDxfText] = useState<string | null>(null);
   const [revPanelOpen, setRevPanelOpen] = useState(false);
+  /** 현장 → 세부 프로젝트 카드 화면(ProjectBrowser) 열림 여부 */
+  const [browserOpen, setBrowserOpen] = useState(false);
 
   const { data: elevProjects = [] } = useElevProjects();
+  const { data: elevSites = [] } = useElevSites();
   const { data: activeProjectData } = useElevProject(activeProjectId);
-  const createProjectMut = useCreateElevProject();
+  /** 타이틀바/리본에 "현장 · 세부" 로 보여줄 현장명 */
+  const activeSiteName = useMemo(() => {
+    const siteId = activeProjectData?.project.site_id;
+    if (!siteId) return activeProjectData ? "미분류" : null;
+    return elevSites.find(st => st.id === siteId)?.name ?? null;
+  }, [activeProjectData, elevSites]);
   const saveRevMut = useSaveElevRevision();
   const deleteRevMut = useDeleteElevRevision();
   const deleteProjectMut = useDeleteElevProject();
@@ -861,18 +870,6 @@ export default function ElevationGeneratorPage() {
     setMode("view");
   }, []);
 
-  const handleNewProject = useCallback(async () => {
-    const name = window.prompt("새 프로젝트 이름")?.trim();
-    if (!name) return;
-    try {
-      const { project } = await createProjectMut.mutateAsync({ name });
-      setActiveProjectId(project.id);
-      toast.success(`프로젝트 '${project.name}' 생성됨`);
-    } catch (e) {
-      toast.error(`생성 실패: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }, [createProjectMut]);
-
   // ─── 작업 초안 자동 저장/복원 ───
   // 새로고침·다른 화면 이동으로 작업(입면·오프닝·동타입 설정)이 사라지던 문제 대응.
   // 저장 원천은 Supabase REV 이고, 이 초안은 저장 전 작업을 지키는 로컬 안전망이다.
@@ -904,6 +901,9 @@ export default function ElevationGeneratorPage() {
           }
           setDraftRestoredAt(rec.savedAt);
         }
+        // 이어서 할 프로젝트도, 복원할 작업도 없을 때만 현장 카드 화면을 먼저 띄운다.
+        // (복원된 미저장 작업이 있으면 그 위를 덮지 않는다 — 앱의 시작점만 프로젝트 선택으로 옮긴 것)
+        if (alive && !rec?.projectId && !draftHasWork(rec)) setBrowserOpen(true);
       } finally {
         if (alive) draftReadyRef.current = true;
       }
@@ -988,11 +988,10 @@ export default function ElevationGeneratorPage() {
     }
   }, [activeProjectId, saveRevMut, buildElevState, walls.length, lastDxfFile, loadedDxfMeta]);
 
-  const handleLoadRev = useCallback(
-    async (revId: string) => {
-      if (!activeProjectId) return;
+  const loadRevision = useCallback(
+    async (projectId: string, revId: string) => {
       try {
-        const { revision, dxfSignedUrl } = await getElevRevision(activeProjectId, revId);
+        const { revision, dxfSignedUrl } = await getElevRevision(projectId, revId);
         applyElevState(revision.state);
         setFileName(revision.dxf_name || revision.state.fileName || "");
         setLoadedDxfMeta(
@@ -1023,7 +1022,43 @@ export default function ElevationGeneratorPage() {
         toast.error(`불러오기 실패: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
-    [activeProjectId, applyElevState]
+    [applyElevState]
+  );
+
+  /** REV 목록 패널(현재 프로젝트)에서 부르는 경로 */
+  const handleLoadRev = useCallback(
+    (revId: string) => {
+      if (!activeProjectId) return;
+      void loadRevision(activeProjectId, revId);
+    },
+    [activeProjectId, loadRevision]
+  );
+
+  /**
+   * 카드 화면에서 세부 프로젝트 열기.
+   * revId 가 없으면 최신 REV 를 연다. REV 가 하나도 없으면 프로젝트만 활성화하고
+   * 현재 캔버스를 유지한다(저장하면 REV 1 이 된다).
+   */
+  const handleOpenProject = useCallback(
+    async (projectId: string, revId: string | null) => {
+      setActiveProjectId(projectId);
+      let target = revId;
+      if (!target) {
+        try {
+          const { revisions } = await getElevProject(projectId);
+          target = revisions[0]?.id ?? null; // rev_no 내림차순 → 첫 항목이 최신
+        } catch {
+          target = null;
+        }
+      }
+      if (target) {
+        await loadRevision(projectId, target);
+      } else {
+        toast.info("저장된 REV가 없습니다. 도면을 올리고 저장하면 REV 1로 기록됩니다.");
+      }
+      setBrowserOpen(false);
+    },
+    [loadRevision]
   );
 
   // ── 체인별 측정값 ──
@@ -4015,21 +4050,16 @@ export default function ElevationGeneratorPage() {
       <div className="fixed inset-0 z-[60] overflow-hidden bg-slate-100 flex flex-col">
         {/* ── AutoCAD 스타일 리본 (타이틀바 · 탭 · 패널) ── */}
         <CadRibbon
-          projects={elevProjects.map(pr => ({
-            id: pr.id,
-            name: pr.name,
-            latest_rev_no: pr.latest_rev_no,
-          }))}
           activeProjectId={activeProjectId}
-          onSelectProject={setActiveProjectId}
+          onOpenBrowser={() => setBrowserOpen(true)}
           activeProjectName={activeProjectData?.project.name}
+          activeSiteName={activeSiteName}
           activeRevNo={activeProjectData?.revisions[0]?.rev_no}
           revCount={activeProjectData?.revisions.length ?? 0}
           dxfName={loadedDxfMeta?.name ?? null}
           reusedRev={!!loadedDxfMeta}
           onUploadDxf={handleFile}
           onImportProject={handleImportProjectFile}
-          onNewProject={handleNewProject}
           onSaveRev={handleSaveRev}
           savingRev={saveRevMut.isPending}
           onToggleRevPanel={() => setRevPanelOpen(o => !o)}
@@ -4397,23 +4427,33 @@ export default function ElevationGeneratorPage() {
                 )}
               />
               {!parsed && !isParsing && !parseError && (
+                // 안내 카드만 클릭을 받고, 나머지 영역은 캔버스 조작을 그대로 통과시킨다
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
-                  <div className="flex flex-col items-center gap-3.5 px-9 py-8 rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-sm">
+                  <div className="pointer-events-auto flex flex-col items-center gap-3.5 px-9 py-8 rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-sm">
                     <span className="flex items-center justify-center w-16 h-16 rounded-2xl bg-[#004791]/25 border border-[#3b82f6]/30 text-blue-200 shadow-lg">
                       <Upload className="w-7 h-7" />
                     </span>
                     <div className="text-center">
                       <p className="text-[15px] font-bold text-slate-100">
-                        DXF 파일을 업로드하세요
+                        {activeProjectId
+                          ? "DXF 파일을 업로드하세요"
+                          : "이어서 할 프로젝트를 고르세요"}
                       </p>
                       <p className="mt-1 text-[12px] text-slate-400">
-                        상단{" "}
-                        <span className="text-blue-300 font-semibold">
-                          DXF 업로드
-                        </span>{" "}
-                        버튼으로 평면 도면을 불러옵니다
+                        {activeProjectId
+                          ? "상단 DXF 업로드 버튼으로 평면 도면을 불러옵니다"
+                          : "저장해 둔 현장·세부 프로젝트를 열거나, 새 도면으로 시작합니다"}
                       </p>
                     </div>
+                    {/* 시작점을 한 곳에 모아 준다 — 리본을 찾아 헤매지 않도록 */}
+                    <button
+                      type="button"
+                      onClick={() => setBrowserOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#0a63b8] px-4 py-2 text-[12.5px] font-bold text-white transition-colors hover:bg-[#0a4f92]"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                      프로젝트 열기
+                    </button>
                   </div>
                 </div>
               )}
@@ -6242,6 +6282,14 @@ export default function ElevationGeneratorPage() {
             onClose={() => setOutputOpen(false)}
           />
         )}
+
+        {/* 현장 → 세부 프로젝트 카드 화면 (프로젝트 선택·생성·REV 불러오기) */}
+        <ProjectBrowser
+          open={browserOpen}
+          onClose={() => setBrowserOpen(false)}
+          activeProjectId={activeProjectId}
+          onOpenProject={handleOpenProject}
+        />
       </div>
     </>
   );

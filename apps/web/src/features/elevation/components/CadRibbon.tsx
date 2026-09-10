@@ -12,6 +12,7 @@
 import { useState, type ComponentType } from "react";
 import {
   Blocks,
+  Building2,
   Calculator,
   Check,
   CornerDownLeft,
@@ -62,10 +63,12 @@ export type RibbonMode =
 
 export interface CadRibbonProps {
   // ── 문서/프로젝트 ──
-  projects: { id: string; name: string; latest_rev_no: number }[];
   activeProjectId: string | null;
-  onSelectProject: (id: string | null) => void;
+  /** 현장 → 세부 프로젝트 카드 화면 열기 (선택·생성·REV 불러오기 모두 여기서) */
+  onOpenBrowser: () => void;
   activeProjectName?: string;
+  /** 활성 프로젝트가 속한 현장명 — 타이틀바에 "현장 · 세부" 로 표기 */
+  activeSiteName?: string | null;
   activeRevNo?: number;
   revCount: number;
   dxfName?: string | null;
@@ -73,7 +76,6 @@ export interface CadRibbonProps {
   // ── 파일 ──
   onUploadDxf: (file: File) => void;
   onImportProject: (file: File) => void;
-  onNewProject: () => void;
   onSaveRev: () => void;
   savingRev: boolean;
   onToggleRevPanel: () => void;
@@ -315,8 +317,10 @@ function FileBigBtn({
 export default function CadRibbon(p: CadRibbonProps) {
   const [tab, setTab] = useState<TabKey>("홈");
 
+  // "화성남양 2차 · 84A 타입 — REV 5" 처럼 현장까지 보여 어떤 도면인지 바로 알게 한다.
   const docTitle = p.activeProjectName
-    ? `${p.activeProjectName}${p.activeRevNo != null ? ` — REV ${p.activeRevNo}` : ""}`
+    ? `${p.activeSiteName ? `${p.activeSiteName} · ` : ""}${p.activeProjectName}` +
+      `${p.activeRevNo != null ? ` — REV ${p.activeRevNo}` : ""}`
     : "Drawing1";
 
   return (
@@ -327,7 +331,11 @@ export default function CadRibbon(p: CadRibbonProps) {
           IP
         </span>
         <div className="flex items-center gap-0.5">
-          <QatBtn icon={FilePlus2} title="새 프로젝트" onClick={p.onNewProject} />
+          <QatBtn
+            icon={Building2}
+            title="프로젝트 열기 — 현장 · 세부 프로젝트 카드"
+            onClick={p.onOpenBrowser}
+          />
           <QatFile
             icon={FolderOpen}
             title="프로젝트 불러오기 (.swelev.json)"
@@ -789,24 +797,31 @@ export default function CadRibbon(p: CadRibbonProps) {
         {tab === "관리" && (
           <>
             <Group title="프로젝트" wide>
+              <BigBtn
+                icon={Building2}
+                label={"프로젝트\n열기"}
+                onClick={p.onOpenBrowser}
+                tone="primary"
+                title="현장 → 세부 프로젝트 카드에서 고르거나 새로 만듭니다"
+              />
               <div className="flex flex-col gap-1 pt-1">
-                <select
-                  value={p.activeProjectId ?? ""}
-                  onChange={e => p.onSelectProject(e.target.value || null)}
-                  className="h-7 min-w-[220px] rounded border border-slate-300 bg-white px-2 text-[12px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#004791]/30"
-                >
-                  <option value="">— 프로젝트 선택 —</option>
-                  {p.projects.map(pr => (
-                    <option key={pr.id} value={pr.id}>
-                      {pr.name} (REV {pr.latest_rev_no})
-                    </option>
-                  ))}
-                </select>
+                {/* 지금 열려 있는 문서 — 리본에서 바로 확인 */}
+                <div className="min-w-[200px] rounded border border-slate-200 bg-white px-2 py-1 leading-tight">
+                  <div className="text-[10px] font-semibold text-slate-400">현재 문서</div>
+                  <div className="truncate text-[12px] font-bold text-slate-700">
+                    {p.activeProjectName ?? "선택 없음"}
+                  </div>
+                  <div className="truncate text-[10.5px] text-slate-400">
+                    {p.activeProjectName
+                      ? `${p.activeSiteName ?? "미분류"} · REV ${p.activeRevNo ?? 0}`
+                      : "프로젝트를 열면 저장·REV 를 쓸 수 있습니다"}
+                  </div>
+                </div>
                 <div className="flex gap-1">
                   <SmallBtn
                     icon={FilePlus2}
                     label="새 프로젝트"
-                    onClick={p.onNewProject}
+                    onClick={p.onOpenBrowser}
                   />
                   <SmallBtn
                     icon={Trash2}

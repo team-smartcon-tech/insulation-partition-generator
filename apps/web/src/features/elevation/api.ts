@@ -14,9 +14,11 @@ import type {
   DbElevProject,
   DbElevRevisionMeta,
   DbElevRevisionFull,
+  DbElevSite,
 } from "@ipg/shared";
 
 const BASE = "/api/elevation-projects";
+const SITE_BASE = "/api/elevation-sites";
 
 export class ElevApiError extends Error {
   status: number;
@@ -33,6 +35,7 @@ async function elevFetch<T = unknown>(
   path: string,
   options: RequestInit = {},
   isForm = false,
+  base: string = BASE,
 ): Promise<T> {
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
@@ -40,7 +43,7 @@ async function elevFetch<T = unknown>(
   // FormData 는 Content-Type 을 브라우저가 boundary 포함해 설정하므로 지정하지 않는다.
   if (!isForm) headers["Content-Type"] = "application/json";
 
-  const res = await fetch(`${BASE}${path}`, { ...options, credentials: "include", headers });
+  const res = await fetch(`${base}${path}`, { ...options, credentials: "include", headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -79,26 +82,84 @@ export async function getElevRevision(
   );
 }
 
-/** 신규 프로젝트 생성 */
+/** 신규 세부 프로젝트 생성 (siteId 미지정 = 미분류) */
 export async function createElevProject(
   name: string,
   description?: string,
+  siteId?: string | null,
 ): Promise<{ project: DbElevProject }> {
   return elevFetch("", {
     method: "POST",
-    body: JSON.stringify({ name, description }),
+    body: JSON.stringify({ name, description, siteId: siteId ?? null }),
   });
 }
 
-/** 프로젝트 이름/설명 수정 */
+/**
+ * 프로젝트 이름/설명/소속 현장 수정.
+ * siteId 키를 넣으면 현장 이동(null = 미분류로 빼기), 넣지 않으면 그대로 둔다.
+ */
 export async function renameElevProject(
   projectId: string,
-  patch: { name?: string; description?: string },
+  patch: { name?: string; description?: string; siteId?: string | null },
 ): Promise<{ project: DbElevProject }> {
   return elevFetch(`/${encodeURIComponent(projectId)}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
   });
+}
+
+// ─── 현장(프로젝트 카드) ───────────────────────────────────
+
+/** 현장 목록 (썸네일 signed URL 포함) */
+export async function listElevSites(): Promise<{ sites: DbElevSite[] }> {
+  return elevFetch<{ sites: DbElevSite[] }>("", {}, false, SITE_BASE);
+}
+
+/** 현장 추가 — 썸네일 파일이 있으면 multipart 로 보낸다 */
+export async function createElevSite(args: {
+  name: string;
+  description?: string;
+  thumb?: File | null;
+}): Promise<{ site: DbElevSite }> {
+  if (args.thumb) {
+    const fd = new FormData();
+    fd.append("name", args.name);
+    if (args.description) fd.append("description", args.description);
+    fd.append("thumb", args.thumb, args.thumb.name);
+    return elevFetch("", { method: "POST", body: fd }, true, SITE_BASE);
+  }
+  return elevFetch(
+    "",
+    { method: "POST", body: JSON.stringify({ name: args.name, description: args.description }) },
+    false,
+    SITE_BASE,
+  );
+}
+
+/** 현장 이름/설명/썸네일 수정 */
+export async function updateElevSite(
+  siteId: string,
+  patch: { name?: string; description?: string; thumb?: File | null },
+): Promise<{ site: DbElevSite }> {
+  const path = `/${encodeURIComponent(siteId)}`;
+  if (patch.thumb) {
+    const fd = new FormData();
+    if (patch.name) fd.append("name", patch.name);
+    if (patch.description != null) fd.append("description", patch.description);
+    fd.append("thumb", patch.thumb, patch.thumb.name);
+    return elevFetch(path, { method: "PATCH", body: fd }, true, SITE_BASE);
+  }
+  return elevFetch(
+    path,
+    { method: "PATCH", body: JSON.stringify({ name: patch.name, description: patch.description }) },
+    false,
+    SITE_BASE,
+  );
+}
+
+/** 현장 삭제 (세부 프로젝트가 남아 있으면 서버가 409 로 거절) */
+export async function deleteElevSite(siteId: string): Promise<{ success: boolean }> {
+  return elevFetch(`/${encodeURIComponent(siteId)}`, { method: "DELETE" }, false, SITE_BASE);
 }
 
 /** 프로젝트 삭제(리비전·DXF 포함) */
