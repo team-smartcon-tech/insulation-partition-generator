@@ -101,3 +101,140 @@
 @media (prefers-reduced-motion: reduce) {
   .ambient-anim { animation: none !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   단열재 나누기도 — 디자인 토큰 (컨셉: 정밀 계측기)
+   다크 크롬(타이틀바·레일)이 캔버스와 이어지고, 인스펙터만 밝게 떠서
+   "작업대 위의 도면"처럼 읽히게 한다. 장식 대신 간격·정렬·위계로 만든다.
+   기존에 컴포넌트마다 흩어져 있던 파랑 6종·보더 4종·글자 8단계를 여기로 모은다.
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  /* 표면 */
+  --ipg-shell: #0d1b2a;
+  --ipg-rail: #0a1826;
+  --ipg-panel: #ffffff;
+  --ipg-panel-sub: #f6f9fc;
+  --ipg-line: #e4eaf2;
+  --ipg-line-strong: #cfd9e6;
+
+  /* 잉크 */
+  --ipg-ink: #16202b;
+  --ipg-ink-2: #5a6b7d;
+  --ipg-ink-3: #8fa0b2;
+
+  /* 강조 — 우미 네이비 한 계열만 쓴다 */
+  --ipg-accent: #1a7ee0;
+  --ipg-accent-deep: #004791;
+  --ipg-accent-soft: #e9f2fd;
+  --ipg-accent-line: #b9d7f6;
+  --ipg-ok: #0f9d6e;
+  --ipg-danger: #e11d48;
+
+  /* 타이포 — 4단계로 고정 */
+  --ipg-t-xs: 10.5px;
+  --ipg-t-sm: 11.5px;
+  --ipg-t-md: 12.5px;
+  --ipg-t-lg: 14.5px;
+
+  /* 반경 · 그림자 */
+  --ipg-r-sm: 6px;
+  --ipg-r-md: 9px;
+  --ipg-r-lg: 14px;
+  --ipg-shadow-1: 0 1px 2px rgba(13, 27, 42, 0.06);
+  --ipg-shadow-2: 0 14px 34px -14px rgba(13, 27, 42, 0.38);
+}
+
+/* 섹션 라벨 — 대문자 + 자간. 폼에서 "무슨 칸인지" 를 조용히 알려준다. */
+.ipg-label {
+  font-size: var(--ipg-t-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ipg-ink-3);
+}
+
+/* 치수·수량은 자리수가 흔들리면 비교가 안 된다 */
+.ipg-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 얇은 스크롤바 — 기본 스크롤바는 패널을 조잡하게 만든다 */
+.ipg-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #c3cfdd transparent;
+}
+.ipg-scroll::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.ipg-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ipg-scroll::-webkit-scrollbar-thumb {
+  background-color: #c8d3e0;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+.ipg-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #a9b8c9;
+}
+/* 다크 표면 위 스크롤바 */
+.ipg-scroll-dark {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+.ipg-scroll-dark::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.ipg-scroll-dark::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+/* ── 폼 정규화 ────────────────────────────────────────────
+   입력칸이 화면마다 보더색·반경·포커스가 달라 조잡했다. 툴 루트(.ipg-ui)에
+   한 번만 걸어 두면 리본·인스펙터·단계 패널이 전부 같은 규칙을 따른다.
+   (클래스 문자열 수백 개를 고치는 대신 여기서 한 번에) */
+.ipg-ui input[type="number"]::-webkit-outer-spin-button,
+.ipg-ui input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ipg-ui input[type="number"] {
+  -moz-appearance: textfield;
+  font-variant-numeric: tabular-nums;
+}
+.ipg-ui input[type="text"],
+.ipg-ui input[type="number"],
+.ipg-ui select {
+  border-color: var(--ipg-line-strong);
+  border-radius: var(--ipg-r-sm);
+  color: var(--ipg-ink);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.ipg-ui input[type="text"]:hover,
+.ipg-ui input[type="number"]:hover,
+.ipg-ui select:hover {
+  border-color: #b6c4d6;
+}
+.ipg-ui input[type="text"]:focus,
+.ipg-ui input[type="number"]:focus,
+.ipg-ui select:focus {
+  border-color: var(--ipg-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ipg-accent) 16%, transparent);
+  outline: none;
+}
+.ipg-ui input[type="checkbox"] {
+  accent-color: var(--ipg-accent-deep);
+}
+/* 포커스 링 — 키보드 이동 시에만 */
+.ipg-ui button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ipg-accent) 55%, transparent);
+  outline-offset: 1px;
+}

@@ -104,6 +104,7 @@ import { getElevRevision, getElevProject, fetchDxfText } from "./api";
 import OutputPanel from "./components/OutputPanel";
 import CadRibbon from "./components/CadRibbon";
 import ProjectBrowser from "./components/ProjectBrowser";
+import WorkflowRail from "./components/WorkflowRail";
 import CadStatusBar from "./components/CadStatusBar";
 import { useFullscreen } from "./useFullscreen";
 import TakeoffPanel from "@/features/takeoff/TakeoffPanel";
@@ -270,6 +271,19 @@ const DLG_TITLE: Record<
   preset: "오프닝 프리셋",
   openings: "오프닝 목록",
   layers: "도면층",
+};
+
+/** 도킹 패널 헤더 — 구분색과 한 줄 설명. 패널이 무엇을 하는 곳인지 바로 알게 한다. */
+const DLG_META: Record<
+  "insul" | "types" | "elev" | "preset" | "openings" | "layers",
+  { accent: string; desc: string }
+> = {
+  insul: { accent: "#0a63b8", desc: "보드 규격과 조인트 정책" },
+  types: { accent: "#7c3aed", desc: "동·타입·세대수 — 현장식 산출서의 기준" },
+  elev: { accent: "#0a63b8", desc: "그린 입면과 동·타입 지정" },
+  preset: { accent: "#0891b2", desc: "창·문 종류와 기본 치수" },
+  openings: { accent: "#0891b2", desc: "배치된 창·문 전체" },
+  layers: { accent: "#64748b", desc: "도면층 표시/숨김" },
 };
 /**
  * 층 그룹 — 세대수 입력(1~3F / 지붕 / 기준)과 같은 축.
@@ -772,6 +786,8 @@ export default function ElevationGeneratorPage() {
   const [revPanelOpen, setRevPanelOpen] = useState(false);
   /** 현장 → 세부 프로젝트 카드 화면(ProjectBrowser) 열림 여부 */
   const [browserOpen, setBrowserOpen] = useState(false);
+  /** 기존 리본(전체 명령) 펼침 — 기본은 접고 좌측 단계 레일로 안내한다 */
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { data: elevProjects = [] } = useElevProjects();
   const { data: elevSites = [] } = useElevSites();
@@ -4044,73 +4060,8 @@ export default function ElevationGeneratorPage() {
           ? "cursor-grabbing"
           : "cursor-grab";
 
-  return (
-    <>
-      {/* 전체화면 스튜디오 오버레이 — 사이드바/상단 네비를 덮고 몰입형으로 (AutoCAD 스타일) */}
-      <div className="fixed inset-0 z-[60] overflow-hidden bg-slate-100 flex flex-col">
-        {/* ── AutoCAD 스타일 리본 (타이틀바 · 탭 · 패널) ── */}
-        <CadRibbon
-          activeProjectId={activeProjectId}
-          onOpenBrowser={() => setBrowserOpen(true)}
-          activeProjectName={activeProjectData?.project.name}
-          activeSiteName={activeSiteName}
-          activeRevNo={activeProjectData?.revisions[0]?.rev_no}
-          revCount={activeProjectData?.revisions.length ?? 0}
-          dxfName={loadedDxfMeta?.name ?? null}
-          reusedRev={!!loadedDxfMeta}
-          onUploadDxf={handleFile}
-          onImportProject={handleImportProjectFile}
-          onSaveRev={handleSaveRev}
-          savingRev={saveRevMut.isPending}
-          onToggleRevPanel={() => setRevPanelOpen(o => !o)}
-          revPanelOpen={revPanelOpen}
-          onExportProject={handleExportProject}
-          onDeleteProject={async () => {
-            if (!activeProjectId) return;
-            if (!window.confirm("이 프로젝트(모든 REV)를 삭제할까요?")) return;
-            try {
-              await deleteProjectMut.mutateAsync(activeProjectId);
-              setActiveProjectId(null);
-              toast.success("프로젝트 삭제됨");
-            } catch (e) {
-              toast.error(
-                `삭제 실패: ${e instanceof Error ? e.message : String(e)}`
-              );
-            }
-          }}
-          onFitToScreen={fitToScreen}
-          onZoomIn={() => setScale(sc => sc * 1.25)}
-          onZoomOut={() => setScale(sc => sc / 1.25)}
-          hasDxf={!!parsed}
-          mode={mode}
-          onMode={m => setMode(m)}
-          onStartNewChain={startNewChain}
-          onTwoPoint={() => {
-            setMode("two-point");
-            setTwoPointAnchor(null);
-          }}
-          wallCount={walls.length}
-          onDeleteEntity={deleteSelectedEntity}
-          hasSelectedEntity={!!selectedEntityId}
-          onUndoEdit={undoDxfEdit}
-          onDownloadEditedDxf={downloadEditedDxf}
-          hasRawDxf={!!rawDxfText}
-          draftCount={draft.length}
-          onCommitDraft={() => {
-            commitDraft(false);
-            setMode("view");
-            setCanvasTab("elev");
-          }}
-          onUndoDraftPoint={() => setDraft(d => d.slice(0, -1))}
-          onExportCombinedDxf={() => handleExportCombined("dxf")}
-          onExportSplitDxf={() => handleExportAll("dxf")}
-          onExportCombinedSvg={() => handleExportCombined("svg")}
-          onExportInsulationCsv={handleExportInsulationCsv}
-          onExportSiteReportCsv={handleExportSiteReportCsv}
-          siteReportThkLabel={thkLabel}
-          onOpenOutput={() => setOutputOpen(true)}
-          canExport={canExport}
-          floorHeightInput={
+  // 리본과 좌측 단계 레일이 같은 컨트롤을 공유한다 — 한 곳에서만 정의.
+  const floorHeightInputNode = (
             // 층 그룹(1~3F/지붕/기준)별 층고 — 선택한 그룹 기준으로 화면 전개도가 그려지고,
             // 도면·산출서는 세대수가 있는 그룹마다 각각 계산된다.
             <div className="flex flex-col gap-1">
@@ -4172,14 +4123,16 @@ export default function ElevationGeneratorPage() {
                 </label>
               </div>
             </div>
-          }
-          onResetAll={resetAll}
-          onOpenDialog={k => setDlg(k)}
-          openDialog={dlg}
-          presetControl={
-            <div className="flex items-start gap-2">
+  );
+
+  /**
+   * 창 프리셋 컨트롤 — 리본(가로로 넓음)과 좌측 단계 패널(302px)이 함께 쓴다.
+   * stacked=true 면 칩을 한 줄 가득 흘리고 치수를 아래 3칸으로 내린다(좁은 패널용).
+   */
+  const renderPresetControl = (stacked = false) => (
+            <div className={stacked ? "flex flex-col gap-2" : "flex items-start gap-2"}>
               {/* 프리셋 선택 — CAD 블록 갤러리 자리 */}
-              <div className="flex max-w-[248px] flex-wrap gap-1">
+              <div className={cn("flex flex-wrap gap-1", !stacked && "max-w-[248px]")}>
                 {presets.map(pr => {
                   const on = pr.id === selectedPresetId;
                   return (
@@ -4189,7 +4142,7 @@ export default function ElevationGeneratorPage() {
                       onClick={() => setSelectedPresetId(pr.id)}
                       title={`${pr.label} · ${pr.width}×${pr.height}${pr.sill ? ` ↑${pr.sill}` : ""}`}
                       className={cn(
-                        "flex items-center gap-1 rounded border px-1.5 py-[3px] text-[10.5px] font-medium transition-colors",
+                        "flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-[3px] text-[10.5px] font-medium transition-colors",
                         on
                           ? "border-[#7fb3e0] bg-[#cfe3f7] text-[#0a4a86]"
                           : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
@@ -4209,7 +4162,7 @@ export default function ElevationGeneratorPage() {
               </div>
               {/* 선택 프리셋 치수 — 리본에서 바로 수정 */}
               {preset && (
-                <div className="flex items-end gap-1">
+                <div className={stacked ? "grid grid-cols-3 gap-1.5" : "flex items-end gap-1"}>
                   {(
                     [
                       ["폭", preset.width, (v: number) => updatePreset(preset.id, { width: v })],
@@ -4217,7 +4170,7 @@ export default function ElevationGeneratorPage() {
                       ["SILL", preset.sill ?? 0, (v: number) => updatePreset(preset.id, { sill: v })],
                     ] as const
                   ).map(([lab, val, on]) => (
-                    <div key={lab} className="w-[62px]">
+                    <div key={lab} className={stacked ? "w-full" : "w-[62px]"}>
                       <div className="mb-[2px] text-[9px] font-semibold uppercase tracking-wider text-slate-400">
                         {lab}
                       </div>
@@ -4227,8 +4180,9 @@ export default function ElevationGeneratorPage() {
                 </div>
               )}
             </div>
-          }
-          layerControl={
+  );
+
+  const layerControlNode = (
             <div className="flex flex-col gap-1 pt-0.5">
               <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
                 <input
@@ -4258,7 +4212,84 @@ export default function ElevationGeneratorPage() {
                 ))}
               </select>
             </div>
-          }
+  );
+
+  return (
+    <>
+      {/* 전체화면 스튜디오 오버레이 — 사이드바/상단 네비를 덮고 몰입형으로 (AutoCAD 스타일) */}
+      <div
+        className="ipg-ui fixed inset-0 z-[60] flex flex-col overflow-hidden"
+        style={{ background: "var(--ipg-shell)" }}
+      >
+        {/* ── AutoCAD 스타일 리본 (타이틀바 · 탭 · 패널) ── */}
+        <CadRibbon
+          compact={!advancedOpen}
+          activeProjectId={activeProjectId}
+          onOpenBrowser={() => setBrowserOpen(true)}
+          activeProjectName={activeProjectData?.project.name}
+          activeSiteName={activeSiteName}
+          activeRevNo={activeProjectData?.revisions[0]?.rev_no}
+          revCount={activeProjectData?.revisions.length ?? 0}
+          dxfName={loadedDxfMeta?.name ?? null}
+          reusedRev={!!loadedDxfMeta}
+          onUploadDxf={handleFile}
+          onImportProject={handleImportProjectFile}
+          onSaveRev={handleSaveRev}
+          savingRev={saveRevMut.isPending}
+          onToggleRevPanel={() => setRevPanelOpen(o => !o)}
+          revPanelOpen={revPanelOpen}
+          onExportProject={handleExportProject}
+          onDeleteProject={async () => {
+            if (!activeProjectId) return;
+            if (!window.confirm("이 프로젝트(모든 REV)를 삭제할까요?")) return;
+            try {
+              await deleteProjectMut.mutateAsync(activeProjectId);
+              setActiveProjectId(null);
+              toast.success("프로젝트 삭제됨");
+            } catch (e) {
+              toast.error(
+                `삭제 실패: ${e instanceof Error ? e.message : String(e)}`
+              );
+            }
+          }}
+          onFitToScreen={fitToScreen}
+          onZoomIn={() => setScale(sc => sc * 1.25)}
+          onZoomOut={() => setScale(sc => sc / 1.25)}
+          hasDxf={!!parsed}
+          mode={mode}
+          onMode={m => setMode(m)}
+          onStartNewChain={startNewChain}
+          onTwoPoint={() => {
+            setMode("two-point");
+            setTwoPointAnchor(null);
+          }}
+          wallCount={walls.length}
+          onDeleteEntity={deleteSelectedEntity}
+          hasSelectedEntity={!!selectedEntityId}
+          onUndoEdit={undoDxfEdit}
+          onDownloadEditedDxf={downloadEditedDxf}
+          hasRawDxf={!!rawDxfText}
+          draftCount={draft.length}
+          onCommitDraft={() => {
+            commitDraft(false);
+            setMode("view");
+            setCanvasTab("elev");
+          }}
+          onUndoDraftPoint={() => setDraft(d => d.slice(0, -1))}
+          onExportCombinedDxf={() => handleExportCombined("dxf")}
+          onExportSplitDxf={() => handleExportAll("dxf")}
+          onExportCombinedSvg={() => handleExportCombined("svg")}
+          onExportInsulationCsv={handleExportInsulationCsv}
+          onExportSiteReportCsv={handleExportSiteReportCsv}
+          siteReportThkLabel={thkLabel}
+          onOpenOutput={() => setOutputOpen(true)}
+          canExport={canExport}
+          floorHeightInput={floorHeightInputNode}
+          onResetAll={resetAll}
+          onOpenDialog={k => setDlg(k)}
+          openDialog={dlg}
+          presetControl={renderPresetControl(false)}
+          layerControl={layerControlNode}
           onOpenTakeoff={() => setTakeoffOpen(true)}
           isFullscreen={isFullscreen}
           onToggleFullscreen={toggleFullscreen}
@@ -4270,17 +4301,6 @@ export default function ElevationGeneratorPage() {
             else window.location.assign("/");
           }}
         />
-
-        {/* 전체화면 안내 — 브라우저는 사용자 클릭 없이 전체화면 전환을 허용하지 않는다.
-            첫 클릭이 들어오면 즉시 전체화면으로 바뀌며 이 줄도 사라진다. */}
-        {!isFullscreen && autoFullscreen && (
-          <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1 text-[11.5px] text-amber-800">
-            <Maximize2 className="h-3.5 w-3.5" />
-            화면을 한 번 클릭하면 <b>전체화면</b>으로 전환됩니다 (브라우저 탭·주소창
-            숨김). 항상 전체화면으로 쓰려면 주소창의 <b>설치</b> 버튼으로 앱을
-            설치하세요.
-          </div>
-        )}
 
         {/* REV 목록 — 리본 '관리 > REV 목록' 토글 시 아래로 펼침 */}
         {revPanelOpen && activeProjectData && (
@@ -4377,8 +4397,59 @@ export default function ElevationGeneratorPage() {
         )}
 
         {/* 본문 — 전폭 캔버스(탭) + 얇은 인스펙터 패널 */}
+        {/* ── 본문 — 좌측 작업 단계 레일 + 캔버스 ──
+             리본(기능별)만으로는 순서를 알 수 없어 현장에서 헷갈렸다.
+             작업 순서를 화면 구조로 만들어 위→아래로 따라가게 한다. ── */}
+        <div className="flex min-h-0 flex-1">
+          <WorkflowRail
+            hasDxf={!!parsed}
+            wallCount={walls.length}
+            openingCount={openings.length}
+            typeCount={typeMatrix.types.length}
+            insulOn={insulOn}
+            canExport={canExport}
+            onUploadDxf={handleFile}
+            onOpenBrowser={() => setBrowserOpen(true)}
+            dxfName={fileName || loadedDxfMeta?.name || null}
+            activeProjectName={activeProjectData?.project.name}
+            activeSiteName={activeSiteName}
+            activeRevNo={activeProjectData?.revisions[0]?.rev_no}
+            mode={mode}
+            onMode={m => setMode(m)}
+            onStartNewChain={startNewChain}
+            draftCount={draft.length}
+            onCommitDraft={() => {
+              commitDraft(false);
+              setMode("view");
+              setCanvasTab("elev");
+            }}
+            onUndoDraftPoint={() => setDraft(d => d.slice(0, -1))}
+            presetControl={renderPresetControl(true)}
+            onTwoPoint={() => {
+              setMode("two-point");
+              setTwoPointAnchor(null);
+            }}
+            floorHeightInput={floorHeightInputNode}
+            onOpenOutput={() => setOutputOpen(true)}
+            onOpenTakeoff={() => setTakeoffOpen(true)}
+            onExportSiteReportCsv={handleExportSiteReportCsv}
+            siteReportThkLabel={thkLabel}
+            onSaveRev={handleSaveRev}
+            savingRev={saveRevMut.isPending}
+            activeProjectId={activeProjectId}
+            onToggleRevPanel={() => setRevPanelOpen(o => !o)}
+            revCount={activeProjectData?.revisions.length ?? 0}
+            onOpenDialog={k => setDlg(k)}
+            openDialog={dlg}
+            onFitToScreen={fitToScreen}
+            onZoomIn={() => setScale(sc => sc * 1.25)}
+            onZoomOut={() => setScale(sc => sc / 1.25)}
+            layerControl={layerControlNode}
+            advancedOpen={advancedOpen}
+            onToggleAdvanced={() => setAdvancedOpen(o => !o)}
+          />
         <div
-          className="flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)] gap-3 p-2"
+          className="min-w-0 flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)] gap-3 p-2"
           style={{
             // 패널을 도면 위에 띄우지 않고 옆 칸으로 도킹 → 도면을 보면서 편집한다
             gridTemplateColumns: dlg
@@ -4560,11 +4631,26 @@ export default function ElevationGeneratorPage() {
           {/* ── CAD 패널 — 리본 [패널] 그룹에서 열기.
                  모달(도면 가림) 이 아니라 캔버스 옆 칸에 도킹한다 — 도면을 보면서 편집. ── */}
           {dlg && (
-            <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-lg accent-[#004791] [&_option]:text-slate-900">
-              <div className="flex items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                <span className="text-[12px] font-bold text-slate-700">
-                  {DLG_TITLE[dlg]}
-                </span>
+            <aside
+              className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ipg-r-lg)] bg-white [&_option]:text-slate-900"
+              style={{ border: "1px solid var(--ipg-line)", boxShadow: "var(--ipg-shadow-2)" }}
+            >
+              <div
+                className="relative flex items-center gap-2 border-b border-slate-200 px-3 py-2"
+                style={{ backgroundColor: DLG_META[dlg].accent + "0f" }}
+              >
+                <span
+                  className="absolute left-0 top-0 h-full w-[3px]"
+                  style={{ backgroundColor: DLG_META[dlg].accent }}
+                />
+                <div className="min-w-0">
+                  <div className="truncate text-[12.5px] font-bold leading-tight text-slate-800">
+                    {DLG_TITLE[dlg]}
+                  </div>
+                  <div className="truncate text-[10.5px] leading-tight text-slate-500">
+                    {DLG_META[dlg].desc}
+                  </div>
+                </div>
                 <div className="ml-auto flex items-center gap-1">
                   <button
                     type="button"
@@ -4584,10 +4670,10 @@ export default function ElevationGeneratorPage() {
                   </button>
                 </div>
               </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="ipg-scroll min-h-0 flex-1 overflow-y-auto">
             {/* 단열재 나누기도 (추가 기능) */}
             {dlg === "insul" && (
-            <Section icon={Square} title="단열재 나누기도" defaultOpen={false} accent="#0a63b8">
+            <>
             <div className="px-3 py-2 text-[11.5px] space-y-2">
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
@@ -4843,17 +4929,12 @@ export default function ElevationGeneratorPage() {
               )}
             </div>
 
-            </Section>
+            </>
             )}
 
             {/* 동·타입 설정 (동·타입·세대수 매트릭스 → 현장식 산출서 구동) */}
             {dlg === "types" && (
-            <Section
-              icon={LayoutGrid}
-              title={`동·타입 설정 (${typeMatrix.buildings.length}동 · ${typeMatrix.types.length}타입)`}
-              defaultOpen={false}
-              accent="#7c3aed"
-            >
+            <>
               <div className="px-2 py-2 space-y-2.5 text-[11px]">
                 {/* 동 목록 */}
                 <div className="space-y-1">
@@ -4958,9 +5039,21 @@ export default function ElevationGeneratorPage() {
                   typeMatrix.types.length > 0 && (
                     <div className="space-y-1">
                       <span className="text-[9.5px] text-slate-400 font-semibold uppercase">
-                        동별 타입 배분 · 세대수 (1~3F / 지붕 / 기준)
+                        동별 타입 배분 · 세대수
                       </span>
-                      <div className="max-h-64 overflow-auto rounded border border-slate-200 divide-y divide-slate-200">
+                      {/* 세대수 3칸이 무슨 칸인지 몰라 헤매던 문제 → 고정 열 머리글.
+                          내부 스크롤(max-h)은 없앤다 — 패널 본문 스크롤 하나로 충분하고,
+                          짧은 창 안에서 매트릭스만 갇혀 아래가 텅 비어 보였다. */}
+                      <div className="overflow-hidden rounded border border-slate-200 divide-y divide-slate-200">
+                        <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-slate-200 bg-slate-50 px-2 py-1 text-[9.5px] font-bold text-slate-500">
+                          <span className="flex-1">타입</span>
+                          {FLOOR_GROUPS.map(g => (
+                            <span key={g.key} className="w-14 text-center">
+                              {g.label}
+                            </span>
+                          ))}
+                          <span className="w-9 text-center">입면</span>
+                        </div>
                         {typeMatrix.buildings.map(b => (
                           <div key={b.id} className="p-1">
                             <div className="flex items-center gap-1 px-1 pb-0.5">
@@ -4968,7 +5061,7 @@ export default function ElevationGeneratorPage() {
                                 {b.name}
                               </span>
                               {/* 이 동만 층고가 다를 때 예외 입력 — 비우면 전역 층고를 따른다 */}
-                              <span className="text-[9px] text-slate-400 shrink-0">
+                              <span className="ml-auto text-[9px] text-slate-400 shrink-0">
                                 층고예외
                               </span>
                               {FLOOR_GROUPS.map(g => (
@@ -4987,7 +5080,7 @@ export default function ElevationGeneratorPage() {
                                     )
                                   }
                                   title={`${b.name} ${g.label} 층고(mm) — 비우면 전역 ${groupHeightValue(g.key)}mm`}
-                                  className="w-12 border border-slate-200 rounded px-1 h-5 bg-white text-slate-700 tabular-nums text-[9.5px] placeholder:text-slate-300"
+                                  className="w-14 border border-slate-200 rounded px-1 h-5 bg-white text-center text-slate-700 tabular-nums text-[9.5px] placeholder:text-slate-300"
                                 />
                               ))}
                             </div>
@@ -5038,7 +5131,7 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-9 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums text-[10.5px]"
+                                        className="w-14 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:border-[#7c3aed] focus:outline-none"
                                       />
                                       <input
                                         type="number"
@@ -5052,7 +5145,7 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-9 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums text-[10.5px]"
+                                        className="w-14 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:border-[#7c3aed] focus:outline-none"
                                       />
                                       <input
                                         type="number"
@@ -5066,7 +5159,7 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-9 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums text-[10.5px]"
+                                        className="w-14 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:border-[#7c3aed] focus:outline-none"
                                       />
                                       <span
                                         className={cn(
@@ -5091,18 +5184,28 @@ export default function ElevationGeneratorPage() {
                           </div>
                         ))}
                       </div>
-                      <p className="text-[9px] text-slate-500">
-                        체크=그 동에 타입 배분 · 물량은 타입 대표 입면 1세대 ×
-                        세대수. '동전용'은 그 동+타입으로 그린 입면이 덮어씀.
-                        <br />
-                        층고예외 3칸(1~3F/지붕/기준)은 그 동만 층고가 다를 때
-                        입력 — 비우면 상단 리본의 층 그룹 층고를 따릅니다. 층고가
-                        다르면 나누기도·물량이 그룹별로 각각 산출됩니다.
-                      </p>
+                      {/* 설명 벽은 접어 둔다 — 필요할 때만 펴서 읽게 */}
+                      <details className="rounded border border-slate-200 bg-slate-50/70">
+                        <summary className="cursor-pointer select-none px-2 py-1 text-[10px] font-semibold text-slate-500 hover:text-slate-700">
+                          이 표는 어떻게 계산되나요?
+                        </summary>
+                        <div className="space-y-1 px-2 pb-2 text-[10px] leading-relaxed text-slate-500">
+                          <p>
+                            <b className="text-slate-600">체크</b> = 그 동에 그 타입이 있다는 뜻.
+                            물량은 <b className="text-slate-600">타입 대표 입면 1세대 × 세대수</b> 로
+                            계산합니다. 그 동+타입으로 따로 그린 입면이 있으면(‘동전용’) 그게 덮어씁니다.
+                          </p>
+                          <p>
+                            <b className="text-slate-600">층고예외</b> 3칸은 그 동만 층고가 다를 때만
+                            입력합니다. 비우면 왼쪽 <b className="text-slate-600">④ 동·타입</b> 단계의
+                            층고를 따르고, 층고가 다르면 나누기도·물량이 층 그룹별로 각각 산출됩니다.
+                          </p>
+                        </div>
+                      </details>
                     </div>
                   )}
               </div>
-            </Section>
+            </>
             )}
 
             {/* 입면 목록 */}
@@ -5646,6 +5749,7 @@ export default function ElevationGeneratorPage() {
             </div>
             </aside>
         )}
+        </div>
         </div>
 
         {selectedOpening && (

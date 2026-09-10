@@ -46,6 +46,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SdMark } from "@/components/brand/BrandWordmark";
 
 type IconType = ComponentType<{ className?: string }>;
 
@@ -69,6 +70,11 @@ export interface CadRibbonProps {
   activeProjectName?: string;
   /** 활성 프로젝트가 속한 현장명 — 타이틀바에 "현장 · 세부" 로 표기 */
   activeSiteName?: string | null;
+  /**
+   * true 면 타이틀바만 남기고 탭·패널을 접는다.
+   * 기본 화면은 좌측 WorkflowRail 이 단계별로 안내하고, 이 리본은 [고급] 일 때만 편다.
+   */
+  compact?: boolean;
   activeRevNo?: number;
   revCount: number;
   dxfName?: string | null;
@@ -326,10 +332,8 @@ export default function CadRibbon(p: CadRibbonProps) {
   return (
     <div className="shrink-0 select-none">
       {/* ① 타이틀바 + 퀵액세스 툴바 */}
-      <div className="flex h-9 items-center gap-2 bg-[#2b3038] px-2 text-white">
-        <span className="flex h-6 w-6 items-center justify-center rounded bg-gradient-to-br from-[#1478d6] to-[#003a78] text-[11px] font-black">
-          IP
-        </span>
+      <div className="flex h-10 items-center gap-2 bg-gradient-to-r from-[#06203f] via-[#0a3567] to-[#0d4a8f] px-2.5 text-white">
+        <SdMark className="h-6 w-6 shrink-0" />
         <div className="flex items-center gap-0.5">
           <QatBtn
             icon={Building2}
@@ -365,8 +369,11 @@ export default function CadRibbon(p: CadRibbonProps) {
         </div>
 
         <div className="flex flex-1 items-center justify-center gap-2 truncate px-4">
-          <span className="truncate text-[12px] font-medium text-white/85">
-            세대 단열재 나누기도 — {docTitle}
+          <span className="text-[12px] font-bold tracking-tight text-white/90">
+            세대 단열재 나누기도
+          </span>
+          <span className="truncate rounded-full bg-white/12 px-2.5 py-0.5 text-[11.5px] font-medium text-white/85 ring-1 ring-white/15">
+            {docTitle}
           </span>
         </div>
 
@@ -416,18 +423,20 @@ export default function CadRibbon(p: CadRibbonProps) {
         </button>
       </div>
 
-      {/* ② 리본 탭 */}
-      <div className="flex items-end gap-0.5 border-b border-[#c9d2dc] bg-[#e8edf3] px-2 pt-1">
+      {/* ② 리본 탭 — compact(기본) 이면 접는다. 좌측 단계 레일이 기본 안내를 맡는다. */}
+      {p.compact ? null : (
+      <>
+      <div className="flex items-end gap-0.5 border-b border-[#dde5ef] bg-[#eef3f9] px-2 pt-1">
         {TABS.map(t => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
             className={cn(
-              "rounded-t px-3.5 py-1 text-[12px] font-medium transition-colors",
+              "relative rounded-t-lg px-3.5 py-1.5 text-[12px] font-semibold transition-colors",
               tab === t
-                ? "border border-b-0 border-[#c9d2dc] bg-[#f3f6f9] text-[#0a4a86]"
-                : "text-slate-600 hover:bg-white/60"
+                ? "bg-white text-[#0a4a86] shadow-[0_-1px_0_#dde5ef_inset]"
+                : "text-slate-500 hover:bg-white/60 hover:text-slate-700"
             )}
           >
             {t}
@@ -436,7 +445,7 @@ export default function CadRibbon(p: CadRibbonProps) {
       </div>
 
       {/* ③ 리본 패널 */}
-      <div className="flex h-[96px] items-stretch overflow-hidden border-b border-[#c9d2dc] bg-[#f3f6f9] px-1">
+      <div className="flex h-[96px] items-stretch overflow-x-auto overflow-y-hidden border-b border-[#dde5ef] bg-white px-1">
         {tab === "홈" && (
           <>
             <Group title="그리기">
@@ -852,6 +861,8 @@ export default function CadRibbon(p: CadRibbonProps) {
           </>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
