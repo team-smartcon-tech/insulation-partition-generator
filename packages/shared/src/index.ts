@@ -99,6 +99,8 @@ export interface DbElevProject {
   id: string;
   name: string;
   description: string | null;
+  /** 소속 현장. null = 미분류(화면에서 "미분류" 그룹으로 묶임) */
+  site_id: string | null;
   latest_rev_no: number;
   latest_rev_id: string | null;
   created_by: string | null;
@@ -123,4 +125,22 @@ export interface DbElevRevisionFull extends DbElevRevisionMeta {
   project_id: string;
   state: ElevState;
   dxf_bucket: string | null;
+}
+
+// ─── 현장 (elev_sites) ───
+/**
+ * 현장 = 프로젝트 카드 1장. 그 안에 세부 프로젝트(elev_projects)가 여러 개 들어간다.
+ * (예: "화성남양1차" 현장 > "84A 타입" · "59B 타입" 세부 프로젝트)
+ */
+export interface DbElevSite {
+  id: string;
+  name: string;
+  description: string | null;
+  thumb_bucket: string | null;
+  thumb_path: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  /** 목록 API 가 매번 발급하는 임시 URL(비공개 버킷). 없으면 기본 썸네일로 그린다. */
+  thumbnail_url?: string | null;
 }

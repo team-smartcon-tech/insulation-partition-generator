@@ -72,11 +72,13 @@ apps/
       types.ts                    # @ipg/shared 재수출
       utils/*.ts                  # 계산·도면 로직(geometry/insulation/exporter/…)
       components/OutputPanel.tsx
+      components/ProjectBrowser.tsx # 현장 → 세부 프로젝트 → REV 카드 화면
   worker/                     # 저장/불러오기 + SPA 서빙 (Hono + Cloudflare Worker)
     src/index.ts              # /api/elevation-projects* + Supabase REST/Storage 헬퍼
+    src/sites.ts              # /api/elevation-sites* (현장 = 프로젝트 카드)
     wrangler.jsonc            # account_id + assets(SPA fallback, run_worker_first)
 packages/shared/src/index.ts  # web·worker 공용 타입(ElevState/ElevSummary/DbElev*)
-supabase/migrations/          # 20260702000001_elev_projects.sql (신규 DB 적용 완료)
+supabase/migrations/          # 20260702000001_elev_projects.sql, 20260910000001_elev_sites.sql
 docs/                         # 핸드오프 / 이관계획
 ```
 
@@ -85,8 +87,10 @@ docs/                         # 핸드오프 / 이관계획
 ## 데이터 / 인프라
 
 - **Supabase 프로젝트**: `yzercziwazfrjsjnmbhr` (전용 — SSX DB 아님)
-  - 테이블: `public.elev_projects`, `public.elev_revisions` (RLS service_role 전용)
+  - 테이블: `public.elev_sites`(현장), `public.elev_projects`(세부 프로젝트), `public.elev_revisions`(REV) — RLS service_role 전용
+    - 계층: **현장 → 세부 프로젝트 → REV**. `elev_projects.site_id` 가 NULL 이면 화면에서 "미분류"로 묶인다.
   - Storage 버킷: `elev-dxf` (private, 경로 `elevation/{projectId}/{revId}.dxf`)
+    - 현장 썸네일은 이미지 버킷 재사용 — `market-shots` 의 `elev-sites/{siteId}/{uuid}.{ext}` (private → signed URL)
 - **Cloudflare 계정**: Smarttech(`2b025f536a98444871b3306efbfd6b2a`) — SSX와 동일 팀 계정
 - **Worker 시크릿**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Cloudflare Secrets, 커밋 금지)
 - **접근 제어**: 현재 없음(사내 도구). 도입 시 `apps/worker/src/index.ts` 라우트 앞단 미들웨어로 추가.

@@ -23,6 +23,7 @@ import {
   parseCookie,
 } from "./auth";
 import market from "./market";
+import sites from "./sites";
 
 export type { Env };
 
@@ -183,6 +184,9 @@ app.use("/api/*", authMiddleware());
 // App Market(홈 게시 도구) — /api/market/* . 단열재 나누기도 라우트와 분리된 신규 모듈.
 app.route("/api/market", market);
 
+// 현장(프로젝트 카드) — /api/elevation-sites* . 세부 프로젝트는 아래 /api/elevation-projects*.
+app.route("/api/elevation-sites", sites);
+
 /** GET /api/elevation-projects — 프로젝트 목록 */
 app.get("/api/elevation-projects", async (c) => {
   try {
@@ -202,14 +206,20 @@ app.get("/api/elevation-projects", async (c) => {
 /** POST /api/elevation-projects — 신규 프로젝트 생성 (JSON: {name, description?}) */
 app.post("/api/elevation-projects", async (c) => {
   try {
-    const body = (await c.req.json().catch(() => null)) as { name?: unknown; description?: unknown } | null;
+    const body = (await c.req.json().catch(() => null)) as
+      | { name?: unknown; description?: unknown; siteId?: unknown }
+      | null;
     const name = typeof body?.name === "string" ? body.name.trim() : "";
     if (!name) return c.json({ error: "프로젝트 이름이 필요합니다." }, 400);
-    const row = {
+    const siteId = typeof body?.siteId === "string" && body.siteId ? body.siteId : null;
+    const row: Record<string, unknown> = {
       name,
       description: typeof body?.description === "string" ? body.description : null,
       created_by: c.get("user")?.id ?? null,
     };
+    // 소속 현장(선택). 미지정이면 키 자체를 빼서, elev_sites 마이그레이션 적용 전에도
+    // 기존처럼 프로젝트 생성이 된다(적용 후엔 NULL = "미분류"로 동일하게 동작).
+    if (siteId) row.site_id = siteId;
     const res = await supabaseRest(c.env, "POST", `/elev_projects`, row);
     if (!res.ok) {
       const errText = await res.text();
@@ -252,10 +262,16 @@ app.get("/api/elevation-projects/:projectId", async (c) => {
 app.patch("/api/elevation-projects/:projectId", async (c) => {
   const projectId = c.req.param("projectId");
   try {
-    const body = (await c.req.json().catch(() => null)) as { name?: unknown; description?: unknown } | null;
+    const body = (await c.req.json().catch(() => null)) as
+      | { name?: unknown; description?: unknown; siteId?: unknown }
+      | null;
     const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (typeof body?.name === "string" && body.name.trim()) row.name = body.name.trim();
     if (typeof body?.description === "string") row.description = body.description;
+    // 현장 이동. null 을 명시하면 "미분류"로 뺀다(키가 아예 없으면 변경하지 않음).
+    if (body && "siteId" in body) {
+      row.site_id = typeof body.siteId === "string" && body.siteId ? body.siteId : null;
+    }
     const res = await supabaseRest(
       c.env, "PATCH", `/elev_projects?id=eq.${encodeURIComponent(projectId)}`, row,
     );

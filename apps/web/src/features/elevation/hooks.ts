@@ -13,11 +13,16 @@ import {
   deleteElevProject,
   deleteElevRevision,
   saveElevRevision,
+  listElevSites,
+  createElevSite,
+  updateElevSite,
+  deleteElevSite,
 } from "./api";
 
 const keys = {
   all: ["elev-projects"] as const,
   list: () => [...keys.all, "list"] as const,
+  sites: () => ["elev-sites"] as const,
   project: (id: string) => [...keys.all, "project", id] as const,
   revision: (pid: string, rid: string) =>
     [...keys.all, "revision", pid, rid] as const,
@@ -55,8 +60,8 @@ export function useElevRevision(projectId: string | null, revId: string | null) 
 export function useCreateElevProject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { name: string; description?: string }) =>
-      createElevProject(args.name, args.description),
+    mutationFn: (args: { name: string; description?: string; siteId?: string | null }) =>
+      createElevProject(args.name, args.description, args.siteId),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.list() }),
   });
 }
@@ -68,7 +73,15 @@ export function useRenameElevProject() {
       projectId: string;
       name?: string;
       description?: string;
-    }) => renameElevProject(args.projectId, { name: args.name, description: args.description }),
+      /** 현장 이동 — null 이면 미분류로 뺀다 */
+      siteId?: string | null;
+    }) =>
+      renameElevProject(args.projectId, {
+        name: args.name,
+        description: args.description,
+        // 키가 있을 때만 이동 — undefined 면 서버가 현장을 건드리지 않는다
+        ...("siteId" in args ? { siteId: args.siteId } : {}),
+      }),
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: keys.list() });
       qc.invalidateQueries({ queryKey: keys.project(v.projectId) });
@@ -118,6 +131,55 @@ export function useSaveElevRevision() {
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: keys.list() });
       qc.invalidateQueries({ queryKey: keys.project(v.projectId) });
+    },
+  });
+}
+
+// ─── 현장(프로젝트 카드) ───────────────────────────────────
+
+/** 현장 목록 — 썸네일 signed URL 이 매번 새로 발급되므로 캐시를 길게 두지 않는다 */
+export function useElevSites() {
+  return useQuery({
+    queryKey: keys.sites(),
+    queryFn: () => listElevSites().then((r) => r.sites),
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateElevSite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { name: string; description?: string; thumb?: File | null }) =>
+      createElevSite(args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.sites() }),
+  });
+}
+
+export function useUpdateElevSite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      siteId: string;
+      name?: string;
+      description?: string;
+      thumb?: File | null;
+    }) =>
+      updateElevSite(args.siteId, {
+        name: args.name,
+        description: args.description,
+        thumb: args.thumb,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.sites() }),
+  });
+}
+
+export function useDeleteElevSite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (siteId: string) => deleteElevSite(siteId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.sites() });
+      qc.invalidateQueries({ queryKey: keys.list() });
     },
   });
 }
