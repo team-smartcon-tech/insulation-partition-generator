@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { parseFormWorkbook } from "./formParser";
 import FormGallery from "./FormGallery";
-import FormSheetView from "./FormSheetView";
+import FormSheetView, { type FormScale } from "./FormSheetView";
 import {
   deleteForm,
   getForm,
@@ -42,7 +42,27 @@ type LoadState =
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.5];
+/**
+ * 배율 선택지. 기본은 "가로 맞춤" — 21열짜리 넓은 양식은 어느 화면에도 안 들어가
+ * 오른쪽이 잘린 것처럼 보인다. 줄이기만 하므로 좁은 양식은 100% 그대로다.
+ */
+const SCALES: { value: FormScale; label: string }[] = [
+  { value: "fit", label: "가로 맞춤" },
+  { value: 0.5, label: "50%" },
+  { value: 0.7, label: "70%" },
+  { value: 0.8, label: "80%" },
+  { value: 0.9, label: "90%" },
+  { value: 1, label: "100%" },
+  { value: 1.25, label: "125%" },
+  { value: 1.5, label: "150%" },
+];
+
+/**
+ * 글자 든 칸이 이보다 적으면서 시트가 이만큼 크면, 내용이 도형·그림으로 그려져
+ * 있을 가능성이 높다. 그때 빈 상자만 띄우면 "고장 났다"로 보여서 이유를 알린다.
+ */
+const SPARSE_TEXT_CELLS = 3;
+const SPARSE_MIN_AREA = 50;
 /** 글자를 칠 때마다 저장하면 과하다. 손을 멈춘 뒤 이만큼 있다가 저장한다. */
 const SAVE_DELAY_MS = 400;
 
@@ -50,7 +70,7 @@ export default function FormsPage() {
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [forms, setForms] = useState<FormSummary[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState<FormScale>("fit");
   const [editable, setEditable] = useState(true);
   const [values, setValues] = useState<FormValues>({});
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -279,9 +299,18 @@ export default function FormsPage() {
   const sheet = state.status === "ready" ? state.sheets[activeSheet] : null;
   const editedCount = Object.keys(values).length;
 
+  // 글자가 거의 없는 큰 시트 — 엑셀에서 도형·그림으로 그린 부분은 옮기지 못한다.
+  const textCells = sheet ? sheet.cells.filter((c) => c.text.trim() !== "").length : 0;
+  const looksDrawn =
+    sheet !== null &&
+    textCells <= SPARSE_TEXT_CELLS &&
+    sheet.rowCount * sheet.colCount >= SPARSE_MIN_AREA;
+
   return (
     <div className="min-h-screen bg-slate-100 px-6 py-10 text-slate-800">
-      <div className="mx-auto max-w-6xl">
+      {/* 넓은 양식(21열짜리 대장 등)이 있어 폭을 넉넉히 잡는다. 좁으면 "가로 맞춤"
+          배율이 그만큼 더 줄여 버려 글자가 작아진다. */}
+      <div className="mx-auto max-w-[1600px]">
         <header className="mb-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
           <Link
             href="/"
@@ -381,13 +410,15 @@ export default function FormsPage() {
                 <label className="inline-flex items-center gap-2 text-sm text-slate-600">
                   배율
                   <select
-                    value={scale}
-                    onChange={(event) => setScale(Number(event.target.value))}
+                    value={String(scale)}
+                    onChange={(event) =>
+                      setScale(event.target.value === "fit" ? "fit" : Number(event.target.value))
+                    }
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
                   >
-                    {SCALES.map((value) => (
-                      <option key={value} value={value}>
-                        {Math.round(value * 100)}%
+                    {SCALES.map((option) => (
+                      <option key={String(option.value)} value={String(option.value)}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
@@ -432,6 +463,17 @@ export default function FormsPage() {
               {editedCount > 0 && <span className="text-blue-600">고친 칸 {editedCount}개</span>}
               {editable && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
             </div>
+
+            {looksDrawn && (
+              <p className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+                <span>
+                  이 시트에서 글자가 든 칸은 {textCells}개뿐입니다. 엑셀에서{" "}
+                  <strong className="font-semibold">도형·그림으로 그린 그림(순서도 등)은 화면에 옮기지 못합니다.</strong>{" "}
+                  칸에 적힌 글자만 가져옵니다.
+                </span>
+              </p>
+            )}
 
             <FormSheetView
               sheet={sheet}

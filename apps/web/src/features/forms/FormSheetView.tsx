@@ -5,7 +5,7 @@
  * 병합은 colSpan/rowSpan, 열 너비는 <colgroup>, 나머지는 인라인 스타일로 간다 —
  * 셀마다 테두리·글꼴이 달라 Tailwind 클래스로는 표현할 수 없다.
  */
-import type { CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import FormCellContent from "./FormCellContent";
 import type { FormBorder, FormCell, FormCellStyle, FormSheet, FormValues } from "./types";
 
@@ -85,6 +85,9 @@ function effectiveAlign(cell: FormCell): FormCellStyle["align"] {
   return cell.col === 1 ? "center" : undefined;
 }
 
+/** 화면 배율. "fit" 이면 표 전체가 가로로 들어가도록 자동 계산한다. */
+export type FormScale = number | "fit";
+
 interface FormSheetViewProps {
   sheet: FormSheet;
   /** true 면 모든 칸의 글자를 고칠 수 있다. false 는 인쇄·검토용 보기. */
@@ -93,7 +96,28 @@ interface FormSheetViewProps {
   values?: FormValues;
   onChangeValue?: (cellKey: string, value: string) => void;
   /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
-  scale?: number;
+  scale?: FormScale;
+}
+
+/**
+ * 요소의 실제 크기를 따라간다.
+ *
+ * "가로 맞춤" 배율은 **화면에 남은 폭**을 알아야 계산할 수 있고, 그 폭은 창 크기·
+ * 사이드바에 따라 바뀐다. 한 번 재고 마는 대신 계속 따라간다.
+ */
+function useElementSize(ref: React.RefObject<HTMLElement | null>, deps: unknown[]) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => setSize({ width: element.clientWidth, height: element.offsetHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return size;
 }
 
 export default function FormSheetView({
@@ -103,6 +127,22 @@ export default function FormSheetView({
   onChangeValue,
   scale = 1,
 }: FormSheetViewProps) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+
+  const totalWidth = sheet.colWidths.reduce((a, b) => a + b, 0);
+  // 남은 폭(가로 맞춤 계산용)과 표의 실제 높이(배율 적용 후 자리 확보용).
+  const box = useElementSize(boxRef, []);
+  const table = useElementSize(tableRef, [sheet, editable]);
+
+  // 가로 맞춤은 줄이기만 한다. 좁은 표를 억지로 늘리면 글자가 뭉개진다.
+  const effectiveScale =
+    scale === "fit"
+      ? box.width > 0 && totalWidth > 0
+        ? Math.min(1, box.width / totalWidth)
+        : 1
+      : scale;
+
   if (sheet.rowCount === 0) {
     return (
       <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
@@ -115,19 +155,29 @@ export default function FormSheetView({
   const rows: FormCell[][] = Array.from({ length: sheet.rowCount }, () => []);
   for (const cell of sheet.cells) rows[cell.row - 1].push(cell);
 
-  const totalWidth = sheet.colWidths.reduce((a, b) => a + b, 0);
-
   return (
     // 가로 스크롤 영역이 표의 바깥 테두리를 1px 잘라먹어, 그만큼 안쪽 여백을 준다.
-    <div className="overflow-x-auto p-0.5">
+    <div ref={boxRef} className="overflow-x-auto p-0.5">
+      {/*
+        transform 은 레이아웃 크기를 바꾸지 않는다 — 줄여도 원래 폭만큼 자리를
+        차지해 빈 공간이 남고, 키우면 아래 내용을 덮는다. 그래서 바깥 상자에
+        배율을 곱한 크기를 직접 준다.
+      */}
+      <div
+        style={
+          effectiveScale === 1
+            ? undefined
+            : { width: totalWidth * effectiveScale, height: table.height * effectiveScale }
+        }
+      >
       <table
+        ref={tableRef}
         className="border-collapse bg-white"
         style={{
           tableLayout: "fixed",
           width: totalWidth,
-          transform: scale === 1 ? undefined : `scale(${scale})`,
+          transform: effectiveScale === 1 ? undefined : `scale(${effectiveScale})`,
           transformOrigin: "top left",
-          marginBottom: scale === 1 ? undefined : `${(scale - 1) * 400}px`,
         }}
       >
         <colgroup>
@@ -157,6 +207,7 @@ export default function FormSheetView({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
