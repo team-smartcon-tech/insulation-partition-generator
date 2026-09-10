@@ -49,7 +49,7 @@ const SHAPE_KINDS: Record<string, FormShapeKind> = {
   rect: "box",
   flowChartProcess: "box",
   flowChartPredefinedProcess: "box",
-  flowChartDocument: "box",
+  flowChartDocument: "document",
   flowChartInputOutput: "box",
   roundRect: "roundBox",
   flowChartAlternateProcess: "roundBox",

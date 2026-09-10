@@ -17,6 +17,44 @@ const MIN_LINE_PX = 1;
 /** 색을 CSS id 로 쓸 수 있게 다듬는다(`#404040` → `404040`). */
 const colorKey = (color: string) => color.replace(/[^a-zA-Z0-9]/g, "");
 
+/**
+ * 네모·타원으로 안 되는 도형의 윤곽선(SVG path).
+ *
+ * 좌표는 엑셀(DrawingML) 규격의 프리셋 정의를 그대로 옮긴 것이다. 눈대중으로 그리면
+ * 원본과 물결 깊이·기울기가 달라져 "비슷한 다른 도형"이 된다.
+ */
+function outlinePath(shape: FormShape): string | null {
+  const { left: x, top: y, width: w, height: h } = shape;
+
+  if (shape.kind === "diamond") {
+    return [
+      `M ${x + w / 2} ${y}`,
+      `L ${x + w} ${y + h / 2}`,
+      `L ${x + w / 2} ${y + h}`,
+      `L ${x} ${y + h / 2}`,
+      "Z",
+    ].join(" ");
+  }
+
+  if (shape.kind === "document") {
+    // flowChartDocument: 21600 격자 기준 y1=17322, y2=20172, y3=23922.
+    // 아래변이 3차 베지에 곡선이라 한쪽은 올라가고 한쪽은 내려간다(물결).
+    const y1 = y + h * (17322 / 21600);
+    const y2 = y + h * (20172 / 21600);
+    const y3 = y + h * (23922 / 21600);
+    const mid = x + w / 2;
+    return [
+      `M ${x} ${y}`,
+      `L ${x + w} ${y}`,
+      `L ${x + w} ${y1}`,
+      `C ${mid} ${y1} ${mid} ${y3} ${x} ${y2}`,
+      "Z",
+    ].join(" ");
+  }
+
+  return null;
+}
+
 /** 선의 두 끝점. 엑셀은 사각형 + 뒤집기로 방향을 표현한다. */
 function endpoints(shape: FormShape) {
   const { left, top, width, height, flipH, flipV } = shape;
@@ -80,8 +118,11 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
   if (shapes.length === 0) return null;
 
   const lines = shapes.filter((shape) => shape.kind === "line");
-  const diamonds = shapes.filter((shape) => shape.kind === "diamond");
-  const boxes = shapes.filter((shape) => shape.kind !== "line" && shape.kind !== "diamond");
+  // 네모·타원으로 안 되는 것은 SVG 윤곽선으로 그리고, 글자만 그 위에 얹는다.
+  const outlined = shapes.filter((shape) => outlinePath(shape) !== null);
+  const boxes = shapes.filter(
+    (shape) => shape.kind !== "line" && outlinePath(shape) === null,
+  );
 
   const arrowColors = [
     ...new Set(
@@ -94,7 +135,7 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
   return (
     // 도형은 보기용이다. 클릭이 통과해야 도형에 가린 칸도 눌러서 고칠 수 있다.
     <div className="pointer-events-none absolute inset-0">
-      {(lines.length > 0 || diamonds.length > 0) && (
+      {(lines.length > 0 || outlined.length > 0) && (
         <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden>
           <defs>
             {arrowColors.map((color) => (
@@ -114,18 +155,14 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
             ))}
           </defs>
 
-          {diamonds.map((shape, index) => (
-            <polygon
-              key={`d${index}`}
-              points={[
-                `${shape.left + shape.width / 2},${shape.top}`,
-                `${shape.left + shape.width},${shape.top + shape.height / 2}`,
-                `${shape.left + shape.width / 2},${shape.top + shape.height}`,
-                `${shape.left},${shape.top + shape.height / 2}`,
-              ].join(" ")}
+          {outlined.map((shape, index) => (
+            <path
+              key={`o${index}`}
+              d={outlinePath(shape) ?? undefined}
               fill={shape.fill ?? "none"}
               stroke={shape.line ?? "#000000"}
               strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
+              strokeLinejoin="round"
             />
           ))}
 
@@ -156,15 +193,17 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
         </div>
       ))}
 
-      {/* 마름모는 SVG 로 그렸으니 글자만 그 자리에 얹는다. */}
-      {diamonds.map((shape, index) => (
-        <div
-          key={`dt${index}`}
-          style={{ ...boxCss(shape), background: "transparent", border: undefined }}
-        >
-          {shape.text && <span style={textCss(shape)}>{shape.text}</span>}
-        </div>
-      ))}
+      {/* 윤곽선은 SVG 로 그렸으니 글자만 그 자리에 얹는다. */}
+      {outlined.map((shape, index) =>
+        shape.text ? (
+          <div
+            key={`ot${index}`}
+            style={{ ...boxCss(shape), background: "transparent", border: undefined }}
+          >
+            <span style={textCss(shape)}>{shape.text}</span>
+          </div>
+        ) : null,
+      )}
     </div>
   );
 }

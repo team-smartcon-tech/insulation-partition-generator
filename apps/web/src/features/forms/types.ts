@@ -76,7 +76,14 @@ export interface FormImage {
  * 도형의 모양. 엑셀에는 수백 가지 도형이 있지만 업무 양식의 순서도에 실제로 쓰이는
  * 것은 몇 가지뿐이다. 모르는 도형은 네모로 떨어뜨린다 — 안 그리는 것보다 낫다.
  */
-export type FormShapeKind = "box" | "roundBox" | "ellipse" | "diamond" | "line";
+export type FormShapeKind =
+  | "box"
+  | "roundBox"
+  | "ellipse"
+  | "diamond"
+  /** 순서도 "문서" 기호 — 아래가 물결인 사각형 */
+  | "document"
+  | "line";
 
 /** 격자 위에 떠 있는 도형(순서도 상자·화살표 등). 그림과 달리 글자를 품는다. */
 export interface FormShape {
