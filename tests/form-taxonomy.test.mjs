@@ -52,7 +52,6 @@ test('코드표 엑셀을 중분류·소분류로 읽는다', async () => {
   const taxonomy = await loadTaxonomy();
 
   assert.equal(taxonomy.groups.length, 9);
-  // 표에는 66줄이 있지만 "305 본사 공지사항"이 두 줄이라 하나로 합쳐져 65개가 된다.
   assert.equal(
     taxonomy.groups.reduce((sum, group) => sum + group.items.length, 0),
     65,
@@ -62,8 +61,8 @@ test('코드표 엑셀을 중분류·소분류로 읽는다', async () => {
     ['100', '200', '300', '400', '500', '600', '700', '800', '900'],
   );
   assert.equal(taxonomy.groups[0].name, '공통/일반');
-  // 305 는 "현장 주요업무 체크리스트"로도 쓰여 이름이 갈린다 — 합치지 않고 알린다.
-  assert.deepEqual(taxonomy.conflicts, ['305']);
+  // 겹치는 코드 없이 정리된 표다. 겹침 처리 자체는 아래 두 테스트가 맡는다.
+  assert.deepEqual(taxonomy.conflicts, []);
   assert.equal(taxonomy.groups[0].items[0].name, '이해관계자 니즈와 기대');
 });
 
