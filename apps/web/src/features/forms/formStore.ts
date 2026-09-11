@@ -486,7 +486,11 @@ export async function loadTaxonomy(): Promise<Taxonomy | null> {
   return new Promise<Taxonomy | null>((resolve, reject) => {
     const transaction = db.transaction(META_STORE, "readonly");
     const request = transaction.objectStore(META_STORE).get(TAXONOMY_KEY);
-    transaction.oncomplete = () => resolve((request.result as Taxonomy | undefined) ?? null);
+    transaction.oncomplete = () => {
+      const saved = request.result as Taxonomy | undefined;
+      // 1차 분류가 생기기 전에 올린 코드표에는 이름이 없다. 빈 이름으로 모양을 맞춘다.
+      resolve(saved ? { ...saved, division: saved.division ?? "" } : null);
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }

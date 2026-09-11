@@ -103,7 +103,8 @@ const TAXONOMY = [
 const outPath = process.argv[2] ?? path.join(ROOT, 'apps/worker/samples/서류 분류 코드표.xlsx');
 
 const workbook = new ExcelJS.Workbook();
-const sheet = workbook.addWorksheet('분류코드');
+// 시트 이름이 곧 1차 분류 이름이다. 앱은 이 이름으로 중분류들을 한데 묶는다.
+const sheet = workbook.addWorksheet('공무관련');
 sheet.columns = [
   { width: 10 },
   { width: 18 },

@@ -341,6 +341,24 @@ export default function FormsPage() {
     fileInputRef.current?.click();
   }
 
+  /** 1차 분류 이름(예: 공무관련)을 붙이거나 바꾼다. 코드표를 다시 올리지 않아도 된다. */
+  async function handleRenameDivision() {
+    if (!taxonomy) return;
+    const name = window
+      .prompt("코드표 전체를 묶을 1차 분류 이름을 적어 주세요. (예: 공무관련)", taxonomy.division ?? "")
+      ?.trim();
+    if (name === undefined || name === taxonomy.division) return;
+    const next: Taxonomy = { ...taxonomy, division: name };
+    try {
+      await saveTaxonomy(next);
+      setTaxonomy(next);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `이름을 바꾸지 못했습니다: ${error.message}` : "이름을 바꾸지 못했습니다.",
+      );
+    }
+  }
+
   /** 코드표를 지운다. 올려 둔 양식은 그대로 남고 분류만 풀린다. */
   async function handleClearTaxonomy() {
     const ok = window.confirm(
@@ -569,6 +587,7 @@ export default function FormsPage() {
               onUpload={() => fileInputRef.current?.click()}
               onReplaceTaxonomy={() => taxonomyInputRef.current?.click()}
               onClearTaxonomy={() => void handleClearTaxonomy()}
+              onRenameDivision={() => void handleRenameDivision()}
             />
           ) : (
             <FormGallery

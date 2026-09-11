@@ -6,7 +6,7 @@
  * 눌러 바로 올릴 수 있어야 한다. 올린 것만 보여 주면 무엇이 없는지 알 수가 없다.
  */
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Search, Star, Trash2, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Search, Star, Trash2, Upload } from "lucide-react";
 import type { FormSummary } from "./formStore";
 import type { Taxonomy, TaxonomyItem } from "./taxonomy";
 
@@ -33,6 +33,8 @@ interface FormTreeProps {
   onReplaceTaxonomy: () => void;
   /** 코드표 지우기 — 양식은 남고 분류만 풀린다 */
   onClearTaxonomy: () => void;
+  /** 1차 분류 이름(예: 공무관련) 붙이기·바꾸기 */
+  onRenameDivision: () => void;
 }
 
 export default function FormTree({
@@ -47,6 +49,7 @@ export default function FormTree({
   onUpload,
   onReplaceTaxonomy,
   onClearTaxonomy,
+  onRenameDivision,
 }: FormTreeProps) {
   const [selected, setSelected] = useState<string>(ALL_GROUPS);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -205,7 +208,29 @@ export default function FormTree({
             </span>
           </button>
 
-          <ul className="mt-1 space-y-0.5">
+          {/* 1차 분류 — 코드표 전체를 묶는 큰 갈래(예: 공무관련). 코드표 시트 이름에서 온다. */}
+          <div className="mt-3 flex items-center gap-1 px-3">
+            <span
+              className={
+                taxonomy.division
+                  ? "min-w-0 truncate text-xs font-semibold text-slate-700"
+                  : "min-w-0 truncate text-xs italic text-slate-400"
+              }
+            >
+              {taxonomy.division || "1차 분류 이름 없음"}
+            </span>
+            <button
+              type="button"
+              onClick={onRenameDivision}
+              title="1차 분류 이름 바꾸기"
+              aria-label="1차 분류 이름 바꾸기"
+              className="shrink-0 rounded p-1 text-slate-300 transition hover:bg-slate-100 hover:text-slate-600"
+            >
+              <Pencil size={11} />
+            </button>
+          </div>
+
+          <ul className="mt-1 ml-2 space-y-0.5 border-l-2 border-slate-100 pl-1">
             {taxonomy.groups.map((group) => {
               const filled = filledCount(group.code);
               const open = expanded.has(group.code);

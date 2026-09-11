@@ -186,3 +186,33 @@ test('빈 줄과 이름 없는 줄은 건너뛴다', () => {
     ['101', '103'],
   );
 });
+
+// ─── 1차 분류(대분류) ──────────────────────────────────────────
+
+const codeTableRows = [
+  [1, 1, 'CODE'],
+  [1, 2, '분류명'],
+  [1, 3, 'CODE'],
+  [1, 4, '분류명'],
+  [2, 1, '100', 1],
+  [2, 2, '공통/일반', 1],
+  [2, 3, '101'],
+  [2, 4, '이해관계자 니즈와 기대'],
+];
+
+test('코드표 시트 이름을 1차 분류 이름으로 쓴다', async () => {
+  const taxonomy = await loadTaxonomy();
+  // 관리자가 엑셀 시트 이름만 바꾸면 되고, 앱에서 따로 입력할 것이 없다.
+  assert.equal(taxonomy.division, '공무관련');
+
+  const named = parseTaxonomySheet({ ...sheetOf(codeTableRows), name: '  안전관련 ' }, '표.xlsx');
+  assert.equal(named.division, '안전관련');
+});
+
+test('엑셀 기본 시트 이름은 1차 분류로 치지 않는다', () => {
+  // "Sheet1" 이 대분류 이름으로 뜨면 이상하다. 비워 두고 화면에서 붙이게 한다.
+  for (const name of ['Sheet1', 'sheet', 'Sheet 2', '시트1']) {
+    const taxonomy = parseTaxonomySheet({ ...sheetOf(codeTableRows), name }, '표.xlsx');
+    assert.equal(taxonomy.division, '', `"${name}" 이 이름으로 잡혔다`);
+  }
+});

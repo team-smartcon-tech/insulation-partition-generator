@@ -31,6 +31,13 @@ export interface TaxonomyGroup {
 }
 
 export interface Taxonomy {
+  /**
+   * 1차 분류 이름(예: "공무관련"). 코드표의 중분류·소분류를 한데 묶는 큰 갈래다.
+   *
+   * 코드표 엑셀의 **시트 이름**에서 가져온다 — 관리자가 엑셀만 고치면 되고 앱에서 따로
+   * 입력할 것이 없다. 시트 이름이 `Sheet1` 같은 기본값이면 비워 두고 화면에서 붙인다.
+   */
+  division: string;
   groups: TaxonomyGroup[];
   /** 어떤 파일에서 읽었는지 — 화면에 "무엇을 기준으로 나눴는지" 보여주기 위해 */
   fileName: string;
@@ -42,6 +49,16 @@ export interface Taxonomy {
    * 적어 둔 경우), 이름까지 다르면 표의 실수일 수 있어 지우지 않고 알린다.
    */
   conflicts: string[];
+}
+
+/**
+ * 시트 이름을 1차 분류 이름으로 다듬는다.
+ * 엑셀이 붙인 기본 이름(`Sheet1`, `시트1`)은 이름으로 치지 않는다 — 그걸 대분류로 보이면 이상하다.
+ */
+export function divisionFromSheetName(name: string): string {
+  const trimmed = name.trim();
+  if (/^(sheet|시트)\s*\d*$/i.test(trimmed)) return "";
+  return trimmed;
 }
 
 /** 코드로 보이는 값인가. 숫자 3자리 이상(100, 101, 1010 …). */
@@ -138,7 +155,13 @@ export function parseTaxonomySheet(sheet: FormSheet, fileName: string): Taxonomy
 
   const result = [...groups.values()].filter((group) => group.items.length > 0);
   if (result.length === 0) return null;
-  return { groups: result, fileName, updatedAt: Date.now(), conflicts: [...conflicts] };
+  return {
+    division: divisionFromSheetName(sheet.name),
+    groups: result,
+    fileName,
+    updatedAt: Date.now(),
+    conflicts: [...conflicts],
+  };
 }
 
 /** 코드표 전체에서 코드 → 항목을 찾는다. */
