@@ -14,6 +14,8 @@ import type { Taxonomy, TaxonomyItem } from "./taxonomy";
 const ALL_GROUPS = " all";
 /** 코드표에 없는 서류가 모이는 자리 */
 const UNFILED = " unfiled";
+/** 오른쪽에서 접어 둔 분류 코드 목록을 기억하는 자리 */
+const COLLAPSED_KEY = "ipg-forms:collapsed-groups";
 
 interface FormTreeProps {
   taxonomy: Taxonomy;
@@ -50,6 +52,32 @@ export default function FormTree({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [query, setQuery] = useState("");
+  /**
+   * 오른쪽에서 접어 둔 분류. 65칸 중 빈 칸이 대부분이라 다 펼치면 스크롤이 길다.
+   * 다음에 열었을 때도 그대로 두는 게 편해 이 브라우저에 기억해 둔다(보는 사람마다 따로).
+   */
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(COLLAPSED_KEY);
+      return new Set(saved ? (JSON.parse(saved) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+
+  function toggleCollapsed(code: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      } catch {
+        // 저장이 막힌 브라우저 — 이번 화면에서만 접힌다.
+      }
+      return next;
+    });
+  }
 
   /** 코드 → 그 코드로 올린 서류들. 한 코드에 여러 장(월별 등)이 올 수 있다. */
   const byCode = useMemo(() => {
@@ -318,15 +346,36 @@ export default function FormTree({
               조건에 맞는 서류가 없습니다.
             </p>
           ) : (
-            rows.map(({ group, items }) => (
+            rows.map(({ group, items }) => {
+              // 검색 중에는 접어 둔 분류도 펼쳐 보인다 — 찾은 것이 접힌 칸에 숨으면 "없다"로 보인다.
+              const isCollapsed = needle === "" && collapsed.has(group.code);
+              return (
               <section key={group.code} className="mb-6 last:mb-0">
-                <h3 className="mb-3 text-xs font-semibold text-slate-600">
-                  <span className="mr-1.5 text-slate-400">{group.code}</span>
-                  {group.name}
-                  <span className="ml-2 font-normal text-slate-400">
-                    {filledCount(group.code)}/{group.items.length}
-                  </span>
+                <h3 className="mb-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleCollapsed(group.code)}
+                    aria-expanded={!isCollapsed}
+                    title={isCollapsed ? "펼치기" : "접기"}
+                    className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                  >
+                    <span className="text-slate-400">{group.code}</span>
+                    {group.name}
+                    <span className="font-normal text-slate-400">
+                      {filledCount(group.code)}/{group.items.length}
+                    </span>
+                    <ChevronDown
+                      size={14}
+                      aria-hidden
+                      className={
+                        isCollapsed
+                          ? "-rotate-90 text-slate-400 transition-transform"
+                          : "text-slate-400 transition-transform"
+                      }
+                    />
+                  </button>
                 </h3>
+                {!isCollapsed && (
                 <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                   {items.map(({ item, related }) =>
                     related.length > 0 ? (
@@ -350,8 +399,10 @@ export default function FormTree({
                     ),
                   )}
                 </ul>
+                )}
               </section>
-            ))
+              );
+            })
           )}
         </div>
       </div>
