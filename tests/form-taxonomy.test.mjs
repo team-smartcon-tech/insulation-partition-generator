@@ -5,9 +5,13 @@ import { fileURLToPath } from 'node:url';
 
 import { parseFormWorkbook } from '../apps/web/src/features/forms/formParser.ts';
 import {
+  LEGACY_TAXONOMY_ID,
   codeFromFileName,
   findItem,
   parseTaxonomySheet,
+  placeByFileName,
+  taxonomyIdOf,
+  upsertTaxonomies,
 } from '../apps/web/src/features/forms/taxonomy.ts';
 
 const SAMPLE = fileURLToPath(
@@ -215,4 +219,108 @@ test('엑셀 기본 시트 이름은 1차 분류로 치지 않는다', () => {
     const taxonomy = parseTaxonomySheet({ ...sheetOf(codeTableRows), name }, '표.xlsx');
     assert.equal(taxonomy.division, '', `"${name}" 이 이름으로 잡혔다`);
   }
+});
+
+// ─── 코드표 여러 벌(공무관련 · 품질관련) ───────────────────────
+
+const QUALITY = fileURLToPath(
+  new URL('../apps/worker/samples/품질관련 코드표.xlsx', import.meta.url),
+);
+
+async function loadQuality() {
+  const buffer = await readFile(QUALITY);
+  const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+  const [sheet] = await parseFormWorkbook(data);
+  return parseTaxonomySheet(sheet, '품질관련 코드표.xlsx');
+}
+
+const tableOf = (id, division, codes) => ({
+  id,
+  division,
+  fileName: `${division}.xlsx`,
+  updatedAt: 0,
+  conflicts: [],
+  groups: [
+    {
+      code: '100',
+      name: '공통/일반',
+      items: codes.map((code) => ({ code, name: `${division} ${code}`, groupCode: '100' })),
+    },
+  ],
+});
+
+test('품질관련 코드표를 사진 그대로 읽는다 — 겹친 번호는 알린다', async () => {
+  const quality = await loadQuality();
+
+  assert.equal(quality.division, '품질관련');
+  assert.deepEqual(
+    quality.groups.map((group) => `${group.code} ${group.name}`),
+    [
+      '100 공통/일반',
+      '200 교육/훈련',
+      '300 계획/절차서',
+      '400 부적합 관리',
+      '500 품질관리',
+      '600 시험관리',
+      '700 공장점검',
+      '800 시험장비',
+      '900 자재',
+    ],
+  );
+  assert.equal(quality.groups.reduce((sum, group) => sum + group.items.length, 0), 59);
+  // 사진의 500 블록에 505·509 가 두 번씩 있다. 짐작해서 번호를 바꾸지 않고 알린다.
+  assert.deepEqual(quality.conflicts, ['505', '509']);
+});
+
+test('같은 1차 분류 이름으로 다시 올리면 내용만 바꾸고 id 는 그대로 둔다', () => {
+  const existing = [tableOf('a', '공무관련', ['101']), tableOf('b', '품질관련', ['101'])];
+  const incoming = [{ ...tableOf('', '품질관련', ['101', '102']) }];
+
+  let made = 0;
+  const result = upsertTaxonomies(existing, incoming, () => `new-${++made}`);
+
+  // id 가 바뀌면 이미 올린 품질 서류들이 떨어져 나간다.
+  assert.equal(result.length, 2);
+  assert.equal(result[1].id, 'b');
+  assert.equal(result[1].groups[0].items.length, 2);
+  assert.equal(made, 0, '같은 이름이면 새 id 를 만들지 않는다');
+});
+
+test('처음 보는 1차 분류는 새 id 를 받아 뒤에 붙는다', () => {
+  const existing = [tableOf('a', '공무관련', ['101'])];
+  const result = upsertTaxonomies(existing, [tableOf('', '품질관련', ['101'])], () => 'new-1');
+
+  assert.deepEqual(result.map((t) => [t.id, t.division]), [
+    ['a', '공무관련'],
+    ['new-1', '품질관련'],
+  ]);
+});
+
+test('코드표 id 없이 올린 옛 서류는 옛 코드표 소속이다', () => {
+  const taxonomies = [tableOf(LEGACY_TAXONOMY_ID, '공무관련', ['101']), tableOf('q', '품질관련', ['101'])];
+
+  assert.equal(taxonomyIdOf({ code: '101' }, taxonomies), LEGACY_TAXONOMY_ID);
+  assert.equal(taxonomyIdOf({ code: '101', taxonomyId: 'q' }, taxonomies), 'q');
+  assert.equal(taxonomyIdOf({}, taxonomies), undefined, '코드가 없으면 어디에도 안 속한다');
+});
+
+test('옛 코드표를 지우면 옛 서류는 다음 코드표로 옮겨 붙지 않는다', () => {
+  // "첫 번째 코드표"로 보면 공무 서류가 품질 칸으로 조용히 들어간다.
+  const onlyQuality = [tableOf('q', '품질관련', ['101'])];
+  assert.equal(taxonomyIdOf({ code: '101' }, onlyQuality), undefined);
+  // 지워진 코드표를 가리키는 서류도 떨어진다.
+  assert.equal(taxonomyIdOf({ code: '101', taxonomyId: 'gone' }, onlyQuality), undefined);
+});
+
+test('파일 이름 번호가 여러 코드표에 겹치면 보고 있는 쪽으로, 모르면 정하지 않는다', () => {
+  const taxonomies = [tableOf('g', '공무관련', ['101', '112']), tableOf('q', '품질관련', ['101', '615'])];
+
+  // 한 곳에만 있는 번호는 그곳으로
+  assert.deepEqual(placeByFileName('112. 문서목록.xlsx', taxonomies), { taxonomyId: 'g', code: '112' });
+  assert.deepEqual(placeByFileName('615. 총괄표.xlsx', taxonomies), { taxonomyId: 'q', code: '615' });
+  // 겹치는 번호는 지금 보고 있는 1차 분류로
+  assert.deepEqual(placeByFileName('101. 이해관계자.xlsx', taxonomies, 'q'), { taxonomyId: 'q', code: '101' });
+  // 어느 쪽인지 모르면 정하지 않는다 — 공무 서류가 품질 칸에 조용히 들어가지 않게
+  assert.equal(placeByFileName('101. 이해관계자.xlsx', taxonomies), undefined);
+  assert.equal(placeByFileName('999. 없음.xlsx', taxonomies, 'q'), undefined);
 });

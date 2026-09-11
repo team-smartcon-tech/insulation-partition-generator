@@ -25,7 +25,6 @@ import FormTree from "./FormTree";
 import FormSheetView, { type FormScale } from "./FormSheetView";
 import {
   addCustomSheet,
-  clearTaxonomy,
   deleteForm,
   findTemplateSheet,
   getForm,
@@ -34,10 +33,10 @@ import {
   isStorageAvailable,
   listForms,
   readLastOpenedId,
-  loadTaxonomy,
+  loadTaxonomies,
   reparseForm,
   saveForm,
-  saveTaxonomy,
+  saveTaxonomies,
   setFormCode,
   touchForm,
   updateFormMeta,
@@ -47,8 +46,9 @@ import {
 } from "./formStore";
 import type { FormSheet, FormValues } from "./types";
 import {
-  codeFromFileName,
   parseTaxonomySheet,
+  placeByFileName,
+  upsertTaxonomies,
   type Taxonomy,
   type TaxonomyItem,
 } from "./taxonomy";
@@ -94,11 +94,14 @@ export default function FormsPage() {
   const [values, setValues] = useState<FormValues>({});
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
-  const [taxonomy, setTaxonomy] = useState<Taxonomy | null>(null);
+  /** 코드표 목록 — 1차 분류(공무관련·품질관련 …)마다 한 벌 */
+  const [taxonomies, setTaxonomies] = useState<Taxonomy[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const taxonomyInputRef = useRef<HTMLInputElement>(null);
-  /** 빈 칸을 눌러 올리는 중이면 그 코드. 읽고 나서 이 코드로 붙인다. */
-  const pendingCodeRef = useRef<string | undefined>(undefined);
+  /** 빈 칸을 눌러 올리는 중이면 그 칸(코드표 id + 코드). 읽고 나서 이 칸에 붙인다. */
+  const pendingPlaceRef = useRef<{ taxonomyId: string; code: string } | undefined>(undefined);
+  /** 그냥 올릴 때 보고 있던 1차 분류. 파일 이름 번호가 여러 코드표에 겹칠 때 쓴다. */
+  const preferredTaxonomyRef = useRef<string | undefined>(undefined);
 
   /** 방금 저장소에서 읽어 온 값. 이것과 같으면 저장할 게 없다. */
   const justLoadedRef = useRef<{ id: string; values: FormValues } | null>(null);
@@ -148,8 +151,8 @@ export default function FormsPage() {
     void (async () => {
       // 코드표가 있으면 트리로, 없으면 지금까지의 서식함 모양으로 보여준다.
       try {
-        const saved = await loadTaxonomy();
-        if (!cancelled) setTaxonomy(saved);
+        const saved = await loadTaxonomies();
+        if (!cancelled) setTaxonomies(saved);
       } catch {
         // 코드표를 못 읽어도 양식 목록은 보여야 한다.
       }
@@ -227,13 +230,22 @@ export default function FormsPage() {
         return;
       }
 
-      // 빈 칸을 눌러 올렸으면 그 코드, 아니면 파일 이름 앞 숫자로 정한다.
-      const code = pendingCodeRef.current ?? codeFromFileName(file.name, taxonomy);
-      pendingCodeRef.current = undefined;
+      // 빈 칸을 눌러 올렸으면 그 칸, 아니면 파일 이름 앞 숫자로 정한다.
+      const place =
+        pendingPlaceRef.current ??
+        placeByFileName(file.name, taxonomies, preferredTaxonomyRef.current);
+      pendingPlaceRef.current = undefined;
+      preferredTaxonomyRef.current = undefined;
 
       let id = "";
       try {
-        const saved = await saveForm({ fileName: file.name, bytes, sheets, code });
+        const saved = await saveForm({
+          fileName: file.name,
+          bytes,
+          sheets,
+          code: place?.code,
+          taxonomyId: place?.taxonomyId,
+        });
         id = saved.id;
         writeLastOpenedId(id);
         setSaveState("saved");
@@ -285,7 +297,12 @@ export default function FormsPage() {
     }
   }
 
-  /** 코드표 엑셀을 읽어 저장한다. 한 번 올리면 계속 쓰인다. */
+  /**
+   * 코드표 엑셀을 읽어 저장한다. 한 번 올리면 계속 쓰인다.
+   *
+   * 시트마다 코드표 한 벌(= 1차 분류 하나)로 읽는다. 같은 1차 분류 이름이 이미 있으면
+   * 그 코드표만 바꾸고(서류는 그대로 붙어 있다), 처음 보는 이름이면 옆에 새로 더한다.
+   */
   async function handleTaxonomyFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -294,39 +311,39 @@ export default function FormsPage() {
     setStorageWarning(null);
     try {
       const sheets = await parseFormWorkbook(await file.arrayBuffer());
-      // 코드표가 여러 장일 수 있다. 읽히는 첫 장을 쓴다.
-      let parsed: Taxonomy | null = null;
-      for (const sheet of sheets) {
-        parsed = parseTaxonomySheet(sheet, file.name);
-        if (parsed) break;
-      }
-      if (!parsed) {
+      const parsed = sheets
+        .map((sheet) => parseTaxonomySheet(sheet, file.name))
+        .filter((item): item is Taxonomy => item !== null);
+      if (parsed.length === 0) {
         setStorageWarning(
           "코드표를 읽지 못했습니다. `CODE`·`분류명` 머리글이 있는 표인지 확인해 주세요. (양식 파일을 올리신 건 아닌가요?)",
         );
         return;
       }
-      await saveTaxonomy(parsed);
-      setTaxonomy(parsed);
 
-      // 이미 올려 둔 양식에도 파일 이름으로 코드를 붙여 준다 — 코드표를 나중에 올린 경우.
+      const next = upsertTaxonomies(taxonomies, parsed, () => crypto.randomUUID());
+      await saveTaxonomies(next);
+      setTaxonomies(next);
+
+      // 이미 올려 둔 양식 중 아직 칸이 없는 것에 파일 이름으로 칸을 붙여 준다.
       let matched = 0;
       for (const form of forms) {
         if (form.code) continue;
-        const code = codeFromFileName(form.fileName, parsed);
-        if (!code) continue;
-        await setFormCode(form.id, code);
+        const place = placeByFileName(form.fileName, next);
+        if (!place) continue;
+        await setFormCode(form.id, place.code, place.taxonomyId);
         matched += 1;
       }
       await refreshList();
 
-      const total = parsed.groups.reduce((sum, group) => sum + group.items.length, 0);
+      const nameOf = (taxonomy: Taxonomy) => taxonomy.division || "이름 없음";
+      const conflicts = parsed.flatMap((taxonomy) =>
+        taxonomy.conflicts.map((code) => `${nameOf(taxonomy)} ${code}`),
+      );
       setStorageWarning(
-        `코드표를 읽었습니다: 분류 ${parsed.groups.length}개 · 서류 ${total}개` +
+        `코드표를 읽었습니다: ${parsed.map(nameOf).join(", ")}` +
           (matched > 0 ? ` · 이미 올린 양식 ${matched}개에 코드를 붙였습니다.` : "") +
-          (parsed.conflicts.length > 0
-            ? ` ⚠ 겹치는 코드가 있습니다: ${parsed.conflicts.join(", ")}`
-            : ""),
+          (conflicts.length > 0 ? ` ⚠ 겹치는 코드가 있습니다: ${conflicts.join(", ")}` : ""),
       );
     } catch (error) {
       setStorageWarning(
@@ -335,23 +352,40 @@ export default function FormsPage() {
     }
   }
 
-  /** 빈 칸을 눌러 그 코드로 양식을 올린다. */
-  function handleUploadFor(item: TaxonomyItem) {
-    pendingCodeRef.current = item.code;
+  /** 빈 칸을 눌러 그 코드표의 그 코드로 양식을 올린다. */
+  function handleUploadFor(taxonomyId: string, item: TaxonomyItem) {
+    pendingPlaceRef.current = { taxonomyId, code: item.code };
+    preferredTaxonomyRef.current = undefined;
     fileInputRef.current?.click();
   }
 
-  /** 1차 분류 이름(예: 공무관련)을 붙이거나 바꾼다. 코드표를 다시 올리지 않아도 된다. */
-  async function handleRenameDivision() {
-    if (!taxonomy) return;
+  /** 그냥 올리기. 보고 있던 1차 분류를 기억해 둔다. */
+  function handleUpload(preferredTaxonomyId?: string) {
+    // 빈 칸을 눌렀다가 파일 고르기를 취소하면 그 칸이 남아 다음 올리기에 엉뚱하게 붙는다.
+    pendingPlaceRef.current = undefined;
+    preferredTaxonomyRef.current = preferredTaxonomyId;
+    fileInputRef.current?.click();
+  }
+
+  /** 1차 분류 이름을 바꾼다. 서류는 코드표 id 로 묶여 있어 이름을 바꿔도 떨어지지 않는다. */
+  async function handleRenameDivision(taxonomyId: string) {
+    const target = taxonomies.find((taxonomy) => taxonomy.id === taxonomyId);
+    if (!target) return;
     const name = window
-      .prompt("코드표 전체를 묶을 1차 분류 이름을 적어 주세요. (예: 공무관련)", taxonomy.division ?? "")
+      .prompt("1차 분류 이름을 적어 주세요. (예: 공무관련, 품질관련)", target.division)
       ?.trim();
-    if (name === undefined || name === taxonomy.division) return;
-    const next: Taxonomy = { ...taxonomy, division: name };
+    if (name === undefined || name === target.division) return;
+    // 같은 이름이 둘이면 코드표를 다시 올릴 때 어느 쪽을 바꿀지 알 수 없다.
+    if (name && taxonomies.some((taxonomy) => taxonomy.id !== taxonomyId && taxonomy.division === name)) {
+      setStorageWarning(`“${name}” 1차 분류가 이미 있습니다. 다른 이름을 적어 주세요.`);
+      return;
+    }
+    const next = taxonomies.map((taxonomy) =>
+      taxonomy.id === taxonomyId ? { ...taxonomy, division: name } : taxonomy,
+    );
     try {
-      await saveTaxonomy(next);
-      setTaxonomy(next);
+      await saveTaxonomies(next);
+      setTaxonomies(next);
     } catch (error) {
       setStorageWarning(
         error instanceof Error ? `이름을 바꾸지 못했습니다: ${error.message}` : "이름을 바꾸지 못했습니다.",
@@ -359,21 +393,22 @@ export default function FormsPage() {
     }
   }
 
-  /** 코드표를 지운다. 올려 둔 양식은 그대로 남고 분류만 풀린다. */
-  async function handleClearTaxonomy() {
+  /** 코드표 하나를 지운다. 그 분류로 올린 양식은 남고 "코드 없는 서류"로 옮겨진다. */
+  async function handleRemoveTaxonomy(taxonomyId: string) {
+    const target = taxonomies.find((taxonomy) => taxonomy.id === taxonomyId);
+    if (!target) return;
     const ok = window.confirm(
-      "코드표를 지웁니다.\n올려 둔 양식은 그대로 남고, 분류만 풀려 예전 목록 화면으로 돌아갑니다. 계속할까요?",
+      `“${target.division || target.fileName}” 코드표를 지웁니다.\n이 분류로 올린 양식은 지워지지 않고 "코드 없는 서류"로 옮겨집니다. 계속할까요?`,
     );
     if (!ok) return;
+    const next = taxonomies.filter((taxonomy) => taxonomy.id !== taxonomyId);
     try {
-      await clearTaxonomy();
-      setTaxonomy(null);
+      await saveTaxonomies(next);
+      setTaxonomies(next);
       setStorageWarning(null);
     } catch (error) {
       setStorageWarning(
-        error instanceof Error
-          ? `코드표를 지우지 못했습니다: ${error.message}`
-          : "코드표를 지우지 못했습니다.",
+        error instanceof Error ? `코드표를 지우지 못했습니다: ${error.message}` : "코드표를 지우지 못했습니다.",
       );
     }
   }
@@ -574,9 +609,9 @@ export default function FormsPage() {
 
         <div className="mb-6">
           {/* 코드표가 있으면 회사 분류 트리로, 없으면 사용자가 만든 분류 탭으로 본다. */}
-          {taxonomy ? (
+          {taxonomies.length > 0 ? (
             <FormTree
-              taxonomy={taxonomy}
+              taxonomies={taxonomies}
               forms={forms}
               activeId={state.status === "ready" ? state.id : null}
               busy={state.status === "loading"}
@@ -584,10 +619,10 @@ export default function FormsPage() {
               onToggleFavorite={(form) => void patchMeta(form.id, { favorite: !form.favorite })}
               onDelete={(form) => void handleDelete(form)}
               onUploadFor={handleUploadFor}
-              onUpload={() => fileInputRef.current?.click()}
-              onReplaceTaxonomy={() => taxonomyInputRef.current?.click()}
-              onClearTaxonomy={() => void handleClearTaxonomy()}
-              onRenameDivision={() => void handleRenameDivision()}
+              onUpload={handleUpload}
+              onUploadTaxonomy={() => taxonomyInputRef.current?.click()}
+              onRenameDivision={(id) => void handleRenameDivision(id)}
+              onRemoveTaxonomy={(id) => void handleRemoveTaxonomy(id)}
             />
           ) : (
             <FormGallery
@@ -598,7 +633,7 @@ export default function FormsPage() {
               onToggleFavorite={(form) => void patchMeta(form.id, { favorite: !form.favorite })}
               onChangeCategory={(form, category) => void patchMeta(form.id, { category })}
               onDelete={(form) => void handleDelete(form)}
-              onUpload={() => fileInputRef.current?.click()}
+              onUpload={() => handleUpload()}
               // 카드 목록 아래 작은 글씨로 두었더니 찾지 못했다. 도구 줄 버튼으로 둔다.
               onUploadTaxonomy={() => taxonomyInputRef.current?.click()}
             />

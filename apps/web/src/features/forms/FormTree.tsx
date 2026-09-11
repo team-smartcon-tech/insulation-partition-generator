@@ -1,44 +1,64 @@
 /**
- * 코드표(중분류/소분류)를 따라 서류를 늘어놓는 화면.
+ * 코드표(1차 분류 / 중분류 / 소분류)를 따라 서류를 늘어놓는 화면.
  *
  * 왼쪽은 분류 트리, 오른쪽은 그 분류의 서류 카드다. **아직 안 올린 항목도 흐리게
- * 보여 준다** — 회사 표준 65개 중 몇 개를 채웠는지가 한눈에 보여야 하고, 빠진 칸을
- * 눌러 바로 올릴 수 있어야 한다. 올린 것만 보여 주면 무엇이 없는지 알 수가 없다.
+ * 보여 준다** — 회사 표준 중 몇 개를 채웠는지가 한눈에 보여야 하고, 빠진 칸을 눌러
+ * 바로 올릴 수 있어야 한다. 올린 것만 보여 주면 무엇이 없는지 알 수가 없다.
+ *
+ * 1차 분류(공무관련·품질관련 …)마다 코드표가 따로 있고 **코드 번호가 서로 겹친다**
+ * (둘 다 101 을 쓴다). 그래서 칸은 늘 "코드표 id + 코드"로 가리킨다.
  */
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Pencil, Plus, Search, Star, Trash2, Upload } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FolderTree,
+  Pencil,
+  Plus,
+  Search,
+  Star,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import type { FormSummary } from "./formStore";
-import type { Taxonomy, TaxonomyItem } from "./taxonomy";
+import { taxonomyIdOf, type Taxonomy, type TaxonomyGroup, type TaxonomyItem } from "./taxonomy";
 
-/** 왼쪽 트리에서 "전체"를 나타내는 값. 코드(숫자)와 겹치지 않게 잡았다. */
-const ALL_GROUPS = " all";
-/** 코드표에 없는 서류가 모이는 자리 */
+/** 왼쪽 트리 선택값. 코드표 id·코드와 겹치지 않게 앞에 표시를 붙인다. */
+const ALL = " all";
 const UNFILED = " unfiled";
-/** 오른쪽에서 접어 둔 분류 코드 목록을 기억하는 자리 */
+const divisionKey = (taxonomyId: string) => `t:${taxonomyId}`;
+const groupKey = (taxonomyId: string, groupCode: string) => `g:${taxonomyId}:${groupCode}`;
+/** 한 칸(= 코드표 안의 한 코드)을 가리키는 열쇠 */
+const slotKey = (taxonomyId: string, code: string) => `${taxonomyId}:${code}`;
+
+/** 오른쪽에서 접어 둔 분류를 기억하는 자리 */
 const COLLAPSED_KEY = "ipg-forms:collapsed-groups";
 
 interface FormTreeProps {
-  taxonomy: Taxonomy;
+  taxonomies: Taxonomy[];
   forms: FormSummary[];
   activeId: string | null;
   busy?: boolean;
   onOpen: (id: string) => void;
   onToggleFavorite: (form: FormSummary) => void;
   onDelete: (form: FormSummary) => void;
-  /** 빈 칸을 눌렀을 때 — 그 코드로 양식을 올린다. */
-  onUploadFor: (item: TaxonomyItem) => void;
-  /** 코드 없이 그냥 올리기 */
-  onUpload: () => void;
-  /** 코드표 바꾸기 */
-  onReplaceTaxonomy: () => void;
-  /** 코드표 지우기 — 양식은 남고 분류만 풀린다 */
-  onClearTaxonomy: () => void;
-  /** 1차 분류 이름(예: 공무관련) 붙이기·바꾸기 */
-  onRenameDivision: () => void;
+  /** 빈 칸을 눌렀을 때 — 그 코드표의 그 코드로 양식을 올린다. */
+  onUploadFor: (taxonomyId: string, item: TaxonomyItem) => void;
+  /**
+   * 그냥 올리기. 지금 보고 있는 1차 분류를 넘겨, 파일 이름 번호가 여러 코드표에
+   * 겹칠 때 어느 쪽으로 넣을지 정하는 데 쓴다.
+   */
+  onUpload: (preferredTaxonomyId?: string) => void;
+  /** 코드표 올리기(새 1차 분류 추가, 또는 같은 이름 코드표 바꾸기) */
+  onUploadTaxonomy: () => void;
+  /** 1차 분류 이름 바꾸기 */
+  onRenameDivision: (taxonomyId: string) => void;
+  /** 코드표 하나 지우기 — 서류는 남고 분류만 풀린다 */
+  onRemoveTaxonomy: (taxonomyId: string) => void;
 }
 
 export default function FormTree({
-  taxonomy,
+  taxonomies,
   forms,
   activeId,
   busy = false,
@@ -47,16 +67,16 @@ export default function FormTree({
   onDelete,
   onUploadFor,
   onUpload,
-  onReplaceTaxonomy,
-  onClearTaxonomy,
+  onUploadTaxonomy,
   onRenameDivision,
+  onRemoveTaxonomy,
 }: FormTreeProps) {
-  const [selected, setSelected] = useState<string>(ALL_GROUPS);
+  const [selected, setSelected] = useState<string>(ALL);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [query, setQuery] = useState("");
   /**
-   * 오른쪽에서 접어 둔 분류. 65칸 중 빈 칸이 대부분이라 다 펼치면 스크롤이 길다.
+   * 오른쪽에서 접어 둔 분류. 빈 칸이 대부분이라 다 펼치면 스크롤이 길다.
    * 다음에 열었을 때도 그대로 두는 게 편해 이 브라우저에 기억해 둔다(보는 사람마다 따로).
    */
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
@@ -68,11 +88,11 @@ export default function FormTree({
     }
   });
 
-  function toggleCollapsed(code: string) {
+  function toggleCollapsed(key: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       try {
         localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
       } catch {
@@ -82,22 +102,42 @@ export default function FormTree({
     });
   }
 
-  /** 코드 → 그 코드로 올린 서류들. 한 코드에 여러 장(월별 등)이 올 수 있다. */
-  const byCode = useMemo(() => {
+  function toggleExpand(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  /** 칸 → 그 칸에 올린 서류들. 한 칸에 여러 장(월별 등)이 올 수 있다. */
+  const bySlot = useMemo(() => {
     const map = new Map<string, FormSummary[]>();
     for (const form of forms) {
-      if (!form.code) continue;
-      const list = map.get(form.code) ?? [];
+      const taxonomyId = taxonomyIdOf(form, taxonomies);
+      if (!taxonomyId || !form.code) continue;
+      const key = slotKey(taxonomyId, form.code);
+      const list = map.get(key) ?? [];
       list.push(form);
-      map.set(form.code, list);
+      map.set(key, list);
     }
     return map;
-  }, [forms]);
+  }, [forms, taxonomies]);
 
-  const unfiled = useMemo(
-    () => forms.filter((form) => !form.code || !byCode.has(form.code)),
-    [forms, byCode],
-  );
+  /** 어느 칸에도 못 들어간 서류 — 코드가 없거나, 코드표가 지워졌거나, 코드표에 없는 번호 */
+  const unfiled = useMemo(() => {
+    const slots = new Set<string>();
+    for (const taxonomy of taxonomies) {
+      for (const group of taxonomy.groups) {
+        for (const item of group.items) slots.add(slotKey(taxonomy.id, item.code));
+      }
+    }
+    return forms.filter((form) => {
+      const taxonomyId = taxonomyIdOf(form, taxonomies);
+      return !taxonomyId || !form.code || !slots.has(slotKey(taxonomyId, form.code));
+    });
+  }, [forms, taxonomies]);
 
   const needle = query.trim().toLowerCase();
   const matches = (item: TaxonomyItem, related: FormSummary[]) => {
@@ -110,36 +150,50 @@ export default function FormTree({
     );
   };
 
-  /** 화면에 뿌릴 줄: 분류 + 그 아래 항목(올린 것/빈 칸) */
-  const rows = useMemo(() => {
-    return taxonomy.groups
-      .filter((group) => selected === ALL_GROUPS || selected === group.code)
-      .map((group) => {
-        const items = group.items
-          .map((item) => ({ item, related: byCode.get(item.code) ?? [] }))
-          .filter((entry) => matches(entry.item, entry.related));
-        return { group, items };
-      })
-      .filter((row) => row.items.length > 0);
+  const filledIn = (taxonomy: Taxonomy, group: TaxonomyGroup) =>
+    group.items.filter((item) => bySlot.has(slotKey(taxonomy.id, item.code))).length;
+  const totalOf = (taxonomy: Taxonomy) =>
+    taxonomy.groups.reduce((sum, group) => sum + group.items.length, 0);
+  const filledOf = (taxonomy: Taxonomy) =>
+    taxonomy.groups.reduce((sum, group) => sum + filledIn(taxonomy, group), 0);
+  const totalItems = taxonomies.reduce((sum, taxonomy) => sum + totalOf(taxonomy), 0);
+  const totalFilled = taxonomies.reduce((sum, taxonomy) => sum + filledOf(taxonomy), 0);
+
+  /** 지금 보고 있는 1차 분류. 전체를 보고 있으면 코드표가 하나일 때만 그것으로 본다. */
+  const preferredTaxonomyId = selected.startsWith("t:")
+    ? selected.slice(2)
+    : selected.startsWith("g:")
+      ? selected.split(":")[1]
+      : taxonomies.length === 1
+        ? taxonomies[0].id
+        : undefined;
+
+  /** 오른쪽에 뿌릴 내용: 1차 분류 → 중분류 → 항목(올린 것/빈 칸) */
+  const sections = useMemo(
+    () =>
+      taxonomies
+        .filter(
+          (taxonomy) =>
+            selected === ALL ||
+            selected === divisionKey(taxonomy.id) ||
+            selected.startsWith(`g:${taxonomy.id}:`),
+        )
+        .map((taxonomy) => ({
+          taxonomy,
+          groups: taxonomy.groups
+            .filter((group) => !selected.startsWith("g:") || selected === groupKey(taxonomy.id, group.code))
+            .map((group) => ({
+              group,
+              items: group.items
+                .map((item) => ({ item, related: bySlot.get(slotKey(taxonomy.id, item.code)) ?? [] }))
+                .filter((entry) => matches(entry.item, entry.related)),
+            }))
+            .filter((row) => row.items.length > 0),
+        }))
+        .filter((section) => section.groups.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taxonomy, byCode, selected, needle, favoritesOnly]);
-
-  const filledCount = (groupCode: string) =>
-    taxonomy.groups
-      .find((group) => group.code === groupCode)
-      ?.items.filter((item) => byCode.has(item.code)).length ?? 0;
-
-  const totalItems = taxonomy.groups.reduce((sum, group) => sum + group.items.length, 0);
-  const totalFilled = taxonomy.groups.reduce((sum, group) => sum + filledCount(group.code), 0);
-
-  function toggleExpand(code: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(code)) next.delete(code);
-      else next.add(code);
-      return next;
-    });
-  }
+    [taxonomies, bySlot, selected, needle, favoritesOnly],
+  );
 
   return (
     <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -180,9 +234,19 @@ export default function FormTree({
           />
         </div>
 
+        {/* 1차 분류를 더하는 입구. 안내 문구 속 링크로 두면 찾지 못한다 — 버튼으로 둔다. */}
         <button
           type="button"
-          onClick={onUpload}
+          onClick={onUploadTaxonomy}
+          title="코드표 엑셀을 올립니다. 시트 이름이 1차 분류 이름이 되고, 같은 이름이 있으면 그 코드표를 바꿉니다."
+          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700"
+        >
+          <FolderTree size={13} /> 코드표 올리기
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onUpload(preferredTaxonomyId)}
           disabled={busy}
           className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
@@ -195,164 +259,188 @@ export default function FormTree({
         <nav className="shrink-0 lg:w-64" aria-label="서류 분류">
           <button
             type="button"
-            onClick={() => setSelected(ALL_GROUPS)}
+            onClick={() => setSelected(ALL)}
             className={
-              selected === ALL_GROUPS
+              selected === ALL
                 ? "flex w-full items-center justify-between rounded-lg bg-[#1b3a6b] px-3 py-2 text-xs font-semibold text-white"
                 : "flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
             }
           >
             <span>전체</span>
-            <span className={selected === ALL_GROUPS ? "text-blue-200" : "text-slate-400"}>
+            <span className={selected === ALL ? "text-blue-200" : "text-slate-400"}>
               {totalFilled}/{totalItems}
             </span>
           </button>
 
-          {/* 1차 분류 — 코드표 전체를 묶는 큰 갈래(예: 공무관련). 코드표 시트 이름에서 온다. */}
-          <div className="mt-3 flex items-center gap-1 px-3">
-            <span
-              className={
-                taxonomy.division
-                  ? "min-w-0 truncate text-xs font-semibold text-slate-700"
-                  : "min-w-0 truncate text-xs italic text-slate-400"
-              }
-            >
-              {taxonomy.division || "1차 분류 이름 없음"}
-            </span>
-            <button
-              type="button"
-              onClick={onRenameDivision}
-              title="1차 분류 이름 바꾸기"
-              aria-label="1차 분류 이름 바꾸기"
-              className="shrink-0 rounded p-1 text-slate-300 transition hover:bg-slate-100 hover:text-slate-600"
-            >
-              <Pencil size={11} />
-            </button>
-          </div>
-
-          <ul className="mt-1 ml-2 space-y-0.5 border-l-2 border-slate-100 pl-1">
-            {taxonomy.groups.map((group) => {
-              const filled = filledCount(group.code);
-              const open = expanded.has(group.code);
-              const active = selected === group.code;
-              return (
-                <li key={group.code}>
-                  <div
-                    className={
-                      active
-                        ? "flex items-center rounded-lg bg-blue-50 ring-1 ring-blue-200"
-                        : "flex items-center rounded-lg hover:bg-slate-50"
-                    }
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleExpand(group.code)}
-                      aria-label={`${group.name} ${open ? "접기" : "펴기"}`}
-                      aria-expanded={open}
-                      className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700"
-                    >
-                      {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelected(group.code)}
-                      className="flex min-w-0 flex-1 items-center justify-between py-2 pr-3 text-left"
-                    >
-                      <span className="min-w-0 truncate text-xs font-medium text-slate-700">
-                        <span className="mr-1.5 text-slate-400">{group.code}</span>
-                        {group.name}
-                      </span>
-                      <span
-                        className={
-                          filled > 0 ? "ml-2 text-xs text-blue-600" : "ml-2 text-xs text-slate-300"
-                        }
-                      >
-                        {filled}/{group.items.length}
-                      </span>
-                    </button>
-                  </div>
-
-                  {open && (
-                    <ul className="ml-6 border-l border-slate-200 pl-2">
-                      {group.items.map((item) => {
-                        const related = byCode.get(item.code) ?? [];
-                        return (
-                          <li key={item.code}>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                related[0] ? onOpen(related[0].id) : onUploadFor(item)
-                              }
-                              title={related.length > 0 ? "열기" : "이 자리에 양식 올리기"}
-                              className={
-                                related.length > 0
-                                  ? "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50"
-                                  : "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-slate-400 hover:bg-slate-50"
-                              }
-                            >
-                              <span
-                                aria-hidden
-                                className={
-                                  related.length > 0
-                                    ? "h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500"
-                                    : "h-1.5 w-1.5 shrink-0 rounded-full ring-1 ring-slate-300"
-                                }
-                              />
-                              <span className="shrink-0 tabular-nums">{item.code}</span>
-                              <span className="truncate">{item.name}</span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-
-            {unfiled.length > 0 && (
-              <li>
-                <button
-                  type="button"
-                  onClick={() => setSelected(UNFILED)}
+          {taxonomies.map((taxonomy) => {
+            const divisionActive = selected === divisionKey(taxonomy.id);
+            const filled = filledOf(taxonomy);
+            return (
+              <div key={taxonomy.id} className="mt-3">
+                {/* 1차 분류 — 코드표 한 벌을 묶는 큰 갈래(예: 공무관련). 시트 이름에서 온다. */}
+                <div
                   className={
-                    selected === UNFILED
-                      ? "flex w-full items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-blue-200"
-                      : "flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50"
+                    divisionActive
+                      ? "flex items-center gap-1 rounded-lg bg-blue-50 pl-3 pr-1 ring-1 ring-blue-200"
+                      : "flex items-center gap-1 rounded-lg pl-3 pr-1 hover:bg-slate-50"
                   }
                 >
-                  <span>코드 없는 서류</span>
-                  <span className="text-slate-400">{unfiled.length}</span>
-                </button>
-              </li>
-            )}
-          </ul>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(divisionKey(taxonomy.id))}
+                    className="flex min-w-0 flex-1 items-center justify-between py-1.5 text-left"
+                  >
+                    <span
+                      className={
+                        taxonomy.division
+                          ? "min-w-0 truncate text-xs font-semibold text-slate-700"
+                          : "min-w-0 truncate text-xs italic text-slate-400"
+                      }
+                    >
+                      {taxonomy.division || "1차 분류 이름 없음"}
+                    </span>
+                    <span className={filled > 0 ? "ml-2 text-xs text-blue-600" : "ml-2 text-xs text-slate-300"}>
+                      {filled}/{totalOf(taxonomy)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRenameDivision(taxonomy.id)}
+                    title="1차 분류 이름 바꾸기"
+                    aria-label={`${taxonomy.division || "1차 분류"} 이름 바꾸기`}
+                    className="shrink-0 rounded p-1 text-slate-300 transition hover:bg-slate-100 hover:text-slate-600"
+                  >
+                    <Pencil size={11} />
+                  </button>
+                </div>
+
+                <ul className="mt-1 ml-2 space-y-0.5 border-l-2 border-slate-100 pl-1">
+                  {taxonomy.groups.map((group) => {
+                    const key = groupKey(taxonomy.id, group.code);
+                    const open = expanded.has(key);
+                    const active = selected === key;
+                    const groupFilled = filledIn(taxonomy, group);
+                    return (
+                      <li key={group.code}>
+                        <div
+                          className={
+                            active
+                              ? "flex items-center rounded-lg bg-blue-50 ring-1 ring-blue-200"
+                              : "flex items-center rounded-lg hover:bg-slate-50"
+                          }
+                        >
+                          <button
+                            type="button"
+                            onClick={() => toggleExpand(key)}
+                            aria-label={`${group.name} ${open ? "접기" : "펴기"}`}
+                            aria-expanded={open}
+                            className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700"
+                          >
+                            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelected(key)}
+                            className="flex min-w-0 flex-1 items-center justify-between py-2 pr-3 text-left"
+                          >
+                            <span className="min-w-0 truncate text-xs font-medium text-slate-700">
+                              <span className="mr-1.5 text-slate-400">{group.code}</span>
+                              {group.name}
+                            </span>
+                            <span
+                              className={
+                                groupFilled > 0 ? "ml-2 text-xs text-blue-600" : "ml-2 text-xs text-slate-300"
+                              }
+                            >
+                              {groupFilled}/{group.items.length}
+                            </span>
+                          </button>
+                        </div>
+
+                        {open && (
+                          <ul className="ml-6 border-l border-slate-200 pl-2">
+                            {group.items.map((item, index) => {
+                              const related = bySlot.get(slotKey(taxonomy.id, item.code)) ?? [];
+                              return (
+                                // 겹치는 코드(같은 번호 두 줄)가 있어 코드만으로는 열쇠가 겹친다.
+                                <li key={`${item.code}-${index}`}>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      related[0] ? onOpen(related[0].id) : onUploadFor(taxonomy.id, item)
+                                    }
+                                    title={related.length > 0 ? "열기" : "이 자리에 양식 올리기"}
+                                    className={
+                                      related.length > 0
+                                        ? "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50"
+                                        : "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-slate-400 hover:bg-slate-50"
+                                    }
+                                  >
+                                    <span
+                                      aria-hidden
+                                      className={
+                                        related.length > 0
+                                          ? "h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500"
+                                          : "h-1.5 w-1.5 shrink-0 rounded-full ring-1 ring-slate-300"
+                                      }
+                                    />
+                                    <span className="shrink-0 tabular-nums">{item.code}</span>
+                                    <span className="truncate">{item.name}</span>
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {taxonomy.conflicts.length > 0 && (
+                  <p className="ml-4 mt-1 text-[11px] text-amber-600">
+                    겹치는 코드: {taxonomy.conflicts.join(", ")}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+
+          {unfiled.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelected(UNFILED)}
+              className={
+                selected === UNFILED
+                  ? "mt-3 flex w-full items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-blue-200"
+                  : "mt-3 flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50"
+              }
+            >
+              <span>코드 없는 서류</span>
+              <span className="text-slate-400">{unfiled.length}</span>
+            </button>
+          )}
 
           <div className="mt-3 border-t border-slate-200 pt-3 text-[11px] text-slate-400">
-            <p className="truncate" title={taxonomy.fileName}>
-              분류 기준: {taxonomy.fileName}
-            </p>
-            {taxonomy.conflicts.length > 0 && (
-              <p className="mt-1 text-amber-600">
-                겹치는 코드: {taxonomy.conflicts.join(", ")}
-              </p>
-            )}
-            <div className="mt-1.5 flex gap-2">
-              <button
-                type="button"
-                onClick={onReplaceTaxonomy}
-                className="rounded px-1.5 py-1 text-[11px] text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-              >
-                코드표 바꾸기
-              </button>
-              <button
-                type="button"
-                onClick={onClearTaxonomy}
-                className="rounded px-1.5 py-1 text-[11px] text-slate-400 underline-offset-2 hover:text-red-600 hover:underline"
-              >
-                코드표 지우기
-              </button>
-            </div>
+            <p className="mb-1">분류 기준</p>
+            <ul className="space-y-1">
+              {taxonomies.map((taxonomy) => (
+                <li key={taxonomy.id} className="flex items-center gap-1">
+                  <span className="min-w-0 flex-1 truncate" title={taxonomy.fileName}>
+                    {taxonomy.division || "이름 없음"} · {taxonomy.fileName}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveTaxonomy(taxonomy.id)}
+                    title="이 코드표 지우기(서류는 남습니다)"
+                    aria-label={`${taxonomy.division || "코드표"} 지우기`}
+                    className="shrink-0 rounded p-0.5 text-slate-300 transition hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         </nav>
 
@@ -366,68 +454,80 @@ export default function FormTree({
               onToggleFavorite={onToggleFavorite}
               onDelete={onDelete}
             />
-          ) : rows.length === 0 ? (
+          ) : sections.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
               조건에 맞는 서류가 없습니다.
             </p>
           ) : (
-            rows.map(({ group, items }) => {
-              // 검색 중에는 접어 둔 분류도 펼쳐 보인다 — 찾은 것이 접힌 칸에 숨으면 "없다"로 보인다.
-              const isCollapsed = needle === "" && collapsed.has(group.code);
-              return (
-              <section key={group.code} className="mb-6 last:mb-0">
-                <h3 className="mb-3">
-                  <button
-                    type="button"
-                    onClick={() => toggleCollapsed(group.code)}
-                    aria-expanded={!isCollapsed}
-                    title={isCollapsed ? "펼치기" : "접기"}
-                    className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
-                  >
-                    <span className="text-slate-400">{group.code}</span>
-                    {group.name}
-                    <span className="font-normal text-slate-400">
-                      {filledCount(group.code)}/{group.items.length}
-                    </span>
-                    <ChevronDown
-                      size={14}
-                      aria-hidden
-                      className={
-                        isCollapsed
-                          ? "-rotate-90 text-slate-400 transition-transform"
-                          : "text-slate-400 transition-transform"
-                      }
-                    />
-                  </button>
-                </h3>
-                {!isCollapsed && (
-                <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                  {items.map(({ item, related }) =>
-                    related.length > 0 ? (
-                      related.map((form) => (
-                        <li key={form.id}>
-                          <Card
-                            title={form.title}
-                            code={item.code}
-                            favorite={form.favorite}
-                            active={form.id === activeId}
-                            onOpen={() => onOpen(form.id)}
-                            onToggleFavorite={() => onToggleFavorite(form)}
-                            onDelete={() => onDelete(form)}
+            sections.map(({ taxonomy, groups }) => (
+              <div key={taxonomy.id} className="mb-8 last:mb-0">
+                <h2 className="mb-3 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-800">
+                  {taxonomy.division || "1차 분류 이름 없음"}
+                  <span className="ml-2 text-xs font-normal text-slate-400">
+                    {filledOf(taxonomy)}/{totalOf(taxonomy)}
+                  </span>
+                </h2>
+
+                {groups.map(({ group, items }) => {
+                  const key = slotKey(taxonomy.id, group.code);
+                  // 검색 중에는 접어 둔 분류도 펼쳐 보인다 — 찾은 것이 접힌 칸에 숨으면 "없다"로 보인다.
+                  const isCollapsed = needle === "" && collapsed.has(key);
+                  return (
+                    <section key={group.code} className="mb-6 last:mb-0">
+                      <h3 className="mb-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleCollapsed(key)}
+                          aria-expanded={!isCollapsed}
+                          title={isCollapsed ? "펼치기" : "접기"}
+                          className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                        >
+                          <span className="text-slate-400">{group.code}</span>
+                          {group.name}
+                          <span className="font-normal text-slate-400">
+                            {filledIn(taxonomy, group)}/{group.items.length}
+                          </span>
+                          <ChevronDown
+                            size={14}
+                            aria-hidden
+                            className={
+                              isCollapsed
+                                ? "-rotate-90 text-slate-400 transition-transform"
+                                : "text-slate-400 transition-transform"
+                            }
                           />
-                        </li>
-                      ))
-                    ) : (
-                      <li key={item.code}>
-                        <EmptyCard item={item} onUpload={() => onUploadFor(item)} />
-                      </li>
-                    ),
-                  )}
-                </ul>
-                )}
-              </section>
-              );
-            })
+                        </button>
+                      </h3>
+                      {!isCollapsed && (
+                        <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                          {items.map(({ item, related }, index) =>
+                            related.length > 0 ? (
+                              related.map((form) => (
+                                <li key={`${form.id}-${index}`}>
+                                  <Card
+                                    title={form.title}
+                                    code={item.code}
+                                    favorite={form.favorite}
+                                    active={form.id === activeId}
+                                    onOpen={() => onOpen(form.id)}
+                                    onToggleFavorite={() => onToggleFavorite(form)}
+                                    onDelete={() => onDelete(form)}
+                                  />
+                                </li>
+                              ))
+                            ) : (
+                              <li key={`${item.code}-${index}`}>
+                                <EmptyCard item={item} onUpload={() => onUploadFor(taxonomy.id, item)} />
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
       </div>

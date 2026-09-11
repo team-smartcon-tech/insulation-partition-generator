@@ -32,6 +32,15 @@ export interface TaxonomyGroup {
 
 export interface Taxonomy {
   /**
+   * 저장소가 붙이는 고정 id. 서류는 이 id 로 "어느 코드표 소속인지"를 기억한다.
+   *
+   * 1차 분류가 여러 개면(공무관련·품질관련) **코드 번호가 겹친다** — 둘 다 101~900 을 쓴다.
+   * 코드만으로는 서류가 어디 속하는지 알 수 없어 코드표마다 id 를 둔다. 이름이 아니라
+   * id 로 묶는 이유: 1차 분류 이름을 바꿔도 서류가 떨어져 나가지 않게.
+   * 엑셀을 막 읽은 직후에는 빈 문자열이고, 저장할 때 채워진다.
+   */
+  id: string;
+  /**
    * 1차 분류 이름(예: "공무관련"). 코드표의 중분류·소분류를 한데 묶는 큰 갈래다.
    *
    * 코드표 엑셀의 **시트 이름**에서 가져온다 — 관리자가 엑셀만 고치면 되고 앱에서 따로
@@ -156,6 +165,7 @@ export function parseTaxonomySheet(sheet: FormSheet, fileName: string): Taxonomy
   const result = [...groups.values()].filter((group) => group.items.length > 0);
   if (result.length === 0) return null;
   return {
+    id: "",
     division: divisionFromSheetName(sheet.name),
     groups: result,
     fileName,
@@ -184,4 +194,78 @@ export function codeFromFileName(fileName: string, taxonomy: Taxonomy | null): s
   const match = /^\s*(\d{3,})/.exec(fileName);
   if (!match) return undefined;
   return findItem(taxonomy, match[1]) ? match[1] : undefined;
+}
+
+// ─── 코드표 여러 벌(1차 분류가 여럿) ───────────────────────────
+
+/**
+ * 1차 분류가 생기기 전, 코드표를 한 벌만 담던 시절의 코드표에 붙이는 id.
+ * 그때 올린 서류에는 코드표 id 가 없으므로 이 코드표 소속으로 본다.
+ */
+export const LEGACY_TAXONOMY_ID = "legacy";
+
+/**
+ * 저장된 코드표 목록에 새로 읽은 코드표들을 합친다.
+ *
+ * **같은 1차 분류 이름이면 내용만 갈아 끼우고 id 는 그대로 둔다.** 그래야 품질관련 코드표를
+ * 고쳐 다시 올려도 이미 올린 품질 서류들이 떨어져 나가지 않는다. 이름이 비어 있는 코드표는
+ * 파일 이름으로 같은지 본다. 처음 보는 코드표는 새 id 를 받아 뒤에 붙는다.
+ */
+export function upsertTaxonomies(
+  existing: Taxonomy[],
+  incoming: Taxonomy[],
+  makeId: () => string,
+): Taxonomy[] {
+  const result = [...existing];
+  for (const next of incoming) {
+    const index = result.findIndex((current) =>
+      next.division ? current.division === next.division : current.fileName === next.fileName,
+    );
+    if (index >= 0) result[index] = { ...next, id: result[index].id };
+    else result.push({ ...next, id: makeId() });
+  }
+  return result;
+}
+
+/**
+ * 서류가 속한 코드표 id. 속한 곳이 없으면 undefined(= 코드 없는 서류).
+ *
+ * - 코드가 없으면 어디에도 안 속한다.
+ * - 코드표 id 가 있으면 그 코드표가 아직 있을 때만 그곳이다(지워졌으면 떨어진다).
+ * - 코드표 id 가 **없는** 서류는 1차 분류가 생기기 전에 올린 것이라 옛 코드표 소속이다.
+ *   "첫 번째 코드표"로 보지 않는 이유: 옛 코드표를 지우면 그 서류들이 엉뚱하게 다음
+ *   코드표(예: 품질관련)로 옮겨 붙는다.
+ */
+export function taxonomyIdOf(
+  form: { code?: string; taxonomyId?: string },
+  taxonomies: Taxonomy[],
+): string | undefined {
+  if (!form.code) return undefined;
+  const id = form.taxonomyId ?? LEGACY_TAXONOMY_ID;
+  return taxonomies.some((taxonomy) => taxonomy.id === id) ? id : undefined;
+}
+
+/**
+ * 파일 이름 앞 숫자로 어느 코드표의 어느 칸인지 정한다.
+ *
+ * 1차 분류가 여러 개면 같은 번호가 여러 코드표에 있다. 이때는:
+ *  - 사용자가 지금 보고 있는 1차 분류(preferredId)에 있으면 그곳으로,
+ *  - 한 코드표에만 있으면 그곳으로,
+ *  - 여러 곳에 있는데 어느 쪽인지 모르면 **정하지 않는다**(코드 없는 서류로 둔다).
+ *    공무 서류가 품질 칸에 조용히 들어가는 것보다, 사용자가 옮기는 편이 낫다.
+ */
+export function placeByFileName(
+  fileName: string,
+  taxonomies: Taxonomy[],
+  preferredId?: string,
+): { taxonomyId: string; code: string } | undefined {
+  const match = /^\s*(\d{3,})/.exec(fileName);
+  if (!match) return undefined;
+  const code = match[1];
+  const owners = taxonomies.filter((taxonomy) => findItem(taxonomy, code));
+  if (owners.length === 0) return undefined;
+  const preferred = owners.find((taxonomy) => taxonomy.id === preferredId);
+  if (preferred) return { taxonomyId: preferred.id, code };
+  if (owners.length === 1) return { taxonomyId: owners[0].id, code };
+  return undefined;
 }
