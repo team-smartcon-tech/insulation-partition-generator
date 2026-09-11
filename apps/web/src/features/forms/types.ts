@@ -110,6 +110,11 @@ export interface FormShape {
   dash?: "solid" | "dashed" | "dotted";
   /** 시계방향 회전(도). 워터마크가 비스듬히 걸려 있는 경우. */
   rotation?: number;
+  /**
+   * 꺾인 연결선이면 꺾는 자리(틀 너비에 대한 비율). 직선이면 없음.
+   * 0.5 = 가운데서 꺾음, 1 = 끝에서 한 번 꺾음, 음수·1 초과 = 틀 밖으로 돌아 나감.
+   */
+  elbow?: number;
   fontSize?: number;
   fontFamily?: string;
   bold?: boolean;

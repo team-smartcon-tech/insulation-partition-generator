@@ -71,6 +71,25 @@ function outlinePath(shape: FormShape): string | null {
   return null;
 }
 
+/**
+ * 꺾인 연결선의 점들. 틀 안에서 "가로 → 세로 → 가로"를 만들고 뒤집기를 건다.
+ * bentConnector3 정의: (0,0) → (w·꺾는자리, 0) → (w·꺾는자리, h) → (w, h)
+ * 꺾는 자리가 음수거나 1보다 크면 틀 밖으로 돌아 나간다(되돌아가는 화살표).
+ */
+function elbowPoints(shape: FormShape): string {
+  const { left, top, width: w, height: h, flipH, flipV } = shape;
+  const bend = w * (shape.elbow ?? 0.5);
+  const frame: [number, number][] = [
+    [0, 0],
+    [bend, 0],
+    [bend, h],
+    [w, h],
+  ];
+  return frame
+    .map(([x, y]) => `${left + (flipH ? w - x : x)},${top + (flipV ? h - y : y)}`)
+    .join(" ");
+}
+
 /** 선의 두 끝점. 엑셀은 사각형 + 뒤집기로 방향을 표현한다. */
 function endpoints(shape: FormShape) {
   const { left, top, width, height, flipH, flipV } = shape;
@@ -135,7 +154,7 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
 
   if (shapes.length === 0) return null;
 
-  const lines = shapes.filter((shape) => shape.kind === "line");
+  const lines = shapes.filter((shape) => shape.kind === "line" && shape.line);
   // 네모·타원으로 안 되는 것은 SVG 윤곽선으로 그리고, 글자만 그 위에 얹는다.
   const outlined = shapes.filter((shape) => outlinePath(shape) !== null);
   const boxes = shapes.filter(
@@ -178,7 +197,7 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
               key={`o${index}`}
               d={outlinePath(shape) ?? undefined}
               fill={shape.fill ?? "none"}
-              stroke={shape.line ?? "#000000"}
+              stroke={shape.line ?? "none"}
               strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
               strokeDasharray={dashArray(shape)}
               strokeLinejoin="round"
@@ -191,19 +210,34 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
             const color = shape.line ?? "#000000";
             const marker = `url(#${uid}-arrow-${colorKey(color)})`;
             return (
-              <line
-                key={`l${index}`}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke={color}
-                strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
-                strokeDasharray={dashArray(shape)}
-                markerStart={shape.arrowStart ? marker : undefined}
-                markerEnd={shape.arrowEnd ? marker : undefined}
-                transform={svgRotate(shape)}
-              />
+              shape.elbow !== undefined ? (
+                <polyline
+                  key={`l${index}`}
+                  points={elbowPoints(shape)}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
+                  strokeDasharray={dashArray(shape)}
+                  strokeLinejoin="round"
+                  markerStart={shape.arrowStart ? marker : undefined}
+                  markerEnd={shape.arrowEnd ? marker : undefined}
+                  transform={svgRotate(shape)}
+                />
+              ) : (
+                <line
+                  key={`l${index}`}
+                  x1={x1}
+                  y1={y1}
+                  x2={x2}
+                  y2={y2}
+                  stroke={color}
+                  strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
+                  strokeDasharray={dashArray(shape)}
+                  markerStart={shape.arrowStart ? marker : undefined}
+                  markerEnd={shape.arrowEnd ? marker : undefined}
+                  transform={svgRotate(shape)}
+                />
+              )
             );
           })}
         </svg>

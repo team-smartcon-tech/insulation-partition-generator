@@ -224,7 +224,7 @@ function readDash(value: string | undefined): FormShape["dash"] {
 /** 도형 안 글자. 문단(`a:p`)은 줄바꿈으로, 문단 안 조각(`a:r`)은 이어 붙인다. */
 function readText(txBody: string | undefined): string {
   if (!txBody) return "";
-  return findBlocks(txBody, "p")
+  const text = findBlocks(txBody, "p")
     .map((paragraph) =>
       findBlocks(paragraph, "t")
         .map((run) => unescapeXml(run.replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "")))
@@ -232,6 +232,9 @@ function readText(txBody: string | undefined): string {
     )
     .join("\n")
     .replace(/\n+$/, "");
+  // 보이지 않는 공백(줄바꿈 없는 공백 \u00a0 등)만 든 도형은 글자 없는 도형이다. 그대로 두면
+  // 합치기 규칙이 "글자가 있다"로 보고 건너뛰어, 마름모 위에 글자 상자가 겹쳐 그려진다.
+  return text.trim() === "" ? "" : text;
 }
 
 /** 60000분의 1도 → 도. -180~180 으로 좁혀 CSS 회전에 그대로 쓴다. */
@@ -267,6 +270,39 @@ function toPx(sizes: number[], fallback: number, index: number, offsetEmu: numbe
   let px = 0;
   for (let i = 0; i < index; i++) px += sizes[i] ?? fallback;
   return px + offsetEmu / EMU_PER_PX;
+}
+
+/**
+ * 선·테두리 색. 없으면 undefined(= 테두리를 그리지 않는다).
+ *
+ * `<a:ln><a:noFill/></a:ln>` 는 "테두리 없음"을 **명시**한 것이다. 이걸 못 읽고 기본 검정을
+ * 넣으면, 글자만 띄우려고 둔 상자(순서도의 Yes/No 라벨, 마름모 위 글자)에 네모 테두리가 생긴다.
+ * `<a:ln>` 이 없으면 도형 스타일(`lnRef`)을 따르고, 스타일도 없으면 테두리가 없다.
+ */
+function readLine(block: string, lineBlock: string): string | undefined {
+  if (lineBlock) {
+    if (/<([A-Za-z0-9_]+:)?noFill\s*\/>/.test(lineBlock)) return undefined;
+    const color = readColor(lineBlock);
+    if (color) return color;
+  }
+  const styleIndex = Number(attrOf(block, "lnRef", "idx") ?? 0);
+  if (styleIndex > 0) return readColor(findBlocks(block, "lnRef")[0]) ?? "#000000";
+  // 굵기만 적고 색을 안 적은 선은 예전처럼 검정으로 둔다(알 수 없는 파일에서 선이 사라지지 않게).
+  return lineBlock ? "#000000" : undefined;
+}
+
+/**
+ * 꺾인 연결선의 꺾는 자리(틀 너비에 대한 비율). 직선이면 undefined.
+ *
+ * bentConnector3 은 "가로로 가다 → 세로로 꺾고 → 다시 가로로" 가는 선이고, 꺾는 자리를
+ * `adj1`(너비의 10만분율)로 적는다. 되돌아가는 화살표는 이 값이 음수로 수백 배라 선이 상자
+ * 밖으로 크게 돌아 나간다. 직선으로 그리면 상자 가장자리에 달라붙어 흐름이 안 보인다.
+ */
+function elbowRatio(prst: string, spPr: string): number | undefined {
+  if (prst === "bentConnector2") return 1;
+  if (prst !== "bentConnector3") return undefined;
+  const adj = /<([A-Za-z0-9_]+:)?gd\s+name="adj1?"\s+fmla="val\s+(-?\d+)"/.exec(spPr);
+  return adj ? Number(adj[2]) / 100000 : 0.5;
 }
 
 interface Rect {
@@ -307,12 +343,13 @@ function buildShape(block: string, rect: Rect): FormShape {
     arrowEnd: Boolean(attrOf(lineBlock, "tailEnd", "type")?.replace("none", "")),
     text: readText(txBody),
     fill: noFill ? undefined : readColor(fillArea),
-    line: readColor(lineBlock) ?? "#000000",
+    line: readLine(block, lineBlock),
     lineWidth:
       (lineWidthEmu > 0 ? lineWidthEmu / EMU_PER_PT : DEFAULT_LINE_PT) * PT_TO_PX,
     dash: readDash(attrOf(lineBlock, "prstDash", "val")),
     // 회전은 60000분의 1도 단위로 들어온다. 워터마크가 비스듬히 걸려 있는 경우다.
     rotation: rotationDegrees(attrOf(spPr, "xfrm", "rot")),
+    elbow: elbowRatio(prst, spPr),
     fontSize: sizeHundredths > 0 ? sizeHundredths / 100 : undefined,
     fontFamily: attrOf(firstRun, "latin", "typeface"),
     bold: attrOf(txBody ?? "", "rPr", "b") === "1",
@@ -376,6 +413,30 @@ function readGroup(group: string, box: Rect): FormShape[] {
   return shapes;
 }
 
+/**
+ * 앵커 칸을 도형의 "돌리기 전" 틀로 바꾼다.
+ *
+ * 90°·270° 근처로 돌린 도형은 엑셀이 앵커에 **돌린 뒤 모습**의 칸을 적는다(가로·세로가 바뀐 채).
+ * 그 칸을 그대로 쓰고 그리는 쪽에서 회전을 또 걸면 두 번 돌아가 가로선이 세로선이 된다.
+ * 가운데는 그대로 두고 가로·세로를 되돌려, 회전은 그리는 쪽에서 한 번만 걸리게 한다.
+ * 그룹 안 도형은 앵커가 아니라 틀 좌표(xfrm)로 자리를 잡으므로 여기를 거치지 않는다.
+ */
+function unrotatedFrame(block: string, box: Rect): Rect {
+  const spPr = findBlocks(block, "spPr")[0] ?? "";
+  const rotation = rotationDegrees(attrOf(spPr, "xfrm", "rot"));
+  if (rotation === undefined) return box;
+  const quarter = Math.abs(rotation) % 180;
+  if (quarter < 45 || quarter >= 135) return box;
+  const centerX = box.left + box.width / 2;
+  const centerY = box.top + box.height / 2;
+  return {
+    left: centerX - box.height / 2,
+    top: centerY - box.width / 2,
+    width: box.height,
+    height: box.width,
+  };
+}
+
 /** 앵커 하나를 화면에 그릴 도형들로 바꾼다. 그룹이면 여러 개가 나온다. */
 function readAnchorShapes(
   block: string,
@@ -408,7 +469,7 @@ function readAnchorShapes(
 
   const group = findBlocks(block, "grpSp")[0];
   if (group) return readGroup(group, box);
-  return [buildShape(block, box)];
+  return [buildShape(block, unrotatedFrame(block, box))];
 }
 
 /** 안쪽 도형이 바깥 도형에 완전히 들어가 있나. 손으로 그린 값이라 1px 은 봐준다. */
@@ -437,7 +498,7 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
   const result = shapes.map((shape) => ({ ...shape }));
 
   result.forEach((outer, outerIndex) => {
-    if (outer.kind === "line" || outer.text !== "") return;
+    if (outer.kind === "line" || outer.text.trim() !== "") return;
 
     const insiders = result
       .map((shape, index) => ({ shape, index }))
@@ -446,7 +507,7 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
           index !== outerIndex &&
           !absorbed.has(index) &&
           shape.kind !== "line" &&
-          shape.text !== "" &&
+          shape.text.trim() !== "" &&
           contains(outer, shape),
       );
     if (insiders.length !== 1) return;
