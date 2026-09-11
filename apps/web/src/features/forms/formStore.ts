@@ -157,6 +157,48 @@ export function withCustomSheets(sheets: FormSheet[], custom: CustomSheet[]): Fo
   return result;
 }
 
+/** 비교용으로 글자를 다듬는다. 시트마다 `작성`/`작 성` 처럼 띄어쓰기가 달라 공백은 뺀다. */
+const compactText = (text: string) => text.replace(/\s+/g, "");
+
+/**
+ * 새 장을 빈 칸으로 시작하게 할 값을 만든다.
+ *
+ * 어느 칸이 "양식 뼈대"이고 어느 칸이 "채워 넣은 내용"인지는 **같은 양식의 다른 장들과
+ * 견주면 드러난다** — 제목·머리글은 모든 장에서 같은 글자이고, 내용은 장마다 다르다.
+ * 칸 위치나 서식으로 추측하지 않는다(그렇게 하면 예외가 끝없이 늘어난다).
+ *
+ * 다른 장과 **한 군데라도 다르면** 비운다. 머리글은 모든 장에서 똑같아 걸리지 않고,
+ * 값은 장마다 달라 걸린다. 띄어쓰기 차이(`작성`/`작 성`)로 머리글이 지워지지 않도록
+ * 공백을 뺀 뒤 견준다 — 실제 파일에서 이 보정이 없으면 "작성"이 지워졌다.
+ *
+ * 견줄 장이 없으면(시트가 하나뿐인 양식) 아무것도 비우지 않는다. 그때는 무엇이
+ * 머리글인지 알 방법이 없고, **머리글을 지우는 쪽이 내용을 남기는 쪽보다 나쁘다.**
+ */
+export function blankValuesFor(sheets: FormSheet[], source: FormSheet): Record<string, string> {
+  // 같은 양식의 다른 장 = 열 수가 같은 원본 시트들. 사용자가 더한 장은 작성 중이라 뺀다.
+  const siblings = sheets.filter(
+    (sheet) => !sheet.custom && sheet.name !== source.name && sheet.colCount === source.colCount,
+  );
+  if (siblings.length === 0) return {};
+
+  const lookups = siblings.map((sheet) => {
+    const map = new Map<string, string>();
+    for (const cell of sheet.cells) map.set(cell.key, compactText(cell.text));
+    return map;
+  });
+
+  const blanks: Record<string, string> = {};
+  for (const cell of source.cells) {
+    const text = compactText(cell.text);
+    if (text === "") continue;
+
+    const seen = lookups.map((map) => map.get(cell.key)).filter((value) => value !== undefined);
+    if (seen.length === 0) continue;
+    if (seen.some((value) => value !== text)) blanks[cell.key] = "";
+  }
+  return blanks;
+}
+
 /**
  * 새 장을 만들 때 복사해 올 "빈 양식" 시트를 고른다.
  *
@@ -398,8 +440,15 @@ export async function addCustomSheet(id: string, sheet: CustomSheet): Promise<vo
     if (!usedSheetNames(form).includes(sheet.source)) {
       throw new Error(`복사할 “${sheet.source}” 시트를 찾지 못했습니다.`);
     }
+    // 새 장은 채워 넣은 내용 없이 시작한다. 무엇을 비울지는 같은 양식의 다른 장들과
+    // 견주어 정한다 — 만들 때 한 번 정해 두면 이후에는 보통 칸처럼 고칠 수 있다.
+    const expanded = withCustomSheets(form.sheets, form.customSheets);
+    const source = expanded.find((item) => item.name === sheet.source);
+    const blanks = source ? blankValuesFor(form.sheets, source) : {};
+
     return {
       customSheets: [...form.customSheets, { name, source: sheet.source }],
+      values: Object.keys(blanks).length > 0 ? { ...form.values, [name]: blanks } : form.values,
       updatedAt: Date.now(),
     };
   });

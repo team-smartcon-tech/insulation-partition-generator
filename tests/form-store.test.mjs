@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  blankValuesFor,
   findTemplateSheet,
   normalizeValues,
   withCustomSheets,
@@ -158,4 +159,65 @@ test('비스듬하기만 하거나 반투명하기만 한 도형은 워터마크
 
   // 기울기만 보면 비스듬한 라벨이, 투명도만 보면 옅은 음영 상자가 함께 지워진다.
   assert.equal(result[1].shapes.length, 2);
+});
+
+// ─── 새 장은 내용을 비우고 시작한다 ───────────────────────────
+
+const cellsOf = (entries) =>
+  entries.map(([key, text]) => {
+    const [row, col] = key.split(':').map(Number);
+    return { key, row, col, rowSpan: 1, colSpan: 1, text, style: { borders: {} } };
+  });
+const formSheet = (name, entries, colCount = 3) => ({
+  ...sheet(name),
+  colCount,
+  cells: cellsOf(entries),
+});
+
+test('장마다 달라지는 칸만 비우고 머리글은 남긴다', () => {
+  const template = formSheet('견본', [
+    ['1:1', '구분'],
+    ['2:1', '외부'],
+    ['2:2', '발주처'],
+  ]);
+  const june = formSheet('6월', [
+    ['1:1', '구분'],
+    ['2:1', '내부'],
+    ['2:2', '건축기획팀'],
+  ]);
+
+  const blanks = blankValuesFor([template, june], template);
+  // 머리글("구분")은 모든 장에서 같아 남고, 값은 장마다 달라 비워진다.
+  assert.deepEqual(blanks, { '2:1': '', '2:2': '' });
+});
+
+test('띄어쓰기만 다른 머리글은 지우지 않는다', () => {
+  const template = formSheet('견본', [['1:1', '작성']]);
+  const june = formSheet('6월', [['1:1', '작 성']]);
+
+  // 실제 파일에서 이 보정이 없으면 "작성"이 내용으로 분류돼 지워졌다.
+  assert.deepEqual(blankValuesFor([template, june], template), {});
+});
+
+test('견줄 장이 없으면 아무것도 비우지 않는다', () => {
+  const only = formSheet('견본', [['1:1', '구분'], ['2:1', '외부']]);
+
+  // 무엇이 머리글인지 알 방법이 없다. 머리글을 지우는 쪽이 내용을 남기는 쪽보다 나쁘다.
+  assert.deepEqual(blankValuesFor([only], only), {});
+});
+
+test('열 수가 다른 시트는 같은 양식으로 보지 않는다', () => {
+  const template = formSheet('견본', [['1:1', '구분']], 20);
+  const other = formSheet('다른양식', [['1:1', '번호']], 8);
+
+  // 생김새가 다른 표끼리 견주면 머리글이 통째로 지워진다.
+  assert.deepEqual(blankValuesFor([template, other], template), {});
+});
+
+test('사용자가 더한 장은 견줄 대상이 아니다', () => {
+  const template = formSheet('견본', [['1:1', '구분']]);
+  const added = { ...formSheet('2026-07', [['1:1', '아무거나']]), custom: true };
+
+  // 더한 장은 작성 중이라 내용이 계속 바뀐다. 그걸 기준 삼으면 머리글이 지워진다.
+  assert.deepEqual(blankValuesFor([template, added], template), {});
 });

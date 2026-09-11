@@ -345,7 +345,7 @@ export default function FormsPage() {
     const source = template ?? sheet;
     const name = window
       .prompt(
-        `“${source.name}” 시트의 빈 양식으로 새 장을 만듭니다.\n새 시트 이름을 적어 주세요. (예: 2026-07)`,
+        `“${source.name}” 시트의 양식으로 새 장을 만듭니다.\n표·머리글은 그대로 두고 채워 넣은 내용은 비웁니다.\n\n새 시트 이름을 적어 주세요. (예: 2026-07)`,
         "",
       )
       ?.trim();
@@ -575,7 +575,7 @@ export default function FormsPage() {
               <button
                 type="button"
                 onClick={() => void handleAddSheet()}
-                title={`“${(template ?? sheet).name}” 시트의 빈 양식으로 새 장을 만듭니다(견본 표시는 지워집니다). 월별로 늘려 쓸 때 사용하세요.`}
+                title={`“${(template ?? sheet).name}” 시트의 양식으로 새 장을 만듭니다. 표·머리글은 그대로, 채워 넣은 내용과 견본 표시는 비워집니다.`}
                 className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-dashed ring-slate-300 transition hover:bg-slate-50"
               >
                 <Plus size={13} /> 시트 추가
