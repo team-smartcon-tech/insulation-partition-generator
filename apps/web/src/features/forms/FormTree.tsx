@@ -3,7 +3,7 @@
  *
  * 왼쪽은 분류 트리, 오른쪽은 서류다. 회사 표준 124칸 중 채운 것은 소수라, **빈 칸을 카드와
  * 같은 크기로 그리면 화면이 빈 상자로 뒤덮인다.** 그래서:
- *  - 올린 서류는 카드(미리보기·파일명·날짜)로,
+ *  - 올린 서류는 세로로 긴 서류 카드로(모서리 별 = 즐겨찾기),
  *  - 빈 칸은 한 줄짜리 행으로 — 처음 몇 개만 보이고 나머지는 "더 보기",
  *  - 한 칸도 안 채운 중분류는 제목 한 줄로 접는다.
  * 빈 칸을 아예 안 보이게 하면 "무엇이 없는지"를 알 수 없어, 숨기기는 사용자가 고르게 둔다.
@@ -87,9 +87,6 @@ function toggled(set: Set<string>, key: string): Set<string> {
   else next.add(key);
   return next;
 }
-
-const formatDate = (time: number) =>
-  new Date(time).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
 
 interface Badge {
   label: string;
@@ -374,7 +371,7 @@ export default function FormTree({
         {!isCollapsed && (
           <div className="mt-2">
             {filledEntries.length > 0 && (
-              <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                 {filledEntries.flatMap(({ item, related }) =>
                   related.map((form) => (
                     <li key={`${form.id}-${item.code}`}>
@@ -709,7 +706,7 @@ export default function FormTree({
                   코드표의 어느 칸에도 들어가지 않은 서류입니다. 파일 이름 앞에 번호가 없거나, 번호가
                   여러 1차 분류에 겹쳐 자리를 정하지 못한 경우입니다.
                 </p>
-                <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                   {unfiled.map((form) => (
                     <li key={form.id}>
                       <DocCard
@@ -767,28 +764,12 @@ export default function FormTree({
 }
 
 /**
- * 양식 미리보기 — 첫 시트의 실제 열 너비 비율로 칸을 그린다.
- * 가짜 무늬를 넣으면 "원본 그대로"라는 약속을 거짓으로 보이게 한다.
+ * 올린 서류 카드 — 세로로 긴 서류 모양. 번호와 제목이 가운데 오고, 접힌 모서리가 즐겨찾기다.
+ *
+ * 윗부분에 양식의 열 구성을 작게 그린 미리보기를 넣어 봤지만, 칸 모양만 보여 줄 뿐 무슨
+ * 서류인지 알려 주지 못해 뺐다(사용자 판단: "무의미해 보인다"). 서류를 고르는 데 필요한 건
+ * 번호와 제목이다.
  */
-function Preview({ columns }: { columns?: number[] }) {
-  const cols = columns && columns.length > 0 ? columns : [1];
-  return (
-    <div aria-hidden className="flex h-16 flex-col gap-px border-b border-slate-100 bg-slate-50 p-2">
-      {[0, 1, 2].map((row) => (
-        <div key={row} className="flex flex-1 gap-px">
-          {cols.map((width, index) => (
-            <div
-              key={index}
-              className={row === 0 ? "bg-slate-300" : "bg-slate-200"}
-              style={{ flexGrow: width, flexBasis: 0 }}
-            />
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function DocCard({
   form,
   code,
@@ -810,53 +791,66 @@ function DocCard({
   onToggleFavorite: () => void;
   onDelete: () => void;
 }) {
-  // 제목이 파일 이름에서 확장자만 뗀 것이면 파일 이름 줄은 같은 말의 반복이라 뺀다.
-  const showFileName = form.fileName.replace(/\.xlsx$/i, "") !== form.title;
   return (
     <div
       className={
         active
-          ? "group relative flex h-full flex-col overflow-hidden rounded-xl bg-white ring-2 ring-blue-500"
-          : "group relative flex h-full flex-col overflow-hidden rounded-xl bg-white ring-1 ring-slate-200 transition hover:shadow-sm hover:ring-slate-300"
+          ? "group relative rounded-sm ring-2 ring-blue-500"
+          : "group relative rounded-sm ring-1 ring-slate-300 transition hover:ring-slate-400"
       }
     >
-      <button type="button" onClick={onOpen} title={form.fileName} className="flex flex-1 flex-col text-left">
-        <Preview columns={form.preview} />
-        <div className="flex flex-1 flex-col gap-1 p-3">
-          <span className="flex items-center gap-1 text-[11px] tabular-nums text-blue-600">
-            {code ?? "코드 없음"}
-            {form.favorite && (
-              <Star size={11} aria-label="즐겨찾기" className="text-amber-400" fill="currentColor" />
-            )}
+      <button
+        type="button"
+        onClick={onOpen}
+        title={form.fileName}
+        className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1.5 bg-slate-50 px-2.5 text-center transition hover:bg-slate-100"
+      >
+        <span className="text-[10px] tabular-nums text-slate-400">{code ?? "코드 없음"}</span>
+        <span className="line-clamp-4 break-keep text-xs font-medium leading-snug text-slate-700">
+          {form.title}
+        </span>
+        {badges.length > 0 && (
+          <span className="flex flex-wrap justify-center gap-1 pt-0.5">
+            {badges.map((badge) => (
+              <span
+                key={badge.label}
+                title={badge.title}
+                className={
+                  badge.tone === "amber"
+                    ? "rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
+                    : "rounded bg-rose-100 px-1 py-0.5 text-[10px] font-medium text-rose-700"
+                }
+              >
+                {badge.label}
+              </span>
+            ))}
           </span>
-          <span className="line-clamp-2 break-keep text-sm font-semibold leading-snug text-slate-900">
-            {form.title}
-          </span>
-          {showFileName && <span className="truncate text-xs text-slate-500">{form.fileName}</span>}
-          {badges.length > 0 && (
-            <span className="flex flex-wrap gap-1 pt-0.5">
-              {badges.map((badge) => (
-                <span
-                  key={badge.label}
-                  title={badge.title}
-                  className={
-                    badge.tone === "amber"
-                      ? "rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800"
-                      : "rounded-md bg-rose-100 px-1.5 py-0.5 text-[11px] font-medium text-rose-700"
-                  }
-                >
-                  {badge.label}
-                </span>
-              ))}
-            </span>
-          )}
-          <span className="mt-auto pt-1 text-xs text-slate-500">
-            {formatDate(form.updatedAt)} · {form.sheetNames.length}시트
-          </span>
-        </div>
+        )}
       </button>
 
-      {/* 휴지통을 카드에 늘 띄워 두지 않는다 — 누르기 쉬운 자리에 지우기가 있으면 사고가 난다. */}
+      {/* 접힌 모서리 = 즐겨찾기. 그룹웨어 서식함과 같은 자리에 둔다. */}
+      <button
+        type="button"
+        onClick={onToggleFavorite}
+        aria-pressed={form.favorite}
+        aria-label={`${form.title} 즐겨찾기`}
+        title={form.favorite ? "즐겨찾기 해제" : "즐겨찾기"}
+        className="absolute right-0 top-0 h-9 w-9"
+      >
+        <span
+          aria-hidden
+          className="absolute right-0 top-0 h-0 w-0 border-l-[36px] border-t-[36px] border-l-transparent"
+          style={{ borderTopColor: form.favorite ? "#1b3a6b" : "#cbd5e1" }}
+        />
+        <Star
+          size={12}
+          aria-hidden
+          className="absolute right-1 top-1 text-white"
+          fill={form.favorite ? "currentColor" : "none"}
+        />
+      </button>
+
+      {/* 지우기는 ⋯ 안에 둔다. 휴지통을 늘 띄워 두면 누르다 지우는 사고가 난다. */}
       <button
         type="button"
         onClick={onToggleMenu}
@@ -864,27 +858,18 @@ function DocCard({
         aria-expanded={menuOpen}
         className={
           menuOpen
-            ? "absolute right-2 top-2 z-10 rounded-md bg-white p-1 text-slate-600 shadow-sm ring-1 ring-slate-200"
-            : "absolute right-2 top-2 z-10 rounded-md bg-white/90 p-1 text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:text-slate-800 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
+            ? "absolute bottom-1.5 right-1.5 z-10 rounded-md bg-white p-1 text-slate-600 shadow-sm ring-1 ring-slate-200"
+            : "absolute bottom-1.5 right-1.5 z-10 rounded-md bg-white/90 p-1 text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:text-slate-800 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
         }
       >
-        <MoreHorizontal size={14} />
+        <MoreHorizontal size={13} />
       </button>
 
       {menuOpen && (
         <div
           role="menu"
-          className="absolute right-2 top-9 z-10 w-40 overflow-hidden rounded-lg bg-white py-1 text-xs shadow-lg ring-1 ring-slate-200"
+          className="absolute bottom-9 right-1.5 z-10 w-28 overflow-hidden rounded-lg bg-white py-1 text-xs shadow-lg ring-1 ring-slate-200"
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={onToggleFavorite}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
-          >
-            <Star size={13} fill={form.favorite ? "currentColor" : "none"} className="text-amber-400" />
-            {form.favorite ? "즐겨찾기 해제" : "즐겨찾기"}
-          </button>
           <button
             type="button"
             role="menuitem"
