@@ -571,28 +571,18 @@ export default function FormsPage() {
               onClearTaxonomy={() => void handleClearTaxonomy()}
             />
           ) : (
-            <>
-              <FormGallery
-                forms={forms}
-                activeId={state.status === "ready" ? state.id : null}
-                busy={state.status === "loading"}
-                onOpen={(id) => void handleOpen(id)}
-                onToggleFavorite={(form) => void patchMeta(form.id, { favorite: !form.favorite })}
-                onChangeCategory={(form, category) => void patchMeta(form.id, { category })}
-                onDelete={(form) => void handleDelete(form)}
-                onUpload={() => fileInputRef.current?.click()}
-              />
-              <p className="mt-3 text-center text-xs text-slate-500">
-                회사 서류 분류 코드표(엑셀)를 올리면 분류 트리로 정리해 드립니다.{" "}
-                <button
-                  type="button"
-                  onClick={() => taxonomyInputRef.current?.click()}
-                  className="font-medium text-blue-600 underline-offset-2 hover:underline"
-                >
-                  코드표 올리기
-                </button>
-              </p>
-            </>
+            <FormGallery
+              forms={forms}
+              activeId={state.status === "ready" ? state.id : null}
+              busy={state.status === "loading"}
+              onOpen={(id) => void handleOpen(id)}
+              onToggleFavorite={(form) => void patchMeta(form.id, { favorite: !form.favorite })}
+              onChangeCategory={(form, category) => void patchMeta(form.id, { category })}
+              onDelete={(form) => void handleDelete(form)}
+              onUpload={() => fileInputRef.current?.click()}
+              // 카드 목록 아래 작은 글씨로 두었더니 찾지 못했다. 도구 줄 버튼으로 둔다.
+              onUploadTaxonomy={() => taxonomyInputRef.current?.click()}
+            />
           )}
         </div>
 
