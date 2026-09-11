@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseFormWorkbook } from '../apps/web/src/features/forms/formParser.ts';
 
 const SAMPLE = fileURLToPath(
-  new URL('../apps/worker/samples/103. 조직의 지식관리.xlsx', import.meta.url),
+  new URL('./fixtures/103. 조직의 지식관리.xlsx', import.meta.url),
 );
 
 let cached;
@@ -61,7 +61,7 @@ test('도형으로만 그린 시트는 그림이 없고 글자도 거의 없다'
 
 test('그림이 없는 양식도 images 를 빈 배열로 갖는다', async () => {
   const buffer = await readFile(
-    fileURLToPath(new URL('../apps/worker/samples/단속점검방문일지양식.xlsx', import.meta.url)),
+    fileURLToPath(new URL('./fixtures/단속점검방문일지양식.xlsx', import.meta.url)),
   );
   const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
   const [sheet] = await parseFormWorkbook(data);

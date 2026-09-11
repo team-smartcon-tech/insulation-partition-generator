@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseFormWorkbook } from '../apps/web/src/features/forms/formParser.ts';
 
 const SAMPLE = fileURLToPath(
-  new URL('../apps/worker/samples/103. 조직의 지식관리.xlsx', import.meta.url),
+  new URL('./fixtures/103. 조직의 지식관리.xlsx', import.meta.url),
 );
 
 let cached;

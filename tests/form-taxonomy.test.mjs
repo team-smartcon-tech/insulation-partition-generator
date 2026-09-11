@@ -15,7 +15,7 @@ import {
 } from '../apps/web/src/features/forms/taxonomy.ts';
 
 const SAMPLE = fileURLToPath(
-  new URL('../apps/worker/samples/서류 분류 코드표.xlsx', import.meta.url),
+  new URL('./fixtures/서류 분류 코드표.xlsx', import.meta.url),
 );
 
 let cached;
@@ -224,7 +224,7 @@ test('엑셀 기본 시트 이름은 1차 분류로 치지 않는다', () => {
 // ─── 코드표 여러 벌(공무관련 · 품질관련) ───────────────────────
 
 const QUALITY = fileURLToPath(
-  new URL('../apps/worker/samples/품질관련 코드표.xlsx', import.meta.url),
+  new URL('./fixtures/품질관련 코드표.xlsx', import.meta.url),
 );
 
 async function loadQuality() {

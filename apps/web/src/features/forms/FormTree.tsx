@@ -1,9 +1,12 @@
 /**
  * 코드표(1차 분류 / 중분류 / 소분류)를 따라 서류를 늘어놓는 화면.
  *
- * 왼쪽은 분류 트리, 오른쪽은 그 분류의 서류 카드다. **아직 안 올린 항목도 흐리게
- * 보여 준다** — 회사 표준 중 몇 개를 채웠는지가 한눈에 보여야 하고, 빠진 칸을 눌러
- * 바로 올릴 수 있어야 한다. 올린 것만 보여 주면 무엇이 없는지 알 수가 없다.
+ * 왼쪽은 분류 트리, 오른쪽은 서류다. 회사 표준 124칸 중 채운 것은 소수라, **빈 칸을 카드와
+ * 같은 크기로 그리면 화면이 빈 상자로 뒤덮인다.** 그래서:
+ *  - 올린 서류는 카드(미리보기·파일명·날짜)로,
+ *  - 빈 칸은 한 줄짜리 행으로 — 처음 몇 개만 보이고 나머지는 "더 보기",
+ *  - 한 칸도 안 채운 중분류는 제목 한 줄로 접는다.
+ * 빈 칸을 아예 안 보이게 하면 "무엇이 없는지"를 알 수 없어, 숨기기는 사용자가 고르게 둔다.
  *
  * 1차 분류(공무관련·품질관련 …)마다 코드표가 따로 있고 **코드 번호가 서로 겹친다**
  * (둘 다 101 을 쓴다). 그래서 칸은 늘 "코드표 id + 코드"로 가리킨다.
@@ -12,12 +15,15 @@ import { useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  Eye,
+  EyeOff,
   FolderTree,
+  MoreHorizontal,
   Pencil,
-  Plus,
   Search,
   Star,
   Trash2,
+  TriangleAlert,
   Upload,
 } from "lucide-react";
 import type { FormSummary } from "./formStore";
@@ -31,10 +37,14 @@ const groupKey = (taxonomyId: string, groupCode: string) => `g:${taxonomyId}:${g
 /** 한 칸(= 코드표 안의 한 코드)을 가리키는 열쇠 */
 const slotKey = (taxonomyId: string, code: string) => `${taxonomyId}:${code}`;
 
-/** 오른쪽에서 접어 둔 분류를 기억하는 자리 */
+/** 오른쪽에서 사용자가 접어 둔 중분류 */
 const COLLAPSED_KEY = "ipg-forms:collapsed-groups";
-/** 왼쪽에서 접어 둔 1차 분류를 기억하는 자리 */
+/** 왼쪽에서 접어 둔 1차 분류 */
 const FOLDED_DIVISIONS_KEY = "ipg-forms:folded-divisions";
+/** 빈 항목 숨기기 */
+const HIDE_EMPTY_KEY = "ipg-forms:hide-empty";
+/** 중분류마다 처음 보여 줄 빈 칸 수. 나머지는 "더 보기"로 편다. */
+const EMPTY_PREVIEW = 3;
 
 /** 이 브라우저에 기억해 둔 목록을 읽는다. 저장이 막힌 브라우저면 빈 목록. */
 function readStoredSet(key: string): Set<string> {
@@ -52,6 +62,39 @@ function writeStoredSet(key: string, value: Set<string>): void {
   } catch {
     // 저장이 막힌 브라우저 — 이번 화면에서만 유지된다.
   }
+}
+
+function readStoredFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredFlag(key: string, value: boolean): void {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // 저장이 막힌 브라우저 — 이번 화면에서만 유지된다.
+  }
+}
+
+/** Set 에서 하나를 넣고 빼는 새 Set */
+function toggled(set: Set<string>, key: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
+const formatDate = (time: number) =>
+  new Date(time).toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
+
+interface Badge {
+  label: string;
+  title: string;
+  tone: "amber" | "rose";
 }
 
 interface FormTreeProps {
@@ -92,62 +135,21 @@ export default function FormTree({
   onRemoveTaxonomy,
 }: FormTreeProps) {
   const [selected, setSelected] = useState<string>(ALL);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [query, setQuery] = useState("");
-  /**
-   * 오른쪽에서 접어 둔 분류. 빈 칸이 대부분이라 다 펼치면 스크롤이 길다.
-   * 다음에 열었을 때도 그대로 두는 게 편해 이 브라우저에 기억해 둔다(보는 사람마다 따로).
-   */
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem(COLLAPSED_KEY);
-      return new Set(saved ? (JSON.parse(saved) as string[]) : []);
-    } catch {
-      return new Set();
-    }
-  });
-
-  function toggleCollapsed(key: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      try {
-        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
-      } catch {
-        // 저장이 막힌 브라우저 — 이번 화면에서만 접힌다.
-      }
-      return next;
-    });
-  }
-
-  /**
-   * 왼쪽에서 접어 둔 1차 분류. 코드표가 여럿이면 중분류가 줄줄이 늘어서 길어진다 —
-   * 지금 쓰는 1차 분류만 펼쳐 두게 한다. 다음에 열어도 그대로 두려고 기억한다.
-   */
+  /** 사용자가 접어 둔 중분류(채운 것이 있는 중분류). 다음에 열어도 그대로 둔다. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => readStoredSet(COLLAPSED_KEY));
+  /** 왼쪽에서 접어 둔 1차 분류 */
   const [foldedDivisions, setFoldedDivisions] = useState<Set<string>>(() =>
     readStoredSet(FOLDED_DIVISIONS_KEY),
   );
-
-  function toggleFoldedDivision(taxonomyId: string) {
-    setFoldedDivisions((prev) => {
-      const next = new Set(prev);
-      if (next.has(taxonomyId)) next.delete(taxonomyId);
-      else next.add(taxonomyId);
-      writeStoredSet(FOLDED_DIVISIONS_KEY, next);
-      return next;
-    });
-  }
-
-  function toggleExpand(key: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
+  /** 한 칸도 안 채워 제목만 보이던 중분류 중 사용자가 펼친 것(이번 화면에서만) */
+  const [openedEmpty, setOpenedEmpty] = useState<Set<string>>(new Set());
+  /** "더 보기"를 누른 중분류(이번 화면에서만) */
+  const [showAllEmpty, setShowAllEmpty] = useState<Set<string>>(new Set());
+  const [hideEmpty, setHideEmpty] = useState<boolean>(() => readStoredFlag(HIDE_EMPTY_KEY));
+  /** ⋯ 메뉴가 열린 서류 */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
 
   /** 칸 → 그 칸에 올린 서류들. 한 칸에 여러 장(월별 등)이 올 수 있다. */
   const bySlot = useMemo(() => {
@@ -177,14 +179,68 @@ export default function FormTree({
     });
   }, [forms, taxonomies]);
 
+  /**
+   * 파일 이름 → 그 파일이 들어가 있는 칸들. 같은 파일을 두 칸에 올린 것을 찾는다.
+   *
+   * 올릴 때 한 번 계산해 서류에 박아 두지 않는다 — 그러면 다른 서류를 지우거나 코드표를
+   * 바꿔도 표시가 그대로 남아 거짓말이 된다. 서류가 수십 개라 그릴 때마다 세도 가볍다.
+   */
+  const slotsByFileName = useMemo(() => {
+    const map = new Map<string, { key: string; code: string }[]>();
+    for (const form of forms) {
+      const taxonomyId = taxonomyIdOf(form, taxonomies);
+      if (!taxonomyId || !form.code) continue;
+      const list = map.get(form.fileName) ?? [];
+      list.push({ key: slotKey(taxonomyId, form.code), code: form.code });
+      map.set(form.fileName, list);
+    }
+    return map;
+  }, [forms, taxonomies]);
+
+  function badgesFor(form: FormSummary): Badge[] {
+    const badges: Badge[] = [];
+    // 파일 이름 앞 번호와 들어간 칸의 번호가 다르다(옛 체계 파일명이거나, 다른 칸에 올린 경우).
+    const numbered = /^\s*(\d{3,})/.exec(form.fileName)?.[1];
+    if (numbered && form.code && numbered !== form.code) {
+      badges.push({
+        label: "코드 불일치",
+        title: `파일 이름은 ${numbered}, 들어간 칸은 ${form.code}입니다.`,
+        tone: "amber",
+      });
+    }
+    const taxonomyId = taxonomyIdOf(form, taxonomies);
+    if (taxonomyId && form.code) {
+      const mine = slotKey(taxonomyId, form.code);
+      const others = [
+        ...new Set(
+          (slotsByFileName.get(form.fileName) ?? [])
+            .filter((slot) => slot.key !== mine)
+            .map((slot) => slot.code),
+        ),
+      ];
+      if (others.length > 0) {
+        badges.push({
+          label: `${others.join("·")}와 중복`,
+          title: `같은 파일이 ${others.join(", ")} 칸에도 올라가 있습니다.`,
+          tone: "rose",
+        });
+      }
+    }
+    return badges;
+  }
+
   const needle = query.trim().toLowerCase();
+  const searching = needle !== "";
   const matches = (item: TaxonomyItem, related: FormSummary[]) => {
     if (favoritesOnly && !related.some((form) => form.favorite)) return false;
-    if (needle === "") return true;
+    if (!searching) return true;
     return (
       item.name.toLowerCase().includes(needle) ||
       item.code.includes(needle) ||
-      related.some((form) => form.title.toLowerCase().includes(needle))
+      related.some(
+        (form) =>
+          form.title.toLowerCase().includes(needle) || form.fileName.toLowerCase().includes(needle),
+      )
     );
   };
 
@@ -196,6 +252,7 @@ export default function FormTree({
     taxonomy.groups.reduce((sum, group) => sum + filledIn(taxonomy, group), 0);
   const totalItems = taxonomies.reduce((sum, taxonomy) => sum + totalOf(taxonomy), 0);
   const totalFilled = taxonomies.reduce((sum, taxonomy) => sum + filledOf(taxonomy), 0);
+  const percent = totalItems > 0 ? Math.round((totalFilled / totalItems) * 100) : 0;
 
   /** 지금 보고 있는 1차 분류. 전체를 보고 있으면 코드표가 하나일 때만 그것으로 본다. */
   const preferredTaxonomyId = selected.startsWith("t:")
@@ -233,79 +290,282 @@ export default function FormTree({
     [taxonomies, bySlot, selected, needle, favoritesOnly],
   );
 
+  function toggleHideEmpty() {
+    setHideEmpty((on) => {
+      writeStoredFlag(HIDE_EMPTY_KEY, !on);
+      return !on;
+    });
+  }
+
+  function renderGroup(
+    taxonomy: Taxonomy,
+    group: TaxonomyGroup,
+    items: { item: TaxonomyItem; related: FormSummary[] }[],
+  ) {
+    const key = slotKey(taxonomy.id, group.code);
+    const filledEntries = items.filter((entry) => entry.related.length > 0);
+    const emptyEntries = items.filter((entry) => entry.related.length === 0);
+    const allEmpty = filledEntries.length === 0;
+
+    // 빈 항목 숨기기 — 한 칸도 안 채운 중분류는 통째로 뺀다(검색 중에는 찾은 것을 보여 준다).
+    if (hideEmpty && allEmpty && !searching) return null;
+
+    // 한 칸도 안 채운 중분류는 제목 한 줄로 접어 둔다. 빈 상자 9개를 늘어놓지 않는다.
+    if (allEmpty && !searching && !openedEmpty.has(key)) {
+      return (
+        <button
+          key={group.code}
+          type="button"
+          onClick={() => setOpenedEmpty((prev) => toggled(prev, key))}
+          aria-expanded={false}
+          className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left ring-1 ring-slate-200 transition hover:bg-slate-50"
+        >
+          <ChevronRight size={15} aria-hidden className="shrink-0 text-slate-400" />
+          <span className="text-sm font-medium text-slate-700">
+            <span className="mr-1.5 tabular-nums">{group.code}</span>
+            {group.name}
+          </span>
+          <span className="text-sm tabular-nums text-slate-400">0/{group.items.length}</span>
+          <span className="ml-auto text-xs text-slate-400">모두 비어 있음</span>
+        </button>
+      );
+    }
+
+    const isCollapsed = !searching && !allEmpty && collapsed.has(key);
+    const expandedEmpty = searching || showAllEmpty.has(key);
+    const visibleEmpty = hideEmpty
+      ? []
+      : expandedEmpty
+        ? emptyEntries
+        : emptyEntries.slice(0, EMPTY_PREVIEW);
+    const hiddenEmptyCount = hideEmpty ? 0 : emptyEntries.length - visibleEmpty.length;
+
+    return (
+      <section key={group.code} className="mb-2">
+        <h3>
+          <button
+            type="button"
+            onClick={() =>
+              allEmpty
+                ? setOpenedEmpty((prev) => toggled(prev, key))
+                : setCollapsed((prev) => {
+                    const next = toggled(prev, key);
+                    writeStoredSet(COLLAPSED_KEY, next);
+                    return next;
+                  })
+            }
+            aria-expanded={!isCollapsed}
+            title={isCollapsed ? "펼치기" : "접기"}
+            className="-ml-1.5 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-semibold text-slate-800 transition hover:bg-slate-100"
+          >
+            <ChevronDown
+              size={15}
+              aria-hidden
+              className={isCollapsed ? "-rotate-90 text-slate-400 transition-transform" : "text-slate-400 transition-transform"}
+            />
+            <span className="tabular-nums">{group.code}</span>
+            {group.name}
+            <span className="font-normal tabular-nums text-slate-500">
+              {filledIn(taxonomy, group)}/{group.items.length}
+            </span>
+          </button>
+        </h3>
+
+        {!isCollapsed && (
+          <div className="mt-2">
+            {filledEntries.length > 0 && (
+              <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                {filledEntries.flatMap(({ item, related }) =>
+                  related.map((form) => (
+                    <li key={`${form.id}-${item.code}`}>
+                      <DocCard
+                        form={form}
+                        code={item.code}
+                        badges={badgesFor(form)}
+                        active={form.id === activeId}
+                        menuOpen={menuFor === form.id}
+                        onOpen={() => onOpen(form.id)}
+                        onToggleMenu={() => setMenuFor((current) => (current === form.id ? null : form.id))}
+                        onToggleFavorite={() => {
+                          setMenuFor(null);
+                          onToggleFavorite(form);
+                        }}
+                        onDelete={() => {
+                          setMenuFor(null);
+                          onDelete(form);
+                        }}
+                      />
+                    </li>
+                  )),
+                )}
+              </ul>
+            )}
+
+            {/* 빈 칸은 한 줄짜리 행으로. 카드 크기로 그리면 같은 내용이 여덟 배 높이를 먹는다. */}
+            {visibleEmpty.length > 0 && (
+              <ul className="mt-3 grid gap-x-8 lg:grid-cols-2">
+                {visibleEmpty.map(({ item }, index) => (
+                  // 같은 번호가 두 줄인 코드표가 있어 번호만으로는 열쇠가 겹친다.
+                  <li key={`${item.code}-${index}`}>
+                    <EmptyRow item={item} onUpload={() => onUploadFor(taxonomy.id, item)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {hiddenEmptyCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAllEmpty((prev) => toggled(prev, key))}
+                className="mt-2 rounded px-1 py-0.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              >
+                비어 있는 슬롯 {hiddenEmptyCount}개 더 보기
+              </button>
+            )}
+            {!hideEmpty && !searching && showAllEmpty.has(key) && emptyEntries.length > EMPTY_PREVIEW && (
+              <button
+                type="button"
+                onClick={() => setShowAllEmpty((prev) => toggled(prev, key))}
+                className="mt-2 rounded px-1 py-0.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              >
+                빈 슬롯 접기
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-      {/* ── 도구 줄 ── */}
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="mr-auto text-sm font-semibold text-slate-700">
-          서류 목록{" "}
-          <span className="font-normal text-slate-400">
-            {totalFilled} / {totalItems}
-          </span>
-        </h2>
-
+      {/* ⋯ 메뉴 바깥을 누르면 닫는다 */}
+      {menuFor && (
         <button
           type="button"
-          onClick={() => setFavoritesOnly((on) => !on)}
-          aria-pressed={favoritesOnly}
-          className={
-            favoritesOnly
-              ? "inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white"
-              : "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50"
-          }
-        >
-          <Star size={13} fill={favoritesOnly ? "currentColor" : "none"} /> 즐겨찾기
-        </button>
+          aria-label="메뉴 닫기"
+          tabIndex={-1}
+          onClick={() => setMenuFor(null)}
+          className="fixed inset-0 z-[5] cursor-default"
+        />
+      )}
 
-        <div className="relative">
-          <Search
-            size={14}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
-          />
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="서류명 · 코드 검색"
-            aria-label="서류 검색"
-            className="w-48 rounded-lg border border-slate-300 py-1.5 pl-8 pr-2.5 text-xs text-slate-700 placeholder:text-slate-400"
-          />
+      {/* ── 머리: 진행률 + 도구 ── */}
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="mr-auto">
+          <h2 className="text-lg font-semibold text-slate-900">
+            서류 목록{" "}
+            <span className="text-sm font-normal tabular-nums text-slate-500">
+              {totalFilled} / {totalItems}
+            </span>
+          </h2>
+          <div
+            role="progressbar"
+            aria-label="회사 표준 서류 채움 정도"
+            aria-valuemin={0}
+            aria-valuemax={totalItems}
+            aria-valuenow={totalFilled}
+            className="mt-2 h-1.5 w-44 overflow-hidden rounded-full bg-slate-100"
+          >
+            <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${percent}%` }} />
+          </div>
         </div>
 
-        {/* 1차 분류를 더하는 입구. 안내 문구 속 링크로 두면 찾지 못한다 — 버튼으로 둔다. */}
-        <button
-          type="button"
-          onClick={onUploadTaxonomy}
-          title="코드표 엑셀을 올립니다. 시트 이름이 1차 분류 이름이 되고, 같은 이름이 있으면 그 코드표를 바꿉니다."
-          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700"
-        >
-          <FolderTree size={13} /> 코드표 올리기
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+            />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="서류명 · 코드 검색"
+              aria-label="서류 검색"
+              className="w-44 rounded-lg border border-slate-300 py-1.5 pl-8 pr-2.5 text-xs text-slate-700 placeholder:text-slate-400"
+            />
+          </div>
 
-        <button
-          type="button"
-          onClick={() => onUpload(preferredTaxonomyId)}
-          disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          <Upload size={13} /> {busy ? "읽는 중..." : "양식 올리기"}
-        </button>
+          <button
+            type="button"
+            onClick={() => setFavoritesOnly((on) => !on)}
+            aria-pressed={favoritesOnly}
+            className={
+              favoritesOnly
+                ? "inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white"
+                : "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50"
+            }
+          >
+            <Star size={13} fill={favoritesOnly ? "currentColor" : "none"} /> 즐겨찾기
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleHideEmpty}
+            aria-pressed={hideEmpty}
+            title={hideEmpty ? "안 올린 칸도 보여 줍니다" : "안 올린 칸을 감춥니다"}
+            className={
+              hideEmpty
+                ? "inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-white"
+                : "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50"
+            }
+          >
+            {hideEmpty ? <Eye size={13} /> : <EyeOff size={13} />}
+            {hideEmpty ? "빈 항목 보이기" : "빈 항목 숨기기"}
+          </button>
+
+          {/* 1차 분류를 더하는 입구. 안내 문구 속 링크로 두면 찾지 못한다 — 버튼으로 둔다. */}
+          <button
+            type="button"
+            onClick={onUploadTaxonomy}
+            title="코드표 엑셀을 올립니다. 시트 이름이 1차 분류 이름이 되고, 같은 이름이 있으면 그 코드표를 바꿉니다."
+            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-blue-700 ring-1 ring-blue-200 transition hover:bg-blue-50"
+          >
+            <FolderTree size={13} /> 코드표 올리기
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onUpload(preferredTaxonomyId)}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            <Upload size={13} /> {busy ? "읽는 중..." : "양식 올리기"}
+          </button>
+        </div>
       </div>
 
-      <div className="mt-4 flex flex-col gap-5 lg:flex-row">
+      <div className="mt-5 flex flex-col gap-6 lg:flex-row">
         {/* ── 왼쪽: 분류 트리 ── */}
-        <nav className="shrink-0 lg:w-64" aria-label="서류 분류">
+        <nav className="shrink-0 lg:w-60" aria-label="서류 분류">
+          {/* 어디에도 못 들어간 서류는 맨 위 경고로 — 목록 끝에 두면 있는 줄도 모른다. */}
+          {unfiled.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelected(UNFILED)}
+              className={
+                selected === UNFILED
+                  ? "mb-3 flex w-full items-center gap-2 rounded-lg bg-amber-200 px-3 py-2.5 text-sm font-medium text-amber-900"
+                  : "mb-3 flex w-full items-center gap-2 rounded-lg bg-amber-100 px-3 py-2.5 text-sm font-medium text-amber-800 transition hover:bg-amber-200/70"
+              }
+            >
+              <TriangleAlert size={15} aria-hidden />
+              코드 없는 서류 {unfiled.length}
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setSelected(ALL)}
             className={
               selected === ALL
-                ? "flex w-full items-center justify-between rounded-lg bg-[#1b3a6b] px-3 py-2 text-xs font-semibold text-white"
-                : "flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                ? "flex w-full items-center justify-between rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900"
+                : "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             }
           >
             <span>전체</span>
-            <span className={selected === ALL ? "text-blue-200" : "text-slate-400"}>
+            <span className="tabular-nums text-slate-500">
               {totalFilled}/{totalItems}
             </span>
           </button>
@@ -313,27 +573,31 @@ export default function FormTree({
           {taxonomies.map((taxonomy) => {
             const divisionActive = selected === divisionKey(taxonomy.id);
             const folded = foldedDivisions.has(taxonomy.id);
-            const filled = filledOf(taxonomy);
             return (
-              <div key={taxonomy.id} className="mt-3">
-                {/* 1차 분류 — 코드표 한 벌을 묶는 큰 갈래(예: 공무관련). 시트 이름에서 온다. */}
+              <div key={taxonomy.id} className="mt-1">
                 <div
                   className={
                     divisionActive
-                      ? "flex items-center gap-1 rounded-lg bg-blue-50 pr-1 ring-1 ring-blue-200"
-                      : "flex items-center gap-1 rounded-lg pr-1 hover:bg-slate-50"
+                      ? "group flex items-center rounded-lg bg-slate-100"
+                      : "group flex items-center rounded-lg hover:bg-slate-50"
                   }
                 >
                   <button
                     type="button"
-                    onClick={() => toggleFoldedDivision(taxonomy.id)}
+                    onClick={() =>
+                      setFoldedDivisions((prev) => {
+                        const next = toggled(prev, taxonomy.id);
+                        writeStoredSet(FOLDED_DIVISIONS_KEY, next);
+                        return next;
+                      })
+                    }
                     aria-expanded={!folded}
                     aria-label={`${taxonomy.division || "1차 분류"} ${folded ? "펼치기" : "접기"}`}
                     title={folded ? "펼치기" : "접기"}
                     className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700"
                   >
                     <ChevronDown
-                      size={13}
+                      size={14}
                       aria-hidden
                       className={folded ? "-rotate-90 transition-transform" : "transition-transform"}
                     />
@@ -341,19 +605,21 @@ export default function FormTree({
                   <button
                     type="button"
                     onClick={() => setSelected(divisionKey(taxonomy.id))}
-                    className="flex min-w-0 flex-1 items-center justify-between py-1.5 text-left"
+                    className="flex min-w-0 flex-1 items-center justify-between py-2 text-left"
                   >
                     <span
                       className={
                         taxonomy.division
-                          ? "min-w-0 truncate text-xs font-semibold text-slate-700"
-                          : "min-w-0 truncate text-xs italic text-slate-400"
+                          ? divisionActive
+                            ? "min-w-0 truncate text-sm font-semibold text-slate-900"
+                            : "min-w-0 truncate text-sm font-medium text-slate-700"
+                          : "min-w-0 truncate text-sm italic text-slate-400"
                       }
                     >
                       {taxonomy.division || "1차 분류 이름 없음"}
                     </span>
-                    <span className={filled > 0 ? "ml-2 text-xs text-blue-600" : "ml-2 text-xs text-slate-300"}>
-                      {filled}/{totalOf(taxonomy)}
+                    <span className="ml-2 text-sm tabular-nums text-slate-500">
+                      {filledOf(taxonomy)}/{totalOf(taxonomy)}
                     </span>
                   </button>
                   <button
@@ -361,99 +627,45 @@ export default function FormTree({
                     onClick={() => onRenameDivision(taxonomy.id)}
                     title="1차 분류 이름 바꾸기"
                     aria-label={`${taxonomy.division || "1차 분류"} 이름 바꾸기`}
-                    className="shrink-0 rounded p-1 text-slate-300 transition hover:bg-slate-100 hover:text-slate-600"
+                    className="shrink-0 rounded p-1.5 text-slate-300 transition hover:text-slate-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
                   >
-                    <Pencil size={11} />
+                    <Pencil size={12} />
                   </button>
                 </div>
 
                 {!folded && (
-                <ul className="mt-1 ml-2 space-y-0.5 border-l-2 border-slate-100 pl-1">
-                  {taxonomy.groups.map((group) => {
-                    const key = groupKey(taxonomy.id, group.code);
-                    const open = expanded.has(key);
-                    const active = selected === key;
-                    const groupFilled = filledIn(taxonomy, group);
-                    return (
-                      <li key={group.code}>
-                        <div
-                          className={
-                            active
-                              ? "flex items-center rounded-lg bg-blue-50 ring-1 ring-blue-200"
-                              : "flex items-center rounded-lg hover:bg-slate-50"
-                          }
-                        >
-                          <button
-                            type="button"
-                            onClick={() => toggleExpand(key)}
-                            aria-label={`${group.name} ${open ? "접기" : "펴기"}`}
-                            aria-expanded={open}
-                            className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700"
-                          >
-                            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                          </button>
+                  <ul className="mb-1 ml-5 mt-0.5 space-y-px">
+                    {taxonomy.groups.map((group) => {
+                      const key = groupKey(taxonomy.id, group.code);
+                      const active = selected === key;
+                      const filled = filledIn(taxonomy, group);
+                      return (
+                        <li key={group.code}>
                           <button
                             type="button"
                             onClick={() => setSelected(key)}
-                            className="flex min-w-0 flex-1 items-center justify-between py-2 pr-3 text-left"
+                            className={
+                              active
+                                ? "flex w-full items-center justify-between rounded-md bg-slate-100 px-2 py-1.5 text-left text-[13px] font-medium text-slate-900"
+                                : "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-slate-50"
+                            }
                           >
-                            <span className="min-w-0 truncate text-xs font-medium text-slate-700">
-                              <span className="mr-1.5 text-slate-400">{group.code}</span>
+                            <span className={filled > 0 ? "min-w-0 truncate text-slate-700" : "min-w-0 truncate text-slate-400"}>
+                              <span className="mr-1.5 tabular-nums">{group.code}</span>
                               {group.name}
                             </span>
-                            <span
-                              className={
-                                groupFilled > 0 ? "ml-2 text-xs text-blue-600" : "ml-2 text-xs text-slate-300"
-                              }
-                            >
-                              {groupFilled}/{group.items.length}
+                            <span className={filled > 0 ? "ml-2 tabular-nums text-slate-600" : "ml-2 tabular-nums text-slate-300"}>
+                              {filled}/{group.items.length}
                             </span>
                           </button>
-                        </div>
-
-                        {open && (
-                          <ul className="ml-6 border-l border-slate-200 pl-2">
-                            {group.items.map((item, index) => {
-                              const related = bySlot.get(slotKey(taxonomy.id, item.code)) ?? [];
-                              return (
-                                // 겹치는 코드(같은 번호 두 줄)가 있어 코드만으로는 열쇠가 겹친다.
-                                <li key={`${item.code}-${index}`}>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      related[0] ? onOpen(related[0].id) : onUploadFor(taxonomy.id, item)
-                                    }
-                                    title={related.length > 0 ? "열기" : "이 자리에 양식 올리기"}
-                                    className={
-                                      related.length > 0
-                                        ? "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50"
-                                        : "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-slate-400 hover:bg-slate-50"
-                                    }
-                                  >
-                                    <span
-                                      aria-hidden
-                                      className={
-                                        related.length > 0
-                                          ? "h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500"
-                                          : "h-1.5 w-1.5 shrink-0 rounded-full ring-1 ring-slate-300"
-                                      }
-                                    />
-                                    <span className="shrink-0 tabular-nums">{item.code}</span>
-                                    <span className="truncate">{item.name}</span>
-                                  </button>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
 
                 {!folded && taxonomy.conflicts.length > 0 && (
-                  <p className="ml-4 mt-1 text-[11px] text-amber-600">
+                  <p className="mb-1 ml-7 text-[11px] text-amber-600">
                     겹치는 코드: {taxonomy.conflicts.join(", ")}
                   </p>
                 )}
@@ -461,22 +673,7 @@ export default function FormTree({
             );
           })}
 
-          {unfiled.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelected(UNFILED)}
-              className={
-                selected === UNFILED
-                  ? "mt-3 flex w-full items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-blue-200"
-                  : "mt-3 flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50"
-              }
-            >
-              <span>코드 없는 서류</span>
-              <span className="text-slate-400">{unfiled.length}</span>
-            </button>
-          )}
-
-          <div className="mt-3 border-t border-slate-200 pt-3 text-[11px] text-slate-400">
+          <div className="mt-4 border-t border-slate-200 pt-3 text-[11px] text-slate-400">
             <p className="mb-1">분류 기준</p>
             <ul className="space-y-1">
               {taxonomies.map((taxonomy) => (
@@ -499,90 +696,69 @@ export default function FormTree({
           </div>
         </nav>
 
-        {/* ── 오른쪽: 서류 카드 ── */}
+        {/* ── 오른쪽: 서류 ── */}
         <div className="min-w-0 flex-1">
           {selected === UNFILED ? (
-            <FormCards
-              forms={unfiled}
-              activeId={activeId}
-              onOpen={onOpen}
-              onToggleFavorite={onToggleFavorite}
-              onDelete={onDelete}
-            />
+            unfiled.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                코드 없는 서류가 없습니다.
+              </p>
+            ) : (
+              <>
+                <p className="mb-3 text-sm text-slate-600">
+                  코드표의 어느 칸에도 들어가지 않은 서류입니다. 파일 이름 앞에 번호가 없거나, 번호가
+                  여러 1차 분류에 겹쳐 자리를 정하지 못한 경우입니다.
+                </p>
+                <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                  {unfiled.map((form) => (
+                    <li key={form.id}>
+                      <DocCard
+                        form={form}
+                        badges={[]}
+                        active={form.id === activeId}
+                        menuOpen={menuFor === form.id}
+                        onOpen={() => onOpen(form.id)}
+                        onToggleMenu={() => setMenuFor((current) => (current === form.id ? null : form.id))}
+                        onToggleFavorite={() => {
+                          setMenuFor(null);
+                          onToggleFavorite(form);
+                        }}
+                        onDelete={() => {
+                          setMenuFor(null);
+                          onDelete(form);
+                        }}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )
           ) : sections.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
               조건에 맞는 서류가 없습니다.
             </p>
           ) : (
-            sections.map(({ taxonomy, groups }) => (
-              <div key={taxonomy.id} className="mb-8 last:mb-0">
-                <h2 className="mb-3 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-800">
-                  {taxonomy.division || "1차 분류 이름 없음"}
-                  <span className="ml-2 text-xs font-normal text-slate-400">
-                    {filledOf(taxonomy)}/{totalOf(taxonomy)}
-                  </span>
-                </h2>
-
-                {groups.map(({ group, items }) => {
-                  const key = slotKey(taxonomy.id, group.code);
-                  // 검색 중에는 접어 둔 분류도 펼쳐 보인다 — 찾은 것이 접힌 칸에 숨으면 "없다"로 보인다.
-                  const isCollapsed = needle === "" && collapsed.has(key);
-                  return (
-                    <section key={group.code} className="mb-6 last:mb-0">
-                      <h3 className="mb-3">
-                        <button
-                          type="button"
-                          onClick={() => toggleCollapsed(key)}
-                          aria-expanded={!isCollapsed}
-                          title={isCollapsed ? "펼치기" : "접기"}
-                          className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
-                        >
-                          <span className="text-slate-400">{group.code}</span>
-                          {group.name}
-                          <span className="font-normal text-slate-400">
-                            {filledIn(taxonomy, group)}/{group.items.length}
-                          </span>
-                          <ChevronDown
-                            size={14}
-                            aria-hidden
-                            className={
-                              isCollapsed
-                                ? "-rotate-90 text-slate-400 transition-transform"
-                                : "text-slate-400 transition-transform"
-                            }
-                          />
-                        </button>
-                      </h3>
-                      {!isCollapsed && (
-                        <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                          {items.map(({ item, related }, index) =>
-                            related.length > 0 ? (
-                              related.map((form) => (
-                                <li key={`${form.id}-${index}`}>
-                                  <Card
-                                    title={form.title}
-                                    code={item.code}
-                                    favorite={form.favorite}
-                                    active={form.id === activeId}
-                                    onOpen={() => onOpen(form.id)}
-                                    onToggleFavorite={() => onToggleFavorite(form)}
-                                    onDelete={() => onDelete(form)}
-                                  />
-                                </li>
-                              ))
-                            ) : (
-                              <li key={`${item.code}-${index}`}>
-                                <EmptyCard item={item} onUpload={() => onUploadFor(taxonomy.id, item)} />
-                              </li>
-                            ),
-                          )}
-                        </ul>
-                      )}
-                    </section>
-                  );
-                })}
-              </div>
-            ))
+            sections.map(({ taxonomy, groups }) => {
+              const rendered = groups
+                .map(({ group, items }) => renderGroup(taxonomy, group, items))
+                .filter(Boolean);
+              if (rendered.length === 0) return null;
+              return (
+                <div key={taxonomy.id} className="mb-8 last:mb-0">
+                  {taxonomies.length > 1 && (
+                    <h2 className="mb-3 flex items-baseline gap-2 border-b border-slate-200 pb-2">
+                      <span className="text-base font-semibold text-slate-900">
+                        {taxonomy.division || "1차 분류 이름 없음"}
+                      </span>
+                      <span className="text-sm tabular-nums text-slate-500">
+                        {filledOf(taxonomy)}/{totalOf(taxonomy)}
+                      </span>
+                    </h2>
+                  )}
+                  <div className="space-y-3">{rendered}</div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
@@ -590,132 +766,153 @@ export default function FormTree({
   );
 }
 
-/** 코드 없이 올린 서류를 늘어놓는다(코드표를 쓰기 전에 올린 것들). */
-function FormCards({
-  forms,
-  activeId,
-  onOpen,
-  onToggleFavorite,
-  onDelete,
-}: {
-  forms: FormSummary[];
-  activeId: string | null;
-  onOpen: (id: string) => void;
-  onToggleFavorite: (form: FormSummary) => void;
-  onDelete: (form: FormSummary) => void;
-}) {
-  if (forms.length === 0) {
-    return (
-      <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-        코드 없는 서류가 없습니다.
-      </p>
-    );
-  }
+/**
+ * 양식 미리보기 — 첫 시트의 실제 열 너비 비율로 칸을 그린다.
+ * 가짜 무늬를 넣으면 "원본 그대로"라는 약속을 거짓으로 보이게 한다.
+ */
+function Preview({ columns }: { columns?: number[] }) {
+  const cols = columns && columns.length > 0 ? columns : [1];
   return (
-    <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-      {forms.map((form) => (
-        <li key={form.id}>
-          <Card
-            title={form.title}
-            favorite={form.favorite}
-            active={form.id === activeId}
-            onOpen={() => onOpen(form.id)}
-            onToggleFavorite={() => onToggleFavorite(form)}
-            onDelete={() => onDelete(form)}
-          />
-        </li>
+    <div aria-hidden className="flex h-16 flex-col gap-px border-b border-slate-100 bg-slate-50 p-2">
+      {[0, 1, 2].map((row) => (
+        <div key={row} className="flex flex-1 gap-px">
+          {cols.map((width, index) => (
+            <div
+              key={index}
+              className={row === 0 ? "bg-slate-300" : "bg-slate-200"}
+              style={{ flexGrow: width, flexBasis: 0 }}
+            />
+          ))}
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }
 
-function Card({
-  title,
+function DocCard({
+  form,
   code,
-  favorite,
+  badges,
   active,
+  menuOpen,
   onOpen,
+  onToggleMenu,
   onToggleFavorite,
   onDelete,
 }: {
-  title: string;
+  form: FormSummary;
   code?: string;
-  favorite: boolean;
+  badges: Badge[];
   active: boolean;
+  menuOpen: boolean;
   onOpen: () => void;
+  onToggleMenu: () => void;
   onToggleFavorite: () => void;
   onDelete: () => void;
 }) {
+  // 제목이 파일 이름에서 확장자만 뗀 것이면 파일 이름 줄은 같은 말의 반복이라 뺀다.
+  const showFileName = form.fileName.replace(/\.xlsx$/i, "") !== form.title;
   return (
-    <>
-      <div
+    <div
+      className={
+        active
+          ? "group relative flex h-full flex-col overflow-hidden rounded-xl bg-white ring-2 ring-blue-500"
+          : "group relative flex h-full flex-col overflow-hidden rounded-xl bg-white ring-1 ring-slate-200 transition hover:shadow-sm hover:ring-slate-300"
+      }
+    >
+      <button type="button" onClick={onOpen} title={form.fileName} className="flex flex-1 flex-col text-left">
+        <Preview columns={form.preview} />
+        <div className="flex flex-1 flex-col gap-1 p-3">
+          <span className="flex items-center gap-1 text-[11px] tabular-nums text-blue-600">
+            {code ?? "코드 없음"}
+            {form.favorite && (
+              <Star size={11} aria-label="즐겨찾기" className="text-amber-400" fill="currentColor" />
+            )}
+          </span>
+          <span className="line-clamp-2 break-keep text-sm font-semibold leading-snug text-slate-900">
+            {form.title}
+          </span>
+          {showFileName && <span className="truncate text-xs text-slate-500">{form.fileName}</span>}
+          {badges.length > 0 && (
+            <span className="flex flex-wrap gap-1 pt-0.5">
+              {badges.map((badge) => (
+                <span
+                  key={badge.label}
+                  title={badge.title}
+                  className={
+                    badge.tone === "amber"
+                      ? "rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800"
+                      : "rounded-md bg-rose-100 px-1.5 py-0.5 text-[11px] font-medium text-rose-700"
+                  }
+                >
+                  {badge.label}
+                </span>
+              ))}
+            </span>
+          )}
+          <span className="mt-auto pt-1 text-xs text-slate-500">
+            {formatDate(form.updatedAt)} · {form.sheetNames.length}시트
+          </span>
+        </div>
+      </button>
+
+      {/* 휴지통을 카드에 늘 띄워 두지 않는다 — 누르기 쉬운 자리에 지우기가 있으면 사고가 난다. */}
+      <button
+        type="button"
+        onClick={onToggleMenu}
+        aria-label={`${form.title} 메뉴`}
+        aria-expanded={menuOpen}
         className={
-          active
-            ? "relative rounded-sm ring-2 ring-blue-500"
-            : "relative rounded-sm ring-1 ring-slate-300 transition hover:ring-slate-400"
+          menuOpen
+            ? "absolute right-2 top-2 z-10 rounded-md bg-white p-1 text-slate-600 shadow-sm ring-1 ring-slate-200"
+            : "absolute right-2 top-2 z-10 rounded-md bg-white/90 p-1 text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:text-slate-800 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
         }
       >
-        <button
-          type="button"
-          onClick={onOpen}
-          title={title}
-          className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1 bg-slate-50 px-2.5 text-center transition hover:bg-slate-100"
-        >
-          {code && <span className="text-[10px] tabular-nums text-slate-400">{code}</span>}
-          <span className="line-clamp-4 break-keep text-xs font-medium leading-snug text-slate-700">
-            {title}
-          </span>
-        </button>
+        <MoreHorizontal size={14} />
+      </button>
 
-        <button
-          type="button"
-          onClick={onToggleFavorite}
-          aria-pressed={favorite}
-          aria-label={`${title} 즐겨찾기`}
-          title={favorite ? "즐겨찾기 해제" : "즐겨찾기"}
-          className="absolute right-0 top-0 h-9 w-9"
+      {menuOpen && (
+        <div
+          role="menu"
+          className="absolute right-2 top-9 z-10 w-40 overflow-hidden rounded-lg bg-white py-1 text-xs shadow-lg ring-1 ring-slate-200"
         >
-          <span
-            aria-hidden
-            className="absolute right-0 top-0 h-0 w-0 border-l-[36px] border-t-[36px] border-l-transparent"
-            style={{ borderTopColor: favorite ? "#1b3a6b" : "#cbd5e1" }}
-          />
-          <Star
-            size={12}
-            aria-hidden
-            className="absolute right-1 top-1 text-white"
-            fill={favorite ? "currentColor" : "none"}
-          />
-        </button>
-      </div>
-
-      <div className="mt-1.5 flex justify-end">
-        <button
-          type="button"
-          onClick={onDelete}
-          aria-label={`${title} 지우기`}
-          title="지우기"
-          className="rounded p-1 text-slate-300 transition hover:bg-red-50 hover:text-red-600"
-        >
-          <Trash2 size={13} />
-        </button>
-      </div>
-    </>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onToggleFavorite}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+          >
+            <Star size={13} fill={form.favorite ? "currentColor" : "none"} className="text-amber-400" />
+            {form.favorite ? "즐겨찾기 해제" : "즐겨찾기"}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onDelete}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-600 hover:bg-red-50"
+          >
+            <Trash2 size={13} /> 지우기
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
-/** 아직 안 올린 자리. 흐리게 두되 눌러서 바로 올릴 수 있다. */
-function EmptyCard({ item, onUpload }: { item: TaxonomyItem; onUpload: () => void }) {
+/** 아직 안 올린 칸 — 한 줄짜리 행. 누르면 그 칸으로 바로 올린다. */
+function EmptyRow({ item, onUpload }: { item: TaxonomyItem; onUpload: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onUpload}
-      title={`${item.code} ${item.name} — 양식 올리기`}
-      className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1.5 rounded-sm border border-dashed border-slate-300 bg-white px-2.5 text-center text-slate-400 transition hover:border-blue-400 hover:bg-blue-50/40 hover:text-blue-600"
-    >
-      <span className="text-[10px] tabular-nums">{item.code}</span>
-      <span className="line-clamp-3 break-keep text-[11px] leading-snug">{item.name}</span>
-      <Plus size={14} aria-hidden />
-    </button>
+    <div className="flex h-9 items-center gap-3 border-b border-slate-100 text-sm">
+      <span className="w-9 shrink-0 text-xs tabular-nums text-slate-400">{item.code}</span>
+      <span className="min-w-0 flex-1 truncate text-slate-600">{item.name}</span>
+      <button
+        type="button"
+        onClick={onUpload}
+        aria-label={`${item.code} ${item.name} 올리기`}
+        className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-xs text-blue-600 transition hover:bg-blue-50"
+      >
+        <Upload size={12} aria-hidden /> 올리기
+      </button>
+    </div>
   );
 }

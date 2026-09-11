@@ -107,6 +107,24 @@ export interface FormSummary {
   openedAt: number;
   sheetNames: string[];
   editedCount: number;
+  /**
+   * 카드 미리보기 — 첫 시트의 열 너비 비율(최대 8칸, 합이 1).
+   * 가짜 무늬가 아니라 **실제 양식의 열 구성**이라, 좁은 번호 칸·넓은 내용 칸이 그대로 보인다.
+   */
+  preview?: number[];
+}
+
+/** 열이 많으면 이웃끼리 묶어 8칸 이하로 줄이고 비율로 바꾼다. */
+function previewColumns(sheet: FormSheet | undefined): number[] | undefined {
+  if (!sheet || sheet.colWidths.length === 0) return undefined;
+  const widths = sheet.colWidths;
+  const size = Math.ceil(widths.length / Math.min(8, widths.length));
+  const merged: number[] = [];
+  for (let i = 0; i < widths.length; i += size) {
+    merged.push(widths.slice(i, i + size).reduce((sum, width) => sum + width, 0));
+  }
+  const total = merged.reduce((sum, width) => sum + width, 0) || 1;
+  return merged.map((width) => width / total);
 }
 
 /**
@@ -283,6 +301,7 @@ function summarize(form: StoredForm): FormSummary {
       (sum, cells) => sum + Object.keys(cells).length,
       0,
     ),
+    preview: previewColumns(form.sheets[0]),
   };
 }
 

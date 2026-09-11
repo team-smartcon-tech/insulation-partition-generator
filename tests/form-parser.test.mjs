@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseFormWorkbook } from '../apps/web/src/features/forms/formParser.ts';
 
 const SAMPLE = fileURLToPath(
-  new URL('../apps/worker/samples/단속점검방문일지양식.xlsx', import.meta.url),
+  new URL('./fixtures/단속점검방문일지양식.xlsx', import.meta.url),
 );
 
 async function loadSample() {
