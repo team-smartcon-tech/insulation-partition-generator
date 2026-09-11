@@ -33,6 +33,26 @@ const slotKey = (taxonomyId: string, code: string) => `${taxonomyId}:${code}`;
 
 /** 오른쪽에서 접어 둔 분류를 기억하는 자리 */
 const COLLAPSED_KEY = "ipg-forms:collapsed-groups";
+/** 왼쪽에서 접어 둔 1차 분류를 기억하는 자리 */
+const FOLDED_DIVISIONS_KEY = "ipg-forms:folded-divisions";
+
+/** 이 브라우저에 기억해 둔 목록을 읽는다. 저장이 막힌 브라우저면 빈 목록. */
+function readStoredSet(key: string): Set<string> {
+  try {
+    const saved = localStorage.getItem(key);
+    return new Set(saved ? (JSON.parse(saved) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeStoredSet(key: string, value: Set<string>): void {
+  try {
+    localStorage.setItem(key, JSON.stringify([...value]));
+  } catch {
+    // 저장이 막힌 브라우저 — 이번 화면에서만 유지된다.
+  }
+}
 
 interface FormTreeProps {
   taxonomies: Taxonomy[];
@@ -98,6 +118,24 @@ export default function FormTree({
       } catch {
         // 저장이 막힌 브라우저 — 이번 화면에서만 접힌다.
       }
+      return next;
+    });
+  }
+
+  /**
+   * 왼쪽에서 접어 둔 1차 분류. 코드표가 여럿이면 중분류가 줄줄이 늘어서 길어진다 —
+   * 지금 쓰는 1차 분류만 펼쳐 두게 한다. 다음에 열어도 그대로 두려고 기억한다.
+   */
+  const [foldedDivisions, setFoldedDivisions] = useState<Set<string>>(() =>
+    readStoredSet(FOLDED_DIVISIONS_KEY),
+  );
+
+  function toggleFoldedDivision(taxonomyId: string) {
+    setFoldedDivisions((prev) => {
+      const next = new Set(prev);
+      if (next.has(taxonomyId)) next.delete(taxonomyId);
+      else next.add(taxonomyId);
+      writeStoredSet(FOLDED_DIVISIONS_KEY, next);
       return next;
     });
   }
@@ -274,6 +312,7 @@ export default function FormTree({
 
           {taxonomies.map((taxonomy) => {
             const divisionActive = selected === divisionKey(taxonomy.id);
+            const folded = foldedDivisions.has(taxonomy.id);
             const filled = filledOf(taxonomy);
             return (
               <div key={taxonomy.id} className="mt-3">
@@ -281,10 +320,24 @@ export default function FormTree({
                 <div
                   className={
                     divisionActive
-                      ? "flex items-center gap-1 rounded-lg bg-blue-50 pl-3 pr-1 ring-1 ring-blue-200"
-                      : "flex items-center gap-1 rounded-lg pl-3 pr-1 hover:bg-slate-50"
+                      ? "flex items-center gap-1 rounded-lg bg-blue-50 pr-1 ring-1 ring-blue-200"
+                      : "flex items-center gap-1 rounded-lg pr-1 hover:bg-slate-50"
                   }
                 >
+                  <button
+                    type="button"
+                    onClick={() => toggleFoldedDivision(taxonomy.id)}
+                    aria-expanded={!folded}
+                    aria-label={`${taxonomy.division || "1차 분류"} ${folded ? "펼치기" : "접기"}`}
+                    title={folded ? "펼치기" : "접기"}
+                    className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700"
+                  >
+                    <ChevronDown
+                      size={13}
+                      aria-hidden
+                      className={folded ? "-rotate-90 transition-transform" : "transition-transform"}
+                    />
+                  </button>
                   <button
                     type="button"
                     onClick={() => setSelected(divisionKey(taxonomy.id))}
@@ -314,6 +367,7 @@ export default function FormTree({
                   </button>
                 </div>
 
+                {!folded && (
                 <ul className="mt-1 ml-2 space-y-0.5 border-l-2 border-slate-100 pl-1">
                   {taxonomy.groups.map((group) => {
                     const key = groupKey(taxonomy.id, group.code);
@@ -396,8 +450,9 @@ export default function FormTree({
                     );
                   })}
                 </ul>
+                )}
 
-                {taxonomy.conflicts.length > 0 && (
+                {!folded && taxonomy.conflicts.length > 0 && (
                   <p className="ml-4 mt-1 text-[11px] text-amber-600">
                     겹치는 코드: {taxonomy.conflicts.join(", ")}
                   </p>
