@@ -15,6 +15,7 @@
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isWatermark } from "./formShapes.ts";
+import type { Taxonomy } from "./taxonomy.ts";
 import type { FormSheet, FormValues } from "./types";
 
 /**
@@ -31,8 +32,12 @@ export interface CustomSheet {
 }
 
 const DB_NAME = "ipg-forms";
-const DB_VERSION = 1;
+/** 2: 코드표를 담을 `meta` 칸을 더했다. */
+const DB_VERSION = 2;
 const STORE = "forms";
+/** 양식이 아닌 것(코드표 등)을 담는 자리. 건수가 적어 키-값으로 충분하다. */
+const META_STORE = "meta";
+const TAXONOMY_KEY = "taxonomy";
 /** 마지막으로 열어 본 양식. 새로고침하면 이걸 다시 연다. */
 const LAST_OPENED_KEY = "ipg-forms:last-opened";
 
@@ -45,8 +50,10 @@ export interface StoredForm {
   fileName: string;
   /** 화면에 보일 이름. 비어 있으면 파일 이름을 쓴다. */
   title: string;
-  /** 서류 분류(탭). 사용자가 직접 만든다. */
+  /** 서류 분류(탭). 사용자가 직접 만든다. 코드표를 쓰면 코드가 대신한다. */
   category: string;
+  /** 코드표의 3차 분류 코드(예: "101"). 코드표를 안 쓰면 비어 있다. */
+  code?: string;
   /** 즐겨찾기(카드 모서리의 별) */
   favorite: boolean;
   /** 처음 올린 시각(ms) */
@@ -83,6 +90,8 @@ export interface FormSummary {
   title: string;
   category: string;
   favorite: boolean;
+  /** 코드표의 3차 분류 코드. 없으면 미분류 */
+  code?: string;
   uploadedAt: number;
   updatedAt: number;
   openedAt: number;
@@ -90,12 +99,6 @@ export interface FormSummary {
   editedCount: number;
 }
 
-/**
- * 저장소에서 읽은 값에 빠진 항목을 채운다.
- *
- * 분류·즐겨찾기는 나중에 생긴 항목이라, 그 전에 올린 양식에는 없다. 읽는 쪽마다
- * `?? 기본값`을 흩뿌리는 대신 들어오는 길목 한 곳에서 모양을 맞춘다.
- */
 /**
  * 옛 저장본의 고친 글자를 시트별 구조로 옮긴다.
  *
@@ -259,6 +262,7 @@ function summarize(form: StoredForm): FormSummary {
     title: form.title,
     category: form.category,
     favorite: form.favorite,
+    code: form.code,
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
@@ -296,8 +300,12 @@ function openDb(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
+      // 이미 있는 칸은 건드리지 않는다 — 판을 올려도 저장해 둔 양식은 그대로 남는다.
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(META_STORE)) {
+        db.createObjectStore(META_STORE);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -388,6 +396,7 @@ export async function saveForm(input: {
   bytes: ArrayBuffer;
   sheets: FormSheet[];
   category?: string;
+  code?: string;
 }): Promise<StoredForm> {
   const now = Date.now();
   const form: StoredForm = {
@@ -398,6 +407,7 @@ export async function saveForm(input: {
     // 파일 이름에서 확장자만 뗀다. 보기 이름은 나중에 바꿀 수 있다.
     title: input.fileName.replace(/\.xlsx$/i, ""),
     category: input.category || UNCATEGORIZED,
+    code: input.code,
     favorite: false,
     uploadedAt: now,
     updatedAt: now,
@@ -452,6 +462,49 @@ async function patchForm(
 /** 고친 글자만 갱신한다. */
 export async function updateFormValues(id: string, values: FormValues): Promise<void> {
   await patchForm(id, () => ({ values, updatedAt: Date.now() }));
+}
+
+/**
+ * 서류 분류 코드표를 저장한다. 한 번 올리면 계속 쓰인다.
+ * 새로 올리면 통째로 갈아 끼운다 — 회사 표가 바뀌면 옛 항목이 남아 있으면 안 된다.
+ */
+export async function saveTaxonomy(taxonomy: Taxonomy): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(META_STORE, "readwrite");
+    transaction.objectStore(META_STORE).put(taxonomy, TAXONOMY_KEY);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error ?? new Error("저장이 취소되었습니다."));
+  });
+}
+
+/** 저장된 코드표. 아직 안 올렸으면 null. */
+export async function loadTaxonomy(): Promise<Taxonomy | null> {
+  if (!isStorageAvailable()) return null;
+  const db = await openDb();
+  return new Promise<Taxonomy | null>((resolve, reject) => {
+    const transaction = db.transaction(META_STORE, "readonly");
+    const request = transaction.objectStore(META_STORE).get(TAXONOMY_KEY);
+    transaction.oncomplete = () => resolve((request.result as Taxonomy | undefined) ?? null);
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/** 코드표를 지운다. 올려 둔 양식은 그대로 남고 분류만 풀린다. */
+export async function clearTaxonomy(): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(META_STORE, "readwrite");
+    transaction.objectStore(META_STORE).delete(TAXONOMY_KEY);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/** 양식에 분류 코드를 붙이거나(코드) 떼어 낸다(undefined). */
+export async function setFormCode(id: string, code: string | undefined): Promise<void> {
+  await patchForm(id, () => ({ code }));
 }
 
 /** 이 양식에서 이미 쓰이고 있는 시트 이름(원본 + 더한 것). */
