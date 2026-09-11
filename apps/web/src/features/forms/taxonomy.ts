@@ -35,6 +35,13 @@ export interface Taxonomy {
   /** 어떤 파일에서 읽었는지 — 화면에 "무엇을 기준으로 나눴는지" 보여주기 위해 */
   fileName: string;
   updatedAt: number;
+  /**
+   * 한 코드에 서로 **다른 이름**이 붙어 있던 경우의 코드 목록.
+   *
+   * 같은 코드·같은 이름은 조용히 하나로 합치지만(오프라인에서 부수가 많아 두 줄로
+   * 적어 둔 경우), 이름까지 다르면 표의 실수일 수 있어 지우지 않고 알린다.
+   */
+  conflicts: string[];
 }
 
 /** 코드로 보이는 값인가. 숫자 3자리 이상(100, 101, 1010 …). */
@@ -92,6 +99,7 @@ export function parseTaxonomySheet(sheet: FormSheet, fileName: string): Taxonomy
   if (!columns) return null;
 
   const groups = new Map<string, TaxonomyGroup>();
+  const conflicts = new Set<string>();
   let lastGroup: TaxonomyGroup | null = null;
 
   for (let row = 1; row <= sheet.rowCount; row++) {
@@ -117,15 +125,20 @@ export function parseTaxonomySheet(sheet: FormSheet, fileName: string): Taxonomy
     if (!name) continue;
     // 중분류를 아직 못 만난 소분류는 버린다. 어디에 걸어야 할지 알 수 없다.
     if (!lastGroup) continue;
-    // 같은 코드가 두 번 나오면 첫 줄을 남긴다(회사 표에 실제로 중복이 있었다).
-    if (lastGroup.items.some((item) => item.code === itemCode)) continue;
+    const sameCode = lastGroup.items.filter((item) => item.code === itemCode);
+    // 같은 코드·같은 이름은 한 줄로 합친다 — 오프라인에서 부수가 많아 표에 두 줄로
+    // 적어 둔 경우다. 화면에는 한 칸으로 보여야 한다.
+    if (sameCode.some((item) => item.name === name)) continue;
+    // 이름까지 다르면 표의 실수일 수 있다. 지우면 서류 한 종류가 통째로 사라지므로
+    // 둘 다 남기고 화면에서 알린다.
+    if (sameCode.length > 0) conflicts.add(itemCode);
 
     lastGroup.items.push({ code: itemCode, name, groupCode: lastGroup.code });
   }
 
   const result = [...groups.values()].filter((group) => group.items.length > 0);
   if (result.length === 0) return null;
-  return { groups: result, fileName, updatedAt: Date.now() };
+  return { groups: result, fileName, updatedAt: Date.now(), conflicts: [...conflicts] };
 }
 
 /** 코드표 전체에서 코드 → 항목을 찾는다. */

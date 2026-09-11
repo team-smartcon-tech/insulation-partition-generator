@@ -52,6 +52,7 @@ test('코드표 엑셀을 중분류·소분류로 읽는다', async () => {
   const taxonomy = await loadTaxonomy();
 
   assert.equal(taxonomy.groups.length, 9);
+  // 표에는 66줄이 있지만 "305 본사 공지사항"이 두 줄이라 하나로 합쳐져 65개가 된다.
   assert.equal(
     taxonomy.groups.reduce((sum, group) => sum + group.items.length, 0),
     65,
@@ -61,6 +62,8 @@ test('코드표 엑셀을 중분류·소분류로 읽는다', async () => {
     ['100', '200', '300', '400', '500', '600', '700', '800', '900'],
   );
   assert.equal(taxonomy.groups[0].name, '공통/일반');
+  // 305 는 "현장 주요업무 체크리스트"로도 쓰여 이름이 갈린다 — 합치지 않고 알린다.
+  assert.deepEqual(taxonomy.conflicts, ['305']);
   assert.equal(taxonomy.groups[0].items[0].name, '이해관계자 니즈와 기대');
 });
 
@@ -112,9 +115,28 @@ test('머리글 CODE 위치로 코드 열을 찾는다 — 열 순서를 고정�
   );
 });
 
-test('같은 코드가 두 번 나오면 첫 줄만 남긴다', () => {
-  // 받은 사진의 300 블록에 "305 본사 공지사항"이 겹쳐 있었다. 겹친 채로 두면
-  // 화면에 같은 칸이 두 번 나온다.
+test('같은 코드·같은 이름은 한 줄로 합친다', () => {
+  // 오프라인에서 부수가 많아 표에 두 줄로 적어 둔 경우. 화면에는 한 칸으로 보여야 한다.
+  const sheet = sheetOf([
+    [1, 1, 'CODE'],
+    [1, 2, '분류명'],
+    [1, 3, 'CODE'],
+    [1, 4, '분류명'],
+    [2, 1, '300', 3],
+    [2, 2, '대본업무', 3],
+    [2, 3, '305'],
+    [2, 4, '본사 공지사항'],
+    [3, 3, '305'],
+    [3, 4, '본사 공지사항'],
+  ]);
+
+  const taxonomy = parseTaxonomySheet(sheet, '표.xlsx');
+  assert.equal(taxonomy.groups[0].items.length, 1);
+  assert.deepEqual(taxonomy.conflicts, [], '같은 이름끼리는 알릴 것이 없다');
+});
+
+test('같은 코드에 다른 이름이면 둘 다 남기고 알린다', () => {
+  // 지우면 서류 한 종류가 통째로 사라진다. 표의 실수일 수 있으니 사람이 보게 한다.
   const sheet = sheetOf([
     [1, 1, 'CODE'],
     [1, 2, '분류명'],
@@ -129,8 +151,8 @@ test('같은 코드가 두 번 나오면 첫 줄만 남긴다', () => {
   ]);
 
   const taxonomy = parseTaxonomySheet(sheet, '표.xlsx');
-  assert.equal(taxonomy.groups[0].items.length, 1);
-  assert.equal(taxonomy.groups[0].items[0].name, '현장 주요업무 체크리스트');
+  assert.equal(taxonomy.groups[0].items.length, 2);
+  assert.deepEqual(taxonomy.conflicts, ['305']);
 });
 
 test('코드표가 아닌 엑셀을 올리면 null 을 돌려준다', () => {
