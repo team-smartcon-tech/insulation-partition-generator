@@ -249,7 +249,7 @@ const tableOf = (id, division, codes) => ({
   ],
 });
 
-test('품질관련 코드표를 사진 그대로 읽는다 — 겹친 번호는 알린다', async () => {
+test('품질관련 코드표를 읽는다 — 겹쳤던 500 블록은 한 칸씩 밀어 정리돼 있다', async () => {
   const quality = await loadQuality();
 
   assert.equal(quality.division, '품질관련');
@@ -268,8 +268,14 @@ test('품질관련 코드표를 사진 그대로 읽는다 — 겹친 번호는 
     ],
   );
   assert.equal(quality.groups.reduce((sum, group) => sum + group.items.length, 0), 59);
-  // 사진의 500 블록에 505·509 가 두 번씩 있다. 짐작해서 번호를 바꾸지 않고 알린다.
-  assert.deepEqual(quality.conflicts, ['505', '509']);
+  // 사진에는 505·509 가 두 번씩 있고 508 이 없었다. 사용자 확인을 받아 501~511 로 밀었다.
+  assert.deepEqual(quality.conflicts, []);
+  const 품질관리 = quality.groups.find((group) => group.code === '500');
+  assert.deepEqual(
+    품질관리.items.map((item) => item.code),
+    ['501', '502', '503', '504', '505', '506', '507', '508', '509', '510', '511'],
+  );
+  assert.equal(findItem(quality, '511').name, '케미칼앙카인발시험');
 });
 
 test('같은 1차 분류 이름으로 다시 올리면 내용만 바꾸고 id 는 그대로 둔다', () => {
