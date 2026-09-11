@@ -371,7 +371,7 @@ export default function FormTree({
         {!isCollapsed && (
           <div className="mt-2">
             {filledEntries.length > 0 && (
-              <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              <ul className="grid grid-cols-[repeat(auto-fill,minmax(7rem,8.5rem))] gap-x-3 gap-y-4">
                 {filledEntries.flatMap(({ item, related }) =>
                   related.map((form) => (
                     <li key={`${form.id}-${item.code}`}>
@@ -706,7 +706,7 @@ export default function FormTree({
                   코드표의 어느 칸에도 들어가지 않은 서류입니다. 파일 이름 앞에 번호가 없거나, 번호가
                   여러 1차 분류에 겹쳐 자리를 정하지 못한 경우입니다.
                 </p>
-                <ul className="grid grid-cols-3 gap-x-4 gap-y-5 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                <ul className="grid grid-cols-[repeat(auto-fill,minmax(7rem,8.5rem))] gap-x-3 gap-y-4">
                   {unfiled.map((form) => (
                     <li key={form.id}>
                       <DocCard
@@ -803,7 +803,7 @@ function DocCard({
         type="button"
         onClick={onOpen}
         title={form.fileName}
-        className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1.5 bg-slate-50 px-2.5 text-center transition hover:bg-slate-100"
+        className="flex aspect-[4/5] w-full flex-col items-center justify-center gap-1 bg-slate-50 px-2 text-center transition hover:bg-slate-100"
       >
         <span className="text-[10px] tabular-nums text-slate-400">{code ?? "코드 없음"}</span>
         <span className="line-clamp-4 break-keep text-xs font-medium leading-snug text-slate-700">
@@ -835,17 +835,17 @@ function DocCard({
         aria-pressed={form.favorite}
         aria-label={`${form.title} 즐겨찾기`}
         title={form.favorite ? "즐겨찾기 해제" : "즐겨찾기"}
-        className="absolute right-0 top-0 h-9 w-9"
+        className="absolute right-0 top-0 h-7 w-7"
       >
         <span
           aria-hidden
-          className="absolute right-0 top-0 h-0 w-0 border-l-[36px] border-t-[36px] border-l-transparent"
+          className="absolute right-0 top-0 h-0 w-0 border-l-[28px] border-t-[28px] border-l-transparent"
           style={{ borderTopColor: form.favorite ? "#1b3a6b" : "#cbd5e1" }}
         />
         <Star
-          size={12}
+          size={10}
           aria-hidden
-          className="absolute right-1 top-1 text-white"
+          className="absolute right-0.5 top-0.5 text-white"
           fill={form.favorite ? "currentColor" : "none"}
         />
       </button>
