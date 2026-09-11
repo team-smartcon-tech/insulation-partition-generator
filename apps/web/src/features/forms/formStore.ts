@@ -187,14 +187,50 @@ export function blankValuesFor(sheets: FormSheet[], source: FormSheet): Record<s
     return map;
   });
 
+  /** 이 칸이 다른 장에서 다른 글자인가. 견줄 데가 없으면 false(= 건드리지 않는다). */
+  const varies = (key: string, text: string) => {
+    const seen = lookups.map((map) => map.get(key)).filter((value) => value !== undefined);
+    return seen.length > 0 && seen.some((value) => value !== text);
+  };
+
+  // 줄별로 "글자가 든 칸 수"와 "장마다 달라지는 칸 수"를 센다.
+  const rows = new Map<number, { filled: number; varying: number }>();
+  for (const cell of source.cells) {
+    const text = compactText(cell.text);
+    if (text === "") continue;
+    const row = rows.get(cell.row) ?? { filled: 0, varying: 0 };
+    row.filled += 1;
+    if (varies(cell.key, text)) row.varying += 1;
+    rows.set(cell.row, row);
+  }
+
+  /**
+   * 표의 머리글 줄(`구분 | 이해관계자 | 요구 사항 …`)을 찾는다.
+   *
+   * 대장류 양식은 머리글 줄 **아래가 전부 내용**이다. 칸 단위로만 보면, 모든 장에서
+   * 우연히 같은 값(담당부서가 늘 "공무")이 머리글로 잘못 남는다.
+   *
+   * 머리글 줄의 조건: 글자 든 칸이 여럿이고, 그 칸들이 **장마다 하나도 안 바뀌며**,
+   * 그 아래에 달라지는 줄이 있다. 셋을 다 만족하는 가장 아래 줄을 고른다
+   * (머리글이 두 줄인 표도 잡힌다).
+   */
+  const sorted = [...rows.entries()].sort(([a], [b]) => a - b);
+  const hasVaryingBelow = (row: number) =>
+    sorted.some(([other, info]) => other > row && info.varying > 0);
+  const headerRow = sorted
+    .filter(([row, info]) => info.filled >= 3 && info.varying === 0 && hasVaryingBelow(row))
+    .map(([row]) => row)
+    .pop();
+
   const blanks: Record<string, string> = {};
   for (const cell of source.cells) {
     const text = compactText(cell.text);
     if (text === "") continue;
 
-    const seen = lookups.map((map) => map.get(cell.key)).filter((value) => value !== undefined);
-    if (seen.length === 0) continue;
-    if (seen.some((value) => value !== text)) blanks[cell.key] = "";
+    // 머리글 줄 아래는 전부 내용이다. 그 위는 칸 단위로 견준다(제목은 남고 현장명은 비운다).
+    const isContent =
+      headerRow !== undefined && cell.row > headerRow ? true : varies(cell.key, text);
+    if (isContent) blanks[cell.key] = "";
   }
   return blanks;
 }

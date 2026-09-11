@@ -221,3 +221,66 @@ test('사용자가 더한 장은 견줄 대상이 아니다', () => {
   // 더한 장은 작성 중이라 내용이 계속 바뀐다. 그걸 기준 삼으면 머리글이 지워진다.
   assert.deepEqual(blankValuesFor([template, added], template), {});
 });
+
+test('머리글 줄 아래는, 모든 장에서 값이 같아도 내용으로 본다', () => {
+  // 담당부서가 늘 "공무"인 대장. 칸 단위로만 보면 머리글로 잘못 남는다.
+  const template = formSheet('견본', [
+    ['6:1', '구분'],
+    ['6:2', '이해관계자'],
+    ['6:3', '담당부서'],
+    ['7:1', '외부'],
+    ['7:2', '발주처'],
+    ['7:3', '공무'],
+  ]);
+  const june = formSheet('6월', [
+    ['6:1', '구분'],
+    ['6:2', '이해관계자'],
+    ['6:3', '담당부서'],
+    ['7:1', '내부'],
+    ['7:2', '건축기획팀'],
+    ['7:3', '공무'],
+  ]);
+
+  const blanks = blankValuesFor([template, june], template);
+  assert.deepEqual(Object.keys(blanks).sort(), ['7:1', '7:2', '7:3']);
+  // 머리글 줄은 통째로 남는다.
+  assert.equal('6:3' in blanks, false);
+});
+
+test('머리글 줄 위는 칸 단위로 본다', () => {
+  const template = formSheet('견본', [
+    ['1:1', '이해관계자의 요구사항 및 관리방안'],
+    ['3:1', '0000 신축공사'],
+    ['6:1', '구분'],
+    ['6:2', '이해관계자'],
+    ['6:3', '담당부서'],
+    ['7:1', '외부'],
+  ]);
+  const june = formSheet('6월', [
+    ['1:1', '이해관계자의 요구사항 및 관리방안'],
+    ['3:1', '부산 장안지구 B-1BL'],
+    ['6:1', '구분'],
+    ['6:2', '이해관계자'],
+    ['6:3', '담당부서'],
+    ['7:1', '내부'],
+  ]);
+
+  const blanks = blankValuesFor([template, june], template);
+  // 제목은 남고 현장명만 비워진다 — 머리글 위쪽을 줄 단위로 지우면 제목이 사라진다.
+  assert.equal('1:1' in blanks, false);
+  assert.equal('3:1' in blanks, true);
+});
+
+test('머리글 줄이 없으면 칸 단위 판정만 쓴다', () => {
+  // 라벨과 값이 같은 줄에 있는 양식(공 사 명 | 부산 장안…). 줄 단위로 지우면 라벨이 사라진다.
+  const template = formSheet('견본', [
+    ['3:1', '공 사 명'],
+    ['3:2', '부산 장안지구'],
+  ]);
+  const other = formSheet('다른장', [
+    ['3:1', '공 사 명'],
+    ['3:2', '이천중리 2차'],
+  ]);
+
+  assert.deepEqual(blankValuesFor([template, other], template), { '3:2': '' });
+});
