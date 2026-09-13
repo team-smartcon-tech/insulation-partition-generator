@@ -85,15 +85,34 @@ export function offsetPolylineInward(
   return out;
 }
 
-/** 벽 폴리라인 누적 길이 (cum[i] = pts[0]→pts[i] 길이) */
-export function cumWallLengths(pts: Point2D[]): {
+/**
+ * 폴리라인의 세그먼트 개수.
+ * 닫힌 체인은 마지막 점 → 첫 점(닫는 변)까지 포함해 N개, 열린 체인은 N-1개다.
+ * 전개(developPly)·세그먼트 스펙(resolveSegInsul)이 이미 이 기준을 쓰므로
+ * 창호 배치 좌표계(s)도 같은 기준을 써야 닫는 변에 창을 놓을 수 있다.
+ */
+export function wallSegCount(pts: Point2D[], closed = false): number {
+  const n = pts.length;
+  if (n < 2) return 0;
+  return closed && n >= 3 ? n : n - 1;
+}
+
+/**
+ * 벽 폴리라인 누적 길이 (cum[i] = pts[0]→pts[i] 길이)
+ * closed=true 면 닫는 변 길이까지 더해 cum 에 항목이 하나 더 붙는다(cum.length = N+1).
+ */
+export function cumWallLengths(
+  pts: Point2D[],
+  closed = false
+): {
   cum: number[];
   total: number;
 } {
   const cum = [0];
   let total = 0;
-  for (let i = 1; i < pts.length; i++) {
-    total += dist(pts[i - 1], pts[i]);
+  const segCount = wallSegCount(pts, closed);
+  for (let i = 0; i < segCount; i++) {
+    total += dist(pts[i], pts[(i + 1) % pts.length]);
     cum.push(total);
   }
   return { cum, total };
@@ -102,20 +121,22 @@ export function cumWallLengths(pts: Point2D[]): {
 /** 평면 점 → 벽 따라간 거리 s (가장 가까운 segment 기준) */
 export function worldToSAlong(
   p: Point2D,
-  pts: Point2D[]
+  pts: Point2D[],
+  closed = false
 ):
   | { s: number; distance: number; point: Point2D; segIndex: number }
   | null {
   if (pts.length < 2) return null;
-  const { cum } = cumWallLengths(pts);
+  const { cum } = cumWallLengths(pts, closed);
+  const segCount = wallSegCount(pts, closed);
   let best = {
     s: 0,
     distance: Infinity,
     point: pts[0],
     segIndex: 0,
   };
-  for (let i = 0; i < pts.length - 1; i++) {
-    const r = projectOnSegment(p, pts[i], pts[i + 1]);
+  for (let i = 0; i < segCount; i++) {
+    const r = projectOnSegment(p, pts[i], pts[(i + 1) % pts.length]);
     if (r.distance < best.distance) {
       const segLen = cum[i + 1] - cum[i];
       best = {
@@ -130,22 +151,36 @@ export function worldToSAlong(
 }
 
 /** 벽 따라간 거리 s → 평면 좌표 */
-export function sAlongToWorld(s: number, pts: Point2D[]): Point2D | null {
+export function sAlongToWorld(
+  s: number,
+  pts: Point2D[],
+  closed = false
+): Point2D | null {
   if (pts.length < 2) return null;
-  const { cum, total } = cumWallLengths(pts);
-  if (s <= 0) return pts[0];
-  if (s >= total) return pts[pts.length - 1];
-  for (let i = 0; i < pts.length - 1; i++) {
-    if (s <= cum[i + 1]) {
+  const { cum, total } = cumWallLengths(pts, closed);
+  const segCount = wallSegCount(pts, closed);
+  // 닫힌 체인은 s 가 한 바퀴를 넘거나 음수여도 둘레로 감아 해석한다(이음매 걸침 허용).
+  let sv = s;
+  if (closed && total > 0) {
+    sv = s % total;
+    if (sv < 0) sv += total;
+  } else {
+    if (sv <= 0) return pts[0];
+    if (sv >= total) return pts[pts.length - 1];
+  }
+  for (let i = 0; i < segCount; i++) {
+    if (sv <= cum[i + 1]) {
       const segLen = cum[i + 1] - cum[i];
-      const t = segLen < 1e-9 ? 0 : (s - cum[i]) / segLen;
+      const t = segLen < 1e-9 ? 0 : (sv - cum[i]) / segLen;
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
       return {
-        x: pts[i].x + t * (pts[i + 1].x - pts[i].x),
-        y: pts[i].y + t * (pts[i + 1].y - pts[i].y),
+        x: a.x + t * (b.x - a.x),
+        y: a.y + t * (b.y - a.y),
       };
     }
   }
-  return pts[pts.length - 1];
+  return closed ? pts[0] : pts[pts.length - 1];
 }
 
 /**
