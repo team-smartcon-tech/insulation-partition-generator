@@ -1080,7 +1080,7 @@ export default function ElevationGeneratorPage() {
   // ── 체인별 측정값 ──
   const wallMetricsById = useMemo(() => {
     const m = new Map<string, ReturnType<typeof cumWallLengths>>();
-    for (const w of walls) m.set(w.id, cumWallLengths(w.points));
+    for (const w of walls) m.set(w.id, cumWallLengths(w.points, w.closed));
     return m;
   }, [walls]);
 
@@ -1717,8 +1717,8 @@ export default function ElevationGeneratorPage() {
     for (const op of openings) {
       const w = walls.find(x => x.id === op.wallId);
       if (!w || w.points.length < 2) continue;
-      const a = sAlongToWorld(op.sAlong - op.width / 2, w.points);
-      const b = sAlongToWorld(op.sAlong + op.width / 2, w.points);
+      const a = sAlongToWorld(op.sAlong - op.width / 2, w.points, w.closed);
+      const b = sAlongToWorld(op.sAlong + op.width / 2, w.points, w.closed);
       if (!a || !b) continue;
       const pa = toPx(a);
       const pb = toPx(b);
@@ -1728,7 +1728,7 @@ export default function ElevationGeneratorPage() {
       ctx.moveTo(pa.x, pa.y);
       ctx.lineTo(pb.x, pb.y);
       ctx.stroke();
-      const cc = toPx(sAlongToWorld(op.sAlong, w.points)!);
+      const cc = toPx(sAlongToWorld(op.sAlong, w.points, w.closed)!);
       ctx.fillStyle =
         op.id === selectedOpeningId ? "#ffffff" : KIND_COLOR[op.kind];
       ctx.beginPath();
@@ -1740,7 +1740,7 @@ export default function ElevationGeneratorPage() {
     if (mode === "two-point" && twoPointAnchor) {
       const w = walls.find(x => x.id === twoPointAnchor.wallId);
       if (w) {
-        const wp = sAlongToWorld(twoPointAnchor.s, w.points);
+        const wp = sAlongToWorld(twoPointAnchor.s, w.points, w.closed);
         if (wp) {
           const q = toPx(wp);
           ctx.strokeStyle = "#facc15";
@@ -2697,7 +2697,7 @@ export default function ElevationGeneratorPage() {
       } | null = null;
       for (const w of walls) {
         if (w.points.length < 2) continue;
-        const p = worldToSAlong(world, w.points);
+        const p = worldToSAlong(world, w.points, w.closed);
         if (!p) continue;
         if (!best || p.distance < best.distance) {
           best = { wallId: w.id, s: p.s, point: p.point, distance: p.distance };
@@ -3217,7 +3217,15 @@ export default function ElevationGeneratorPage() {
         const sB = proj.s;
         const sMin = Math.min(sA, sB);
         const sMax = Math.max(sA, sB);
-        const width = sMax - sMin;
+        let width = sMax - sMin;
+        let center = (sMin + sMax) / 2;
+        // 닫힌 체인에서 이음매(s=0=둘레, 트레이싱 시작점)를 사이에 두고 두 점을 찍으면
+        // 둘레에서 창을 뺀 "바깥쪽"이 잡힌다. 짧은 쪽이 실제 창 폭이다.
+        if (targetWall.closed && perimeter > 0 && width > perimeter / 2) {
+          width = perimeter - width;
+          center = sMax + width / 2;
+          if (center > perimeter) center -= perimeter;
+        }
         if (width < 1) {
           setTwoPointAnchor(null);
           return;
@@ -3226,7 +3234,7 @@ export default function ElevationGeneratorPage() {
           id: uid(),
           wallId: proj.wallId,
           kind: preset.kind,
-          sAlong: (sMin + sMax) / 2,
+          sAlong: center,
           width: Math.round(width),
           height: preset.height,
           sill: preset.sill,
