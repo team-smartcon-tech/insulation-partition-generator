@@ -118,6 +118,7 @@ import {
   sAlongToWorld,
   cumWallLengths,
   offsetPolylineInward,
+  autoExteriorSide,
   extractSizeFromText,
 } from "./utils/geometry";
 
@@ -225,11 +226,13 @@ interface WallChain {
    */
   points2P?: Point2D[];
   /**
-   * 단열재 시공면(외부)이 폴리라인 진행방향 기준 어느 쪽인가. "left"(기본) | "right".
-   * 닫힌 폴리곤은 면적(winding)으로 자동 판정되지만, 열린 폴리라인(측벽 등)은
-   * 트레이싱 방향에 따라 2P 오프셋/코너 인셋 방향이 뒤집히므로 이 값으로 반전한다.
+   * 단열재 시공면(외부)이 폴리라인 진행방향 기준 어느 쪽인가. "left" | "right".
+   * 직접 읽지 말고 exteriorSideOf(w) 를 쓸 것 — 열린 선은 모양으로 자동 판정한다.
+   * 이 저장값은 exteriorSideManual 일 때, 또는 자동 판정이 안 되는 일자 선에서만 쓰인다.
    */
   exteriorSide?: "left" | "right";
+  /** 사용자가 '방향 반전'으로 직접 정한 방향이면 true — 자동 판정보다 우선한다. */
+  exteriorSideManual?: boolean;
   /** @deprecated 레거시(구모델) 입면별 단일 두께. 로드 시 마이그레이션에만 사용. */
   thickness?: number;
   /** @deprecated 레거시 수동 2P 결로 기준 id. */
@@ -290,6 +293,17 @@ const DLG_META: Record<
  * 층고가 그룹마다 다르면 나누기(행 구성)와 물량도 달라지므로, 대표 입면을
  * 그룹 층고로 각각 전개해 세대수를 곱한다.
  */
+/**
+ * 입면의 외부 방향 — 전개(developPly)·2P 가이드 선이 모두 이 값을 쓴다.
+ * ① 방향 반전으로 직접 정한 값 ② 열린 선은 모양으로 자동 판정 ③ 저장값 ④ "left"
+ * (예전엔 ③④만 써서, 반대 끝부터 그린 측벽은 사용자가 반전해야 2P 가 맞게 나왔다)
+ */
+const exteriorSideOf = (w: WallChain): "left" | "right" =>
+  (w.exteriorSideManual ? w.exteriorSide : undefined) ??
+  autoExteriorSide(w.points, w.closed) ??
+  w.exteriorSide ??
+  "left";
+
 const FLOOR_GROUPS: { key: ElevFloorGroup; label: string }[] = [
   { key: "low", label: "1~3F" },
   { key: "roof", label: "지붕층" },
@@ -1166,36 +1180,50 @@ export default function ElevationGeneratorPage() {
     [exposurePresets]
   );
 
+  // ── 2P 가이드 선(평면 파란 점선) 좌표 — 1P 두께만큼 안쪽 오프셋 ──
+  // 전개와 같은 방향(exteriorSideOf)을 쓴다. 저장된 points2P 는 예전 방향으로 만들어졌을 수
+  // 있어서, 평면에 그릴 때도 이 함수로 다시 계산한다(점선과 실제 전개가 어긋나지 않게).
+  const ply2GuideOf = useCallback(
+    (w: WallChain, side: "left" | "right" = exteriorSideOf(w)): Point2D[] => {
+      const dists = resolveSegInsul(w).map(s => s.ply1); // 1P 두께만큼 안으로
+      const sArea = (pts: Point2D[]) => {
+        let a = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i];
+          const q = pts[(i + 1) % pts.length];
+          a += p.x * q.y - q.x * p.y;
+        }
+        return a / 2;
+      };
+      let pts = offsetPolylineInward(w.points, w.closed, dists, side);
+      // 닫힘: 면적 작아지는 쪽(=안쪽)인지 확인, 아니면 반대로
+      if (w.closed && w.points.length >= 3) {
+        const inward = Math.abs(sArea(pts)) < Math.abs(sArea(w.points));
+        if (!inward)
+          pts = offsetPolylineInward(w.points, w.closed, dists.map(d => -d), side);
+      }
+      return pts;
+    },
+    [resolveSegInsul]
+  );
+
   // ── 같은 입면 안에 2P 선(안쪽 오프셋) 자동 생성 → w.points2P 에 저장 ──
   const createPly2From = (w: WallChain, sideOverride?: "left" | "right") => {
     if (w.points.length < 2) return;
-    const side = sideOverride ?? w.exteriorSide ?? "left";
-    const segInsul = resolveSegInsul(w);
-    const dists = segInsul.map(s => s.ply1); // 1P 두께만큼 안으로
-    const sArea = (pts: Point2D[]) => {
-      let a = 0;
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i];
-        const q = pts[(i + 1) % pts.length];
-        a += p.x * q.y - q.x * p.y;
-      }
-      return a / 2;
-    };
-    let pts = offsetPolylineInward(w.points, w.closed, dists, side);
-    // 닫힘: 면적 작아지는 쪽(=안쪽)인지 확인, 아니면 반대로
-    if (w.closed && w.points.length >= 3) {
-      const inward = Math.abs(sArea(pts)) < Math.abs(sArea(w.points));
-      if (!inward)
-        pts = offsetPolylineInward(w.points, w.closed, dists.map(d => -d), side);
-    }
-    updateChain(w.id, { points2P: pts, exteriorSide: side });
+    const side = sideOverride ?? exteriorSideOf(w);
+    updateChain(w.id, {
+      points2P: ply2GuideOf(w, side),
+      exteriorSide: side,
+      // 방향 반전으로 만든 경우만 수동값으로 고정 — 그냥 생성은 자동 판정을 따른다
+      ...(sideOverride ? { exteriorSideManual: true } : {}),
+    });
     toast.success("2P 선 자동 생성됨 (안쪽 오프셋). 물량은 1P+2P 합산.");
   };
 
-  // 2P 오프셋이 바깥으로 나갔을 때(열린 폴리라인 트레이싱 방향 문제) 방향을 반전한다.
+  // 자동 판정이 틀린 모양(거의 일자·S자 벽 등)일 때 사용자가 방향을 직접 뒤집는다.
   const flipPly2Side = (w: WallChain) => {
     const next: "left" | "right" =
-      (w.exteriorSide ?? "left") === "left" ? "right" : "left";
+      exteriorSideOf(w) === "left" ? "right" : "left";
     createPly2From(w, next);
   };
 
@@ -1226,7 +1254,7 @@ export default function ElevationGeneratorPage() {
       ply: isP2 ? 2 : 1, // 2P=창 물림, 1P=창 경계 절단
       segThickness: thk,
       segSkip,
-      exteriorSide: w.exteriorSide ?? "left", // 체인별 외부 방향(코너 인셋 방향)
+      exteriorSide: exteriorSideOf(w), // 체인별 외부 방향 — 열린 선은 모양으로 자동 판정
       plyInward,
       minPieceWidth,
       placement,
@@ -1588,7 +1616,8 @@ export default function ElevationGeneratorPage() {
         ctx.setLineDash([6, 4]);
         ctx.globalAlpha = 0.95;
         ctx.beginPath();
-        w.points2P.forEach((p, i) => {
+        // 저장된 points2P 대신 현재 방향으로 다시 계산 — 전개와 항상 같은 쪽에 그린다
+        ply2GuideOf(w).forEach((p, i) => {
           const q = toPx(p);
           if (i === 0) ctx.moveTo(q.x, q.y);
           else ctx.lineTo(q.x, q.y);
@@ -1926,6 +1955,7 @@ export default function ElevationGeneratorPage() {
     takeoffRooms,
     roomEdit,
     selRoom,
+    ply2GuideOf,
   ]);
 
   // ─── 입면 렌더 (여러 체인 세로로 쌓기) ───
