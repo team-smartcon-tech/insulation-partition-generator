@@ -80,6 +80,14 @@ export interface StoredForm {
   values: FormValues;
   /** 사용자가 더한 시트(원본 엑셀에는 없다) */
   customSheets: CustomSheet[];
+  /**
+   * 시트 이름 → 아래에 더한 빈 줄 수.
+   *
+   * 현장마다 특이사항 줄 수가 달라 원본 줄 수로는 모자란다. 격자를 통째로 저장하지 않고
+   * **줄 수만** 적어 둔다 — 화면을 그릴 때마다 원본에서 다시 만들어, 파서가 좋아지면
+   * 더한 줄도 같이 새 모양이 된다.
+   */
+  extraRows: Record<string, number>;
 }
 
 /**
@@ -142,6 +150,7 @@ function normalize(raw: StoredForm): StoredForm {
     favorite: raw.favorite ?? false,
     openedAt: raw.openedAt ?? raw.updatedAt,
     customSheets: raw.customSheets ?? [],
+    extraRows: raw.extraRows ?? {},
     values: normalizeValues(raw.values, raw.sheets ?? []),
   };
 }
@@ -430,6 +439,7 @@ export async function saveForm(input: {
     parserVersion: PARSER_VERSION,
     values: {},
     customSheets: [],
+    extraRows: {},
   };
   await run("readwrite", (store) => store.put(form));
   return form;
@@ -548,6 +558,19 @@ export async function setFormCode(
   taxonomyId: string | undefined,
 ): Promise<void> {
   await patchForm(id, () => ({ code, taxonomyId }));
+}
+
+/**
+ * 시트 아래에 더한 빈 줄 수를 정한다. 0 이면 표시를 지운다.
+ * 줄을 줄여도 그 줄에 적은 글자는 값에 남아 있다 — 다시 늘리면 그대로 돌아온다.
+ */
+export async function setExtraRows(id: string, sheetName: string, count: number): Promise<void> {
+  await patchForm(id, (form) => {
+    const next = { ...form.extraRows };
+    if (count > 0) next[sheetName] = count;
+    else delete next[sheetName];
+    return { extraRows: next, updatedAt: Date.now() };
+  });
 }
 
 /** 이 양식에서 이미 쓰이고 있는 시트 이름(원본 + 더한 것). */

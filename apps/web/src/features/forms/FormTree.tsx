@@ -795,41 +795,66 @@ export default function FormTree({
         </p>
       )}
 
+      {/*
+        ── 1차 분류 탭 ──
+        서류철 라벨처럼 위에 붙여, 지금 어느 분류를 보고 있는지 한눈에 보이게 한다.
+        왼쪽 트리에도 같은 항목이 있지만, 분류를 옮길 때마다 왼쪽 목록을 훑어야 했다.
+      */}
+      {(taxonomies.length > 1 || unfiled.length > 0) && (
+        <div className="mt-5 flex flex-wrap items-end gap-1 border-b border-slate-200">
+          {[
+            { key: ALL, label: "전체", filled: totalFilled, total: totalItems, tone: "normal" as const },
+            ...taxonomies.map((taxonomy) => ({
+              key: divisionKey(taxonomy.id),
+              label: taxonomy.division || "이름 없음",
+              filled: filledOf(taxonomy),
+              total: totalOf(taxonomy),
+              tone: "normal" as const,
+            })),
+            ...(unfiled.length > 0
+              ? [{ key: UNFILED, label: "코드 없는 서류", filled: unfiled.length, total: 0, tone: "warn" as const }]
+              : []),
+          ].map((tab) => {
+            const active = selected === tab.key || (tab.key !== ALL && tab.key !== UNFILED && selected.startsWith(`g:${tab.key.slice(2)}:`));
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setSelected(tab.key)}
+                aria-current={active ? "page" : undefined}
+                className={
+                  "-mb-px rounded-t-lg border border-b-0 px-3.5 py-2 text-sm transition " +
+                  (active
+                    ? tab.tone === "warn"
+                      ? "border-amber-300 bg-amber-100 font-semibold text-amber-900"
+                      : "border-slate-200 bg-white font-semibold text-slate-900"
+                    : tab.tone === "warn"
+                      ? "border-transparent bg-amber-50 text-amber-800 hover:bg-amber-100"
+                      : "border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200/70")
+                }
+              >
+                {tab.tone === "warn" && <TriangleAlert size={13} aria-hidden className="mr-1 inline align-[-2px]" />}
+                {tab.label}{" "}
+                <span className="font-normal tabular-nums text-slate-400">
+                  {tab.total > 0 ? `${tab.filled}/${tab.total}` : tab.filled}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="mt-5 flex flex-col gap-6 lg:flex-row">
         {/* ── 왼쪽: 분류 트리 ── */}
         <nav className="shrink-0 lg:w-60" aria-label="서류 분류">
-          {/* 어디에도 못 들어간 서류는 맨 위 경고로 — 목록 끝에 두면 있는 줄도 모른다. */}
-          {unfiled.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelected(UNFILED)}
-              className={
-                selected === UNFILED
-                  ? "mb-3 flex w-full items-center gap-2 rounded-lg bg-amber-200 px-3 py-2.5 text-sm font-medium text-amber-900"
-                  : "mb-3 flex w-full items-center gap-2 rounded-lg bg-amber-100 px-3 py-2.5 text-sm font-medium text-amber-800 transition hover:bg-amber-200/70"
-              }
-            >
-              <TriangleAlert size={15} aria-hidden />
-              코드 없는 서류 {unfiled.length}
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setSelected(ALL)}
-            className={
-              selected === ALL
-                ? "flex w-full items-center justify-between rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900"
-                : "flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            }
-          >
-            <span>전체</span>
-            <span className="tabular-nums text-slate-500">
-              {totalFilled}/{totalItems}
-            </span>
-          </button>
-
-          {taxonomies.map((taxonomy) => {
+          {/*
+            1차 분류는 **위 탭**이 맡는다. 여기 또 두면 같은 이름이 두 번 보여
+            "중복돼 보인다"는 말이 나온다(사용자 지적). 왼쪽은 그 아래 중분류만 맡는다.
+          */}
+          {taxonomies
+            // 한 분류를 고르면 그 분류의 중분류만 보여 준다(탭과 나란히 보이는 겹침을 없앤다).
+            .filter((taxonomy) => selected === ALL || selected === UNFILED || selected === divisionKey(taxonomy.id) || selected.startsWith(`g:${taxonomy.id}:`))
+            .map((taxonomy) => {
             const divisionActive = selected === divisionKey(taxonomy.id);
             const folded = foldedDivisions.has(taxonomy.id);
             return (

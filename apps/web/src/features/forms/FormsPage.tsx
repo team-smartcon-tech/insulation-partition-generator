@@ -15,6 +15,7 @@ import {
   Check,
   Download,
   FileSpreadsheet,
+  Minus,
   Pencil,
   Plus,
   RefreshCw,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import { buildFilledWorkbook, downloadBytes, filledFileName } from "./formExport";
 import { parseFormWorkbook } from "./formParser";
+import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import FormSheetView, { type FormScale } from "./FormSheetView";
@@ -41,6 +43,7 @@ import {
   reparseForm,
   saveForm,
   saveTaxonomies,
+  setExtraRows,
   setFormCode,
   touchForm,
   updateFormMeta,
@@ -119,6 +122,8 @@ export default function FormsPage() {
   const [editingTaxonomy, setEditingTaxonomy] = useState(false);
   // 붙여넣기 상자를 연 코드표 id. null 이면 닫혀 있다.
   const [pasteTarget, setPasteTarget] = useState<string | null>(null);
+  /** 시트 이름 → 아래에 더한 빈 줄 수 */
+  const [extraRows, setExtraRowsState] = useState<Record<string, number>>({});
   /** 내려받기 선택 메뉴가 열려 있나 */
   const [downloadOpen, setDownloadOpen] = useState(false);
   /** 고칠 수 있는 칸을 하늘색으로 칠할까. 인쇄하거나 원본 모양을 볼 때 끌 수 있다. */
@@ -166,6 +171,7 @@ export default function FormsPage() {
     historyRef.current = { past: [], future: [] };
     justLoadedRef.current = { id: form.id, values: form.values };
     setValues(form.values);
+    setExtraRowsState(form.extraRows ?? {});
     setActiveSheet(0);
     setState({
       status: "ready",
@@ -275,6 +281,7 @@ export default function FormsPage() {
 
     setState({ status: "loading" });
     setActiveSheet(0);
+    setExtraRowsState({});
     historyRef.current = { past: [], future: [] };
     // 다른 양식을 올리면 앞 양식에 적은 값은 의미가 없다.
     // 아래 justLoadedRef 와 같은 객체를 써야 "방금 불러온 그대로"로 인식돼 헛저장을 안 한다.
@@ -698,6 +705,26 @@ export default function FormsPage() {
     }
   }
 
+  /**
+   * 시트 아래에 빈 줄을 더하거나 줄인다.
+   *
+   * 현장마다 특이사항 줄 수가 달라 원본 줄 수로는 모자란다. 줄 수만 저장하고 격자는
+   * 그릴 때 다시 만든다. 줄을 줄여도 그 줄에 적은 글자는 남아 있어, 다시 늘리면 돌아온다.
+   */
+  async function changeExtraRows(delta: number) {
+    if (state.status !== "ready" || !baseSheet) return;
+    const next = Math.max(0, extraRowCount + delta);
+    if (next === extraRowCount) return;
+    setExtraRowsState((prev) => ({ ...prev, [baseSheet.name]: next }));
+    try {
+      await setExtraRows(state.id, baseSheet.name, next);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `줄 수를 저장하지 못했습니다: ${error.message}` : "줄 수를 저장하지 못했습니다.",
+      );
+    }
+  }
+
   /** 빈 칸을 눌러 그 코드표의 그 코드로 양식을 올린다. */
   function handleUploadFor(taxonomyId: string, item: TaxonomyItem) {
     pendingPlaceRef.current = { taxonomyId, code: item.code };
@@ -884,7 +911,10 @@ export default function FormsPage() {
     }
   }
 
-  const sheet = state.status === "ready" ? state.sheets[activeSheet] : null;
+  const baseSheet = state.status === "ready" ? state.sheets[activeSheet] : null;
+  // 시트 아래에 더한 빈 줄. 원본 격자는 그대로 두고 그릴 때만 이어 붙인다.
+  const extraRowCount = baseSheet ? (extraRows[baseSheet.name] ?? 0) : 0;
+  const sheet = baseSheet ? withExtraRows(baseSheet, extraRowCount) : null;
   // 새 장을 만들 때 복사해 올 빈 양식. 없으면 지금 보는 시트를 쓴다.
   const template = state.status === "ready" ? findTemplateSheet(state.sheets) : undefined;
   // 고친 글자는 시트마다 따로 담긴다. 화면에는 지금 보는 시트 것만 넘긴다.
@@ -1309,6 +1339,35 @@ export default function FormsPage() {
               }
               scale={scale}
             />
+
+            {/* 줄 늘리기 — 편집 중에만, 표 **아래 한 곳**에만 둔다. 줄마다 버튼을 붙이면
+                표가 버튼으로 뒤덮여 양식처럼 보이지 않는다. */}
+            {editable && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-dashed border-slate-200 pt-3">
+                <button
+                  type="button"
+                  onClick={() => void changeExtraRows(1)}
+                  title="바로 위 줄의 테두리·글꼴을 복사해 빈 줄을 한 줄 더합니다."
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50"
+                >
+                  <Plus size={13} /> 줄 추가
+                </button>
+                {extraRowCount > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void changeExtraRows(-1)}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50"
+                    >
+                      <Minus size={13} /> 마지막 줄 빼기
+                    </button>
+                    <span className="text-xs text-slate-400">
+                      더한 줄 {extraRowCount}개 · 내려받을 때 인쇄 영역도 함께 늘어납니다
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
           </section>
         )}
       </main>

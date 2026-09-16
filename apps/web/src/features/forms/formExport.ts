@@ -165,6 +165,28 @@ export function patchSheetXml(xml: string, cells: Record<string, string>): strin
   return result;
 }
 
+/**
+ * 인쇄 영역을 넓힌다 — 화면에서 줄을 더해 적었는데 인쇄 영역이 옛 끝 줄에 멈춰 있으면,
+ * 내려받은 파일을 인쇄할 때 **더한 줄이 통째로 빠진다.**
+ *
+ * 인쇄 영역은 워크북의 이름 정의(`_xlnm.Print_Area`)에 시트별로 들어 있다
+ * (`'시트명'!$A$1:$K$33`). 적은 줄이 그 끝 줄보다 아래면 끝 줄만 늘린다.
+ */
+export function extendPrintArea(workbookXml: string, lastRowBySheetIndex: Map<number, number>): string {
+  return workbookXml.replace(
+    /<definedName[^>]*name="_xlnm\.Print_Area"[^>]*localSheetId="(\d+)"[^>]*>([\s\S]*?)<\/definedName>/g,
+    (whole, sheetIndex: string, area: string) => {
+      const needed = lastRowBySheetIndex.get(Number(sheetIndex));
+      if (!needed) return whole;
+      // 여러 조각(`A1:C9,E1:G9`)이면 조각마다 끝 줄을 본다.
+      const next = area.replace(/(\$?[A-Z]+\$?)(\d+)(?=\s*(?:,|$))/g, (piece, column: string, row: string) =>
+        Number(row) < needed ? `${column}${needed}` : piece,
+      );
+      return whole.replace(area, next);
+    },
+  );
+}
+
 export interface FilledWorkbook {
   bytes: ArrayBuffer;
   /** 엑셀에 없어 넣지 못한 시트 이름(앱에서 더한 월별 장 등) */
@@ -183,8 +205,11 @@ export async function buildFilledWorkbook(
 ): Promise<FilledWorkbook> {
   const index = readZipIndex(data);
   const paths = await sheetPaths(data, index);
+  const order = [...paths.keys()];
   const items = readZipItems(data);
   const skippedSheets: string[] = [];
+  /** 시트 번호 → 글자를 적은 마지막 줄(인쇄 영역을 여기까지 늘린다) */
+  const lastRowBySheetIndex = new Map<number, number>();
 
   for (const [sheetName, cells] of Object.entries(values)) {
     if (Object.keys(cells).length === 0) continue;
@@ -198,6 +223,12 @@ export async function buildFilledWorkbook(
       skippedSheets.push(sheetName);
       continue;
     }
+    const lastRow = Math.max(
+      ...Object.keys(cells).map((key) => Number(key.split(":")[0]) || 0),
+    );
+    const sheetIndex = order.indexOf(sheetName);
+    if (sheetIndex >= 0 && Number.isFinite(lastRow)) lastRowBySheetIndex.set(sheetIndex, lastRow);
+
     const patched = patchSheetXml(xml, cells);
     const { compressed, raw } = await deflateText(patched);
     const at = items.findIndex((item) => item.name === path);
@@ -210,6 +241,25 @@ export async function buildFilledWorkbook(
     };
     if (at >= 0) items[at] = replacement;
     else items.push(replacement);
+  }
+
+  // 인쇄 영역도 함께 늘린다(줄을 더해 적은 경우).
+  const workbookXml = await readZipText(data, index, "xl/workbook.xml");
+  if (workbookXml && lastRowBySheetIndex.size > 0) {
+    const nextWorkbook = extendPrintArea(workbookXml, lastRowBySheetIndex);
+    if (nextWorkbook !== workbookXml) {
+      const { compressed, raw } = await deflateText(nextWorkbook);
+      const at = items.findIndex((item) => item.name === "xl/workbook.xml");
+      if (at >= 0) {
+        items[at] = {
+          name: "xl/workbook.xml",
+          method: 8,
+          crc32: crc32(raw),
+          compressed,
+          uncompressedSize: raw.length,
+        };
+      }
+    }
   }
 
   return { bytes: writeZip(items), skippedSheets };
