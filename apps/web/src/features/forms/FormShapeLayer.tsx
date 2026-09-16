@@ -1,12 +1,16 @@
 /**
  * 격자 위에 도형(순서도 상자·화살표)을 얹는다.
  *
- * 상자는 HTML `<div>` 로, 선·화살표는 `<svg>` 로 그린다. 상자를 SVG 로 그리면 안에
+ * 상자는 HTML `<div>` 로, 선·화살표·윤곽선은 `<svg>` 로 그린다. 상자를 SVG 로 그리면 안에
  * 든 글자를 접는 처리를 직접 해야 하고(SVG `<text>` 는 자동 줄바꿈이 없다), 선을
  * div 로 그리면 대각선과 화살촉을 만들 수 없다. 각자 잘하는 쪽에 맡긴다.
+ *
+ * **도형은 엑셀에 적힌 순서대로 하나씩 쌓는다.** 뒤에 적힌 것이 위에 온다. 선을 전부 한
+ * SVG 에 모아 먼저 그리고 상자를 나중에 얹으면, 회색 배경 띠(구역 표시)가 그 위를 지나는
+ * 화살표를 덮어 흐름이 끊겨 보인다.
  */
-import { useId } from "react";
-import type { CSSProperties } from "react";
+import { Fragment, useId } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { FormShape } from "./types";
 
 /** 엑셀 둥근 사각형의 모서리 반경은 짧은 변의 약 16%다. */
@@ -71,6 +75,22 @@ function outlinePath(shape: FormShape): string | null {
   return null;
 }
 
+/** 틀 비율(0~1)로 적힌 윤곽선 조각을 화면 좌표의 SVG path 로. 뒤집기도 여기서 건다. */
+function framePath(shape: FormShape, segments: NonNullable<FormShape["paths"]>[number]["segments"]): string {
+  const { left, top, width: w, height: h, flipH, flipV } = shape;
+  return segments
+    .map(({ op, points }) => {
+      const coords: string[] = [];
+      for (let i = 0; i + 1 < points.length; i += 2) {
+        const x = flipH ? 1 - points[i] : points[i];
+        const y = flipV ? 1 - points[i + 1] : points[i + 1];
+        coords.push(`${left + x * w} ${top + y * h}`);
+      }
+      return `${op} ${coords.join(" ")}`.trim();
+    })
+    .join(" ");
+}
+
 /**
  * 꺾인 연결선의 점들. 틀 안에서 "가로 → 세로 → 가로"를 만들고 뒤집기를 건다.
  * bentConnector3 정의: (0,0) → (w·꺾는자리, 0) → (w·꺾는자리, h) → (w, h)
@@ -101,50 +121,68 @@ function endpoints(shape: FormShape) {
   };
 }
 
-function boxCss(shape: FormShape): CSSProperties {
+function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
   const radius =
     shape.kind === "ellipse"
       ? "50%"
       : shape.kind === "roundBox"
         ? Math.min(shape.width, shape.height) * ROUND_RATIO
         : undefined;
+  const [padTop, padRight, padBottom, padLeft] = shape.inset ?? [2, 4, 2, 4];
   return {
     position: "absolute",
     left: shape.left,
     top: shape.top,
     width: shape.width,
     height: shape.height,
-    background: shape.fill ?? "transparent",
-    border: shape.line
-      ? `${Math.max(MIN_LINE_PX, shape.lineWidth)}px ${shape.dash ?? "solid"} ${shape.line}`
-      : undefined,
+    background: outlined ? "transparent" : (shape.fill ?? "transparent"),
+    border:
+      !outlined && shape.line
+        ? `${Math.max(MIN_LINE_PX, shape.lineWidth)}px ${shape.dash ?? "solid"} ${shape.line}`
+        : undefined,
     borderRadius: radius,
     // 회전은 도형 가운데를 축으로 돈다. 엑셀도 같은 기준이라 자리가 어긋나지 않는다.
     transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
-    // 도형 안의 글자는 가운데가 기본이다(엑셀도 그렇다).
     display: "flex",
-    alignItems: "center",
+    alignItems:
+      shape.valign === "top" ? "flex-start" : shape.valign === "bottom" ? "flex-end" : "center",
     justifyContent:
       shape.align === "left" ? "flex-start" : shape.align === "right" ? "flex-end" : "center",
-    padding: "2px 4px",
+    padding: `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px`,
     boxSizing: "border-box",
   };
 }
 
 function textCss(shape: FormShape): CSSProperties {
+  const vertical = shape.vertical;
   return {
-    width: "100%",
+    // 세로 글자는 줄 방향이 바뀌므로 너비 대신 높이를 채운다.
+    width: vertical ? undefined : shape.noWrap ? "max-content" : "100%",
+    height: vertical ? "100%" : undefined,
+    flexShrink: 0,
     textAlign: shape.align ?? "center",
     fontSize: shape.fontSize ? `${shape.fontSize}pt` : undefined,
     fontFamily: shape.fontFamily ? `"${shape.fontFamily}", "맑은 고딕", sans-serif` : undefined,
     fontWeight: shape.bold ? 700 : undefined,
     color: shape.color,
     lineHeight: 1.25,
-    whiteSpace: "pre-wrap",
+    whiteSpace: shape.noWrap ? "pre" : "pre-wrap",
     // 한글은 어절 단위로 끊어야 "지식관리"가 "지식관"+"리"로 쪼개지지 않는다.
     wordBreak: "keep-all",
     overflowWrap: "break-word",
+    writingMode: vertical ? "vertical-rl" : undefined,
+    textOrientation: vertical === "eaVert" ? "upright" : undefined,
+    transform: vertical === "vert270" ? "rotate(180deg)" : undefined,
   };
+}
+
+/** 선·윤곽선 하나를 그리는 SVG. 도형마다 따로 둬야 도형 순서대로 쌓인다. */
+function ShapeSvg({ children }: { children: ReactNode }) {
+  return (
+    <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden>
+      {children}
+    </svg>
+  );
 }
 
 export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
@@ -154,26 +192,27 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
 
   if (shapes.length === 0) return null;
 
-  const lines = shapes.filter((shape) => shape.kind === "line" && shape.line);
-  // 네모·타원으로 안 되는 것은 SVG 윤곽선으로 그리고, 글자만 그 위에 얹는다.
-  const outlined = shapes.filter((shape) => outlinePath(shape) !== null);
-  const boxes = shapes.filter(
-    (shape) => shape.kind !== "line" && outlinePath(shape) === null,
-  );
-
   const arrowColors = [
     ...new Set(
-      lines
-        .filter((line) => line.arrowStart || line.arrowEnd)
-        .map((line) => line.line ?? "#000000"),
+      shapes
+        .filter((shape) => (shape.kind === "line" || shape.kind === "path") && (shape.arrowStart || shape.arrowEnd))
+        .map((shape) => shape.line ?? "#000000"),
     ),
   ];
+  const markerOf = (color: string) => `url(#${uid}-arrow-${colorKey(color)})`;
+
+  const text = (shape: FormShape, outlined: boolean) =>
+    shape.text ? (
+      <div style={boxCss(shape, outlined)}>
+        <span style={textCss(shape)}>{shape.text}</span>
+      </div>
+    ) : null;
 
   return (
     // 도형은 보기용이다. 클릭이 통과해야 도형에 가린 칸도 눌러서 고칠 수 있다.
     <div className="pointer-events-none absolute inset-0">
-      {(lines.length > 0 || outlined.length > 0) && (
-        <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden>
+      {arrowColors.length > 0 && (
+        <svg className="absolute h-0 w-0" aria-hidden>
           <defs>
             {arrowColors.map((color) => (
               <marker
@@ -191,75 +230,85 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
               </marker>
             ))}
           </defs>
-
-          {outlined.map((shape, index) => (
-            <path
-              key={`o${index}`}
-              d={outlinePath(shape) ?? undefined}
-              fill={shape.fill ?? "none"}
-              stroke={shape.line ?? "none"}
-              strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
-              strokeDasharray={dashArray(shape)}
-              strokeLinejoin="round"
-              transform={svgRotate(shape)}
-            />
-          ))}
-
-          {lines.map((shape, index) => {
-            const { x1, y1, x2, y2 } = endpoints(shape);
-            const color = shape.line ?? "#000000";
-            const marker = `url(#${uid}-arrow-${colorKey(color)})`;
-            return (
-              shape.elbow !== undefined ? (
-                <polyline
-                  key={`l${index}`}
-                  points={elbowPoints(shape)}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
-                  strokeDasharray={dashArray(shape)}
-                  strokeLinejoin="round"
-                  markerStart={shape.arrowStart ? marker : undefined}
-                  markerEnd={shape.arrowEnd ? marker : undefined}
-                  transform={svgRotate(shape)}
-                />
-              ) : (
-                <line
-                  key={`l${index}`}
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
-                  stroke={color}
-                  strokeWidth={Math.max(MIN_LINE_PX, shape.lineWidth)}
-                  strokeDasharray={dashArray(shape)}
-                  markerStart={shape.arrowStart ? marker : undefined}
-                  markerEnd={shape.arrowEnd ? marker : undefined}
-                  transform={svgRotate(shape)}
-                />
-              )
-            );
-          })}
         </svg>
       )}
 
-      {boxes.map((shape, index) => (
-        <div key={`b${index}`} style={boxCss(shape)}>
-          {shape.text && <span style={textCss(shape)}>{shape.text}</span>}
-        </div>
-      ))}
+      {shapes.map((shape, index) => {
+        const strokeWidth = Math.max(MIN_LINE_PX, shape.lineWidth);
 
-      {/* 윤곽선은 SVG 로 그렸으니 글자만 그 자리에 얹는다. */}
-      {outlined.map((shape, index) =>
-        shape.text ? (
-          <div
-            key={`ot${index}`}
-            style={{ ...boxCss(shape), background: "transparent", border: undefined }}
-          >
-            <span style={textCss(shape)}>{shape.text}</span>
+        if (shape.kind === "line") {
+          if (!shape.line) return null;
+          const color = shape.line;
+          const common = {
+            stroke: color,
+            strokeWidth,
+            strokeDasharray: dashArray(shape),
+            markerStart: shape.arrowStart ? markerOf(color) : undefined,
+            markerEnd: shape.arrowEnd ? markerOf(color) : undefined,
+            transform: svgRotate(shape),
+          };
+          return (
+            <ShapeSvg key={index}>
+              {shape.elbow !== undefined ? (
+                <polyline points={elbowPoints(shape)} fill="none" strokeLinejoin="round" {...common} />
+              ) : (
+                <line {...endpoints(shape)} {...common} />
+              )}
+            </ShapeSvg>
+          );
+        }
+
+        if (shape.kind === "path" && shape.paths) {
+          const color = shape.line;
+          return (
+            <Fragment key={index}>
+            <ShapeSvg>
+              {shape.paths.map((path, pathIndex) => (
+                <path
+                  key={pathIndex}
+                  d={framePath(shape, path.segments)}
+                  fill={path.fill ? (shape.fill ?? "none") : "none"}
+                  stroke={path.stroke ? (color ?? "none") : "none"}
+                  strokeWidth={strokeWidth}
+                  strokeDasharray={dashArray(shape)}
+                  strokeLinejoin="round"
+                  markerStart={color && shape.arrowStart ? markerOf(color) : undefined}
+                  markerEnd={color && shape.arrowEnd ? markerOf(color) : undefined}
+                  transform={svgRotate(shape)}
+                />
+              ))}
+            </ShapeSvg>
+            {text(shape, true)}
+            </Fragment>
+          );
+        }
+
+        const outline = outlinePath(shape);
+        if (outline) {
+          return (
+            <Fragment key={index}>
+            <ShapeSvg>
+              <path
+                d={outline}
+                fill={shape.fill ?? "none"}
+                stroke={shape.line ?? "none"}
+                strokeWidth={strokeWidth}
+                strokeDasharray={dashArray(shape)}
+                strokeLinejoin="round"
+                transform={svgRotate(shape)}
+              />
+            </ShapeSvg>
+            {text(shape, true)}
+            </Fragment>
+          );
+        }
+
+        return (
+          <div key={index} style={boxCss(shape, false)}>
+            {shape.text && <span style={textCss(shape)}>{shape.text}</span>}
           </div>
-        ) : null,
-      )}
+        );
+      })}
     </div>
   );
 }

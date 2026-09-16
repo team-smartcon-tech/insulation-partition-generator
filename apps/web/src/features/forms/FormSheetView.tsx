@@ -5,7 +5,7 @@
  * 병합은 colSpan/rowSpan, 열 너비는 <colgroup>, 나머지는 인라인 스타일로 간다 —
  * 셀마다 테두리·글꼴이 달라 Tailwind 클래스로는 표현할 수 없다.
  */
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import FormCellContent from "./FormCellContent";
 import FormShapeLayer from "./FormShapeLayer";
 import type { FormBorder, FormCell, FormCellStyle, FormCellValues, FormSheet } from "./types";
@@ -21,6 +21,37 @@ const BORDER_WIDTH: Record<FormBorder["style"], string> = {
 };
 
 const DEFAULT_BORDER_COLOR = "#111827";
+
+/** 고친 글자가 없는 줄에 넘기는 빈 값. 매번 새 객체를 만들면 줄 메모가 듣지 않는다. */
+const EMPTY_VALUES: FormCellValues = {};
+
+/**
+ * 칸마다 "오른쪽 옆 칸이 비어 있어 글자를 넘겨도 되는가".
+ *
+ * 엑셀은 줄바꿈을 끈 칸의 글자가 길면 **옆 칸이 비어 있는 동안 그 위로 넘겨서** 보여 준다.
+ * 우리는 칸 안에 가두고 글자를 줄여 맞췄더니, 한 줄짜리 설명문이 7px 까지 작아져 읽을 수
+ * 없게 됐다(사용자 신고: "글씨 크기 왜 이래?"). 옆이 비었으면 줄이지 말고 넘긴다.
+ */
+function spillableKeys(sheet: FormSheet): Set<string> {
+  // 글자가 있는 칸이 차지하는 자리(행:열)를 모두 표시한다. 병합은 그 범위 전부.
+  const filled = new Set<string>();
+  for (const cell of sheet.cells) {
+    if (cell.text.trim() === "") continue;
+    for (let row = cell.row; row < cell.row + cell.rowSpan; row++) {
+      for (let col = cell.col; col < cell.col + cell.colSpan; col++) filled.add(`${row}:${col}`);
+    }
+  }
+
+  const keys = new Set<string>();
+  for (const cell of sheet.cells) {
+    if (cell.style.wrap === true || cell.text.trim() === "") continue;
+    const next = cell.col + cell.colSpan;
+    // 마지막 열까지 꽉 찼으면 넘길 자리가 없다.
+    if (next > sheet.colCount) continue;
+    if (!filled.has(`${cell.row}:${next}`)) keys.add(cell.key);
+  }
+  return keys;
+}
 
 /**
  * 한글 글꼴은 PC에 없을 수 있어 같은 계열로 대체한다.
@@ -96,6 +127,10 @@ interface FormSheetViewProps {
   /** 이 시트에서 고친 글자만 담긴다. 셀 키 → 값 */
   values?: FormCellValues;
   onChangeValue?: (cellKey: string, value: string) => void;
+  /** 한 칸 고치기를 끝냈을 때. 되돌리기(Ctrl+Z)를 이 단위로 쌓는다. */
+  onCommitValue?: (cellKey: string, before: string | undefined, after: string) => void;
+  /** 고칠 수 있는 칸에 하늘색을 칠할까. 잠긴 시트에서만 뜻이 있다. */
+  tint?: boolean;
   /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
   scale?: FormScale;
 }
@@ -121,11 +156,82 @@ function useElementSize(ref: React.RefObject<HTMLElement | null>, deps: unknown[
   return size;
 }
 
+/**
+ * 한 줄. **줄 단위로 메모**해 둔다 — 한 칸에 글자를 치면 시트 전체가 다시 그려지는데,
+ * 큰 시트(수천 칸)에서는 그것만으로 타자가 눈에 띄게 밀린다. 값이 바뀐 줄만 다시 그린다.
+ */
+const SheetRow = memo(function SheetRow({
+  cells,
+  height,
+  editable,
+  sheetLocked,
+  tint,
+  values,
+  spillable,
+  onChangeValue,
+  onCommitValue,
+}: {
+  cells: FormCell[];
+  height: number | undefined;
+  editable: boolean;
+  /** 엑셀에서 시트 보호가 걸린 시트인가 — 이때만 "고칠 수 있는 칸"을 칠해 준다. */
+  sheetLocked: boolean;
+  /** 고칠 수 있는 칸에 하늘색을 칠할까(사용자가 끌 수 있다) */
+  tint: boolean;
+  /** 옆 칸으로 글자를 넘겨도 되는 칸들의 키 */
+  spillable: Set<string>;
+  /** 이 줄에서 고친 글자만 담긴다(셀 키 → 값). 줄마다 잘라 넘겨야 메모가 듣는다. */
+  values: FormCellValues;
+  onChangeValue: (cellKey: string, value: string) => void;
+  onCommitValue: (cellKey: string, before: string | undefined, after: string) => void;
+}) {
+  return (
+    <tr style={{ height }}>
+      {cells.map((cell) => {
+        const canEdit = editable && !cell.locked;
+        return (
+        <td
+          key={cell.key}
+          colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
+          rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
+          title={editable && cell.locked ? "엑셀에서 잠가 둔 칸이라 고칠 수 없습니다(엑셀 원본에 잠금이 걸려 있습니다)." : undefined}
+          style={{
+            ...cellCss(cell.style, effectiveAlign(cell)),
+            // 잠긴 시트에서 "여기에 적으면 된다"를 한눈에 보이게 연한 하늘색을 덧칠한다.
+            // 배경색 대신 덧칠(gradient)이라 엑셀 원본의 칸 색이 그대로 비쳐 보인다.
+            //
+            // **글자가 없는 칸은 칠하지 않는다.** 양식의 빈 자리는 대부분 줄 간격을 맞추려고
+            // 둔 칸이라, 칠하면 화면이 하늘색 띠로 뒤덮여 오히려 어디를 적어야 할지 모른다
+            // (사용자 판단). 적는 자리에는 보통 `0000년 00월 00일` 같은 예시 글자가 들어 있다.
+            ...(sheetLocked && tint && canEdit && cell.text.trim() !== ""
+
+              ? { backgroundImage: "linear-gradient(rgba(125, 211, 252, 0.38), rgba(125, 211, 252, 0.38))" }
+              : {}),
+          }}
+        >
+          <FormCellContent
+            cell={cell}
+            // 엑셀에서 잠긴 칸은 여기서도 못 고친다(시트 보호가 걸린 시트에만 표시가 붙는다).
+            editable={canEdit}
+            value={values[cell.key]}
+            spill={spillable.has(cell.key)}
+            onChange={onChangeValue}
+            onCommit={onCommitValue}
+          />
+        </td>
+        );
+      })}
+    </tr>
+  );
+});
+
 export default function FormSheetView({
   sheet,
   editable = false,
   values = {},
   onChangeValue,
+  onCommitValue,
+  tint = true,
   scale = 1,
 }: FormSheetViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -135,6 +241,33 @@ export default function FormSheetView({
   // 남은 폭(가로 맞춤 계산용)과 표의 실제 높이(배율 적용 후 자리 확보용).
   const box = useElementSize(boxRef, []);
   const table = useElementSize(tableRef, [sheet, editable]);
+
+  // 글자를 고칠 때 넘기는 함수가 매번 새로 만들어지면 줄 메모가 듣지 않는다.
+  const handleChange = useCallback(
+    (cellKey: string, next: string) => onChangeValue?.(cellKey, next),
+    [onChangeValue],
+  );
+  const handleCommit = useCallback(
+    (cellKey: string, before: string | undefined, after: string) => onCommitValue?.(cellKey, before, after),
+    [onCommitValue],
+  );
+
+  // 옆 칸으로 넘겨도 되는 칸은 시트가 바뀔 때만 다시 센다.
+  const spillable = useMemo(() => spillableKeys(sheet), [sheet]);
+
+  /**
+   * 고친 글자를 줄별로 잘라 둔다. 줄마다 자기 줄의 값만 받아야, 다른 줄에 글자를 쳐도
+   * 이 줄은 다시 그리지 않는다(큰 시트에서 타자가 밀리는 주된 원인).
+   */
+  const rowValues = useMemo(() => {
+    const byRow: Record<number, FormCellValues> = {};
+    for (const [key, text] of Object.entries(values)) {
+      const row = Number(key.split(":")[0]) - 1;
+      if (!Number.isFinite(row)) continue;
+      (byRow[row] ??= {})[key] = text;
+    }
+    return byRow;
+  }, [values]);
 
   // 가로 맞춤은 줄이기만 한다. 좁은 표를 억지로 늘리면 글자가 뭉개진다.
   const effectiveScale =
@@ -192,23 +325,18 @@ export default function FormSheetView({
         </colgroup>
         <tbody>
           {rows.map((cells, rowIndex) => (
-            <tr key={rowIndex} style={{ height: sheet.rowHeights[rowIndex] }}>
-              {cells.map((cell) => (
-                <td
-                  key={cell.key}
-                  colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
-                  rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-                  style={cellCss(cell.style, effectiveAlign(cell))}
-                >
-                  <FormCellContent
-                    cell={cell}
-                    editable={editable}
-                    value={values[cell.key]}
-                    onChange={(value) => onChangeValue?.(cell.key, value)}
-                  />
-                </td>
-              ))}
-            </tr>
+            <SheetRow
+              key={rowIndex}
+              cells={cells}
+              height={sheet.rowHeights[rowIndex]}
+              editable={editable}
+              sheetLocked={sheet.locked === true}
+              tint={tint}
+              values={rowValues[rowIndex] ?? EMPTY_VALUES}
+              spillable={spillable}
+              onChangeValue={handleChange}
+              onCommitValue={handleCommit}
+            />
           ))}
         </tbody>
       </table>

@@ -4,7 +4,10 @@
  * exceljs 는 무거워서(약 1MB) 최상단에서 import 하지 않고 파싱할 때만 동적으로 불러온다.
  * 양식 화면에 들어오지 않는 사용자가 이 비용을 내지 않게 하기 위해서다.
  */
+import { DEFAULT_THEME, excelColor, parseThemeXml } from "./colors.ts";
+import type { ThemeColors } from "./colors.ts";
 import { parseWorkbookShapes } from "./formShapes.ts";
+import { readZipIndex, readZipText } from "./zip.ts";
 import type {
   FormBorder,
   FormBorderStyle,
@@ -22,7 +25,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 9;
+export const PARSER_VERSION = 11;
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀.
@@ -63,22 +66,6 @@ function rowHeightToPx(heightPt: number | undefined): number {
   return Math.round((heightPt ?? DEFAULT_ROW_HEIGHT_PT) * PT_TO_PX);
 }
 
-/**
- * 엑셀 ARGB("FF4472C4") → CSS "#4472C4".
- * 테마색만 지정된 칸은 argb 가 없어 undefined 를 돌려주고, 화면에서 기본값을 쓴다.
- */
-function argbToHex(argb: unknown): string | undefined {
-  if (typeof argb !== "string") return undefined;
-  const value = argb.trim();
-  if (value.length === 8) {
-    // 완전 투명은 "색 없음"으로 본다.
-    if (value.slice(0, 2).toUpperCase() === "00") return undefined;
-    return `#${value.slice(2).toUpperCase()}`;
-  }
-  if (value.length === 6) return `#${value.toUpperCase()}`;
-  return undefined;
-}
-
 /** 셀 값은 문자열·숫자·날짜·서식글자·수식결과 등 여러 모양으로 온다. 화면에 쓸 문자열로 좁힌다. */
 function cellText(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -102,23 +89,23 @@ function cellText(value: unknown): string {
   return "";
 }
 
-function readBorder(side: unknown): FormBorder | undefined {
+function readBorder(side: unknown, theme: ThemeColors): FormBorder | undefined {
   if (!side || typeof side !== "object") return undefined;
-  const record = side as { style?: unknown; color?: { argb?: unknown } };
+  const record = side as { style?: unknown; color?: unknown };
   if (typeof record.style !== "string") return undefined;
   const style = BORDER_STYLES[record.style];
   if (!style) return undefined;
-  return { style, color: argbToHex(record.color?.argb) };
+  return { style, color: excelColor(record.color, theme) };
 }
 
-function readBorders(border: unknown): FormCellBorders {
+function readBorders(border: unknown, theme: ThemeColors): FormCellBorders {
   if (!border || typeof border !== "object") return {};
   const record = border as Record<string, unknown>;
   const borders: FormCellBorders = {};
-  const top = readBorder(record.top);
-  const right = readBorder(record.right);
-  const bottom = readBorder(record.bottom);
-  const left = readBorder(record.left);
+  const top = readBorder(record.top, theme);
+  const right = readBorder(record.right, theme);
+  const bottom = readBorder(record.bottom, theme);
+  const left = readBorder(record.left, theme);
   if (top) borders.top = top;
   if (right) borders.right = right;
   if (bottom) borders.bottom = bottom;
@@ -140,28 +127,31 @@ function readValign(vertical: unknown): FormCellStyle["valign"] {
   return undefined;
 }
 
-function readStyle(cell: {
-  font?: Record<string, unknown> | null;
-  fill?: Record<string, unknown> | null;
-  alignment?: Record<string, unknown> | null;
-  border?: unknown;
-}): FormCellStyle {
+function readStyle(
+  cell: {
+    font?: Record<string, unknown> | null;
+    fill?: Record<string, unknown> | null;
+    alignment?: Record<string, unknown> | null;
+    border?: unknown;
+  },
+  theme: ThemeColors,
+): FormCellStyle {
   const font = cell.font ?? {};
   const alignment = cell.alignment ?? {};
 
   let background: string | undefined;
   const fill = cell.fill;
   if (fill && fill.type === "pattern" && fill.pattern !== "none") {
-    background = argbToHex((fill.fgColor as { argb?: unknown } | undefined)?.argb);
+    background = excelColor(fill.fgColor, theme);
   }
 
-  const style: FormCellStyle = { borders: readBorders(cell.border) };
+  const style: FormCellStyle = { borders: readBorders(cell.border, theme) };
   if (font.bold === true) style.bold = true;
   if (font.italic === true) style.italic = true;
   if (font.underline) style.underline = true;
   if (typeof font.size === "number") style.fontSize = font.size;
   if (typeof font.name === "string") style.fontFamily = font.name;
-  const color = argbToHex((font.color as { argb?: unknown } | undefined)?.argb);
+  const color = excelColor(font.color, theme);
   if (color) style.color = color;
   if (background) style.background = background;
   const align = readAlign(alignment.horizontal);
@@ -180,7 +170,7 @@ function isMeaningful(cell: {
   fill?: Record<string, unknown> | null;
 }): boolean {
   if (cellText(cell.value).trim() !== "") return true;
-  const borders = readBorders(cell.border);
+  const borders = readBorders(cell.border, DEFAULT_THEME);
   if (borders.top || borders.right || borders.bottom || borders.left) return true;
   const fill = cell.fill;
   return Boolean(fill && fill.type === "pattern" && fill.pattern !== "none");
@@ -237,16 +227,16 @@ interface SpanBox {
  * `B11` 이 아니라 맨 오른쪽 `G11` 에 들어 있다. 대표 칸만 보면 병합 줄의 오른쪽·아래
  * 선이 통째로 사라진다.
  */
-function readMergedBorders(worksheet: any, box: SpanBox): FormCellBorders {
+function readMergedBorders(worksheet: any, box: SpanBox, theme: ThemeColors): FormCellBorders {
   const topLeft = worksheet.getCell(box.minRow, box.minCol);
   const topRight = worksheet.getCell(box.minRow, box.maxCol);
   const bottomLeft = worksheet.getCell(box.maxRow, box.minCol);
 
   const borders: FormCellBorders = {};
-  const top = readBorder(topLeft.border?.top);
-  const left = readBorder(topLeft.border?.left);
-  const right = readBorder(topRight.border?.right);
-  const bottom = readBorder(bottomLeft.border?.bottom);
+  const top = readBorder(topLeft.border?.top, theme);
+  const left = readBorder(topLeft.border?.left, theme);
+  const right = readBorder(topRight.border?.right, theme);
+  const bottom = readBorder(bottomLeft.border?.bottom, theme);
   if (top) borders.top = top;
   if (left) borders.left = left;
   if (right) borders.right = right;
@@ -362,7 +352,11 @@ function readImages(
 }
 
 /** exceljs Worksheet 하나를 격자 구조로 바꾼다. */
-export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
+export function parseFormSheet(
+  worksheet: any,
+  workbook?: any,
+  theme: ThemeColors = DEFAULT_THEME,
+): FormSheet {
   // 1) 실제로 내용이 있는 범위를 먼저 구한다.
   let maxRow = 0;
   let maxCol = 0;
@@ -382,6 +376,12 @@ export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
     if (end.row > maxRow) maxRow = end.row;
     if (end.col > maxCol) maxCol = end.col;
   }
+
+  /**
+   * 엑셀의 "시트 보호". 켜져 있으면 잠긴 칸은 엑셀에서도 못 고친다 —
+   * 화면에서도 같게 막아야 양식이 흐트러지지 않는다.
+   */
+  const sheetLocked = Boolean(worksheet.sheetProtection ?? worksheet.model?.sheetProtection);
 
   // 인쇄 영역이 정해져 있으면 거기까지만 옮긴다.
   const printArea = readPrintArea(worksheet);
@@ -439,10 +439,12 @@ export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
       const cell = worksheet.getCell(row, col);
       const rowSpan = box.maxRow - box.minRow + 1;
       const colSpan = box.maxCol - box.minCol + 1;
-      const style = readStyle(cell);
+      const style = readStyle(cell, theme);
       // 병합된 칸은 바깥 테두리를 모서리 칸들에서 다시 읽는다.
-      if (rowSpan > 1 || colSpan > 1) style.borders = readMergedBorders(worksheet, box);
+      if (rowSpan > 1 || colSpan > 1) style.borders = readMergedBorders(worksheet, box, theme);
 
+      // 엑셀의 잠금 기본값은 "잠김"이다. 푼 칸만 protection.locked === false 로 온다.
+      const unlocked = (cell.protection as { locked?: unknown } | undefined)?.locked === false;
       cells.push({
         key: `${row}:${col}`,
         row,
@@ -450,6 +452,8 @@ export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
         rowSpan,
         colSpan,
         text: cellText(cell.value),
+        // 보호가 안 걸린 시트에서는 잠금 표시를 달지 않는다(전부 고칠 수 있다).
+        ...(sheetLocked && !unlocked ? { locked: true } : {}),
         style,
       });
     }
@@ -481,6 +485,7 @@ export function parseFormSheet(worksheet: any, workbook?: any): FormSheet {
     shapes: [],
     // 실제로 잘라낸 경우에만 알린다. 인쇄 영역이 내용보다 넓으면 알릴 것이 없다.
     printArea: trimmed ? worksheet.pageSetup?.printArea : undefined,
+    ...(sheetLocked ? { locked: true } : {}),
   };
 }
 
@@ -501,6 +506,19 @@ function withinGrid<T extends { left: number; top: number }>(
   return items.filter((item) => item.left < width && item.top < height);
 }
 
+/**
+ * 파일의 테마 색. 회색 제목줄·칸 배경 대부분이 테마 색으로 적혀 있다.
+ * 못 읽으면 기본 Office 테마로 간다 — 색이 조금 다를 뿐 양식은 열린다.
+ */
+async function readTheme(data: ArrayBuffer): Promise<ThemeColors> {
+  try {
+    const index = readZipIndex(data);
+    return parseThemeXml(await readZipText(data, index, "xl/theme/theme1.xml"));
+  } catch {
+    return DEFAULT_THEME;
+  }
+}
+
 /** .xlsx 파일 내용을 시트 목록으로 바꾼다. 시트가 여러 개면 전부 돌려준다. */
 export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]> {
   // 브라우저용 exceljs 는 UMD 번들이라 default 로 감싸질 때와 아닐 때가 갈린다.
@@ -509,8 +527,9 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
   const workbook = new ExcelJS.Workbook();
   // exceljs 가 버퍼를 소유·이관해 비워 버려도 도형을 읽을 수 있게 복사본을 넘긴다.
   await workbook.xlsx.load(data.slice(0));
+  const theme = await readTheme(data);
   const sheets: FormSheet[] = workbook.worksheets.map((worksheet: any) =>
-    parseFormSheet(worksheet, workbook),
+    parseFormSheet(worksheet, workbook, theme),
   );
 
   // 도형은 exceljs 가 내주지 않으므로 원본 압축을 직접 열어 읽는다.
@@ -522,10 +541,12 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
         { colWidths: sheet.colWidths, rowHeights: sheet.rowHeights },
       ]),
     );
-    const shapes = await parseWorkbookShapes(data, sizes, {
-      col: colWidthToPx(undefined),
-      row: rowHeightToPx(undefined),
-    });
+    const shapes = await parseWorkbookShapes(
+      data,
+      sizes,
+      { col: colWidthToPx(undefined), row: rowHeightToPx(undefined) },
+      theme,
+    );
     for (const sheet of sheets) {
       sheet.shapes = withinGrid(shapes.get(sheet.name) ?? [], sheet.colWidths, sheet.rowHeights);
     }

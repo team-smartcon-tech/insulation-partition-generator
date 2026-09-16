@@ -97,3 +97,129 @@ export async function readZipText(
     return null;
   }
 }
+
+// ─── 쓰기 ──────────────────────────────────────────────────
+// 양식을 "채운 내용 포함"으로 내려받으려면 원본 .xlsx 에서 **글자만 바꾼 새 파일**이
+// 필요하다. 엑셀 라이브러리로 다시 저장하면 우리가 모르는 것(도형·차트·설정)이 통째로
+// 날아간다 — 실제로 순서도가 전부 사라졌다. 그래서 건드리지 않는 파일은 **압축된 바이트
+// 그대로 복사**하고, 손댄 파일만 다시 압축해 넣는다.
+
+/** 압축파일 안의 파일 하나(원본 바이트 그대로) */
+export interface ZipItem {
+  name: string;
+  /** 0 = 무압축, 8 = deflate */
+  method: number;
+  crc32: number;
+  compressed: Uint8Array;
+  uncompressedSize: number;
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    table[i] = value >>> 0;
+  }
+  return table;
+})();
+
+export function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** 압축파일 안의 모든 파일을 **압축된 채로** 꺼낸다(다시 쓰려고 들고 있는 것이다). */
+export function readZipItems(data: ArrayBuffer): ZipItem[] {
+  const view = new DataView(data);
+  const bytes = new Uint8Array(data);
+  const items: ZipItem[] = [];
+  for (const [name, entry] of readZipIndex(data)) {
+    const at = entry.localOffset;
+    if (at + 30 > data.byteLength || view.getUint32(at, true) !== SIG_LOCAL) continue;
+    const nameLength = view.getUint16(at + 26, true);
+    const extraLength = view.getUint16(at + 28, true);
+    const start = at + 30 + nameLength + extraLength;
+    items.push({
+      name,
+      method: entry.method,
+      crc32: view.getUint32(at + 14, true),
+      compressed: bytes.slice(start, start + entry.compressedSize),
+      uncompressedSize: view.getUint32(at + 22, true),
+    });
+  }
+  return items;
+}
+
+/** 글자를 deflate 로 압축한다. 브라우저·Node 에 모두 있는 기본 기능을 쓴다. */
+export async function deflateText(text: string): Promise<{ compressed: Uint8Array; raw: Uint8Array }> {
+  const raw = new TextEncoder().encode(text);
+  const stream = new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
+  return { compressed, raw };
+}
+
+/** 파일 목록을 하나의 .xlsx(zip) 바이트로 묶는다. */
+export function writeZip(items: ZipItem[]): ArrayBuffer {
+  const encoder = new TextEncoder();
+  const encoded = items.map((item) => ({ item, name: encoder.encode(item.name) }));
+
+  let size = 0;
+  for (const { item, name } of encoded) size += 30 + name.length + item.compressed.length + 46 + name.length;
+  size += 22;
+
+  const out = new Uint8Array(size);
+  const view = new DataView(out.buffer);
+  let at = 0;
+  const offsets: number[] = [];
+
+  for (const { item, name } of encoded) {
+    offsets.push(at);
+    view.setUint32(at, SIG_LOCAL, true);
+    view.setUint16(at + 4, 20, true); // 풀려면 필요한 버전
+    view.setUint16(at + 6, 0x0800, true); // 이름이 UTF-8 이다
+    view.setUint16(at + 8, item.method, true);
+    view.setUint16(at + 10, 0, true); // 시각 — 엑셀은 보지 않는다
+    view.setUint16(at + 12, 0, true);
+    view.setUint32(at + 14, item.crc32, true);
+    view.setUint32(at + 18, item.compressed.length, true);
+    view.setUint32(at + 22, item.uncompressedSize, true);
+    view.setUint16(at + 26, name.length, true);
+    view.setUint16(at + 28, 0, true);
+    out.set(name, at + 30);
+    out.set(item.compressed, at + 30 + name.length);
+    at += 30 + name.length + item.compressed.length;
+  }
+
+  const centralStart = at;
+  encoded.forEach(({ item, name }, index) => {
+    view.setUint32(at, SIG_CENTRAL, true);
+    view.setUint16(at + 4, 20, true);
+    view.setUint16(at + 6, 20, true);
+    view.setUint16(at + 8, 0x0800, true);
+    view.setUint16(at + 10, item.method, true);
+    view.setUint16(at + 12, 0, true);
+    view.setUint16(at + 14, 0, true);
+    view.setUint32(at + 16, item.crc32, true);
+    view.setUint32(at + 20, item.compressed.length, true);
+    view.setUint32(at + 24, item.uncompressedSize, true);
+    view.setUint16(at + 28, name.length, true);
+    view.setUint16(at + 30, 0, true); // 추가필드
+    view.setUint16(at + 32, 0, true); // 주석
+    view.setUint16(at + 34, 0, true); // 디스크 번호
+    view.setUint16(at + 36, 0, true); // 내부 속성
+    view.setUint32(at + 38, 0, true); // 외부 속성
+    view.setUint32(at + 42, offsets[index], true);
+    out.set(name, at + 46);
+    at += 46 + name.length;
+  });
+
+  view.setUint32(at, SIG_EOCD, true);
+  view.setUint16(at + 8, encoded.length, true);
+  view.setUint16(at + 10, encoded.length, true);
+  view.setUint32(at + 12, at - centralStart, true);
+  view.setUint32(at + 16, centralStart, true);
+  view.setUint16(at + 20, 0, true);
+  return out.buffer;
+}

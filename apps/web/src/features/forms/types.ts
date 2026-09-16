@@ -54,6 +54,11 @@ export interface FormCell {
   colSpan: number;
   /** 엑셀 원본 글자. 사용자가 고친 값은 따로 보관하고 이건 그대로 둔다. */
   text: string;
+  /**
+   * 엑셀에서 잠긴 칸인가. **시트 보호가 걸린 시트에서만** 뜻이 있다(엑셀과 같은 규칙).
+   * 양식을 만든 사람이 "여기는 건드리지 말라"고 정해 둔 자리라 화면에서도 고칠 수 없게 한다.
+   */
+  locked?: boolean;
   style: FormCellStyle;
 }
 
@@ -83,7 +88,21 @@ export type FormShapeKind =
   | "diamond"
   /** 순서도 "문서" 기호 — 아래가 물결인 사각형 */
   | "document"
-  | "line";
+  | "line"
+  /** 윤곽선을 점으로 그리는 도형 — 굵은 화살표·갈매기표·자유형(손으로 그린 선) */
+  | "path";
+
+/**
+ * 윤곽선 한 줄기. 좌표는 도형 틀에 대한 비율(0~1)이라 틀 크기가 바뀌어도 그대로 쓴다.
+ * 뒤집기(flipH/flipV)는 그리는 쪽에서 건다.
+ */
+export interface FormShapePath {
+  segments: { op: "M" | "L" | "C" | "Q" | "Z"; points: number[] }[];
+  /** 안을 채우는가(열린 선은 false) */
+  fill: boolean;
+  /** 선을 긋는가 */
+  stroke: boolean;
+}
 
 /** 격자 위에 떠 있는 도형(순서도 상자·화살표 등). 그림과 달리 글자를 품는다. */
 export interface FormShape {
@@ -115,11 +134,21 @@ export interface FormShape {
    * 0.5 = 가운데서 꺾음, 1 = 끝에서 한 번 꺾음, 음수·1 초과 = 틀 밖으로 돌아 나감.
    */
   elbow?: number;
+  /** kind 가 "path" 일 때의 윤곽선 */
+  paths?: FormShapePath[];
   fontSize?: number;
   fontFamily?: string;
   bold?: boolean;
   color?: string;
   align?: "left" | "center" | "right";
+  /** 글자의 세로 자리. 엑셀 기본은 위쪽이다(순서도 상자는 보통 가운데로 적혀 있다). */
+  valign?: "top" | "middle" | "bottom";
+  /** 글자 안쪽 여백(px) — 위·오른쪽·아래·왼쪽. 여백이 달라지면 줄 바뀌는 자리가 달라진다. */
+  inset?: [number, number, number, number];
+  /** 틀 너비에 맞춰 줄을 바꾸지 않는다(짧은 라벨이 틀보다 길게 삐져나오는 경우) */
+  noWrap?: boolean;
+  /** 세로 글자. vert = 시계방향으로 누움, vert270 = 반시계, eaVert = 글자는 서고 줄만 세로 */
+  vertical?: "vert" | "vert270" | "eaVert";
 }
 
 export interface FormSheet {
@@ -141,6 +170,11 @@ export interface FormSheet {
    * 안 그러면 원본에 있던 줄이 왜 없는지 알 방법이 없다. 지정이 없으면 undefined.
    */
   printArea?: string;
+  /**
+   * 엑셀에서 "시트 보호"가 걸려 있는 시트인가.
+   * 이 시트에서는 잠긴 칸(`FormCell.locked`)을 고칠 수 없다 — 엑셀과 같게 맞춘다.
+   */
+  locked?: boolean;
   /**
    * 사용자가 앱에서 더한 시트(원본 엑셀에는 없다). 월별로 장을 늘려 쓰는 용도.
    * 원본 시트와 구분해야 이름 바꾸기·지우기를 여기에만 허용할 수 있다.
