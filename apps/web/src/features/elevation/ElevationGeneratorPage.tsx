@@ -1290,10 +1290,12 @@ export default function ElevationGeneratorPage() {
     const p1 = makeParams(w, w.points, false, opsStruct, floorHeight);
     const dev1 = optimizeSP ? developPlyMinBoards(p1).dev : developPly(p1);
 
-    if (!w.points2P || w.points2P.length < 2)
-      return { dev1, dev2: null, conflictSegs: [] };
-
-    // 모든 변이 2P=0(또는 배치 안함)이면 2P 겹 자체가 없다 → 빈 전개면/0T 물량 방지
+    // 2P 생성 여부는 '두께'로만 판단한다. 모든 변이 2P=0(또는 배치 안함)이면
+    // 2P 겹 자체가 없다 → 빈 전개면/0T 물량 방지.
+    // ※ 예전에는 여기서 w.points2P(평면 파란 점선) 유무도 함께 봤는데, 그 선은
+    //   2026-07-02 이후 전개 계산에 쓰이지 않는다(2P 도 w.points 로 전개 — 아래 주석).
+    //   계산에 안 쓰는 값이 스위치로 남아, 버튼을 안 누른 입면은 두께를 50/50 으로
+    //   넣어도 조용히 1P 만 나왔다.
     const has2P = resolveSegInsul(w).some(s => !s.skip && s.ply2 > 0);
     if (!has2P) return { dev1, dev2: null, conflictSegs: [] };
 

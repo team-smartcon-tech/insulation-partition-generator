@@ -154,11 +154,12 @@ function emitInsulationDxf(
     push(20, y);
     push(30, 0);
     push(40, h);
-    push(1, s);
+    push(1, dxfText(s));
+    push(7, DXF_TEXT_STYLE);
     if (rot) push(50, rot);
   };
 
-  // 보드 번호(원+숫자) + 치수 — 칸 가운데. (한글 '온장'은 R12 깨질 수 있어 'F'로)
+  // 보드 번호(원+숫자) + 치수 — 칸 가운데. 라벨은 화면과 같은 한글을 쓴다
   // 번호·원·치수 색은 **두께별**로 다르게 준다(60T ↔ 90T 오시공 방지).
   insul.cells.forEach((c, ci) => {
     const cx = c.x + c.w / 2;
@@ -166,7 +167,7 @@ function emitInsulationDxf(
     const raw = insul.labels?.[ci] ?? "";
     const thk = insul.cellThk?.[ci];
     const tAci = insul.labelAcis?.[ci] ?? 7;
-    const label = raw === "온장" ? (thk ? `F${Math.round(thk)}` : "F") : raw;
+    const label = raw;
     const rad = Math.min(c.w, c.h) * 0.28;
     if (label) {
       if (rad > 50) {
@@ -229,13 +230,13 @@ function emitInsulationDxf(
       cbox(bx1, by1, bx0, by1);
       cbox(bx0, by1, bx0, by0);
       const mid = (bx0 + bx1) / 2;
-      text(mid - b.labelAscii.length * 30, by0 + 30, 70, b.labelAscii, "ELEV_INSUL_TXT");
+      text(mid - b.label.length * 45, by0 + 30, 70, b.label, "ELEV_INSUL_TXT");
     }
   }
-  // 헤더 + 물량 총괄 (ASCII — R12 한글 깨짐 방지)
-  let head = `INSUL ${insul.boardLength}x${insul.boardHeight}`;
+  // 헤더 + 물량 총괄 — 화면 문구와 같은 한글
+  let head = `단열 ${insul.boardLength}x${insul.boardHeight}`;
   if (insul.summary) {
-    head += `  ORDER ${insul.summary.orderBoardCount} BD (FULL ${insul.summary.fullCount} + CUTBD ${insul.summary.cutBoardCount}) PIECES ${insul.summary.totalCount} ${insul.summary.totalAreaM2.toFixed(2)}sqm`;
+    head += `  주문 ${insul.summary.orderBoardCount}판 (온장 ${insul.summary.fullCount} + 절단판 ${insul.summary.cutBoardCount}) 조각 ${insul.summary.totalCount} ${insul.summary.totalAreaM2.toFixed(2)}m2`;
   }
   text(0, dy + floorHeight + 450, 150, head, "ELEV_INSUL");
 
@@ -383,6 +384,59 @@ export function dxfAscii(str: string): string {
   return s || "-"; // 전부 한글이던 이름이 비면 빈 TEXT 대신 하이픈
 }
 
+/** DXF TEXT 가 쓸 글꼴 스타일 이름 — 한글 글리프가 있는 TTF 를 참조한다. */
+export const DXF_TEXT_STYLE = "ELEV_KR";
+
+/**
+ * DXF TEXT 값에 한글을 담는다.
+ *
+ * DXF 파일은 코드페이지(CP949 등)로 읽히므로 UTF-8 한글을 그대로 쓰면 깨진다.
+ * AutoCAD 가 자기 DXF 를 쓸 때와 같은 방식으로 — 코드페이지 밖 글자는
+ * 유니코드 이스케이프(\\U+XXXX)로 내보낸다. 파일은 순수 ASCII 로 유지되고
+ * CAD 가 읽을 때 글자로 복원된다. 글리프는 DXF_TEXT_STYLE(맑은 고딕)이 담당.
+ */
+export function dxfText(str: string): string {
+  let s = String(str ?? "");
+  // 기호는 이스케이프보다 ASCII 치환이 도면에서 읽기 좋다
+  s = s
+    .replace(/[·・]/g, "-")
+    .replace(/[×✕]/g, "x")
+    .replace(/㎡/g, "m2")
+    .replace(/…/g, "...")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[〜～]/g, "~");
+  // 남은 비ASCII(한글 등) → 유니코드 이스케이프
+  s = s.replace(
+    /[^\x20-\x7E]/g,
+    ch => "\\U+" + ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")
+  );
+  return s.replace(/\s{2,}/g, " ").trim() || "-";
+}
+
+/** R12 STYLE 테이블 — STANDARD(기본) + ELEV_KR(한글 TTF). */
+function pushStyleTable(push: (code: number, value: string | number) => void) {
+  push(0, "TABLE");
+  push(2, "STYLE");
+  push(70, 2);
+  const addStyle = (name: string, font: string) => {
+    push(0, "STYLE");
+    push(2, name);
+    push(70, 0);
+    push(40, 0); // 고정 높이 0 = 가변
+    push(41, 1); // 폭 비율
+    push(50, 0); // 기울기
+    push(71, 0);
+    push(42, 2.5);
+    push(3, font); // 주 글꼴 파일
+    push(4, ""); // 큰 글꼴(bigfont) 없음 — TTF 는 불필요
+  };
+  addStyle("STANDARD", "txt");
+  // 한글 Windows 기본 탑재 TTF. 없으면 CAD 가 대체 글꼴로 띄운다(글자는 살아 있음)
+  addStyle(DXF_TEXT_STYLE, "malgun.ttf");
+  push(0, "ENDTAB");
+}
+
 /**
  * AutoCAD R12 호환 최소 DXF 생성.
  * 한국어 TEXT 는 R12 SHX 폰트 호환성이 떨어져 영문/숫자 라벨만 출력한다.
@@ -420,7 +474,8 @@ export function buildElevationDxf(input: ElevationExportInput): string {
     push(20, y);
     push(30, 0);
     push(40, height);
-    push(1, dxfAscii(str)); // 한글/기호는 CAD 에서 깨지므로 ASCII 로 정규화
+    push(1, dxfText(str)); // 한글은 유니코드 이스케이프로 담는다
+    push(7, DXF_TEXT_STYLE); // 한글 글리프가 있는 TTF 스타일
   };
 
   // ── 헤더 ──
@@ -458,6 +513,7 @@ export function buildElevationDxf(input: ElevationExportInput): string {
   addLayer("ELEV_INSUL_TXT", 2); // 보드 치수 텍스트(물량) — 노랑
 
   push(0, "ENDTAB");
+  pushStyleTable(push);
   push(0, "ENDSEC");
 
   // ── ENTITIES ──
@@ -711,7 +767,8 @@ export function buildElevationDxfMulti(input: ElevationStackInput): string {
     push(20, y);
     push(30, 0);
     push(40, height);
-    push(1, dxfAscii(str)); // 한글/기호는 CAD 에서 깨지므로 ASCII 로 정규화
+    push(1, dxfText(str)); // 한글은 유니코드 이스케이프로 담는다
+    push(7, DXF_TEXT_STYLE); // 한글 글리프가 있는 TTF 스타일
   };
 
   // 헤더
@@ -747,21 +804,30 @@ export function buildElevationDxfMulti(input: ElevationStackInput): string {
   addLayer("ELEV_INSUL_LAP", 30); // 모서리 랩(엇갈림) — 주황
   addLayer("ELEV_INSUL_TXT", 2); // 보드 치수 텍스트(물량) — 노랑
   push(0, "ENDTAB");
+  pushStyleTable(push);
   push(0, "ENDSEC");
 
   // ENTITIES
   push(0, "SECTION");
   push(2, "ENTITIES");
 
-  let yCursor = 0;
+  // CAD 좌표는 Y↑ 다. y=0 에서 위로 쌓으면 첫 입면이 맨 아래로 가서
+  // 화면·SVG(위→아래) 와 순서가 뒤집힌다 → 총 높이를 먼저 구해 위에서부터 내려 놓는다.
+  const drawn = input.chains.filter(
+    c => c.perimeter > 0 && c.floorHeight > 0
+  );
+  let yCursor =
+    drawn.reduce((s, c) => s + c.floorHeight, 0) +
+    gapY * Math.max(0, drawn.length - 1);
   input.chains.forEach((c, idx) => {
     const { perimeter, floorHeight, wallCum, openings } = c;
     if (perimeter <= 0 || floorHeight <= 0) return;
+    yCursor -= floorHeight;
     const dy = yCursor;
     // 제목은 text() 가 ASCII 로 정규화한다. 이름이 전부 한글이라 남는 글자가 없으면
     // 빈 제목 대신 순번을 쓴다(어느 입면인지 도면에서 구분되게).
     const rawTitle = c.title ?? `Elevation ${idx + 1}`;
-    const titleStr = dxfAscii(rawTitle) === "-" ? `ELEV ${idx + 1}` : rawTitle;
+    const titleStr = dxfText(rawTitle) === "-" ? `ELEV ${idx + 1}` : rawTitle;
 
     // 제목 (영문/숫자만 안전 — 한글은 R12 SHX 에서 ?로 나올 수 있음)
     text(0, dy + floorHeight + 250, 150, titleStr, "ELEV_TEXT");
@@ -829,7 +895,7 @@ export function buildElevationDxfMulti(input: ElevationStackInput): string {
       text(x, dy - 150, 80, `${(x / 1000).toFixed(0)}m`, "ELEV_TEXT");
     }
 
-    yCursor += floorHeight + gapY;
+    yCursor -= gapY;
   });
 
   push(0, "ENDSEC");
