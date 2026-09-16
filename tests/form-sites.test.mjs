@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { addSite, formsOfSite, renameSite, siteIdOf } from '../apps/web/src/features/forms/sites.ts';
+import { addSite, formsOfSite, renameSite, siteIdOf, summarizeSites } from '../apps/web/src/features/forms/sites.ts';
 
 let counter = 0;
 const makeId = () => `s${++counter}`;
@@ -46,4 +46,30 @@ test('목록은 보고 있는 현장 것만 보여 준다', () => {
   assert.deepEqual(formsOfSite(forms, sites, sites[0].id).map((f) => f.id), ['a', 'b']);
   assert.deepEqual(formsOfSite(forms, sites, sites[1].id).map((f) => f.id), ['c']);
   assert.deepEqual(formsOfSite(forms, sites, undefined).map((f) => f.id), ['a', 'b', 'c', 'd'], '현장을 안 고르면 전부');
+});
+
+test('전 현장 보기 — 현장마다 채운 칸 수와 마지막 수정 시각을 센다', () => {
+  counter = 0;
+  const sites = addSite(addSite([], '부산장안', makeId), '광주선운', makeId);
+  const forms = [
+    // 같은 칸에 두 장(월별) → 한 칸으로 센다
+    { siteId: sites[0].id, code: '101', taxonomyId: 'g', updatedAt: 10 },
+    { siteId: sites[0].id, code: '101', taxonomyId: 'g', updatedAt: 30 },
+    { siteId: sites[0].id, code: '102', taxonomyId: 'g', updatedAt: 20 },
+    // 코드 없는 서류는 따로
+    { siteId: sites[0].id, updatedAt: 5 },
+    // 현장 표시가 없는 옛 서류 → 첫 현장
+    { code: '103', taxonomyId: 'g', updatedAt: 40 },
+    { siteId: sites[1].id, code: '101', taxonomyId: 'g', updatedAt: 7 },
+  ];
+
+  const [busan, gwangju] = summarizeSites(sites, forms, 87);
+  assert.deepEqual(
+    { filled: busan.filled, unfiled: busan.unfiled, total: busan.total, updatedAt: busan.updatedAt },
+    { filled: 3, unfiled: 1, total: 87, updatedAt: 40 },
+  );
+  assert.deepEqual(
+    { filled: gwangju.filled, unfiled: gwangju.unfiled, updatedAt: gwangju.updatedAt },
+    { filled: 1, unfiled: 0, updatedAt: 7 },
+  );
 });

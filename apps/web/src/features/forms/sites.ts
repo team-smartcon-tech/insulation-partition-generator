@@ -52,3 +52,41 @@ export function renameSite(sites: FormSite[], siteId: string, name: string): For
   if (!trimmed || sites.some((site) => site.id !== siteId && site.name === trimmed)) return sites;
   return sites.map((site) => (site.id === siteId ? { ...site, name: trimmed } : site));
 }
+
+/** 현장 한 곳의 서류 현황(전 현장 보기에서 쓴다). */
+export interface SiteProgress {
+  site: FormSite;
+  /** 코드표의 칸 중 서류가 하나라도 올라온 칸 수 */
+  filled: number;
+  /** 코드표의 칸 수(회사 공통이라 현장마다 같다) */
+  total: number;
+  /** 코드가 없어 어느 칸에도 안 들어간 서류 수 */
+  unfiled: number;
+  /** 이 현장에서 마지막으로 고친 시각(ms). 없으면 0 */
+  updatedAt: number;
+}
+
+/**
+ * 현장별 서류 현황을 센다.
+ *
+ * 서류 점검은 "어느 현장이 무엇을 안 올렸나"를 보는 일이다. 그래서 **칸 기준**으로 센다 —
+ * 한 칸에 여러 장을 올려도 한 칸으로, 코드 없는 서류는 따로 센다.
+ */
+export function summarizeSites(
+  sites: FormSite[],
+  forms: { siteId?: string; code?: string; taxonomyId?: string; updatedAt: number }[],
+  total: number,
+): SiteProgress[] {
+  return sites.map((site) => {
+    const mine = forms.filter((form) => siteIdOf(form, sites) === site.id);
+    const slots = new Set<string>();
+    let unfiled = 0;
+    let updatedAt = 0;
+    for (const form of mine) {
+      if (form.code) slots.add(`${form.taxonomyId ?? ""}:${form.code}`);
+      else unfiled += 1;
+      if (form.updatedAt > updatedAt) updatedAt = form.updatedAt;
+    }
+    return { site, filled: slots.size, total, unfiled, updatedAt };
+  });
+}

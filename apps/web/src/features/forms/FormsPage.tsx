@@ -14,6 +14,7 @@ import {
   Building2,
   Check,
   ChevronDown,
+  Search,
   Download,
   FileSpreadsheet,
   Minus,
@@ -30,7 +31,15 @@ import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import FormSheetView, { type FormScale } from "./FormSheetView";
-import { FIRST_SITE_NAME, addSite, formsOfSite, renameSite, type FormSite } from "./sites";
+import {
+  FIRST_SITE_NAME,
+  addSite,
+  formsOfSite,
+  renameSite,
+  summarizeSites,
+  type FormSite,
+  type SiteProgress,
+} from "./sites";
 import {
   addCustomSheet,
   deleteForm,
@@ -165,7 +174,8 @@ export default function FormsPage() {
 
   /** 마지막으로 보던 현장을 기억해 둔다(다음에 열 때 그 현장으로 시작). */
   function selectSite(id: string) {
-    setSiteId(id);
+    // 빈 문자열은 "모든 현장 보기"다(한 현장을 고르지 않은 상태).
+    setSiteId(id || undefined);
     try {
       localStorage.setItem(LAST_SITE_KEY, id);
     } catch {
@@ -997,6 +1007,11 @@ export default function FormsPage() {
 
   // 지금 보고 있는 현장의 서류만 목록에 올린다.
   const siteForms = formsOfSite(forms, sites, siteId);
+  // 코드표의 칸 수(회사 공통) — 현장별 현황의 분모다.
+  const totalSlots = taxonomies.reduce(
+    (sum, taxonomy) => sum + taxonomy.groups.reduce((count, group) => count + group.items.length, 0),
+    0,
+  );
   const baseSheet = state.status === "ready" ? state.sheets[activeSheet] : null;
   // 시트 아래에 더한 빈 줄. 원본 격자는 그대로 두고 그릴 때만 이어 붙인다.
   const extraRowCount = baseSheet ? (extraRows[baseSheet.name] ?? 0) : 0;
@@ -1052,6 +1067,7 @@ export default function FormsPage() {
             sites={sites}
             currentId={siteId}
             onSelect={(id) => selectSite(id)}
+            onSelectAll={() => selectSite("")}
             onAdd={() => void handleAddSite()}
             onRename={() => void handleRenameSite()}
           />
@@ -1093,8 +1109,14 @@ export default function FormsPage() {
         )}
 
         <div className="mb-6">
-          {/* 코드표가 있으면 회사 분류 트리로, 없으면 사용자가 만든 분류 탭으로 본다. */}
-          {taxonomies.length > 0 ? (
+          {/* 현장을 고르지 않았으면 현장별 현황부터 — 서류 점검은 여기서 시작한다. */}
+          {!siteId ? (
+            <SiteOverview
+              rows={summarizeSites(sites, forms, totalSlots)}
+              onOpen={(id) => selectSite(id)}
+              onAdd={() => void handleAddSite()}
+            />
+          ) : taxonomies.length > 0 ? (
             <FormTree
               taxonomies={taxonomies}
               editing={editingTaxonomy}
@@ -1535,26 +1557,34 @@ function PasteTaxonomyDialog({
 }
 
 /**
- * 헤더 가운데의 현장 고르개.
+ * 헤더 가운데의 현장 고르개 — 사내 Smart Works 와 같은 모양으로 맞췄다.
  *
  * 서류는 현장별로 쌓이므로 "지금 어느 현장인지"가 늘 보여야 한다. 목록 위에 두면 스크롤에
  * 밀려 사라지고, 그 상태로 올리면 엉뚱한 현장에 들어간다.
+ *
+ * **모든 현장 보기**가 맨 위에 있다 — 서류 점검(어느 현장이 무엇을 안 올렸나)은 한 현장씩
+ * 들어가서는 못 한다. 현장이 많아지면 검색으로 찾는다.
  */
 function SitePicker({
   sites,
   currentId,
   onSelect,
+  onSelectAll,
   onAdd,
   onRename,
 }: {
   sites: FormSite[];
   currentId: string | undefined;
   onSelect: (id: string) => void;
+  onSelectAll: () => void;
   onAdd: () => void;
   onRename: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const current = sites.find((site) => site.id === currentId);
+  const needle = query.trim().toLowerCase();
+  const shown = needle ? sites.filter((site) => site.name.toLowerCase().includes(needle)) : sites;
 
   return (
     <div className="relative">
@@ -1562,18 +1592,18 @@ function SitePicker({
         type="button"
         onClick={() => setOpen((on) => !on)}
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-left transition hover:bg-slate-100"
+        className="flex flex-col items-center rounded-xl px-4 py-1 transition hover:bg-slate-100"
       >
-        <Building2 size={16} className="shrink-0 text-slate-400" />
-        <span className="min-w-0">
-          <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-            현장
+        <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Project</span>
+        <span className="flex items-center gap-1.5">
+          <span className="max-w-[16rem] truncate text-[15px] font-bold text-slate-800">
+            {current ? current.name : "모든 현장"}
           </span>
-          <span className="block truncate text-[15px] font-bold text-slate-800">
-            {current?.name ?? "현장 없음"}
-          </span>
+          <ChevronDown
+            size={15}
+            className={open ? "shrink-0 rotate-180 text-slate-500 transition-transform" : "shrink-0 text-slate-500 transition-transform"}
+          />
         </span>
-        <ChevronDown size={15} className="shrink-0 text-slate-400" />
       </button>
 
       {open && (
@@ -1585,37 +1615,71 @@ function SitePicker({
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-10 cursor-default"
           />
-          <div className="absolute left-1/2 z-20 mt-1 w-64 -translate-x-1/2 overflow-hidden rounded-xl bg-white py-1 shadow-lg ring-1 ring-slate-200">
-            <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              현장 고르기
-            </p>
-            {sites.map((site) => (
-              <button
-                key={site.id}
-                type="button"
-                onClick={() => {
-                  onSelect(site.id);
-                  setOpen(false);
-                }}
-                className={
-                  "flex w-full items-center justify-between px-3 py-2 text-left text-sm " +
-                  (site.id === currentId ? "bg-blue-50 font-semibold text-blue-800" : "text-slate-700 hover:bg-slate-50")
-                }
-              >
-                <span className="truncate">{site.name}</span>
-                {site.id === currentId && <Check size={14} className="shrink-0" />}
-              </button>
-            ))}
-            <div className="mt-1 border-t border-slate-100 pt-1">
+          <div className="absolute left-1/2 z-20 mt-1 w-72 -translate-x-1/2 overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-slate-200">
+            <button
+              type="button"
+              onClick={() => {
+                onSelectAll();
+                setOpen(false);
+              }}
+              className={
+                "flex w-full items-center justify-between border-b border-slate-100 px-4 py-3 text-left text-sm " +
+                (current ? "text-slate-700 hover:bg-slate-50" : "bg-blue-50 font-semibold text-blue-800")
+              }
+            >
+              모든 현장 보기
+              {!current && <Check size={14} className="shrink-0" />}
+            </button>
+
+            <div className="p-2">
+              <div className="relative">
+                <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="현장 검색..."
+                  aria-label="현장 검색"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-2.5 text-[13px] text-slate-700 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="max-h-64 overflow-auto pb-1">
+              {shown.length === 0 && (
+                <p className="px-4 py-3 text-xs text-slate-400">찾는 현장이 없습니다.</p>
+              )}
+              {shown.map((site) => (
+                <button
+                  key={site.id}
+                  type="button"
+                  onClick={() => {
+                    onSelect(site.id);
+                    setOpen(false);
+                  }}
+                  className={
+                    "flex w-full items-center justify-between px-4 py-2 text-left text-sm " +
+                    (site.id === currentId
+                      ? "font-semibold text-blue-800"
+                      : "text-slate-700 hover:bg-slate-50")
+                  }
+                >
+                  <span className="truncate">{site.name}</span>
+                  {site.id === currentId && <Check size={14} className="shrink-0 text-blue-700" />}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1 border-t border-slate-100 px-2 py-1.5">
               <button
                 type="button"
                 onClick={() => {
                   setOpen(false);
                   onAdd();
                 }}
-                className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
               >
-                <Plus size={13} /> 새 현장 만들기
+                <Plus size={13} /> 새 현장
               </button>
               {current && (
                 <button
@@ -1624,7 +1688,7 @@ function SitePicker({
                     setOpen(false);
                     onRename();
                   }}
-                  className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
                 >
                   <Pencil size={13} /> 이름 바꾸기
                 </button>
@@ -1634,5 +1698,95 @@ function SitePicker({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * 전 현장 보기 — 현장마다 서류를 얼마나 채웠는지 한 화면에 늘어놓는다.
+ *
+ * 서류 점검(어느 현장이 무엇을 안 올렸나)은 한 현장씩 들어가서는 못 한다. 오프라인 점검
+ * 때는 이 화면만 띄워 놓고 현장을 하나씩 열어 본다.
+ */
+function SiteOverview({
+  rows,
+  onOpen,
+  onAdd,
+}: {
+  rows: SiteProgress[];
+  onOpen: (siteId: string) => void;
+  onAdd: () => void;
+}) {
+  const totalFilled = rows.reduce((sum, row) => sum + row.filled, 0);
+  const totalSlots = rows.reduce((sum, row) => sum + row.total, 0);
+
+  return (
+    <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="mr-auto">
+          <h2 className="text-lg font-semibold text-slate-900">
+            전 현장 서류 현황{" "}
+            <span className="text-sm font-normal tabular-nums text-slate-500">현장 {rows.length}개</span>
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            현장을 눌러 그 현장 서류함으로 들어갑니다. 점검할 때는 채운 칸 수로 빠진 서류를 찾습니다.
+          </p>
+        </div>
+        {totalSlots > 0 && (
+          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
+            전체 채움 <span className="tabular-nums">{totalFilled}</span> /{" "}
+            <span className="tabular-nums">{totalSlots}</span>
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200 transition hover:bg-blue-50"
+        >
+          <Plus size={13} /> 새 현장
+        </button>
+      </div>
+
+      <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {rows.map((row) => {
+          const percent = row.total > 0 ? Math.round((row.filled / row.total) * 100) : 0;
+          return (
+            <li key={row.site.id}>
+              <button
+                type="button"
+                onClick={() => onOpen(row.site.id)}
+                className="flex w-full flex-col gap-2 rounded-xl border border-slate-200 p-4 text-left transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md"
+              >
+                <span className="flex items-center gap-2">
+                  <Building2 size={15} className="shrink-0 text-slate-400" />
+                  <span className="min-w-0 truncate text-sm font-bold text-slate-900">{row.site.name}</span>
+                </span>
+
+                <span className="flex items-baseline gap-1.5">
+                  <span className="text-2xl font-bold tabular-nums text-slate-900">{percent}</span>
+                  <span className="text-xs text-slate-400">%</span>
+                  <span className="ml-auto text-xs tabular-nums text-slate-500">
+                    {row.filled} / {row.total}칸
+                  </span>
+                </span>
+
+                <span className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <span className="block h-full rounded-full bg-blue-600" style={{ width: `${percent}%` }} />
+                </span>
+
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                  <span>
+                    마지막 수정{" "}
+                    {row.updatedAt > 0 ? new Date(row.updatedAt).toLocaleDateString("ko-KR") : "없음"}
+                  </span>
+                  {row.unfiled > 0 && (
+                    <span className="text-amber-700">코드 없는 서류 {row.unfiled}</span>
+                  )}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
