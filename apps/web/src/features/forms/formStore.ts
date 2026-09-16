@@ -15,6 +15,7 @@
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
+import type { FormSite } from "./sites.ts";
 import { LEGACY_TAXONOMY_ID, type Taxonomy } from "./taxonomy.ts";
 import type { FormSheet, FormValues } from "./types";
 
@@ -41,6 +42,8 @@ const META_STORE = "meta";
 const LEGACY_TAXONOMY_KEY = "taxonomy";
 /** 코드표 목록(1차 분류마다 한 벌) */
 const TAXONOMIES_KEY = "taxonomies";
+/** 현장(프로젝트) 목록 — 서류는 현장별로 나뉜다 */
+const SITES_KEY = "sites";
 /** 마지막으로 열어 본 양식. 새로고침하면 이걸 다시 연다. */
 const LAST_OPENED_KEY = "ipg-forms:last-opened";
 
@@ -62,6 +65,11 @@ export interface StoredForm {
    * 모른다. 비어 있으면 1차 분류가 생기기 전에 올린 서류라 옛 코드표 소속으로 본다.
    */
   taxonomyId?: string;
+  /**
+   * 어느 현장의 서류인지. 현장 구분이 생기기 전에 올린 서류는 비어 있고, 첫 현장 것으로 본다
+   * (`sites.ts`). 안 그러면 현장을 만든 순간 이미 올려 둔 서류가 어느 목록에도 안 보인다.
+   */
+  siteId?: string;
   /** 즐겨찾기(카드 모서리의 별) */
   favorite: boolean;
   /** 처음 올린 시각(ms) */
@@ -110,6 +118,8 @@ export interface FormSummary {
   code?: string;
   /** 어느 코드표 소속인지 */
   taxonomyId?: string;
+  /** 어느 현장의 서류인지. 현장이 생기기 전에 올린 것은 비어 있다(첫 현장으로 본다). */
+  siteId?: string;
   uploadedAt: number;
   updatedAt: number;
   openedAt: number;
@@ -283,6 +293,7 @@ function summarize(form: StoredForm): FormSummary {
     favorite: form.favorite,
     code: form.code,
     taxonomyId: form.taxonomyId,
+    siteId: form.siteId,
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
@@ -418,6 +429,7 @@ export async function saveForm(input: {
   category?: string;
   code?: string;
   taxonomyId?: string;
+  siteId?: string;
 }): Promise<StoredForm> {
   const now = Date.now();
   const form: StoredForm = {
@@ -430,6 +442,7 @@ export async function saveForm(input: {
     category: input.category || UNCATEGORIZED,
     code: input.code,
     taxonomyId: input.taxonomyId,
+    siteId: input.siteId,
     favorite: false,
     uploadedAt: now,
     updatedAt: now,
@@ -544,6 +557,22 @@ export async function loadTaxonomies(): Promise<Taxonomy[]> {
   const migrated = [normalizeTaxonomy({ ...legacy, id: LEGACY_TAXONOMY_ID }, LEGACY_TAXONOMY_ID)];
   await writeMeta({ [TAXONOMIES_KEY]: migrated, [LEGACY_TAXONOMY_KEY]: undefined });
   return migrated;
+}
+
+/** 현장 목록. 없으면 빈 배열 — 화면이 첫 현장을 만들어 준다. */
+export async function loadSites(): Promise<FormSite[]> {
+  if (!isStorageAvailable()) return [];
+  return (await readMeta<FormSite[]>(SITES_KEY)) ?? [];
+}
+
+/** 현장 목록을 통째로 저장한다(추가·이름 바꾸기). */
+export async function saveSites(list: FormSite[]): Promise<void> {
+  await writeMeta({ [SITES_KEY]: list });
+}
+
+/** 서류를 다른 현장으로 옮긴다. */
+export async function setFormSite(id: string, siteId: string): Promise<void> {
+  await patchForm(id, () => ({ siteId, updatedAt: Date.now() }));
 }
 
 /** 코드표 목록을 통째로 저장한다. 올리기·이름 바꾸기·지우기 모두 이걸로 끝난다. */

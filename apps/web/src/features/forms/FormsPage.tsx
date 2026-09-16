@@ -9,10 +9,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import BrandWordmark from "@/components/brand/BrandWordmark";
-import { HeroChip, SmartBackground, SmartHeader, SmartHero } from "@/components/layout/SmartShell";
+import { SmartBackground, SmartHeader } from "@/components/layout/SmartShell";
 import {
-  ArrowLeft,
+  Building2,
   Check,
+  ChevronDown,
   Download,
   FileSpreadsheet,
   Minus,
@@ -29,6 +30,7 @@ import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import FormSheetView, { type FormScale } from "./FormSheetView";
+import { FIRST_SITE_NAME, addSite, formsOfSite, renameSite, type FormSite } from "./sites";
 import {
   addCustomSheet,
   deleteForm,
@@ -39,9 +41,11 @@ import {
   isStorageAvailable,
   listForms,
   readLastOpenedId,
+  loadSites,
   loadTaxonomies,
   reparseForm,
   saveForm,
+  saveSites,
   saveTaxonomies,
   setExtraRows,
   setFormCode,
@@ -102,6 +106,8 @@ const SCALES: { value: FormScale; label: string }[] = [
  * 글자 든 칸이 이보다 적으면서 시트가 이만큼 크면, 내용이 도형·그림으로 그려져
  * 있을 가능성이 높다. 그때 빈 상자만 띄우면 "고장 났다"로 보여서 이유를 알린다.
  */
+/** 마지막으로 보던 현장(브라우저에만 기억한다) */
+const LAST_SITE_KEY = "ipg-forms:last-site";
 const SPARSE_TEXT_CELLS = 3;
 const SPARSE_MIN_AREA = 50;
 /** 글자를 칠 때마다 저장하면 과하다. 손을 멈춘 뒤 이만큼 있다가 저장한다. */
@@ -122,6 +128,9 @@ export default function FormsPage() {
   const [editingTaxonomy, setEditingTaxonomy] = useState(false);
   // 붙여넣기 상자를 연 코드표 id. null 이면 닫혀 있다.
   const [pasteTarget, setPasteTarget] = useState<string | null>(null);
+  /** 현장 목록과 지금 보고 있는 현장 */
+  const [sites, setSites] = useState<FormSite[]>([]);
+  const [siteId, setSiteId] = useState<string | undefined>(undefined);
   /** 시트 이름 → 아래에 더한 빈 줄 수 */
   const [extraRows, setExtraRowsState] = useState<Record<string, number>>({});
   /** 내려받기 선택 메뉴가 열려 있나 */
@@ -153,6 +162,56 @@ export default function FormsPage() {
   const justLoadedRef = useRef<{ id: string; values: FormValues } | null>(null);
   /** 아직 저장되지 않은 변경. 창을 닫을 때 마지막으로 한 번 더 써 본다. */
   const pendingRef = useRef<{ id: string; values: FormValues } | null>(null);
+
+  /** 마지막으로 보던 현장을 기억해 둔다(다음에 열 때 그 현장으로 시작). */
+  function selectSite(id: string) {
+    setSiteId(id);
+    try {
+      localStorage.setItem(LAST_SITE_KEY, id);
+    } catch {
+      // 저장이 막힌 브라우저 — 이번 화면에서만 유지된다.
+    }
+  }
+
+  async function handleAddSite() {
+    const name = window.prompt("새 현장 이름을 적어 주세요. (예: 부산장안(B1))", "")?.trim();
+    if (!name) return;
+    const next = addSite(sites, name, () => crypto.randomUUID());
+    if (next === sites) {
+      setStorageWarning(`“${name}” 현장이 이미 있습니다.`);
+      return;
+    }
+    try {
+      await saveSites(next);
+      setSites(next);
+      selectSite(next[next.length - 1].id);
+      setStorageWarning(null);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `현장을 만들지 못했습니다: ${error.message}` : "현장을 만들지 못했습니다.",
+      );
+    }
+  }
+
+  async function handleRenameSite() {
+    const target = sites.find((site) => site.id === siteId);
+    if (!target) return;
+    const name = window.prompt("현장 이름을 바꿉니다.", target.name)?.trim();
+    if (!name || name === target.name) return;
+    const next = renameSite(sites, target.id, name);
+    if (next === sites) {
+      setStorageWarning(`“${name}” 현장이 이미 있습니다.`);
+      return;
+    }
+    try {
+      await saveSites(next);
+      setSites(next);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `이름을 바꾸지 못했습니다: ${error.message}` : "이름을 바꾸지 못했습니다.",
+      );
+    }
+  }
 
   const refreshList = useCallback(async () => {
     try {
@@ -204,6 +263,29 @@ export default function FormsPage() {
         if (!cancelled) setTaxonomies(saved);
       } catch {
         // 코드표를 못 읽어도 양식 목록은 보여야 한다.
+      }
+
+      // 현장 목록. 한 번도 만든 적이 없으면 첫 현장을 만들어 준다 — 빈 선택 상태를
+      // 보여 주면 "어디에 올라가는지" 모른 채 올리게 된다.
+      try {
+        let list = await loadSites();
+        if (list.length === 0) {
+          list = addSite([], FIRST_SITE_NAME, () => crypto.randomUUID());
+          await saveSites(list);
+        }
+        if (!cancelled) {
+          setSites(list);
+          const remembered = (() => {
+            try {
+              return localStorage.getItem(LAST_SITE_KEY) ?? undefined;
+            } catch {
+              return undefined;
+            }
+          })();
+          setSiteId(list.some((site) => site.id === remembered) ? remembered : list[0].id);
+        }
+      } catch {
+        // 현장을 못 읽어도 서류는 보여야 한다.
       }
       await refreshList();
       const lastId = readLastOpenedId();
@@ -317,6 +399,8 @@ export default function FormsPage() {
             sheets,
             code: place?.code,
             taxonomyId: place?.taxonomyId,
+            // 올린 서류는 지금 보고 있는 현장 것이다.
+            siteId,
           });
           id = saved.id;
         } catch (error) {
@@ -911,6 +995,8 @@ export default function FormsPage() {
     }
   }
 
+  // 지금 보고 있는 현장의 서류만 목록에 올린다.
+  const siteForms = formsOfSite(forms, sites, siteId);
   const baseSheet = state.status === "ready" ? state.sheets[activeSheet] : null;
   // 시트 아래에 더한 빈 줄. 원본 격자는 그대로 두고 그릴 때만 이어 붙인다.
   const extraRowCount = baseSheet ? (extraRows[baseSheet.name] ?? 0) : 0;
@@ -961,26 +1047,14 @@ export default function FormsPage() {
             <BrandWordmark letters="SF" name="FORMS" caption="Company Form Library" />
           </Link>
         }
-      />
-
-      <SmartHero
-        eyebrow="Smart Forms · Form Library"
-        chips={
-          <>
-            <HeroChip>서류 {forms.length}</HeroChip>
-            {taxonomies.length > 0 && <HeroChip dot>코드표 {taxonomies.length}</HeroChip>}
-          </>
-        }
-        title="스마트폼(Smart Forms)"
-        description="우미건설 사내 서식을 한곳에. 필요한 양식을 찾고, 그 자리에서 채우세요."
-        actions={
-          <Link
-            href="/"
-            className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-white px-5 text-[14px] font-bold text-[#0a5aa8] shadow-[0_14px_30px_-14px_rgba(0,20,45,0.9)] transition-all hover:-translate-y-0.5 hover:bg-[#f2f8ff]"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            도구 목록
-          </Link>
+        center={
+          <SitePicker
+            sites={sites}
+            currentId={siteId}
+            onSelect={(id) => selectSite(id)}
+            onAdd={() => void handleAddSite()}
+            onRename={() => void handleRenameSite()}
+          />
         }
       />
 
@@ -1038,7 +1112,7 @@ export default function FormsPage() {
               }
               onMoveGroup={(taxonomyId, code, before) => void handleMoveGroup(taxonomyId, code, before)}
               onRenumberGroup={(taxonomyId, groupCode) => void handleRenumberGroup(taxonomyId, groupCode)}
-              forms={forms}
+              forms={siteForms}
               activeId={state.status === "ready" ? state.id : null}
               busy={state.status === "loading"}
               onOpen={(id) => void handleOpen(id)}
@@ -1052,7 +1126,7 @@ export default function FormsPage() {
             />
           ) : (
             <FormGallery
-              forms={forms}
+              forms={siteForms}
               activeId={state.status === "ready" ? state.id : null}
               busy={state.status === "loading"}
               onOpen={(id) => void handleOpen(id)}
@@ -1456,6 +1530,109 @@ function PasteTaxonomyDialog({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 헤더 가운데의 현장 고르개.
+ *
+ * 서류는 현장별로 쌓이므로 "지금 어느 현장인지"가 늘 보여야 한다. 목록 위에 두면 스크롤에
+ * 밀려 사라지고, 그 상태로 올리면 엉뚱한 현장에 들어간다.
+ */
+function SitePicker({
+  sites,
+  currentId,
+  onSelect,
+  onAdd,
+  onRename,
+}: {
+  sites: FormSite[];
+  currentId: string | undefined;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+  onRename: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = sites.find((site) => site.id === currentId);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((on) => !on)}
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-left transition hover:bg-slate-100"
+      >
+        <Building2 size={16} className="shrink-0 text-slate-400" />
+        <span className="min-w-0">
+          <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            현장
+          </span>
+          <span className="block truncate text-[15px] font-bold text-slate-800">
+            {current?.name ?? "현장 없음"}
+          </span>
+        </span>
+        <ChevronDown size={15} className="shrink-0 text-slate-400" />
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="현장 목록 닫기"
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-10 cursor-default"
+          />
+          <div className="absolute left-1/2 z-20 mt-1 w-64 -translate-x-1/2 overflow-hidden rounded-xl bg-white py-1 shadow-lg ring-1 ring-slate-200">
+            <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              현장 고르기
+            </p>
+            {sites.map((site) => (
+              <button
+                key={site.id}
+                type="button"
+                onClick={() => {
+                  onSelect(site.id);
+                  setOpen(false);
+                }}
+                className={
+                  "flex w-full items-center justify-between px-3 py-2 text-left text-sm " +
+                  (site.id === currentId ? "bg-blue-50 font-semibold text-blue-800" : "text-slate-700 hover:bg-slate-50")
+                }
+              >
+                <span className="truncate">{site.name}</span>
+                {site.id === currentId && <Check size={14} className="shrink-0" />}
+              </button>
+            ))}
+            <div className="mt-1 border-t border-slate-100 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onAdd();
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
+              >
+                <Plus size={13} /> 새 현장 만들기
+              </button>
+              {current && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onRename();
+                  }}
+                  className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  <Pencil size={13} /> 이름 바꾸기
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

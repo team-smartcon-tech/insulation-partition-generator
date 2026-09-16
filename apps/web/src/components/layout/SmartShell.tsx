@@ -100,19 +100,27 @@ export function WoomiLogo() {
   );
 }
 
-/** 흰 글래스 상단 바 — 좌: 우미 로고 | 도구 워드마크, 우: 사용자·로그아웃 */
-export function SmartHeader({ brand }: { brand: ReactNode }) {
+/**
+ * 흰 글래스 상단 바 — 좌: 우미 로고 | 도구 워드마크, 가운데: 화면이 넣는 것(현장 선택 등),
+ * 우: 사용자·로그아웃.
+ */
+export function SmartHeader({ brand, center }: { brand: ReactNode; center?: ReactNode }) {
   const { user, logout } = useAuth();
   const roleLabel = user?.role ? (ROLE_LABEL[user.role] ?? undefined) : undefined;
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(8,22,52,0.4)] backdrop-blur-xl">
+      {/* 배너를 뺀 화면이 밋밋해지지 않게, 머리 위에 얇은 파란 띠를 둔다. */}
+      <div className="h-1 w-full bg-[linear-gradient(90deg,#00224a_0%,#0a5aa8_38%,#1478d6_62%,#043a74_100%)]" />
       <div className="flex h-[68px] w-full items-center justify-between px-8">
         <div className="flex items-center gap-4">
           <WoomiLogo />
           <div className="h-7 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent" />
           {brand}
         </div>
+
+        {/* 가운데 — 지금 무엇을 보고 있는지(예: 현장). 좁은 화면에서는 숨긴다. */}
+        {center && <div className="hidden min-w-0 md:block">{center}</div>}
 
         <div className="flex items-center gap-3">
           {user && (
