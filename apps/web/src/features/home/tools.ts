@@ -62,8 +62,8 @@ export const TOOLS: ToolDef[] = [
   },
   {
     id: "forms",
-    name: "우미 양식 모음집",
-    description: "엑셀 업무 양식을 올리면 셀 병합·테두리까지 원본 그대로 띄우고, 내용을 채워 저장합니다.",
+    name: "스마트폼(Smart Forms)",
+    description: "우미건설 사내 서식을 한곳에. 필요한 양식을 찾고, 그 자리에서 채우세요.",
     path: "/tools/forms",
     icon: FileSpreadsheet,
     status: "available",
