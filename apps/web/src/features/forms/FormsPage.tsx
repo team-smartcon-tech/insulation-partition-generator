@@ -1007,6 +1007,18 @@ export default function FormsPage() {
 
   // 지금 보고 있는 현장의 서류만 목록에 올린다.
   const siteForms = formsOfSite(forms, sites, siteId);
+  /**
+   * 열어 둔 서류를 아래에 펼칠지.
+   *
+   * 모든 현장 보기에서는 펼치지 않는다 — 현황을 훑는 화면인데 마지막에 열었던 서류 한 장이
+   * 아래를 통째로 차지하면 "어느 현장 서류인지"도 헷갈린다. 현장을 골랐을 때도 **그 현장
+   * 서류일 때만** 펼친다(다른 현장으로 옮기면 앞 현장 서류가 남아 보이지 않게).
+   */
+  const openFormInSite =
+    state.status === "ready" &&
+    Boolean(siteId) &&
+    // 저장에 실패한 양식(id 없음)은 목록에 없지만, 방금 올린 것이라 그대로 보여 줘야 한다.
+    (state.id === "" || siteForms.some((form) => form.id === state.id));
   // 코드표의 칸 수(회사 공통) — 현장별 현황의 분모다.
   const totalSlots = taxonomies.reduce(
     (sum, taxonomy) => sum + taxonomy.groups.reduce((count, group) => count + group.items.length, 0),
@@ -1174,7 +1186,7 @@ export default function FormsPage() {
           />
         )}
 
-        {state.status === "ready" && sheet && (
+        {state.status === "ready" && sheet && openFormInSite && (
           <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
             {/* 열려 있는 서류의 도구 줄 */}
             <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-slate-200 pb-4">
