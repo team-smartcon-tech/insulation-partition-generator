@@ -86,6 +86,38 @@ export function offsetPolylineInward(
 }
 
 /**
+ * 열린 폴리라인의 외부 방향("left" | "right")을 선 모양으로 자동 판정한다.
+ *
+ * 열린 선은 트레이싱을 어느 끝에서 시작했느냐에 따라 진행방향 기준 좌/우가 바뀐다.
+ * 예전엔 "left" 고정이라 반대 끝에서 그린 측벽은 2P 가 바깥으로 오프셋되고
+ * 2P 가 1P 보다 길게 나왔다(남원주역세권1차 84B — 사용자가 '방향 반전'을 눌러야 했다).
+ * 양 끝을 이어 닫힌 도형으로 보고, 선이 감싸는 방향(넓이 부호)으로 정한다.
+ *  · 넓이 +(Y↑ 반시계) → "right" / 넓이 − → "left"
+ *  · developPly 시뮬레이션으로 확인: 이 값일 때 2P 선이 세대 안쪽이고 2P 가 1P 보다 짧다.
+ *
+ * null 을 돌려주는 경우 — 호출부가 저장값(방향 반전 버튼)을 쓴다.
+ *  · 닫힌 폴리곤: 전개 쪽이 이미 넓이로 보정한다.
+ *  · 거의 일자인 선: 감싸는 넓이가 (길이²)의 1% 미만이면 모양으로 안/밖을 알 수 없다.
+ */
+export function autoExteriorSide(
+  pts: Point2D[],
+  closed: boolean
+): "left" | "right" | null {
+  if (closed || pts.length < 3) return null;
+  let a2 = 0;
+  let len = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    a2 += p.x * q.y - q.x * p.y;
+    if (i < pts.length - 1) len += Math.hypot(q.x - p.x, q.y - p.y);
+  }
+  const area = a2 / 2;
+  if (len <= 0 || Math.abs(area) < 0.01 * len * len) return null;
+  return area > 0 ? "right" : "left";
+}
+
+/**
  * 폴리라인의 세그먼트 개수.
  * 닫힌 체인은 마지막 점 → 첫 점(닫는 변)까지 포함해 N개, 열린 체인은 N-1개다.
  * 전개(developPly)·세그먼트 스펙(resolveSegInsul)이 이미 이 기준을 쓰므로
