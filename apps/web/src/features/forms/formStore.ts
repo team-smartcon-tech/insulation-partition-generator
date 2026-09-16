@@ -14,7 +14,7 @@
  */
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
-import { isWatermark } from "./formShapes.ts";
+import { isRemovedOnCopy } from "./formShapes.ts";
 import { LEGACY_TAXONOMY_ID, type Taxonomy } from "./taxonomy.ts";
 import type { FormSheet, FormValues } from "./types";
 
@@ -162,9 +162,9 @@ export function withCustomSheets(sheets: FormSheet[], custom: CustomSheet[]): Fo
       ...source,
       name: item.name,
       custom: true,
-      // 견본 시트의 "Sample" 워터마크는 실제 문서로 넘어오면 안 된다 — 인쇄물에 찍힌다.
-      // 원본 견본 시트에는 그대로 남는다.
-      shapes: source.shapes.filter((shape) => !isWatermark(shape)),
+      // 견본 시트의 "Sample" 워터마크와 "제출 시 삭제" 안내 상자는 실제 문서로 넘어오면
+      // 안 된다 — 인쇄물에 찍힌다. 원본 견본 시트에는 그대로 남는다.
+      shapes: source.shapes.filter((shape) => !isRemovedOnCopy(shape)),
     });
   }
   return result;

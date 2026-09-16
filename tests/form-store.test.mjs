@@ -284,3 +284,24 @@ test('머리글 줄이 없으면 칸 단위 판정만 쓴다', () => {
 
   assert.deepEqual(blankValuesFor([template, other], template), { '3:2': '' });
 });
+
+test('새 장에는 "제출 시 삭제" 안내 상자가 따라오지 않고, 주의사항 안내는 남는다', () => {
+  const shape = (text) => ({ kind: 'box', left: 0, top: 0, width: 10, height: 10, text, lineWidth: 1 });
+  const template = {
+    ...sheet('견본'),
+    shapes: [
+      shape('Sample'),
+      shape('※ 제출시에는 해당 BOX 삭제 후 제출\n- 현장 여건에 맞게 수정'),
+      shape('※ 주의사항 - 작성 전 법규 및 구비서류가 현행 법규에 맞는지 확인 후 작성'),
+      shape('검토 및 승인'),
+    ],
+  };
+  const [original, copy] = withCustomSheets([template], [{ name: '2026-09', source: '견본' }]);
+
+  // 원본 견본에는 그대로 남는다
+  assert.equal(original.shapes.length, 4);
+  assert.deepEqual(
+    copy.shapes.map((s) => s.text),
+    ['※ 주의사항 - 작성 전 법규 및 구비서류가 현행 법규에 맞는지 확인 후 작성', '검토 및 승인'],
+  );
+});

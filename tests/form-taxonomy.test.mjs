@@ -330,3 +330,29 @@ test('파일 이름 번호가 여러 코드표에 겹치면 보고 있는 쪽으
   assert.equal(placeByFileName('101. 이해관계자.xlsx', taxonomies), undefined);
   assert.equal(placeByFileName('999. 없음.xlsx', taxonomies, 'q'), undefined);
 });
+
+test('한 칸 더 쪼갠 코드(802-1)도 코드표와 파일 이름에서 읽는다', () => {
+  const sheet = sheetOf([
+    [1, 1, 'CODE'],
+    [1, 2, '분류명'],
+    [1, 3, 'CODE'],
+    [1, 4, '분류명'],
+    [2, 1, '800', 2],
+    [2, 2, '문서관리', 2],
+    [2, 3, '802-1'],
+    [2, 4, 'TFT성과보고서'],
+    [3, 3, '802-3'],
+    [3, 4, '착공보고서'],
+  ]);
+  const taxonomy = parseTaxonomySheet(sheet, '공사관련 코드표.xlsx');
+  assert.deepEqual(
+    taxonomy.groups[0].items.map((item) => item.code),
+    ['802-1', '802-3'],
+  );
+  assert.equal(codeFromFileName('802-1. TFT성과보고서.xlsx', taxonomy), '802-1');
+  // 802-2 는 코드표에 없고 802 도 없으니 정하지 않는다
+  assert.equal(codeFromFileName('802-2. 착공전 현장조사 보고서.xlsx', taxonomy), undefined);
+  // 앞 번호(802)로 줄여 맞추지 않는다 — 802 는 다른 서류(착공보고서)일 수 있다
+  const renumbered = [tableOf('c', '공사관련', ['801', '802', '803'])];
+  assert.equal(placeByFileName('802-1. TFT성과보고서.xlsx', renumbered), undefined);
+});

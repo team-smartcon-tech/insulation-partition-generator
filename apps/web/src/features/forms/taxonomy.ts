@@ -71,7 +71,20 @@ export function divisionFromSheetName(name: string): string {
 }
 
 /** 코드로 보이는 값인가. 숫자 3자리 이상(100, 101, 1010 …). */
-const isCode = (text: string) => /^\d{3,}$/.test(text.trim());
+/** 코드 — `101` 처럼 세 자리 이상 숫자, 또는 한 칸을 더 쪼갠 `802-1`(802 보고서 중 1번). */
+const isCode = (text: string) => /^\d{3,}(-\d+)?$/.test(text.trim());
+
+/**
+ * 파일 이름 앞의 코드 후보. `101. 이해관계자.xlsx` → `["101"]`, `802-1. TFT성과보고서.xlsx` → `["802-1"]`.
+ *
+ * `802-1` 을 앞 번호 `802` 로 줄여 맞추지 않는다 — 코드표에서 802 는 전혀 다른 서류(착공보고서)일 수
+ * 있어, 엉뚱한 칸에 조용히 들어간다. 맞는 칸이 없으면 "코드 없는 서류"로 두고 사용자가 옮긴다.
+ */
+export function fileNameCodes(fileName: string): string[] {
+  const match = /^\s*(\d{3,})(?:-(\d+))?/.exec(fileName);
+  if (!match) return [];
+  return [match[2] ? `${match[1]}-${match[2]}` : match[1]];
+}
 
 /** 표에서 한 칸을 꺼낸다. 병합된 칸은 그 범위를 덮는 대표 칸이 나온다. */
 function cellAt(sheet: FormSheet, row: number, col: number): string {
@@ -185,15 +198,14 @@ export function findItem(taxonomy: Taxonomy | null, code: string): TaxonomyItem 
 }
 
 /**
- * 파일 이름 앞의 숫자를 코드로 읽는다 — `101. 이해관계자니즈와기대2.xlsx` → `101`.
+ * 파일 이름 앞의 숫자를 코드로 읽는다 — `101. 이해관계자니즈와기대2.xlsx` → `101`,
+ * `802-1. TFT성과보고서.xlsx` → `802-1`.
  *
  * 사내 양식 파일은 이미 코드로 시작하는 이름을 쓰고 있어, 올릴 때 분류를 고르지 않아도
  * 제자리에 들어간다. 코드표에 없는 번호면 넘긴다(파일명이 옛 체계일 수 있다).
  */
 export function codeFromFileName(fileName: string, taxonomy: Taxonomy | null): string | undefined {
-  const match = /^\s*(\d{3,})/.exec(fileName);
-  if (!match) return undefined;
-  return findItem(taxonomy, match[1]) ? match[1] : undefined;
+  return fileNameCodes(fileName).find((code) => findItem(taxonomy, code));
 }
 
 // ─── 코드표 여러 벌(1차 분류가 여럿) ───────────────────────────
@@ -259,13 +271,262 @@ export function placeByFileName(
   taxonomies: Taxonomy[],
   preferredId?: string,
 ): { taxonomyId: string; code: string } | undefined {
-  const match = /^\s*(\d{3,})/.exec(fileName);
-  if (!match) return undefined;
-  const code = match[1];
-  const owners = taxonomies.filter((taxonomy) => findItem(taxonomy, code));
+  let code = "";
+  let owners: Taxonomy[] = [];
+  for (const candidate of fileNameCodes(fileName)) {
+    owners = taxonomies.filter((taxonomy) => findItem(taxonomy, candidate));
+    code = candidate;
+    if (owners.length > 0) break;
+  }
   if (owners.length === 0) return undefined;
   const preferred = owners.find((taxonomy) => taxonomy.id === preferredId);
   if (preferred) return { taxonomyId: preferred.id, code };
   if (owners.length === 1) return { taxonomyId: owners[0].id, code };
   return undefined;
+}
+
+// ─── 사이트에서 코드표 고치기 ──────────────────────────────────
+// 코드표를 엑셀로만 넣을 수 있으면, 항목 하나 늘릴 때마다 엑셀을 고쳐 다시 올려야 한다.
+// 아래 함수들은 코드표를 **새 값으로 바꿔 돌려준다**(원본은 건드리지 않는다) — 화면은
+// 돌려받은 코드표를 저장하고 다시 그리기만 하면 된다.
+
+/** 코드에서 숫자만 뽑는다. `802-1` → 802.1 처럼 뒤 번호까지 살려 정렬·다음 번호 계산에 쓴다. */
+function codeValue(code: string): number {
+  const [main, sub] = code.split("-");
+  return Number(main) + (sub ? Number(sub) / 1000 : 0);
+}
+
+/** 사이트에서 새로 만든 빈 코드표. 저장할 때 id 가 붙는다. */
+export function createTaxonomy(division: string): Taxonomy {
+  return { id: "", division: division.trim(), groups: [], fileName: "", updatedAt: Date.now(), conflicts: [] };
+}
+
+/** 다음 중분류 번호 — 100, 200, 300 … 마지막 번호에서 100 을 더한다. */
+export function nextGroupCode(taxonomy: Taxonomy): string {
+  const numbers = taxonomy.groups.map((group) => Math.floor(codeValue(group.code))).filter(Number.isFinite);
+  if (numbers.length === 0) return "100";
+  return String(Math.max(...numbers) + 100);
+}
+
+/** 다음 소분류 번호 — 중분류가 800 이면 801, 802 … 이미 있는 마지막 번호 다음. */
+export function nextItemCode(group: TaxonomyGroup): string {
+  const base = Math.floor(codeValue(group.code));
+  const numbers = group.items.map((item) => Math.floor(codeValue(item.code))).filter(Number.isFinite);
+  const last = numbers.length > 0 ? Math.max(...numbers) : base;
+  return String(Math.max(last, base) + 1);
+}
+
+/** 코드표를 고친 뒤 부르는 마무리 — 고친 시각을 남긴다. */
+function touched(taxonomy: Taxonomy, groups: TaxonomyGroup[]): Taxonomy {
+  return { ...taxonomy, groups, updatedAt: Date.now() };
+}
+
+export function addGroup(taxonomy: Taxonomy, name: string, code = nextGroupCode(taxonomy)): Taxonomy {
+  if (taxonomy.groups.some((group) => group.code === code)) return taxonomy;
+  return touched(taxonomy, [...taxonomy.groups, { code, name: name.trim() || code, items: [] }]);
+}
+
+export function addItem(
+  taxonomy: Taxonomy,
+  groupCode: string,
+  name: string,
+  code?: string,
+): Taxonomy {
+  const groups = taxonomy.groups.map((group) => {
+    if (group.code !== groupCode) return group;
+    const itemCode = code ?? nextItemCode(group);
+    if (group.items.some((item) => item.code === itemCode)) return group;
+    return { ...group, items: [...group.items, { code: itemCode, name: name.trim() || itemCode, groupCode }] };
+  });
+  return touched(taxonomy, groups);
+}
+
+/** 중분류의 이름·번호를 고친다. 번호를 바꾸면 그 아래 소분류의 소속도 함께 따라간다. */
+export function editGroup(
+  taxonomy: Taxonomy,
+  groupCode: string,
+  next: { code?: string; name?: string },
+): Taxonomy {
+  const code = next.code?.trim() || groupCode;
+  if (code !== groupCode && taxonomy.groups.some((group) => group.code === code)) return taxonomy;
+  const groups = taxonomy.groups.map((group) =>
+    group.code === groupCode
+      ? {
+          ...group,
+          code,
+          name: next.name?.trim() || group.name,
+          items: group.items.map((item) => ({ ...item, groupCode: code })),
+        }
+      : group,
+  );
+  return touched(taxonomy, groups);
+}
+
+/** 소분류의 이름·번호를 고친다. 번호가 이미 쓰이고 있으면 그대로 둔다. */
+export function editItem(
+  taxonomy: Taxonomy,
+  itemCode: string,
+  next: { code?: string; name?: string },
+): Taxonomy {
+  const code = next.code?.trim() || itemCode;
+  if (code !== itemCode && findItem(taxonomy, code)) return taxonomy;
+  const groups = taxonomy.groups.map((group) => ({
+    ...group,
+    items: group.items.map((item) =>
+      item.code === itemCode ? { ...item, code, name: next.name?.trim() || item.name } : item,
+    ),
+  }));
+  return touched(taxonomy, groups);
+}
+
+/**
+ * 중분류·소분류를 지운다. **지워진 칸에 있던 코드 목록**을 함께 돌려준다 —
+ * 그 칸에 올려 둔 서류는 지우지 않고 "코드 없는 서류"로 내려보내야 하기 때문이다.
+ */
+export function removeGroup(taxonomy: Taxonomy, groupCode: string): { taxonomy: Taxonomy; codes: string[] } {
+  const target = taxonomy.groups.find((group) => group.code === groupCode);
+  if (!target) return { taxonomy, codes: [] };
+  return {
+    taxonomy: touched(taxonomy, taxonomy.groups.filter((group) => group.code !== groupCode)),
+    codes: target.items.map((item) => item.code),
+  };
+}
+
+export function removeItem(taxonomy: Taxonomy, itemCode: string): { taxonomy: Taxonomy; codes: string[] } {
+  if (!findItem(taxonomy, itemCode)) return { taxonomy, codes: [] };
+  const groups = taxonomy.groups.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => item.code !== itemCode),
+  }));
+  return { taxonomy: touched(taxonomy, groups), codes: [itemCode] };
+}
+
+/**
+ * 칸을 다른 자리로 옮긴다(끌어다 놓기).
+ *
+ * **번호는 그대로 둔다.** 끌어 놓을 때마다 번호를 새로 매기면, 그 칸에 이미 올려 둔 서류의
+ * 번호까지 줄줄이 따라 바뀐다. 순서만 먼저 맞추고, 번호를 가지런히 하고 싶으면
+ * `renumberGroup` 을 따로 부른다.
+ *
+ * @param before 이 칸 **앞**에 끼워 넣는다. 없으면 그 중분류 맨 끝에 붙인다.
+ */
+export function moveItem(
+  taxonomy: Taxonomy,
+  code: string,
+  toGroupCode: string,
+  before?: string,
+): Taxonomy {
+  const moving = findItem(taxonomy, code);
+  if (!moving || code === before) return taxonomy;
+  if (!taxonomy.groups.some((group) => group.code === toGroupCode)) return taxonomy;
+
+  const groups = taxonomy.groups.map((group) => {
+    const items = group.items.filter((item) => item.code !== code);
+    if (group.code !== toGroupCode) return { ...group, items };
+    const placed = { ...moving, groupCode: toGroupCode };
+    const at = before ? items.findIndex((item) => item.code === before) : -1;
+    if (at < 0) return { ...group, items: [...items, placed] };
+    return { ...group, items: [...items.slice(0, at), placed, ...items.slice(at)] };
+  });
+  return touched(taxonomy, groups);
+}
+
+/** 중분류 자체의 순서를 바꾼다. `before` 중분류 앞에, 없으면 맨 끝으로. */
+export function moveGroup(taxonomy: Taxonomy, code: string, before?: string): Taxonomy {
+  const moving = taxonomy.groups.find((group) => group.code === code);
+  if (!moving || code === before) return taxonomy;
+  const rest = taxonomy.groups.filter((group) => group.code !== code);
+  const at = before ? rest.findIndex((group) => group.code === before) : -1;
+  const groups = at < 0 ? [...rest, moving] : [...rest.slice(0, at), moving, ...rest.slice(at)];
+  return touched(taxonomy, groups);
+}
+
+/**
+ * 한 중분류의 칸 번호를 지금 순서대로 다시 매긴다(700 → 701, 702 …).
+ *
+ * 바뀐 번호를 함께 돌려준다 — 그 칸에 올려 둔 서류의 번호도 같이 바꿔야 서류가
+ * 제자리에 남기 때문이다. 쪼갠 번호(802-1)는 건드리지 않는다.
+ */
+export function renumberGroup(
+  taxonomy: Taxonomy,
+  groupCode: string,
+): { taxonomy: Taxonomy; changes: { from: string; to: string }[] } {
+  const target = taxonomy.groups.find((group) => group.code === groupCode);
+  if (!target) return { taxonomy, changes: [] };
+  const base = Math.floor(codeValue(groupCode));
+  const changes: { from: string; to: string }[] = [];
+  const items = target.items.map((item, index) => {
+    const to = String(base + index + 1);
+    if (item.code !== to) changes.push({ from: item.code, to });
+    return { ...item, code: to };
+  });
+  // 다른 중분류가 쓰고 있는 번호와 부딪히면 손대지 않는다(번호가 겹치면 서류가 섞인다).
+  const others = taxonomy.groups
+    .filter((group) => group.code !== groupCode)
+    .flatMap((group) => group.items.map((item) => item.code));
+  if (items.some((item) => others.includes(item.code))) return { taxonomy, changes: [] };
+
+  const groups = taxonomy.groups.map((group) => (group.code === groupCode ? { ...group, items } : group));
+  return { taxonomy: touched(taxonomy, groups), changes };
+}
+
+/** 붙여넣은 글에서 읽어 낸 한 줄. */
+export interface PastedLine {
+  code: string;
+  name: string;
+  /** 중분류(100·200 처럼 100 단위)인가 */
+  isGroup: boolean;
+}
+
+/**
+ * 폴더 이름 목록을 붙여넣어 코드표를 만든다.
+ *
+ * 탐색기에서 폴더를 복사해 붙이면 `Z:\01. 공사\100. 공통일반` 같은 전체 경로가,
+ * 엑셀에서 복사하면 `100\t공통일반` 이 온다. 둘 다 받아 **맨 앞 번호 + 이름**만 남긴다.
+ * 100 단위(100·200·800)는 중분류로, 나머지(101·802-1)는 바로 위 중분류의 소분류로 본다.
+ */
+export function parsePastedTaxonomy(text: string): PastedLine[] {
+  const out: PastedLine[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of text.split(/\r?\n/)) {
+    // 경로로 붙은 줄은 마지막 칸(폴더 이름)만 쓴다. 엑셀에서 온 탭은 사이 띄어쓰기로 본다.
+    const line = (rawLine.split(/[\\/]/).pop() ?? "").replace(/\t+/g, " ").trim();
+    if (!line) continue;
+    const match = /^(\d{3,})(?:-(\d+))?[.)\s]+(.*)$/.exec(line);
+    if (!match) continue;
+    const code = match[2] ? `${match[1]}-${match[2]}` : match[1];
+    if (seen.has(code)) continue;
+    const name = match[3].replace(/\.(xlsx|xls|pdf|hwp|docx?)$/i, "").trim();
+    if (!name) continue;
+    seen.add(code);
+    out.push({ code, name, isGroup: !match[2] && Number(match[1]) % 100 === 0 });
+  }
+  return out;
+}
+
+/** 붙여넣어 읽은 줄들을 코드표에 더한다. 이미 있는 번호는 건너뛴다. */
+export function applyPastedLines(taxonomy: Taxonomy, lines: PastedLine[]): Taxonomy {
+  let result = taxonomy;
+  let currentGroup = result.groups[result.groups.length - 1]?.code ?? "";
+  for (const line of lines) {
+    if (line.isGroup) {
+      if (!result.groups.some((group) => group.code === line.code)) {
+        result = addGroup(result, line.name, line.code);
+      }
+      currentGroup = line.code;
+      continue;
+    }
+    // 중분류를 아직 못 만난 소분류는 번호의 100 단위로 중분류를 만들어 건다(101 → 100).
+    let groupCode = currentGroup;
+    const hundred = String(Math.floor(codeValue(line.code) / 100) * 100);
+    if (!groupCode || Math.floor(codeValue(groupCode) / 100) !== Math.floor(codeValue(line.code) / 100)) {
+      groupCode = result.groups.find((group) => group.code === hundred)?.code ?? hundred;
+      if (!result.groups.some((group) => group.code === groupCode)) {
+        result = addGroup(result, groupCode, groupCode);
+      }
+      currentGroup = groupCode;
+    }
+    if (!findItem(result, line.code)) result = addItem(result, groupCode, line.name, line.code);
+  }
+  return result;
 }

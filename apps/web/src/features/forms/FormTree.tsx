@@ -15,11 +15,15 @@ import { useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  ClipboardPaste,
   Eye,
   EyeOff,
   FolderTree,
+  GripVertical,
+  ListOrdered,
   MoreHorizontal,
   Pencil,
+  Plus,
   Search,
   Star,
   Trash2,
@@ -27,7 +31,7 @@ import {
   Upload,
 } from "lucide-react";
 import type { FormSummary } from "./formStore";
-import { taxonomyIdOf, type Taxonomy, type TaxonomyGroup, type TaxonomyItem } from "./taxonomy";
+import { fileNameCodes, taxonomyIdOf, type Taxonomy, type TaxonomyGroup, type TaxonomyItem } from "./taxonomy";
 
 /** 왼쪽 트리 선택값. 코드표 id·코드와 겹치지 않게 앞에 표시를 붙인다. */
 const ALL = " all";
@@ -115,6 +119,24 @@ interface FormTreeProps {
   onRenameDivision: (taxonomyId: string) => void;
   /** 코드표 하나 지우기 — 서류는 남고 분류만 풀린다 */
   onRemoveTaxonomy: (taxonomyId: string) => void;
+  /** 코드표 편집 모드인가 — 켜면 칸을 더하고 고치고 지우는 버튼이 붙는다 */
+  editing: boolean;
+  onToggleEditing: () => void;
+  onAddDivision: () => void;
+  onAddGroup: (taxonomyId: string) => void;
+  onEditGroup: (taxonomyId: string, groupCode: string) => void;
+  onRemoveGroup: (taxonomyId: string, groupCode: string) => void;
+  onAddItem: (taxonomyId: string, groupCode: string) => void;
+  onEditItem: (taxonomyId: string, item: TaxonomyItem) => void;
+  onRemoveItem: (taxonomyId: string, item: TaxonomyItem) => void;
+  /** 폴더 이름 목록을 붙여넣어 한 번에 채우기 */
+  onPasteInto: (taxonomyId: string) => void;
+  /** 칸을 끌어다 놓아 옮기기. before 가 없으면 그 중분류 맨 끝으로. */
+  onMoveItem: (taxonomyId: string, code: string, toGroupCode: string, before?: string) => void;
+  /** 중분류 순서 바꾸기 */
+  onMoveGroup: (taxonomyId: string, code: string, before?: string) => void;
+  /** 한 중분류의 칸 번호를 지금 순서대로 다시 매기기 */
+  onRenumberGroup: (taxonomyId: string, groupCode: string) => void;
 }
 
 export default function FormTree({
@@ -130,6 +152,19 @@ export default function FormTree({
   onUploadTaxonomy,
   onRenameDivision,
   onRemoveTaxonomy,
+  editing,
+  onToggleEditing,
+  onAddDivision,
+  onAddGroup,
+  onEditGroup,
+  onRemoveGroup,
+  onAddItem,
+  onEditItem,
+  onRemoveItem,
+  onPasteInto,
+  onMoveItem,
+  onMoveGroup,
+  onRenumberGroup,
 }: FormTreeProps) {
   const [selected, setSelected] = useState<string>(ALL);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
@@ -147,6 +182,10 @@ export default function FormTree({
   const [hideEmpty, setHideEmpty] = useState<boolean>(() => readStoredFlag(HIDE_EMPTY_KEY));
   /** ⋯ 메뉴가 열린 서류 */
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  /** 지금 끌고 있는 것(칸 또는 중분류) */
+  const [dragging, setDragging] = useState<{ kind: "item" | "group"; taxonomyId: string; code: string } | null>(null);
+  /** 끌고 있는 것이 놓일 자리 — 이 줄 위에 파란 선을 그린다. */
+  const [dropBefore, setDropBefore] = useState<string | null>(null);
 
   /** 칸 → 그 칸에 올린 서류들. 한 칸에 여러 장(월별 등)이 올 수 있다. */
   const bySlot = useMemo(() => {
@@ -197,8 +236,9 @@ export default function FormTree({
   function badgesFor(form: FormSummary): Badge[] {
     const badges: Badge[] = [];
     // 파일 이름 앞 번호와 들어간 칸의 번호가 다르다(옛 체계 파일명이거나, 다른 칸에 올린 경우).
-    const numbered = /^\s*(\d{3,})/.exec(form.fileName)?.[1];
-    if (numbered && form.code && numbered !== form.code) {
+    const candidates = fileNameCodes(form.fileName);
+    const numbered = candidates[0];
+    if (numbered && form.code && !candidates.includes(form.code)) {
       badges.push({
         label: "코드 불일치",
         title: `파일 이름은 ${numbered}, 들어간 칸은 ${form.code}입니다.`,
@@ -280,11 +320,12 @@ export default function FormTree({
                 .map((item) => ({ item, related: bySlot.get(slotKey(taxonomy.id, item.code)) ?? [] }))
                 .filter((entry) => matches(entry.item, entry.related)),
             }))
-            .filter((row) => row.items.length > 0),
+            // 편집 중에는 빈 중분류·빈 분류도 보여야 한다 — 방금 만든 칸이 안 보이면 이어서 못 채운다.
+            .filter((row) => editing || row.items.length > 0),
         }))
-        .filter((section) => section.groups.length > 0),
+        .filter((section) => editing || section.groups.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [taxonomies, bySlot, selected, needle, favoritesOnly],
+    [taxonomies, bySlot, selected, needle, favoritesOnly, editing],
   );
 
   function toggleHideEmpty() {
@@ -300,6 +341,166 @@ export default function FormTree({
     items: { item: TaxonomyItem; related: FormSummary[] }[],
   ) {
     const key = slotKey(taxonomy.id, group.code);
+
+    // 편집 중에는 서류 카드 대신 칸 목록을 편다 — 지금 하는 일이 "칸 정리"라서,
+    // 채워진 칸만 크게 보이면 어디를 고쳐야 할지 보이지 않는다.
+    if (editing) {
+      const groupDropKey = `g:${group.code}`;
+      return (
+        <section
+          key={group.code}
+          className={
+            "mb-2 rounded-xl ring-1 ring-amber-200" +
+            (dropBefore === groupDropKey ? " ring-2 ring-blue-400" : "") +
+            (dragging?.kind === "group" && dragging.code === group.code ? " opacity-50" : "")
+          }
+          onDragOver={(event) => {
+            if (!dragging || dragging.taxonomyId !== taxonomy.id) return;
+            event.preventDefault();
+            // 칸을 끌고 있으면 이 중분류 맨 끝으로, 중분류를 끌고 있으면 이 중분류 앞으로.
+            setDropBefore(dragging.kind === "group" ? groupDropKey : `end:${group.code}`);
+          }}
+          onDrop={(event) => {
+            if (!dragging || dragging.taxonomyId !== taxonomy.id) return;
+            event.preventDefault();
+            if (dragging.kind === "group") onMoveGroup(taxonomy.id, dragging.code, group.code);
+            else onMoveItem(taxonomy.id, dragging.code, group.code);
+            setDragging(null);
+            setDropBefore(null);
+          }}
+        >
+          <div
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              setDragging({ kind: "group", taxonomyId: taxonomy.id, code: group.code });
+            }}
+            onDragEnd={() => {
+              setDragging(null);
+              setDropBefore(null);
+            }}
+            title="끌어서 중분류 순서를 바꿉니다"
+            className="flex cursor-grab flex-wrap items-center gap-2 rounded-t-xl bg-amber-50/70 px-3 py-2 active:cursor-grabbing"
+          >
+            <GripVertical size={14} aria-hidden className="shrink-0 text-amber-400" />
+            <span className="text-sm font-semibold text-slate-800">
+              <span className="mr-1.5 tabular-nums">{group.code}</span>
+              {group.name}
+            </span>
+            <span className="text-xs tabular-nums text-slate-500">칸 {group.items.length}개</span>
+            <span className="ml-auto flex items-center gap-1">
+              {group.items.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => onRenumberGroup(taxonomy.id, group.code)}
+                  title="지금 순서대로 번호를 다시 매깁니다(701, 702 …). 올려 둔 서류도 새 번호를 따라갑니다."
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-slate-600 ring-1 ring-slate-300 hover:bg-white"
+                >
+                  <ListOrdered size={12} /> 번호 정리
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onAddItem(taxonomy.id, group.code)}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-amber-700 ring-1 ring-amber-300 hover:bg-white"
+              >
+                <Plus size={12} /> 칸 추가
+              </button>
+              <button
+                type="button"
+                onClick={() => onEditGroup(taxonomy.id, group.code)}
+                title="중분류 번호·이름 고치기"
+                className="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onRemoveGroup(taxonomy.id, group.code)}
+                title="중분류 지우기"
+                className="rounded p-1 text-slate-400 hover:bg-white hover:text-rose-600"
+              >
+                <Trash2 size={13} />
+              </button>
+            </span>
+          </div>
+
+          {group.items.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-slate-400">아직 칸이 없습니다. “칸 추가”를 누르세요.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {group.items.map((item, index) => {
+                const count = bySlot.get(slotKey(taxonomy.id, item.code))?.length ?? 0;
+                return (
+                  <li
+                    key={`${item.code}-${index}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      setDragging({ kind: "item", taxonomyId: taxonomy.id, code: item.code });
+                    }}
+                    onDragEnd={() => {
+                      setDragging(null);
+                      setDropBefore(null);
+                    }}
+                    onDragOver={(event) => {
+                      if (!dragging || dragging.kind !== "item" || dragging.taxonomyId !== taxonomy.id) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setDropBefore(item.code);
+                    }}
+                    onDrop={(event) => {
+                      if (!dragging || dragging.kind !== "item" || dragging.taxonomyId !== taxonomy.id) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onMoveItem(taxonomy.id, dragging.code, group.code, item.code);
+                      setDragging(null);
+                      setDropBefore(null);
+                    }}
+                    className={
+                      "flex cursor-grab items-center gap-2 px-3 py-2 active:cursor-grabbing" +
+                      (dropBefore === item.code ? " border-t-2 border-blue-500" : "") +
+                      (dragging?.kind === "item" && dragging.code === item.code ? " opacity-40" : "")
+                    }
+                  >
+                    <GripVertical size={14} aria-hidden className="shrink-0 text-slate-300" />
+                    <span className="w-14 shrink-0 text-xs tabular-nums text-slate-500">{item.code}</span>
+                    <span className="truncate text-sm text-slate-700">{item.name}</span>
+                    {count > 0 && (
+                      <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
+                        서류 {count}
+                      </span>
+                    )}
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => onEditItem(taxonomy.id, item)}
+                        title="번호·이름 고치기"
+                        className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveItem(taxonomy.id, item)}
+                        title="칸 지우기"
+                        className="rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-rose-600"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {/* 맨 끝에 놓으려고 상자 아래쪽으로 끌고 왔을 때 */}
+          {dropBefore === `end:${group.code}` && <div className="mx-3 mb-2 h-0.5 rounded bg-blue-500" />}
+        </section>
+      );
+    }
+
     const filledEntries = items.filter((entry) => entry.related.length > 0);
     const emptyEntries = items.filter((entry) => entry.related.length === 0);
     const allEmpty = filledEntries.length === 0;
@@ -371,10 +572,39 @@ export default function FormTree({
         {!isCollapsed && (
           <div className="mt-2">
             {filledEntries.length > 0 && (
+              // 칸(코드)마다 "712 현장설명서" 라벨을 달고 그 아래에 올린 서류를 둔다.
+              // 카드에는 파일 이름이 뜨는데, 파일 이름은 보통 코드표의 칸 이름과 달라
+              // (`● (현장명) OO공사 현장설명서(공통사항)_Ver3-4_26.06`) 라벨이 없으면
+              // **어느 칸이 채워진 것인지 목록에서 사라져 버린다.**
               <ul className="grid grid-cols-[repeat(auto-fill,minmax(7rem,8.5rem))] gap-x-3 gap-y-4">
                 {filledEntries.flatMap(({ item, related }) =>
-                  related.map((form) => (
+                  related.map((form, index) => (
                     <li key={`${form.id}-${item.code}`}>
+                      {/* 같은 칸에 여러 장(월별 등)이면 첫 장에만 라벨을 붙인다. */}
+                      <div className="mb-1 flex items-center gap-1 leading-tight">
+                        <p
+                          className={
+                            "min-w-0 truncate text-[11px] " +
+                            (index === 0 ? "text-slate-500" : "text-transparent")
+                          }
+                          title={`${item.code} ${item.name}`}
+                        >
+                          <span className="tabular-nums">{item.code}</span> {item.name}
+                        </p>
+                        {/* 같은 칸에 한 장 더 올리기. 이미 한 장 올린 칸은 "올리기" 줄이 사라져,
+                            여기 말고는 그 칸에 더 올릴 입구가 없다. */}
+                        {index === 0 && (
+                          <button
+                            type="button"
+                            onClick={() => onUploadFor(taxonomy.id, item)}
+                            title={`${item.code} ${item.name} 칸에 파일을 더 올립니다`}
+                            aria-label={`${item.code} ${item.name} 칸에 파일 더 올리기`}
+                            className="shrink-0 rounded p-0.5 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
+                          >
+                            <Plus size={12} />
+                          </button>
+                        )}
+                      </div>
                       <DocCard
                         form={form}
                         code={item.code}
@@ -512,6 +742,30 @@ export default function FormTree({
             {hideEmpty ? "빈 항목 보이기" : "빈 항목 숨기기"}
           </button>
 
+          <button
+            type="button"
+            onClick={onToggleEditing}
+            aria-pressed={editing}
+            title="코드표(분류 칸)를 사이트에서 직접 만들고 고칩니다."
+            className={
+              editing
+                ? "inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-2.5 py-1.5 text-xs font-medium text-white"
+                : "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50"
+            }
+          >
+            <Pencil size={13} /> {editing ? "편집 끝내기" : "코드표 편집"}
+          </button>
+
+          {editing && (
+            <button
+              type="button"
+              onClick={onAddDivision}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-amber-700 ring-1 ring-amber-300 transition hover:bg-amber-50"
+            >
+              <Plus size={13} /> 1차 분류
+            </button>
+          )}
+
           {/* 1차 분류를 더하는 입구. 안내 문구 속 링크로 두면 찾지 못한다 — 버튼으로 둔다. */}
           <button
             type="button"
@@ -526,12 +780,20 @@ export default function FormTree({
             type="button"
             onClick={() => onUpload(preferredTaxonomyId)}
             disabled={busy}
+            title="엑셀 양식을 올립니다. 여러 개를 한 번에 골라도 됩니다 — 파일 이름 앞 번호로 각자 제자리에 들어갑니다."
             className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             <Upload size={13} /> {busy ? "읽는 중..." : "양식 올리기"}
           </button>
         </div>
       </div>
+
+      {editing && (
+        <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800 ring-1 ring-amber-200">
+          코드표 편집 중입니다. 칸을 지워도 <strong className="font-semibold">올려 둔 서류는 지워지지 않고</strong>{" "}
+          “코드 없는 서류”로 옮겨집니다. 다 고치면 <strong className="font-semibold">편집 끝내기</strong>를 누르세요.
+        </p>
+      )}
 
       <div className="mt-5 flex flex-col gap-6 lg:flex-row">
         {/* ── 왼쪽: 분류 트리 ── */}
@@ -739,20 +1001,45 @@ export default function FormTree({
               const rendered = groups
                 .map(({ group, items }) => renderGroup(taxonomy, group, items))
                 .filter(Boolean);
-              if (rendered.length === 0) return null;
+              if (rendered.length === 0 && !editing) return null;
               return (
                 <div key={taxonomy.id} className="mb-8 last:mb-0">
-                  {taxonomies.length > 1 && (
-                    <h2 className="mb-3 flex items-baseline gap-2 border-b border-slate-200 pb-2">
+                  {(taxonomies.length > 1 || editing) && (
+                    <h2 className="mb-3 flex flex-wrap items-baseline gap-2 border-b border-slate-200 pb-2">
                       <span className="text-base font-semibold text-slate-900">
                         {taxonomy.division || "1차 분류 이름 없음"}
                       </span>
                       <span className="text-sm tabular-nums text-slate-500">
                         {filledOf(taxonomy)}/{totalOf(taxonomy)}
                       </span>
+                      {editing && (
+                        <span className="ml-auto flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => onAddGroup(taxonomy.id)}
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-amber-700 ring-1 ring-amber-300 hover:bg-amber-50"
+                          >
+                            <Plus size={12} /> 중분류
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onPasteInto(taxonomy.id)}
+                            title="탐색기에서 폴더를 복사해 붙여넣으면 한 번에 채웁니다."
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-amber-700 ring-1 ring-amber-300 hover:bg-amber-50"
+                          >
+                            <ClipboardPaste size={12} /> 여러 줄 넣기
+                          </button>
+                        </span>
+                      )}
                     </h2>
                   )}
                   <div className="space-y-3">{rendered}</div>
+                  {editing && rendered.length === 0 && (
+                    <p className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-6 text-center text-xs text-amber-800">
+                      아직 중분류가 없습니다. 위의 <strong className="font-semibold">＋ 중분류</strong> 로 하나 만들거나,{" "}
+                      <strong className="font-semibold">여러 줄 넣기</strong> 로 폴더 목록을 붙여넣으세요.
+                    </p>
+                  )}
                 </div>
               );
             })
