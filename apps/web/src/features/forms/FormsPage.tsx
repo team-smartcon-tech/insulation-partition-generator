@@ -29,6 +29,7 @@ import {
   Trash2,
   TriangleAlert,
   UserRound,
+  Users,
 } from "lucide-react";
 import {
   contactFor,
@@ -44,6 +45,8 @@ import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import { findApprovalBoxes } from "./approval";
+import ApprovalLineDialog, { type ApprovalLineResult } from "./ApprovalLineDialog";
+import { assigneeCaption, initialLine, lineRecord, rememberDefaults, type Assignee } from "./approvalLine";
 import {
   isSiteDoc,
   isTemplate,
@@ -57,6 +60,7 @@ import {
   addSite,
   formsOfSite,
   renameSite,
+  updateSite,
   summarizeSites,
   type FormSite,
   type SiteProgress,
@@ -80,6 +84,7 @@ import {
   saveForm,
   saveSites,
   saveTaxonomies,
+  setApprovalLine,
   setExtraRows,
   setFormCode,
   touchForm,
@@ -187,6 +192,10 @@ export default function FormsPage() {
   });
   /** 시트 이름 → 아래에 더한 빈 줄 수 */
   const [extraRows, setExtraRowsState] = useState<Record<string, number>>({});
+  /** 시트 이름 → (서명 자리 키 → 결재자) */
+  const [approvalLines, setApprovalLinesState] = useState<Record<string, Record<string, Assignee>>>({});
+  /** 결재선 지정 창이 열려 있나 */
+  const [lineDialogOpen, setLineDialogOpen] = useState(false);
   /** 내려받기 선택 메뉴가 열려 있나 */
   const [downloadOpen, setDownloadOpen] = useState(false);
   /** 고칠 수 있는 칸을 하늘색으로 칠할까. 인쇄하거나 원본 모양을 볼 때 끌 수 있다. */
@@ -297,6 +306,7 @@ export default function FormsPage() {
     justLoadedRef.current = { id: form.id, values: form.values };
     setValues(form.values);
     setExtraRowsState(form.extraRows ?? {});
+    setApprovalLinesState(form.approvalLines ?? {});
     setActiveSheet(0);
     setState({
       status: "ready",
@@ -438,6 +448,7 @@ export default function FormsPage() {
     setState({ status: "loading" });
     setActiveSheet(0);
     setExtraRowsState({});
+    setApprovalLinesState({});
     historyRef.current = { past: [], future: [] };
     // 다른 양식을 올리면 앞 양식에 적은 값은 의미가 없다.
     // 아래 justLoadedRef 와 같은 객체를 써야 "방금 불러온 그대로"로 인식돼 헛저장을 안 한다.
@@ -836,6 +847,38 @@ export default function FormsPage() {
     await applyTaxonomies(next, `붙여넣기로 채웠습니다. 지금 서류 칸 ${count}개입니다.`);
   }
 
+  /**
+   * 결재선 지정 창에서 [확인] — 이 시트의 결재선을 저장하고, 조직 변경과 기본 결재선을 현장에 남긴다.
+   * 저장에 실패하면 화면도 바꾸지 않는다(보이는 것과 저장된 것이 갈리지 않게).
+   */
+  async function handleConfirmLine(result: ApprovalLineResult) {
+    if (state.status !== "ready" || !baseSheet || !docSite) return;
+    const record = lineRecord(lineSlots, result.line);
+    const nextSites = updateSite(sites, docSite.id, {
+      members: result.members,
+      ...(result.remember
+        ? { lineDefaults: rememberDefaults(docSite.lineDefaults, lineSlots, result.line) }
+        : {}),
+    });
+    try {
+      await setApprovalLine(state.id, baseSheet.name, record);
+      await saveSites(nextSites);
+      setSites(nextSites);
+      setApprovalLinesState((prev) => {
+        const next = { ...prev };
+        if (Object.keys(record).length > 0) next[baseSheet.name] = record;
+        else delete next[baseSheet.name];
+        return next;
+      });
+      setLineDialogOpen(false);
+      setStorageWarning(null);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `결재선을 저장하지 못했습니다: ${error.message}` : "결재선을 저장하지 못했습니다.",
+      );
+    }
+  }
+
   /** 한 칸에 적은 값을 되돌리기 기록에 남긴다. */
   const handleCommitValue = useCallback(
     (cellKey: string, before: string | undefined, after: string) => {
@@ -1219,6 +1262,14 @@ export default function FormsPage() {
     () => new Set(approvalBoxes.flatMap((box) => box.slots.map((slot) => slot.signKey))),
     [approvalBoxes],
   );
+  const lineSlots = useMemo(() => approvalBoxes.flatMap((box) => box.slots), [approvalBoxes]);
+  const sheetLine = baseSheet ? approvalLines[baseSheet.name] : undefined;
+  const signCaptions = useMemo(
+    () => new Map(Object.entries(sheetLine ?? {}).map(([key, person]) => [key, assigneeCaption(person)])),
+    [sheetLine],
+  );
+  /** 이 서류가 속한 현장 — 조직·기본 결재선을 여기서 꺼낸다(헤더에서 고른 현장과 같다). */
+  const docSite = sites.find((site) => site.id === (openedSummary?.siteId ?? siteId));
   // 새 장을 만들 때 복사해 올 빈 양식. 없으면 지금 보는 시트를 쓴다.
   const template = state.status === "ready" ? findTemplateSheet(state.sheets) : undefined;
   // 고친 글자는 시트마다 따로 담긴다. 화면에는 지금 보는 시트 것만 넘긴다.
@@ -1723,7 +1774,33 @@ export default function FormsPage() {
                   </button>
                 </>
               )}
+
+              {/* 결재선 — 결재칸이 있는 현장 서류에만. 배포 원본은 결재할 문서가 아니다. */}
+              {lineSlots.length > 0 && !readOnly && state.id !== "" && docSite && (
+                <button
+                  type="button"
+                  onClick={() => setLineDialogOpen(true)}
+                  title="이 시트의 결재칸마다 서명할 사람을 정합니다."
+                  className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                >
+                  <Users size={14} /> 결재선 지정
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1 text-[11px] tabular-nums text-white">
+                    {Object.keys(sheetLine ?? {}).length}/{lineSlots.length}
+                  </span>
+                </button>
+              )}
             </div>
+
+            {lineDialogOpen && docSite && (
+              <ApprovalLineDialog
+                siteName={docSite.name}
+                slots={lineSlots}
+                members={docSite.members ?? []}
+                initialLine={initialLine(lineSlots, sheetLine, docSite.lineDefaults)}
+                onCancel={() => setLineDialogOpen(false)}
+                onConfirm={(result) => void handleConfirmLine(result)}
+              />
+            )}
 
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
               <span>시트 “{sheet.name}”</span>
@@ -1786,6 +1863,7 @@ export default function FormsPage() {
               onCommitValue={handleCommitValue}
               tint={showEditableTint}
               signKeys={signKeys}
+              signCaptions={signCaptions}
               onChangeValue={(cellKey, value) =>
                 setValues((prev) => ({
                   ...prev,

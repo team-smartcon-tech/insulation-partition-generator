@@ -133,6 +133,8 @@ interface FormSheetViewProps {
   tint?: boolean;
   /** 결재 서명 자리 — 파란 점선 테두리로 알린다(`approval.ts` 가 찾는다). */
   signKeys?: Set<string>;
+  /** 서명 자리 키 → 지정된 결재자(`김성훈 대리`). 칸 아래쪽에 작게 보인다. */
+  signCaptions?: Map<string, string>;
   /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
   scale?: FormScale;
 }
@@ -160,6 +162,7 @@ function useElementSize(ref: React.RefObject<HTMLElement | null>, deps: unknown[
 
 /** 결재칸이 없는 시트 — 줄 메모가 듣도록 늘 같은 빈 묶음을 넘긴다. */
 const EMPTY_KEYS: Set<string> = new Set();
+const EMPTY_CAPTIONS: Map<string, string> = new Map();
 
 /**
  * 한 줄. **줄 단위로 메모**해 둔다 — 한 칸에 글자를 치면 시트 전체가 다시 그려지는데,
@@ -174,10 +177,12 @@ const SheetRow = memo(function SheetRow({
   values,
   spillable,
   signKeys,
+  signCaptions,
   onChangeValue,
   onCommitValue,
 }: {
   cells: FormCell[];
+  signCaptions: Map<string, string>;
   /** 결재 서명 자리 */
   signKeys: Set<string>;
   height: number | undefined;
@@ -227,10 +232,19 @@ const SheetRow = memo(function SheetRow({
                   outline: "2px dashed rgba(37, 99, 235, 0.55)",
                   outlineOffset: "-4px",
                   backgroundColor: "rgba(219, 234, 254, 0.35)",
+                  position: "relative",
                 }
               : {}),
           }}
         >
+          {/* 지정된 결재자. 칸 글자를 가리지 않게 아래쪽에 작게 두고, 누르기를 막지 않는다. */}
+          {signCaptions.has(cell.key) && (
+            <span
+              className="pointer-events-none absolute inset-x-0 bottom-1 truncate px-1 text-center text-[11px] font-medium text-blue-800"
+            >
+              {signCaptions.get(cell.key)}
+            </span>
+          )}
           <FormCellContent
             cell={cell}
             // 엑셀에서 잠긴 칸은 여기서도 못 고친다(시트 보호가 걸린 시트에만 표시가 붙는다).
@@ -255,6 +269,7 @@ export default function FormSheetView({
   onCommitValue,
   tint = true,
   signKeys = EMPTY_KEYS,
+  signCaptions = EMPTY_CAPTIONS,
   scale = 1,
 }: FormSheetViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -358,6 +373,7 @@ export default function FormSheetView({
               values={rowValues[rowIndex] ?? EMPTY_VALUES}
               spillable={spillable}
               signKeys={signKeys}
+              signCaptions={signCaptions}
               onChangeValue={handleChange}
               onCommitValue={handleCommit}
             />

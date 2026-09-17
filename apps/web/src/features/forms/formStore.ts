@@ -16,6 +16,7 @@
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
 import { planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
+import type { Assignee } from "./approvalLine.ts";
 import type { FormSite } from "./sites.ts";
 import { LEGACY_TAXONOMY_ID, type Taxonomy } from "./taxonomy.ts";
 import type { FormSheet, FormValues } from "./types";
@@ -106,6 +107,11 @@ export interface StoredForm {
    * 더한 줄도 같이 새 모양이 된다.
    */
   extraRows: Record<string, number>;
+  /**
+   * 시트 이름 → (결재 서명 자리 키 → 지정된 사람). 결재칸은 시트마다 따로 있다.
+   * 칸 순서가 아니라 서명 자리 키로 담아, 양식을 다시 읽어도 같은 칸에 붙어 있다.
+   */
+  approvalLines: Record<string, Record<string, Assignee>>;
 }
 
 /**
@@ -174,6 +180,7 @@ function normalize(raw: StoredForm): StoredForm {
     openedAt: raw.openedAt ?? raw.updatedAt,
     customSheets: raw.customSheets ?? [],
     extraRows: raw.extraRows ?? {},
+    approvalLines: raw.approvalLines ?? {},
     values: restoreBlankedTitles(
       normalizeValues(raw.values, raw.sheets ?? []),
       raw.sheets ?? [],
@@ -527,6 +534,7 @@ export async function saveForm(input: {
     values: {},
     customSheets: [],
     extraRows: {},
+    approvalLines: {},
   };
   await run("readwrite", (store) => store.put(form));
   return form;
@@ -735,6 +743,20 @@ export async function setExtraRows(id: string, sheetName: string, count: number)
   });
 }
 
+/** 한 시트의 결재선을 저장한다. 비어 있으면 그 시트 표시를 지운다. */
+export async function setApprovalLine(
+  id: string,
+  sheetName: string,
+  line: Record<string, Assignee>,
+): Promise<void> {
+  await patchForm(id, (form) => {
+    const next = { ...form.approvalLines };
+    if (Object.keys(line).length > 0) next[sheetName] = line;
+    else delete next[sheetName];
+    return { approvalLines: next, updatedAt: Date.now() };
+  });
+}
+
 /** 이 양식에서 이미 쓰이고 있는 시트 이름(원본 + 더한 것). */
 function usedSheetNames(form: StoredForm): string[] {
   return withCustomSheets(form.sheets, form.customSheets).map((sheet) => sheet.name);
@@ -796,7 +818,14 @@ export async function renameCustomSheet(
       values[name] = values[from];
       delete values[from];
     }
+    // 결재선도 시트 이름에 붙어 있어 함께 옮긴다.
+    const approvalLines = { ...form.approvalLines };
+    if (approvalLines[from]) {
+      approvalLines[name] = approvalLines[from];
+      delete approvalLines[from];
+    }
     return {
+      approvalLines,
       customSheets: form.customSheets.map((item) =>
         item.name === from ? { ...item, name } : item,
       ),
@@ -814,7 +843,10 @@ export async function removeCustomSheet(id: string, name: string): Promise<void>
     }
     const values = { ...form.values };
     delete values[name];
+    const approvalLines = { ...form.approvalLines };
+    delete approvalLines[name];
     return {
+      approvalLines,
       customSheets: form.customSheets.filter((item) => item.name !== name),
       values,
       updatedAt: Date.now(),

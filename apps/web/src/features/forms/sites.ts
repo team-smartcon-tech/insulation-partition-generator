@@ -9,10 +9,25 @@
  * 관리해야 한다.
  */
 
+import type { LineDefaults, SiteMember } from "./approvalLine.ts";
+
 export interface FormSite {
   id: string;
   name: string;
   createdAt: number;
+  /** 현장 조직 — 결재선에서 고르는 사람 명단 */
+  members?: SiteMember[];
+  /** 이 현장의 기본 결재선(칸 이름 → 사람들). 다음 서류에 미리 채운다. */
+  lineDefaults?: LineDefaults;
+}
+
+/** 현장 하나의 조직·기본 결재선 같은 부가 정보를 바꾼다. */
+export function updateSite(
+  sites: FormSite[],
+  siteId: string,
+  patch: Partial<Pick<FormSite, "members" | "lineDefaults">>,
+): FormSite[] {
+  return sites.map((site) => (site.id === siteId ? { ...site, ...patch } : site));
 }
 
 /** 현장이 하나도 없을 때 처음 만들어 주는 이름 */
