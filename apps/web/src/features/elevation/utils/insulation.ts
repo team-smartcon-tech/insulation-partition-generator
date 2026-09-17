@@ -121,6 +121,13 @@ export interface DevelopPlyParams {
    */
   startOffset?: number;
   /**
+   * 면(세그먼트)별 시작 위상(mm). 있으면 그 면은 startOffset 대신 이 값을 쓴다.
+   * 판은 코너를 못 넘어 면마다 새로 깔리므로, 벽 전체에 위상 하나를 쓰면 어떤 면은
+   * 양 끝이 모두 잘린다. 면마다 따로 고르면 잘린 조각·결로 경고를 함께 줄일 수 있다
+   * (물량 최소 모드 2P 에서 사용).
+   */
+  segStartOffsets?: number[];
+  /**
    * 최소 조각 폭(mm) — 이보다 좁은 절단 슬리버는 옆 보드와 합쳐 균등 분할한다
    * (둘 다 시공 가능한 크기로). 코너/오프닝 경계는 넘지 않음. 기본 0(off).
    * (placement="min-waste" 에서만 적용)
@@ -670,13 +677,14 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     for (let y = 0; y < wallHeight - 1e-6; y += H, r++) {
       const h = Math.min(H, wallHeight - y);
       rowJoints.push(y);
-      const rowShift =
-        (rowBond === "running" ? (r % 2) * (L / 2) : 0) + plyShift + startOffset;
+      const rowBase =
+        (rowBond === "running" ? (r % 2) * (L / 2) : 0) + plyShift;
       for (let si = 0; si < segCount; si++) {
         const lo = tileLo[si];
         const segLen = tileHi[si] - lo;
         if (segLen <= 1e-6) continue;
-        for (const seg of tileRow(segLen, L, rowShift)) {
+        const faceShift = params.segStartOffsets?.[si] ?? startOffset;
+        for (const seg of tileRow(segLen, L, rowBase + faceShift)) {
           cells.push({
             row: r,
             x: lo + seg.x,
@@ -831,7 +839,9 @@ export function developPlyMinBoards(
   let bestScore: [number, number] = [Infinity, Infinity];
   for (const off of candidates) {
     const dev = developPly({ ...params, startOffset: off });
-    const s = summarizeBoards(dev.cells, L, H);
+    const s = summarizeBoards(dev.cells, L, H, {
+      allowRotate: params.placement === "min-waste",
+    });
     const score: [number, number] = [s.orderBoardCount, s.cutCount];
     if (
       score[0] < bestScore[0] ||
@@ -901,11 +911,23 @@ export interface BoardSummary {
  * 반환: bins (각 bin = 한 온장에서 함께 재단되는 절단 cell 인덱스 배열).
  * bins.length = 절단에 필요한 실제 온장 판 수.
  */
+/** 절단 재단(빈패킹) 옵션 */
+export interface PackOptions {
+  /**
+   * 조각을 90° 돌려 재단 허용 — 물량 최소 모드.
+   * 단열재(PF보드)는 결 방향이 없어 돌려 잘라도 된다. 예: 1000×190(창 위 조각)을
+   * 폭 200 자투리에 세워 넣어 판 1장을 아낀다. 시공성 우선은 기존대로(회전 없음).
+   */
+  allowRotate?: boolean;
+}
+
 export function packCutBoards(
   cells: BoardCell[],
   L: number,
-  H: number
+  H: number,
+  opts: PackOptions = {}
 ): number[][] {
+  const allowRotate = !!opts.allowRotate;
   const EPS = 1e-6;
   const isFull = (c: BoardCell) => c.w >= L - EPS && c.h >= H - EPS;
   type FreeRect = { x: number; y: number; w: number; h: number };
@@ -933,25 +955,42 @@ export function packCutBoards(
       if (bin.thk !== p.thk) continue; // 두께 다르면 같은 온장 재단 불가
       let best = -1;
       let bestArea = Infinity;
+      let bestRot = false;
       for (let k = 0; k < bin.free.length; k++) {
         const f = bin.free[k];
         if (f.w >= p.w - EPS && f.h >= p.h - EPS && f.w * f.h < bestArea) {
           bestArea = f.w * f.h;
           best = k;
+          bestRot = false;
+        }
+        // 돌려서 들어가면 후보 — 같은 넓이면 안 돌린 쪽 유지(<)
+        if (
+          allowRotate &&
+          f.w >= p.h - EPS &&
+          f.h >= p.w - EPS &&
+          f.w * f.h < bestArea
+        ) {
+          bestArea = f.w * f.h;
+          best = k;
+          bestRot = true;
         }
       }
       if (best >= 0) {
         const f = bin.free[best];
         bin.items.push(p.i);
         bin.free.splice(best, 1);
-        splitFree(bin, f, p.w, p.h);
+        if (bestRot) splitFree(bin, f, p.h, p.w);
+        else splitFree(bin, f, p.w, p.h);
         done = true;
         break;
       }
     }
     if (!done) {
       const bin: Bin = { free: [], items: [p.i], thk: p.thk };
-      splitFree(bin, { x: 0, y: 0, w: L, h: H }, p.w, p.h);
+      // 판보다 넓은 조각(예 1050×369 문 위)은 회전 허용 시 세워서 잘라낸다
+      const rotNew = allowRotate && p.w > L + EPS && p.h <= L + EPS;
+      if (rotNew) splitFree(bin, { x: 0, y: 0, w: L, h: H }, p.h, p.w);
+      else splitFree(bin, { x: 0, y: 0, w: L, h: H }, p.w, p.h);
       bins.push(bin);
     }
   }
@@ -1001,7 +1040,8 @@ export function thicknessStyle(thk: number): { hex: string; aci: number } {
 export function numberBoards(
   cells: BoardCell[],
   L: number,
-  H: number
+  H: number,
+  opts: PackOptions = {}
 ): string[] {
   const labels: string[] = new Array(cells.length).fill("");
   const isFull = (c: BoardCell) => c.w >= L - 1e-6 && c.h >= H - 1e-6;
@@ -1009,7 +1049,7 @@ export function numberBoards(
     if (c.discarded) labels[i] = "버림";
     else if (isFull(c)) labels[i] = "온장";
   });
-  const bins = packCutBoards(cells, L, H);
+  const bins = packCutBoards(cells, L, H, opts);
   // 두께별 번호 카운터 — bin 은 packCutBoards 에서 이미 두께 단일로 만들어진다
   const seq = new Map<number, number>();
   bins.forEach(items => {
@@ -1039,7 +1079,8 @@ export function groupKeyOf(label: string): string | null {
 export function summarizeBoards(
   cells: BoardCell[],
   L: number,
-  H: number
+  H: number,
+  opts: PackOptions = {}
 ): BoardSummary {
   const map = new Map<string, BoardTally>();
   let totalAreaMm2 = 0;
@@ -1075,7 +1116,7 @@ export function summarizeBoards(
     .reduce((s, t) => s + t.count, 0);
   const fullCount = totalCount - cutCount;
   // 절단 조각을 실제 온장 몇 판에서 재단하는지 (2D 빈패킹 결과, 버림 제외)
-  const cutBoardCount = packCutBoards(cells, L, H).length;
+  const cutBoardCount = packCutBoards(cells, L, H, opts).length;
   return {
     tallies,
     totalCount,
