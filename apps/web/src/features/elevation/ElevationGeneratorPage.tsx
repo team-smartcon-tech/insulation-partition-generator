@@ -1303,7 +1303,7 @@ export default function ElevationGeneratorPage() {
     dev2: PlyDevelopment | null;
     conflictSegs: JointSeg[];
   };
-  // 물량 최소 모드는 2P 면별 위치 탐색(면 × 20위치)으로 계산이 무거워,
+  // 2P 면별 위치 탐색(면 × 20위치)으로 계산이 무거워,
   // 같은 입력이면 결과를 재사용한다. 키는 전개에 들어가는 입력 전부.
   const plyDevCacheRef = useRef(new Map<string, PlyDevResult>());
   const buildPlyDev = (
@@ -1319,9 +1319,8 @@ export default function ElevationGeneratorPage() {
       y0: o.sill,
       y1: o.sill + o.height,
     }));
-    if (placement !== "min-waste") return computePlyDev(w, floorHeight, opsStruct);
     const key = JSON.stringify([
-      w.points, w.closed, resolveSegInsul(w), exteriorSideOf(w), opsStruct,
+      placement, w.points, w.closed, resolveSegInsul(w), exteriorSideOf(w), opsStruct,
       floorHeight, boardLength, boardHeight, boardThickness, optimizeSP,
       discardWidth, constructMinW, minPieceWidth, minJointGap, plyInward,
     ]);
@@ -1370,16 +1369,13 @@ export default function ElevationGeneratorPage() {
         allowRotate: minWaste,
       }).orderBoardCount,
     });
-    // 우선순위 — 시공성 우선: 결로 경고 → 판수 (기존 그대로)
-    //            물량 최소: 판수 → 결로 경고
-    // (결로 경고를 먼저 보면 경고 몇 개를 줄이려고 판을 여러 장 더 쓴다.
-    //  남원주역세권1차 84C 2P: 경고 우선 49판 ↔ 판수 우선 43판, 현장 도면 44판)
+    // 2P 위치 우선순위 — 두 모드 모두 판수 → 결로 경고.
+    // (예전엔 결로 경고를 먼저 봐서 경고 몇 개를 줄이려고 판을 여러 장 더 썼다.
+    //  남원주역세권1차 84C 2P: 경고 우선 48~49판 ↔ 판수 우선 42판, 현장 도면 44판)
+    // 1P 배치(시공성 우선 = 창 좌우 일직선 절단)와 조각 회전(물량 최소만)은 모드별 그대로.
     const better = (a: Cand, b: Cand) =>
-      minWaste
-        ? a.boards < b.boards ||
-          (a.boards === b.boards && a.segs.length < b.segs.length)
-        : a.segs.length < b.segs.length ||
-          (a.segs.length === b.segs.length && a.boards < b.boards);
+      a.boards < b.boards ||
+      (a.boards === b.boards && a.segs.length < b.segs.length);
 
     // ① 벽 전체 시작 위치 0~950 을 50 간격으로 훑는다
     let best: Cand | null = null;
@@ -1393,21 +1389,19 @@ export default function ElevationGeneratorPage() {
     }
     if (!best) return { dev1, dev2: developPly(p2), conflictSegs: [] };
 
-    // ② 물량 최소: 면마다 시작 위치를 따로 골라 본다(①의 위치에서 출발, 한 바퀴).
+    // ② 면마다 시작 위치를 따로 골라 본다(①의 위치에서 출발, 한 바퀴).
     //    판은 코너를 못 넘어 면마다 새로 깔리는데, 위치 하나를 벽 전체에 쓰면
     //    어떤 면은 양 끝이 다 잘린다. 판수가 같아도 결로 경고가 줄어드는 쪽을 택한다.
-    if (minWaste) {
-      const offs = new Array<number>(best.dev.segLengths.length).fill(bestOff);
-      for (let f = 0; f < offs.length; f++) {
-        for (let off = 0; off < L; off += 50) {
-          if (off === offs[f]) continue;
-          const trial = offs.slice();
-          trial[f] = off;
-          const c = evalDev(developPly({ ...p2, segStartOffsets: trial }));
-          if (better(c, best)) {
-            best = c;
-            offs[f] = off;
-          }
+    const offs = new Array<number>(best.dev.segLengths.length).fill(bestOff);
+    for (let f = 0; f < offs.length; f++) {
+      for (let off = 0; off < L; off += 50) {
+        if (off === offs[f]) continue;
+        const trial = offs.slice();
+        trial[f] = off;
+        const c = evalDev(developPly({ ...p2, segStartOffsets: trial }));
+        if (better(c, best)) {
+          best = c;
+          offs[f] = off;
         }
       }
     }
