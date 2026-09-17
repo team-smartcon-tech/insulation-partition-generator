@@ -168,6 +168,11 @@ interface FormTreeProps {
   extraBadges?: (form: FormSummary) => Badge[];
   /** 칸마다 올리기/작성하기 중 무엇을 할지. 없으면 늘 올리기. */
   slotAction?: (taxonomyId: string, item: TaxonomyItem) => SlotAction;
+  /**
+   * 세는 칸(`코드표id:코드`). 주면 **이 칸들만** 분모로 센다 — 현장 서류함은 배포 양식이 있는 서류만
+   * 셈에 넣어 홈의 서류 진척도와 숫자가 같게 한다. 없으면 코드표의 모든 칸.
+   */
+  countableSlots?: Set<string>;
 }
 
 export default function FormTree({
@@ -205,6 +210,7 @@ export default function FormTree({
   toolbarExtra,
   extraBadges,
   slotAction,
+  countableSlots,
 }: FormTreeProps) {
   const actionFor = (taxonomyId: string, item: TaxonomyItem): SlotAction =>
     slotAction?.(taxonomyId, item) ?? {
@@ -323,10 +329,13 @@ export default function FormTree({
     );
   };
 
+  const countable = (taxonomy: Taxonomy, group: TaxonomyGroup) =>
+    countableSlots ? group.items.filter((item) => countableSlots.has(slotKey(taxonomy.id, item.code))) : group.items;
   const filledIn = (taxonomy: Taxonomy, group: TaxonomyGroup) =>
-    group.items.filter((item) => bySlot.has(slotKey(taxonomy.id, item.code))).length;
+    countable(taxonomy, group).filter((item) => bySlot.has(slotKey(taxonomy.id, item.code))).length;
+  const groupTotal = (taxonomy: Taxonomy, group: TaxonomyGroup) => countable(taxonomy, group).length;
   const totalOf = (taxonomy: Taxonomy) =>
-    taxonomy.groups.reduce((sum, group) => sum + group.items.length, 0);
+    taxonomy.groups.reduce((sum, group) => sum + groupTotal(taxonomy, group), 0);
   const filledOf = (taxonomy: Taxonomy) =>
     taxonomy.groups.reduce((sum, group) => sum + filledIn(taxonomy, group), 0);
   const totalItems = taxonomies.reduce((sum, taxonomy) => sum + totalOf(taxonomy), 0);
@@ -617,7 +626,8 @@ export default function FormTree({
             <span className="tabular-nums">{group.code}</span>
             {group.name}
             <span className="font-normal tabular-nums text-slate-500">
-              {filledIn(taxonomy, group)}/{group.items.length}
+              {/* 셀 서류가 없으면(현장 서류함에서 배포 양식이 하나도 없는 중분류) 0/0 대신 – */}
+              {groupTotal(taxonomy, group) === 0 ? "–" : `${filledIn(taxonomy, group)}/${groupTotal(taxonomy, group)}`}
             </span>
           </button>
           {/* 서류를 쓰다 막히면 물어볼 곳. 중분류 제목 옆에 한 번만 — 칸마다 되풀이하면 목록이 글자로 덮인다. */}
@@ -743,7 +753,7 @@ export default function FormTree({
           <h2 className="text-lg font-semibold text-slate-900">
             {title}{" "}
             <span className="text-sm font-normal tabular-nums text-slate-500">
-              {totalFilled} / {totalItems}
+              {totalFilled} / {totalItems}종
             </span>
           </h2>
           <div
@@ -1009,7 +1019,7 @@ export default function FormTree({
                               {group.name}
                             </span>
                             <span className={filled > 0 ? "ml-2 tabular-nums text-slate-600" : "ml-2 tabular-nums text-slate-300"}>
-                              {filled}/{group.items.length}
+                              {groupTotal(taxonomy, group) === 0 ? "–" : `${filled}/${groupTotal(taxonomy, group)}`}
                             </span>
                           </button>
                         </li>

@@ -50,7 +50,7 @@ import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import HomeDashboard, { SitesAudit } from "./HomeDashboard";
-import { approvalOverview, documentProgress, sitesAudit } from "./homeStats";
+import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
 import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
 import ApprovalLineDialog, { type ApprovalLineResult } from "./ApprovalLineDialog";
@@ -1359,6 +1359,15 @@ export default function FormsPage() {
         .map((form) => ({ formId: form.id, title: form.title })),
     [siteForms, templates, taxonomies],
   );
+  /** 배포 양식이 있는 칸(`코드표id:코드`) — 현장이 만들 수 있는 서류 */
+  const deployedSlots = useMemo(() => {
+    const slots = new Set<string>();
+    for (const template of templates) {
+      const taxonomyId = taxonomyIdOf(template, taxonomies);
+      if (taxonomyId && template.code) slots.add(`${taxonomyId}:${template.code}`);
+    }
+    return slots;
+  }, [templates, taxonomies]);
   const homeAudit = useMemo(
     () => sitesAudit(sites, taxonomies, forms, homeMinute * 60_000),
     [sites, taxonomies, forms, homeMinute],
@@ -1584,6 +1593,7 @@ export default function FormsPage() {
           ) : space === "site" && !siteId ? (
             <SiteOverview
               rows={summarizeSites(sites, siteDocs, totalSlots)}
+              audit={homeAudit}
               onOpen={(id) => selectSite(id)}
               onAdd={() => void handleAddSite()}
             />
@@ -1617,9 +1627,11 @@ export default function FormsPage() {
               subtitle={
                 space === "library"
                   ? "회사가 배포한 원본입니다. 열어서 확인하고 [작성하기]를 누르면 현장 서류함에 사본이 생깁니다."
-                  : "이 현장의 작성본입니다. 빈 칸의 [작성하기]는 배포 양식으로 바로 사본을 만듭니다."
+                  : "이 현장의 작성본입니다. 아직 만들지 않은 서류의 [작성하기]는 배포 양식으로 바로 사본을 만듭니다."
               }
               manageTaxonomy={space === "library"}
+              // 현장 서류함의 숫자는 배포 양식이 있는 서류만 센다(홈의 서류 진척도와 같은 기준).
+              countableSlots={space === "site" ? deployedSlots : undefined}
               // 현장 서류함의 서류는 배포 양식에서 가져온다. 원본이 없는 칸만 그 칸의 [올리기]로 올린다.
               uploadLabel={space === "library" ? "배포 양식 올리기" : null}
               toolbarExtra={space === "site" ? importButton : undefined}
@@ -2464,15 +2476,19 @@ function SitePicker({
  */
 function SiteOverview({
   rows,
+  audit,
   onOpen,
   onAdd,
 }: {
   rows: SiteProgress[];
+  /** 서류 진척도 — 홈과 같은 기준(배포된 서류 중 만든 종류 수)으로 센다 */
+  audit: SiteAuditRow[];
   onOpen: (siteId: string) => void;
   onAdd: () => void;
 }) {
-  const totalFilled = rows.reduce((sum, row) => sum + row.filled, 0);
-  const totalSlots = rows.reduce((sum, row) => sum + row.total, 0);
+  const progressOf = (siteId: string) => audit.find((entry) => entry.siteId === siteId);
+  const totalMade = audit.reduce((sum, row) => sum + row.made, 0);
+  const totalDeployed = audit.reduce((sum, row) => sum + row.deployed, 0);
 
   return (
     <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -2483,13 +2499,13 @@ function SiteOverview({
             <span className="text-sm font-normal tabular-nums text-slate-500">현장 {rows.length}개</span>
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            현장을 눌러 그 현장 서류함으로 들어갑니다. 점검할 때는 채운 칸 수로 빠진 서류를 찾습니다.
+            현장을 눌러 그 현장 서류함으로 들어갑니다. 서류 진척도는 배포된 서류 중 그 현장에서 만든 서류 종류로 셉니다.
           </p>
         </div>
-        {totalSlots > 0 && (
+        {totalDeployed > 0 && (
           <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
-            전체 채움 <span className="tabular-nums">{totalFilled}</span> /{" "}
-            <span className="tabular-nums">{totalSlots}</span>
+            전체 작성 <span className="tabular-nums">{totalMade}</span> /{" "}
+            <span className="tabular-nums">{totalDeployed}</span>종
           </span>
         )}
         <button
@@ -2503,7 +2519,10 @@ function SiteOverview({
 
       <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {rows.map((row) => {
-          const percent = row.total > 0 ? Math.round((row.filled / row.total) * 100) : 0;
+          const progress = progressOf(row.site.id);
+          const made = progress?.made ?? 0;
+          const deployed = progress?.deployed ?? 0;
+          const percent = deployed > 0 ? Math.round((made / deployed) * 100) : 0;
           return (
             <li key={row.site.id}>
               <button
@@ -2520,7 +2539,7 @@ function SiteOverview({
                   <span className="text-2xl font-bold tabular-nums text-slate-900">{percent}</span>
                   <span className="text-xs text-slate-400">%</span>
                   <span className="ml-auto text-xs tabular-nums text-slate-500">
-                    {row.filled} / {row.total}칸
+                    {deployed > 0 ? `${made} / ${deployed}종` : "배포된 양식 없음"}
                   </span>
                 </span>
 
