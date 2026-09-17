@@ -14,7 +14,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
   ChevronDown,
-  ChevronRight,
   ClipboardPaste,
   Eye,
   EyeOff,
@@ -50,8 +49,6 @@ const COLLAPSED_KEY = "ipg-forms:collapsed-groups";
 const FOLDED_DIVISIONS_KEY = "ipg-forms:folded-divisions";
 /** 빈 항목 숨기기 */
 const HIDE_EMPTY_KEY = "ipg-forms:hide-empty";
-/** 중분류마다 처음 보여 줄 빈 칸 수. 나머지는 "더 보기"로 편다. */
-const EMPTY_PREVIEW = 3;
 
 /** 이 브라우저에 기억해 둔 목록을 읽는다. 저장이 막힌 브라우저면 빈 목록. */
 function readStoredSet(key: string): Set<string> {
@@ -224,10 +221,6 @@ export default function FormTree({
   const [foldedDivisions, setFoldedDivisions] = useState<Set<string>>(() =>
     readStoredSet(FOLDED_DIVISIONS_KEY),
   );
-  /** 한 칸도 안 채워 제목만 보이던 중분류 중 사용자가 펼친 것(이번 화면에서만) */
-  const [openedEmpty, setOpenedEmpty] = useState<Set<string>>(new Set());
-  /** "더 보기"를 누른 중분류(이번 화면에서만) */
-  const [showAllEmpty, setShowAllEmpty] = useState<Set<string>>(new Set());
   const [hideEmpty, setHideEmpty] = useState<boolean>(() => readStoredFlag(HIDE_EMPTY_KEY));
   /** ⋯ 메뉴가 열린 서류 */
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -595,35 +588,10 @@ export default function FormTree({
     // 빈 항목 숨기기 — 한 칸도 안 채운 중분류는 통째로 뺀다(검색 중에는 찾은 것을 보여 준다).
     if (hideEmpty && allEmpty && !searching) return null;
 
-    // 한 칸도 안 채운 중분류는 제목 한 줄로 접어 둔다. 빈 상자 9개를 늘어놓지 않는다.
-    if (allEmpty && !searching && !openedEmpty.has(key)) {
-      return (
-        <button
-          key={group.code}
-          type="button"
-          onClick={() => setOpenedEmpty((prev) => toggled(prev, key))}
-          aria-expanded={false}
-          className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left ring-1 ring-slate-200 transition hover:bg-slate-50"
-        >
-          <ChevronRight size={15} aria-hidden className="shrink-0 text-slate-400" />
-          <span className="text-sm font-medium text-slate-700">
-            <span className="mr-1.5 tabular-nums">{group.code}</span>
-            {group.name}
-          </span>
-          <span className="text-sm tabular-nums text-slate-400">0/{group.items.length}</span>
-          <span className="ml-auto text-xs text-slate-400">모두 비어 있음</span>
-        </button>
-      );
-    }
-
-    const isCollapsed = !searching && !allEmpty && collapsed.has(key);
-    const expandedEmpty = searching || showAllEmpty.has(key);
-    const visibleEmpty = hideEmpty
-      ? []
-      : expandedEmpty
-        ? emptyEntries
-        : emptyEntries.slice(0, EMPTY_PREVIEW);
-    const hiddenEmptyCount = hideEmpty ? 0 : emptyEntries.length - visibleEmpty.length;
+    // 빈 칸도 처음부터 모두 보여 준다(사용자 판단: 몇 개만 보이고 "더 보기"로 숨기면 오히려 찾기 어렵다).
+    // 줄이고 싶으면 [빈 항목 숨기기], 중분류째 접으려면 제목을 누른다.
+    const isCollapsed = !searching && collapsed.has(key);
+    const visibleEmpty = hideEmpty ? [] : emptyEntries;
 
     return (
       <section key={group.code} className="mb-2">
@@ -631,13 +599,11 @@ export default function FormTree({
           <button
             type="button"
             onClick={() =>
-              allEmpty
-                ? setOpenedEmpty((prev) => toggled(prev, key))
-                : setCollapsed((prev) => {
-                    const next = toggled(prev, key);
-                    writeStoredSet(COLLAPSED_KEY, next);
-                    return next;
-                  })
+              setCollapsed((prev) => {
+                const next = toggled(prev, key);
+                writeStoredSet(COLLAPSED_KEY, next);
+                return next;
+              })
             }
             aria-expanded={!isCollapsed}
             title={isCollapsed ? "펼치기" : "접기"}
@@ -752,24 +718,6 @@ export default function FormTree({
               </ul>
             )}
 
-            {hiddenEmptyCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowAllEmpty((prev) => toggled(prev, key))}
-                className="mt-2 rounded px-1 py-0.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              >
-                비어 있는 슬롯 {hiddenEmptyCount}개 더 보기
-              </button>
-            )}
-            {!hideEmpty && !searching && showAllEmpty.has(key) && emptyEntries.length > EMPTY_PREVIEW && (
-              <button
-                type="button"
-                onClick={() => setShowAllEmpty((prev) => toggled(prev, key))}
-                className="mt-2 rounded px-1 py-0.5 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              >
-                빈 슬롯 접기
-              </button>
-            )}
           </div>
         )}
       </section>
