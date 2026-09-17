@@ -405,7 +405,8 @@ export function dxfText(str: string): string {
     .replace(/…/g, "...")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
-    .replace(/[〜～]/g, "~");
+    .replace(/[〜～]/g, "~")
+    .replace(/↻/g, "R"); // 회전 재단 표시 — TTF 에 글리프가 없을 수 있어 ASCII 로
   // 남은 비ASCII(한글 등) → 유니코드 이스케이프
   s = s.replace(
     /[^\x20-\x7E]/g,
