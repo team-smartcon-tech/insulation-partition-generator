@@ -52,6 +52,7 @@ import {
   summarizeBoards,
   numberBoards,
   packCutBoards,
+  type PackOptions,
   groupKeyOf,
   thicknessStyle,
   type DevelopPlyParams,
@@ -303,6 +304,13 @@ const exteriorSideOf = (w: WallChain): "left" | "right" =>
   autoExteriorSide(w.points, w.closed) ??
   w.exteriorSide ??
   "left";
+
+/**
+ * 물량 최소 모드 재단 옵션 — 창 노치 조각 재사용 + 조각 회전.
+ * 도면 번호(numberBoards)와 물량(summarizeBoards)이 같은 옵션을 써야 서로 맞는다.
+ * 시공성 우선은 옵션 없음(기존 그대로).
+ */
+const MIN_WASTE_PACK: PackOptions = { allowRotate: true, reuseNotches: true };
 
 const FLOOR_GROUPS: { key: ElevFloorGroup; label: string }[] = [
   { key: "low", label: "1~3F" },
@@ -1387,7 +1395,8 @@ export default function ElevationGeneratorPage() {
     const evalDev = (dev: PlyDevelopment): Cand => ({
       dev,
       segs: conflictSegsOf(j1, 0, jointSegsOf(dev), 0, minJointGap),
-      boards: summarizeBoards(dev.cells, L, boardHeight).orderBoardCount,
+      boards: summarizeBoards(dev.cells, L, boardHeight, minWaste ? MIN_WASTE_PACK : {})
+        .orderBoardCount,
     });
     // 2P 위치 우선순위 — 시공성 우선: 결로 경고 → 판수 (기존 그대로)
     //                    물량 최소: 판수 → 결로 경고
@@ -2448,7 +2457,7 @@ export default function ElevationGeneratorPage() {
         }
 
         // 보드 번호(원형) + 치수 — 정척="온장", 절단=전용그룹 N-1/N-2
-        const labels = numberBoards(dev.cells, boardLength, boardHeight);
+        const labels = numberBoards(dev.cells, boardLength, boardHeight, placement === "min-waste" ? MIN_WASTE_PACK : {});
         // 클릭 상세용 시트 등록 (fit 좌표계 히트 영역은 아래 forEach 에서 기록)
         const sheetIdx =
           elevSheetsRef.current.push({
@@ -2587,7 +2596,7 @@ export default function ElevationGeneratorPage() {
         }
 
         // ── 물량 집계 ──
-        const sum = summarizeBoards(dev.cells, boardLength, boardHeight);
+        const sum = summarizeBoards(dev.cells, boardLength, boardHeight, placement === "min-waste" ? MIN_WASTE_PACK : {});
         // 헤더 우측: 총 장수/면적
         ctx.fillStyle = "#0284c7";
         ctx.font = `bold ${metaFont}px 'Noto Sans KR', sans-serif`;
@@ -3521,7 +3530,7 @@ export default function ElevationGeneratorPage() {
     ply: number,
     segInsul: SegInsul[]
   ): InsulationExport => {
-    const s = summarizeBoards(dev.cells, boardLength, boardHeight);
+    const s = summarizeBoards(dev.cells, boardLength, boardHeight, placement === "min-waste" ? MIN_WASTE_PACK : {});
     const isP2 = ply === 2;
     // 노출 구간(직접/간접외기) 밴드 — 연속 같은 노출은 병합. 전개좌표(dev.segLengths) 기준.
     const exposureBands: NonNullable<InsulationExport["exposureBands"]> = [];
@@ -3578,7 +3587,7 @@ export default function ElevationGeneratorPage() {
     // 버림(폐기) 자투리는 도면에서 뺀다 — 발주·시공 대상이 아닌데 번호·치수가 찍히면
     // 현장에서 시공해야 할 조각으로 오독된다(물량 집계에서도 이미 제외돼 있다).
     // 번호는 전체 셀 기준으로 먼저 매기고 인덱스로 걸러야 남는 조각 번호가 안 밀린다.
-    const allLabels = numberBoards(dev.cells, boardLength, boardHeight);
+    const allLabels = numberBoards(dev.cells, boardLength, boardHeight, placement === "min-waste" ? MIN_WASTE_PACK : {});
     const keep: number[] = [];
     dev.cells.forEach((c, i) => {
       if (!c.discarded) keep.push(i);
@@ -3705,8 +3714,17 @@ export default function ElevationGeneratorPage() {
         : "";
       const name = `${w.name}${gLabel}`.replace(/,/g, " ");
 
+      // 절단판 묶음을 먼저 계산 — 물량 최소에선 창 노치 판이 조각 재료로 묶음에 들어가므로
+      // 그 판은 온장에서 빼야 중복 집계가 안 된다
+      const rotated = new Set<number>();
+      const bins = packCutBoards(cells, L, H, {
+        ...(placement === "min-waste" ? MIN_WASTE_PACK : {}),
+        rotatedOut: rotated,
+      });
+      const binned = new Set(bins.flat());
+
       // 정척(온장) — 버림 제외. **두께별로 나눠 낸다**(60T 온장과 90T 온장은 다른 자재)
-      const fulls = cells.filter(c => isFull(c) && !c.discarded);
+      const fulls = cells.filter((c, i) => isFull(c) && !c.discarded && !binned.has(i));
       const fullByThk = new Map<number, number>();
       for (const c of fulls) {
         const t = Math.round(c.thickness);
@@ -3723,14 +3741,16 @@ export default function ElevationGeneratorPage() {
 
       // 절단판 — 한 온장에서 재단되는 조각 묶음 = 1판 (묶음은 두께 단일이 보장된다)
       // 번호는 도면과 같은 규칙으로 두께별 시퀀스를 쓴다 → 도면의 90-2 와 표의 90-2 가 같은 판
-      const bins = packCutBoards(cells, L, H);
       const binSeq = new Map<number, number>();
       bins.forEach(items => {
         const thk = Math.round(cells[items[0]].thickness);
         const no = (binSeq.get(thk) ?? 0) + 1;
         binSeq.set(thk, no);
         const pieces = items.map(
-          i => `${Math.round(cells[i].w)}x${Math.round(cells[i].h)}`
+          i =>
+            `${Math.round(cells[i].w)}x${Math.round(cells[i].h)}` +
+            (cells[i].notches && isFull(cells[i]) ? "(창따냄)" : "") +
+            (rotated.has(i) ? "(회전)" : "")
         );
         const area =
           items.reduce((s, i) => s + cells[i].w * cells[i].h, 0) / 1_000_000;
@@ -3793,7 +3813,7 @@ export default function ElevationGeneratorPage() {
     // 두께별로 주문 판수(정척+절단판) 산출 → 면적 = 판수 × 정척면적 (현장식)
     for (const t of new Set(cells.map(c => Math.round(c.thickness)))) {
       const sub = cells.filter(c => Math.round(c.thickness) === t);
-      const boards = summarizeBoards(sub, boardLength, boardHeight).orderBoardCount;
+      const boards = summarizeBoards(sub, boardLength, boardHeight, placement === "min-waste" ? MIN_WASTE_PACK : {}).orderBoardCount;
       m.set(t, { ea: boards, areaM2: boards * fullArea });
     }
     return m;
@@ -4136,7 +4156,8 @@ export default function ElevationGeneratorPage() {
             summary: summarizeBoards(
               [...dev1.cells, ...(dev2?.cells ?? [])],
               boardLength,
-              boardHeight
+              boardHeight,
+              placement === "min-waste" ? MIN_WASTE_PACK : {}
             ),
           };
         }),

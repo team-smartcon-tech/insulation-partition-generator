@@ -57,6 +57,11 @@ export interface BoardCell {
   discarded?: boolean;
   /** 이 셀이 속한 세그먼트의 겹 두께(mm). 물량을 두께별로 분리 집계할 때 사용 */
   thickness: number;
+  /**
+   * 창에 옆구리만 걸쳐 한 장으로 붙이고 창 부분을 따내는(노치) 판의 따낸 사각형 —
+   * 판 좌하단 기준 좌표(mm). 물량 최소 재단에서 이 조각을 다른 조각의 재료로 쓴다.
+   */
+  notches?: { x: number; y: number; w: number; h: number }[];
 }
 
 export interface CornerLap {
@@ -736,7 +741,31 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
             op => op.x0 <= cr.x0 + eps && op.x1 >= cr.x1 - eps
           );
           if (overlapping.length > 0 && !hasFullSpan) {
-            cut.push(cell); // 옆구리 창 → 한 장 유지(현장 노치 컷)
+            // 옆구리 창 → 한 장 유지(현장 노치 컷).
+            // 따낸 사각형을 판 기준 좌표로 기록해 둔다 — 물량 최소 재단에서 그 조각을
+            // 창 아래·위 조각 재료로 다시 쓴다(서로 겹치는 노치는 큰 것만).
+            const notches: NonNullable<BoardCell["notches"]> = [];
+            const cands = overlapping
+              .map(op => {
+                const nx0 = Math.max(op.x0, cr.x0);
+                const nx1 = Math.min(op.x1, cr.x1);
+                const ny0 = Math.max(op.y0, cr.y0);
+                const ny1 = Math.min(op.y1, cr.y1);
+                return { x: nx0 - cell.x, y: ny0 - cell.y, w: nx1 - nx0, h: ny1 - ny0 };
+              })
+              .filter(n => n.w > eps && n.h > eps)
+              .sort((a, b) => b.w * b.h - a.w * a.h);
+            for (const n of cands) {
+              const hit = notches.some(
+                m =>
+                  n.x < m.x + m.w - eps &&
+                  n.x + n.w > m.x + eps &&
+                  n.y < m.y + m.h - eps &&
+                  n.y + n.h > m.y + eps
+              );
+              if (!hit) notches.push(n);
+            }
+            cut.push(notches.length > 0 ? { ...cell, notches } : cell);
             continue;
           }
         }
@@ -919,6 +948,14 @@ export interface PackOptions {
    * 폭 200 자투리에 세워 넣어 판 1장을 아낀다. 시공성 우선은 기존대로(회전 없음).
    */
   allowRotate?: boolean;
+  /**
+   * 창 노치 판의 따낸 조각(BoardCell.notches)을 재료로 쓴다 — 물량 최소 모드.
+   * 노치 판이 조각을 하나라도 내주면 그 판은 절단판 묶음의 첫 항목(items[0])으로 돌려준다
+   * (온장이 아니라 절단판으로 센다 — 중복 집계 방지는 summarizeBoards 가 처리).
+   */
+  reuseNotches?: boolean;
+  /** (출력) 돌려서 재단한 조각의 셀 인덱스를 담는다 — 도면 번호에 회전 표시용 */
+  rotatedOut?: Set<number>;
 }
 
 export function packCutBoards(
@@ -927,13 +964,52 @@ export function packCutBoards(
   H: number,
   opts: PackOptions = {}
 ): number[][] {
+  // 회전은 판이 실제로 줄 때만 쓴다 — 판수가 같은데 돌려 자르라고 표시하면
+  // 도면만 복잡해진다(현장 재단 혼동). 안 돌린 결과와 비교해 적은 쪽을 택한다.
+  if (opts.allowRotate) {
+    const plain = packCutBoardsCore(cells, L, H, { ...opts, allowRotate: false, rotatedOut: undefined });
+    const rot = new Set<number>();
+    const turned = packCutBoardsCore(cells, L, H, { ...opts, rotatedOut: rot });
+    if (turned.length < plain.length) {
+      rot.forEach(i => opts.rotatedOut?.add(i));
+      return turned;
+    }
+    return plain;
+  }
+  return packCutBoardsCore(cells, L, H, opts);
+}
+
+function packCutBoardsCore(
+  cells: BoardCell[],
+  L: number,
+  H: number,
+  opts: PackOptions
+): number[][] {
   const allowRotate = !!opts.allowRotate;
   const EPS = 1e-6;
   const isFull = (c: BoardCell) => c.w >= L - EPS && c.h >= H - EPS;
   type FreeRect = { x: number; y: number; w: number; h: number };
   // 두께가 다른 조각은 같은 온장에서 못 자름 → bin 을 두께별로 구분
-  type Bin = { free: FreeRect[]; items: number[]; thk: number };
+  type Bin = { free: FreeRect[]; items: number[]; thk: number; seed?: boolean };
   const bins: Bin[] = [];
+
+  // 창 노치 판 — 따낸 사각형을 빈 공간으로 가진 '재료 판'으로 먼저 등록(먼저 채워 본다)
+  if (opts.reuseNotches) {
+    cells.forEach((c, i) => {
+      if (c.discarded || !isFull(c) || !c.notches || c.notches.length === 0) return;
+      const free = c.notches
+        .map(n => {
+          const x0 = Math.max(0, n.x);
+          const y0 = Math.max(0, n.y);
+          const x1 = Math.min(L, n.x + n.w);
+          const y1 = Math.min(H, n.y + n.h);
+          return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        })
+        .filter(r => r.w > EPS && r.h > EPS);
+      if (free.length > 0)
+        bins.push({ free, items: [i], thk: Math.round(c.thickness), seed: true });
+    });
+  }
 
   // 큰 조각(면적)부터 — 빈패킹 안정성
   const pieces = cells
@@ -951,50 +1027,47 @@ export function packCutBoards(
 
   for (const p of pieces) {
     let done = false;
-    for (const bin of bins) {
-      if (bin.thk !== p.thk) continue; // 두께 다르면 같은 온장 재단 불가
-      let best = -1;
-      let bestArea = Infinity;
-      let bestRot = false;
-      for (let k = 0; k < bin.free.length; k++) {
-        const f = bin.free[k];
-        if (f.w >= p.w - EPS && f.h >= p.h - EPS && f.w * f.h < bestArea) {
-          bestArea = f.w * f.h;
-          best = k;
-          bestRot = false;
+    // 1차: 안 돌리고 들어갈 판을 전체에서 찾는다. 2차(회전 허용 시): 없을 때만 돌려서 찾는다.
+    // (한 판 안에서 넓이만 비교해 돌리면 안 돌려도 되는 조각까지 돌아가 도면이 복잡해진다)
+    for (const rotate of allowRotate ? [false, true] : [false]) {
+      const pw = rotate ? p.h : p.w;
+      const ph = rotate ? p.w : p.h;
+      for (const bin of bins) {
+        if (bin.thk !== p.thk) continue; // 두께 다르면 같은 온장 재단 불가
+        let best = -1;
+        let bestArea = Infinity;
+        for (let k = 0; k < bin.free.length; k++) {
+          const f = bin.free[k];
+          if (f.w >= pw - EPS && f.h >= ph - EPS && f.w * f.h < bestArea) {
+            bestArea = f.w * f.h;
+            best = k;
+          }
         }
-        // 돌려서 들어가면 후보 — 같은 넓이면 안 돌린 쪽 유지(<)
-        if (
-          allowRotate &&
-          f.w >= p.h - EPS &&
-          f.h >= p.w - EPS &&
-          f.w * f.h < bestArea
-        ) {
-          bestArea = f.w * f.h;
-          best = k;
-          bestRot = true;
+        if (best >= 0) {
+          const f = bin.free[best];
+          bin.items.push(p.i);
+          bin.free.splice(best, 1);
+          splitFree(bin, f, pw, ph);
+          if (rotate) opts.rotatedOut?.add(p.i);
+          done = true;
+          break;
         }
       }
-      if (best >= 0) {
-        const f = bin.free[best];
-        bin.items.push(p.i);
-        bin.free.splice(best, 1);
-        if (bestRot) splitFree(bin, f, p.h, p.w);
-        else splitFree(bin, f, p.w, p.h);
-        done = true;
-        break;
-      }
+      if (done) break;
     }
     if (!done) {
       const bin: Bin = { free: [], items: [p.i], thk: p.thk };
       // 판보다 넓은 조각(예 1050×369 문 위)은 회전 허용 시 세워서 잘라낸다
       const rotNew = allowRotate && p.w > L + EPS && p.h <= L + EPS;
-      if (rotNew) splitFree(bin, { x: 0, y: 0, w: L, h: H }, p.h, p.w);
-      else splitFree(bin, { x: 0, y: 0, w: L, h: H }, p.w, p.h);
+      if (rotNew) {
+        splitFree(bin, { x: 0, y: 0, w: L, h: H }, p.h, p.w);
+        opts.rotatedOut?.add(p.i);
+      } else splitFree(bin, { x: 0, y: 0, w: L, h: H }, p.w, p.h);
       bins.push(bin);
     }
   }
-  return bins.map(b => b.items);
+  // 조각을 하나도 못 내준 노치 판은 그냥 온장이다 — 절단판 목록에서 뺀다
+  return bins.filter(b => !(b.seed && b.items.length === 1)).map(b => b.items);
 }
 
 /**
@@ -1049,7 +1122,8 @@ export function numberBoards(
     if (c.discarded) labels[i] = "버림";
     else if (isFull(c)) labels[i] = "온장";
   });
-  const bins = packCutBoards(cells, L, H, opts);
+  const rotated = new Set<number>();
+  const bins = packCutBoards(cells, L, H, { ...opts, rotatedOut: rotated });
   // 두께별 번호 카운터 — bin 은 packCutBoards 에서 이미 두께 단일로 만들어진다
   const seq = new Map<number, number>();
   bins.forEach(items => {
@@ -1059,7 +1133,8 @@ export function numberBoards(
     seq.set(thk, no);
     items.forEach((cellIdx, k) => {
       labels[cellIdx] =
-        items.length > 1 ? `${thk}-${no}-${k + 1}` : `${thk}-${no}`;
+        (items.length > 1 ? `${thk}-${no}-${k + 1}` : `${thk}-${no}`) +
+        (rotated.has(cellIdx) ? "↻" : ""); // 돌려서 재단하는 조각
     });
   });
   return labels;
@@ -1114,9 +1189,16 @@ export function summarizeBoards(
   const cutCount = tallies
     .filter(t => t.remainder)
     .reduce((s, t) => s + t.count, 0);
-  const fullCount = totalCount - cutCount;
+  let fullCount = totalCount - cutCount;
   // 절단 조각을 실제 온장 몇 판에서 재단하는지 (2D 빈패킹 결과, 버림 제외)
-  const cutBoardCount = packCutBoards(cells, L, H, opts).length;
+  const cutBins = packCutBoards(cells, L, H, opts);
+  const cutBoardCount = cutBins.length;
+  // 창 노치 판이 조각을 내준 경우 그 판(items[0], 온장 크기)은 절단판으로 센다 → 온장에서 뺀다
+  const usedNotchBoards = cutBins.filter(b => {
+    const c = cells[b[0]];
+    return !!c && c.w >= L - 1e-6 && c.h >= H - 1e-6;
+  }).length;
+  fullCount -= usedNotchBoards;
   return {
     tallies,
     totalCount,
