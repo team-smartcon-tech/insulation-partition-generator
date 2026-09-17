@@ -10,6 +10,19 @@
  * 시트 파일 하나만 고치고 나머지는 압축된 바이트 그대로 복사**한다. 우리가 모르는 것
  * (차트·SmartArt·수식·인쇄 설정)은 손대지 않으니 그대로 남는다.
  */
+import {
+  DRAWING_CONTENT_TYPE,
+  EMPTY_DRAWING,
+  EMPTY_RELS,
+  REL_DRAWING,
+  REL_IMAGE,
+  addRelationship,
+  insertDrawingTag,
+  maxShapeId,
+  sheetGeometry,
+  stampAnchorsXml,
+  type ApprovalStamp,
+} from "./approvalExport.ts";
 import type { FormValues } from "./types";
 import { crc32, deflateText, readZipIndex, readZipItems, readZipText, writeZip } from "./zip.ts";
 
@@ -202,6 +215,8 @@ export interface FilledWorkbook {
 export async function buildFilledWorkbook(
   data: ArrayBuffer,
   values: FormValues,
+  /** 시트 이름 → 결재칸에 찍을 도장(서명·구분선·이름). 날짜는 values 로 넘긴다. */
+  stamps: Record<string, ApprovalStamp[]> = {},
 ): Promise<FilledWorkbook> {
   const index = readZipIndex(data);
   const paths = await sheetPaths(data, index);
@@ -211,55 +226,122 @@ export async function buildFilledWorkbook(
   /** 시트 번호 → 글자를 적은 마지막 줄(인쇄 영역을 여기까지 늘린다) */
   const lastRowBySheetIndex = new Map<number, number>();
 
-  for (const [sheetName, cells] of Object.entries(values)) {
-    if (Object.keys(cells).length === 0) continue;
+  // 손댄 XML 은 여기 담아 두고 읽는다 — 같은 파일(내용 형식 목록 등)을 여러 시트가 차례로 고친다.
+  const edited = new Map<string, string>();
+  const readText = async (name: string) => edited.get(name) ?? (await readZipText(data, index, name));
+  const putText = async (name: string, text: string) => {
+    edited.set(name, text);
+    const { compressed, raw } = await deflateText(text);
+    putItem({ name, method: 8, crc32: crc32(raw), compressed, uncompressedSize: raw.length });
+  };
+  function putItem(item: (typeof items)[number]) {
+    const at = items.findIndex((entry) => entry.name === item.name);
+    if (at >= 0) items[at] = item;
+    else items.push(item);
+  }
+  const freeName = (make: (n: number) => string) => {
+    let n = 1;
+    while (items.some((item) => item.name === make(n))) n += 1;
+    return make(n);
+  };
+  const newOverrides: string[] = [];
+  let addedImages = false;
+
+  /** 시트에 결재 도장을 얹는다. 시트에 그림 판(drawing)이 없으면 만들어 붙인다. 고친 시트 XML 을 돌려준다. */
+  async function attachStamps(sheetPath: string, sheetXml: string, list: ApprovalStamp[]): Promise<string> {
+    const relsPath = sheetPath.replace(/([^/]+)$/, "_rels/$1.rels");
+    let sheetRels = (await readText(relsPath)) ?? EMPTY_RELS;
+    let xml = sheetXml;
+    let drawingPath: string;
+
+    const existingId = /<drawing\b[^>]*\br:id="([^"]+)"/.exec(xml)?.[1];
+    const existingTarget = existingId
+      ? new RegExp(`<Relationship\\b[^>]*\\bId="${existingId}"[^>]*\\bTarget="([^"]+)"`).exec(sheetRels)?.[1] ??
+        new RegExp(`<Relationship\\b[^>]*\\bTarget="([^"]+)"[^>]*\\bId="${existingId}"`).exec(sheetRels)?.[1]
+      : undefined;
+    if (existingTarget) {
+      drawingPath = resolvePath(sheetPath, existingTarget);
+    } else {
+      drawingPath = freeName((n) => `xl/drawings/drawing${n}.xml`);
+      const target = `../drawings/${drawingPath.split("/").pop()}`;
+      const added = addRelationship(sheetRels, REL_DRAWING, target);
+      sheetRels = added.xml;
+      await putText(relsPath, sheetRels);
+      xml = insertDrawingTag(xml, added.id);
+      newOverrides.push(`/${drawingPath}`);
+    }
+
+    const drawingRelsPath = drawingPath.replace(/([^/]+)$/, "_rels/$1.rels");
+    let drawingXml = (await readText(drawingPath)) ?? EMPTY_DRAWING;
+    let drawingRels = (await readText(drawingRelsPath)) ?? EMPTY_RELS;
+    // 다른 접두어로 쓴 그림 판이면 우리가 쓰는 접두어(xdr·a)를 뿌리에 알린다.
+    drawingXml = drawingXml.replace(/<xdr:wsDr\b([^>]*)>/, (whole, attrs: string) => {
+      let next = attrs;
+      if (!/xmlns:a=/.test(next)) next += ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
+      return `<xdr:wsDr${next}>`;
+    });
+
+    const geometry = sheetGeometry(xml);
+    let nextId = maxShapeId(drawingXml) + 1;
+    let anchors = "";
+    for (const stamp of list) {
+      const mediaPath = freeName((n) => `xl/media/approval${n}.png`);
+      putItem({ name: mediaPath, method: 0, crc32: crc32(stamp.png), compressed: stamp.png, uncompressedSize: stamp.png.length });
+      const rel = addRelationship(drawingRels, REL_IMAGE, `../media/${mediaPath.split("/").pop()}`);
+      drawingRels = rel.xml;
+      anchors += stampAnchorsXml(stamp, geometry, rel.id, nextId);
+      nextId += 3;
+      addedImages = true;
+    }
+    await putText(drawingPath, drawingXml.replace("</xdr:wsDr>", `${anchors}</xdr:wsDr>`));
+    await putText(drawingRelsPath, drawingRels);
+    return xml;
+  }
+
+  const sheetNames = new Set([
+    ...Object.entries(values).filter(([, cells]) => Object.keys(cells).length > 0).map(([name]) => name),
+    ...Object.entries(stamps).filter(([, list]) => list.length > 0).map(([name]) => name),
+  ]);
+  for (const sheetName of sheetNames) {
+    const cells = values[sheetName] ?? {};
     const path = paths.get(sheetName);
     if (!path) {
       skippedSheets.push(sheetName);
       continue;
     }
-    const xml = await readZipText(data, index, path);
+    const xml = await readText(path);
     if (!xml) {
       skippedSheets.push(sheetName);
       continue;
     }
-    const lastRow = Math.max(
-      ...Object.keys(cells).map((key) => Number(key.split(":")[0]) || 0),
-    );
-    const sheetIndex = order.indexOf(sheetName);
-    if (sheetIndex >= 0 && Number.isFinite(lastRow)) lastRowBySheetIndex.set(sheetIndex, lastRow);
+    if (Object.keys(cells).length > 0) {
+      const lastRow = Math.max(...Object.keys(cells).map((key) => Number(key.split(":")[0]) || 0));
+      const sheetIndex = order.indexOf(sheetName);
+      if (sheetIndex >= 0 && Number.isFinite(lastRow)) lastRowBySheetIndex.set(sheetIndex, lastRow);
+    }
 
-    const patched = patchSheetXml(xml, cells);
-    const { compressed, raw } = await deflateText(patched);
-    const at = items.findIndex((item) => item.name === path);
-    const replacement = {
-      name: path,
-      method: 8,
-      crc32: crc32(raw),
-      compressed,
-      uncompressedSize: raw.length,
-    };
-    if (at >= 0) items[at] = replacement;
-    else items.push(replacement);
+    let patched = patchSheetXml(xml, cells);
+    if (stamps[sheetName]?.length) patched = await attachStamps(path, patched, stamps[sheetName]);
+    await putText(path, patched);
+  }
+
+  // 새로 만든 그림 판·PNG 를 엑셀이 알아보도록 내용 형식 목록에 올린다.
+  if (newOverrides.length > 0 || addedImages) {
+    let types = (await readText("[Content_Types].xml")) ?? "";
+    if (addedImages && !/<Default\b[^>]*Extension="png"/i.test(types)) {
+      types = types.replace("</Types>", '<Default Extension="png" ContentType="image/png"/></Types>');
+    }
+    for (const part of newOverrides) {
+      types = types.replace("</Types>", `<Override PartName="${part}" ContentType="${DRAWING_CONTENT_TYPE}"/></Types>`);
+    }
+    await putText("[Content_Types].xml", types);
   }
 
   // 인쇄 영역도 함께 늘린다(줄을 더해 적은 경우).
   const workbookXml = await readZipText(data, index, "xl/workbook.xml");
   if (workbookXml && lastRowBySheetIndex.size > 0) {
     const nextWorkbook = extendPrintArea(workbookXml, lastRowBySheetIndex);
-    if (nextWorkbook !== workbookXml) {
-      const { compressed, raw } = await deflateText(nextWorkbook);
-      const at = items.findIndex((item) => item.name === "xl/workbook.xml");
-      if (at >= 0) {
-        items[at] = {
-          name: "xl/workbook.xml",
-          method: 8,
-          crc32: crc32(raw),
-          compressed,
-          uncompressedSize: raw.length,
-        };
-      }
-    }
+    if (nextWorkbook !== workbookXml) await putText("xl/workbook.xml", nextWorkbook);
   }
 
   return { bytes: writeZip(items), skippedSheets };

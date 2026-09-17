@@ -49,6 +49,7 @@ import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import { findApprovalBoxes } from "./approval";
+import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
 import ApprovalLineDialog, { type ApprovalLineResult } from "./ApprovalLineDialog";
 import {
   approvalDateText,
@@ -1002,7 +1003,31 @@ export default function FormsPage() {
         setStorageWarning(null);
         return;
       }
-      const { bytes, skippedSheets } = await buildFilledWorkbook(form.bytes, values);
+      // 결재한 칸: 서명·구분선·이름은 떠 있는 그림으로, 날짜는 날짜 자리(`/`) 칸의 글자로 넣는다.
+      const exportValues: FormValues = { ...values };
+      const stamps: Record<string, ApprovalStamp[]> = {};
+      for (const [sheetName, record] of Object.entries(approvals)) {
+        const target = state.sheets.find((item) => item.name === sheetName);
+        if (!target) continue;
+        const slots = findApprovalBoxes(target).flatMap((box) => box.slots);
+        for (const [signKey, approval] of Object.entries(record)) {
+          const cell = target.cells.find((item) => item.key === signKey);
+          if (!cell) continue;
+          (stamps[sheetName] ??= []).push({
+            row: cell.row,
+            col: cell.col,
+            rowSpan: cell.rowSpan,
+            colSpan: cell.colSpan,
+            png: dataUrlBytes(approval.signature),
+            caption: [approval.name, approval.position].filter(Boolean).join(" "),
+          });
+          const dateKey = slots.find((slot) => slot.signKey === signKey)?.dateKey;
+          if (dateKey) {
+            exportValues[sheetName] = { ...(exportValues[sheetName] ?? {}), [dateKey]: approvalDateText(approval.approvedAt) };
+          }
+        }
+      }
+      const { bytes, skippedSheets } = await buildFilledWorkbook(form.bytes, exportValues, stamps);
       downloadBytes(bytes, filledFileName(form.fileName));
       setStorageWarning(
         skippedSheets.length > 0
