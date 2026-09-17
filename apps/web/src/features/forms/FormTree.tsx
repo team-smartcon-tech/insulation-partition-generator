@@ -105,6 +105,8 @@ export interface SlotAction {
   title: string;
   /** true 면 배포 양식에서 사본 만들기, false 면 파일 올리기 */
   write: boolean;
+  /** true 면 할 수 있는 일이 없다 — 누를 것 없이 흐린 글자만 보인다 */
+  none?: boolean;
 }
 
 interface FormTreeProps {
@@ -632,7 +634,7 @@ export default function FormTree({
                         </p>
                         {/* 같은 칸에 한 장 더 올리기. 이미 한 장 올린 칸은 "올리기" 줄이 사라져,
                             여기 말고는 그 칸에 더 올릴 입구가 없다. */}
-                        {index === 0 && (
+                        {index === 0 && !actionFor(taxonomy.id, item).none && (
                           <button
                             type="button"
                             onClick={() => onUploadFor(taxonomy.id, item)}
@@ -1271,6 +1273,11 @@ function EmptyRow({
     <div className="flex h-9 items-center gap-3 border-b border-slate-100 text-sm">
       <span className="w-9 shrink-0 text-xs tabular-nums text-slate-400">{item.code}</span>
       <span className="min-w-0 flex-1 truncate text-slate-600">{item.name}</span>
+      {action.none ? (
+        <span title={action.title} className="shrink-0 px-1.5 text-xs text-slate-300">
+          {action.label}
+        </span>
+      ) : (
       <button
         type="button"
         onClick={onUpload}
@@ -1284,6 +1291,7 @@ function EmptyRow({
       >
         {action.write ? <FilePenLine size={12} aria-hidden /> : <Upload size={12} aria-hidden />} {action.label}
       </button>
+      )}
     </div>
   );
 }

@@ -883,6 +883,8 @@ export default function FormsPage() {
         void handleWrite(template.id, siteId);
         return;
       }
+      // 원본이 없는 칸 — 현장 서류함에서는 파일을 직접 올리지 않는다.
+      return;
     }
     pendingPlaceRef.current = { taxonomyId, code: item.code };
     preferredTaxonomyRef.current = undefined;
@@ -1318,12 +1320,19 @@ export default function FormsPage() {
                     write: true,
                   };
                 }
+                // 현장 서류는 원본에서 시작한다 — 원본이 없는 칸에 올리기를 두면 원본을 거치지 않는
+                // 길이 생기고, 원본이 하나도 없을 때는 목록이 온통 [올리기]로 덮여 예전 화면처럼 보인다.
+                if (space === "site") {
+                  return {
+                    label: "배포 양식 없음",
+                    title: "배포 양식함에 이 칸의 원본이 올라오면 여기서 [작성하기]로 만들 수 있습니다.",
+                    write: false,
+                    none: true,
+                  };
+                }
                 return {
                   label: "올리기",
-                  title:
-                    space === "library"
-                      ? `${item.code} ${item.name} 칸에 배포 양식을 올립니다`
-                      : `이 칸의 배포 양식이 없어 파일을 직접 올립니다`,
+                  title: `${item.code} ${item.name} 칸에 배포 양식을 올립니다`,
                   write: false,
                 };
               }}
