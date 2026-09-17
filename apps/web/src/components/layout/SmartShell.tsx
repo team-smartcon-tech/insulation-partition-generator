@@ -10,7 +10,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import ProfileCard from "@/features/profile/ProfileCard";
 
 /** DCR role 코드 → 한국어 라벨 */
-const ROLE_LABEL: Record<string, string> = {
+export const ROLE_LABEL: Record<string, string> = {
   super_admin: "최고 관리자",
   system_admin: "시스템 관리자",
   site_admin: "현장 관리자",

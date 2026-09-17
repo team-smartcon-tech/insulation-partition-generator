@@ -9,13 +9,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import BrandWordmark from "@/components/brand/BrandWordmark";
-import { SmartBackground, SmartHeader } from "@/components/layout/SmartShell";
+import { ROLE_LABEL, SmartBackground, SmartHeader } from "@/components/layout/SmartShell";
 import { useAuth } from "@/features/auth/AuthContext";
 import SignatureDialog, { useSignature } from "@/features/profile/SignatureDialog";
 import { writeSignature } from "@/features/profile/signature";
 import {
   ArrowRight,
   BookOpen,
+  House,
   Building2,
   Check,
   FolderOpen,
@@ -48,6 +49,8 @@ import { parseFormWorkbook } from "./formParser";
 import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
+import HomeDashboard, { SitesAudit } from "./HomeDashboard";
+import { approvalOverview, documentProgress, sitesAudit } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
 import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
 import ApprovalLineDialog, { type ApprovalLineResult } from "./ApprovalLineDialog";
@@ -60,6 +63,7 @@ import {
   pruneApprovals,
   rememberDefaults,
   slotStates,
+  stampAssignedAt,
   type Approval,
   type Assignee,
 } from "./approvalLine";
@@ -147,8 +151,8 @@ type LoadState =
       kind?: FormKind;
     };
 
-/** 배포 양식함(원본) · 현장 서류함(작성본) */
-type Space = "library" | "site";
+/** 홈 · 배포 양식함(원본) · 현장 서류함(작성본) */
+type Space = "home" | "library" | "site";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -199,13 +203,10 @@ export default function FormsPage() {
   const [sites, setSites] = useState<FormSite[]>([]);
   const [siteId, setSiteId] = useState<string | undefined>(undefined);
   /** 지금 보는 곳. 원본(배포 양식함)과 작성본(현장 서류함)을 섞어 보여 주지 않는다. */
-  const [space, setSpaceState] = useState<Space>(() => {
-    try {
-      return localStorage.getItem(SPACE_KEY) === "library" ? "library" : "site";
-    } catch {
-      return "site";
-    }
-  });
+  // 들어오면 홈에서 시작한다 — 오늘 내 차례인 결재와 알림을 먼저 본다(사용자와 정한 흐름).
+  const [space, setSpaceState] = useState<Space>("home");
+  /** 홈에서 [서명 등록하기] 를 눌렀나 */
+  const [homeSignOpen, setHomeSignOpen] = useState(false);
   /** 시트 이름 → 아래에 더한 빈 줄 수 */
   const [extraRows, setExtraRowsState] = useState<Record<string, number>>({});
   /** 시트 이름 → (서명 자리 키 → 결재자) */
@@ -320,7 +321,7 @@ export default function FormsPage() {
     }
   }, []);
 
-  const openStored = useCallback(async (id: string) => {
+  const openStored = useCallback(async (id: string, sheetName?: string) => {
     const form = await getForm(id);
     if (!form) return false;
     // 되돌리기 기록은 양식 하나짜리다. 다른 양식의 걸음을 여기에 적용하면 엉뚱한 칸이 바뀐다.
@@ -330,7 +331,8 @@ export default function FormsPage() {
     setExtraRowsState(form.extraRows ?? {});
     setApprovalLinesState(form.approvalLines ?? {});
     setApprovalsState(form.approvals ?? {});
-    setActiveSheet(0);
+    // 홈에서 특정 시트(결재할 장)를 눌렀으면 그 시트를 편다.
+    setActiveSheet(sheetName ? Math.max(0, form.sheets.findIndex((item) => item.name === sheetName)) : 0);
     setState({
       status: "ready",
       id: form.id,
@@ -877,7 +879,8 @@ export default function FormsPage() {
    */
   async function handleConfirmLine(result: ApprovalLineResult) {
     if (state.status !== "ready" || !baseSheet || !docSite) return;
-    const record = lineRecord(lineSlots, result.line);
+    // 칸마다 "정한 시각"을 남긴다 — 홈의 "며칠째 멈춘 결재"가 여기서부터 센다.
+    const record = stampAssignedAt(sheetLine, lineRecord(lineSlots, result.line), Date.now());
     const nextSites = updateSite(sites, docSite.id, {
       members: result.members,
       ...(result.remember
@@ -893,6 +896,8 @@ export default function FormsPage() {
       setApprovalLinesState((prev) => ({ ...prev, [baseSheet.name]: record }));
       setApprovalsState((prev) => ({ ...prev, [baseSheet.name]: pruned.approvals }));
       setLineDialogOpen(false);
+      // 홈의 결재 숫자는 목록 요약에서 센다 — 저장한 뒤 목록을 다시 읽어야 홈에 반영된다.
+      void refreshList();
       setStorageWarning(
         pruned.removed > 0 ? `결재선이 바뀌어 이미 한 결재 ${pruned.removed}건을 지웠습니다. 바뀐 칸부터 다시 결재해야 합니다.` : null,
       );
@@ -903,12 +908,45 @@ export default function FormsPage() {
     }
   }
 
+  /**
+   * 홈에서 서류를 누르면 — 그 서류의 현장·양식함으로 옮기고, 그 시트를 펴서 보여 준다.
+   */
+  async function openDocAt(formId: string, sheetName?: string) {
+    const target = forms.find((form) => form.id === formId);
+    if (!target) {
+      setStorageWarning("그 서류를 찾지 못했습니다(지워졌을 수 있습니다).");
+      return;
+    }
+    if (target.siteId) selectSite(target.siteId);
+    setSpace(isTemplate(target) ? "library" : "site");
+    try {
+      if (state.status === "ready" && state.id === formId) {
+        const index = sheetName ? state.sheets.findIndex((item) => item.name === sheetName) : -1;
+        if (index >= 0) setActiveSheet(index);
+      } else {
+        const opened = await openStored(formId, sheetName);
+        if (!opened) {
+          setStorageWarning("그 서류는 이미 지워졌습니다.");
+          return;
+        }
+        setSaveState("saved");
+      }
+      // 목록 아래의 서류로 내려가 보여 준다.
+      window.requestAnimationFrame(() =>
+        document.getElementById("form-viewer")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      );
+    } catch (error) {
+      setStorageWarning(error instanceof Error ? `서류를 열지 못했습니다: ${error.message}` : "서류를 열지 못했습니다.");
+    }
+  }
+
   /** 결재 기록을 저장하고 화면에 반영한다. 실패하면 화면은 그대로 둔다. */
   async function saveApprovals(next: Record<string, Approval>) {
     if (state.status !== "ready" || !baseSheet) return false;
     try {
       await setSheetApproval(state.id, baseSheet.name, { approvals: next });
       setApprovalsState((prev) => ({ ...prev, [baseSheet.name]: next }));
+      void refreshList();
       return true;
     } catch (error) {
       setStorageWarning(
@@ -1304,6 +1342,27 @@ export default function FormsPage() {
   const siteDocs = forms.filter(isSiteDoc);
   const siteForms = formsOfSite(siteDocs, sites, siteId);
   const listForms_ = space === "library" ? templates : siteForms;
+  // 홈 숫자 — 목록이 바뀔 때만 다시 센다. 시각은 1분 단위면 충분하다(3일 멈춤 판단).
+  const homeMinute = Math.floor(Date.now() / 60_000);
+  const homeOverview = useMemo(
+    () => approvalOverview(siteForms, { id: user?.id, name: user?.name }, homeMinute * 60_000),
+    [siteForms, user?.id, user?.name, homeMinute],
+  );
+  const homeProgress = useMemo(
+    () => documentProgress(taxonomies, forms, siteId ?? ""),
+    [taxonomies, forms, siteId],
+  );
+  const homeNewer = useMemo(
+    () =>
+      siteForms
+        .filter((form) => newerTemplateFor(form, templates, taxonomies))
+        .map((form) => ({ formId: form.id, title: form.title })),
+    [siteForms, templates, taxonomies],
+  );
+  const homeAudit = useMemo(
+    () => sitesAudit(sites, taxonomies, forms, homeMinute * 60_000),
+    [sites, taxonomies, forms, homeMinute],
+  );
   // 배포 양식함에서 "작성하기"를 누를 때 사본이 들어갈 현장. 전 현장 보기였으면 첫 현장.
   const writeSite = sites.find((site) => site.id === siteId) ?? sites[0];
   /**
@@ -1315,6 +1374,7 @@ export default function FormsPage() {
    */
   const openFormInSite =
     state.status === "ready" &&
+    space !== "home" &&
     (space === "library"
       ? state.kind === "template"
       : Boolean(siteId) &&
@@ -1448,7 +1508,7 @@ export default function FormsPage() {
           </Link>
         }
         center={
-          space === "site" ? (
+          space !== "library" ? (
             <SitePicker
               sites={sites}
               currentId={siteId}
@@ -1504,7 +1564,24 @@ export default function FormsPage() {
 
         <div className="mb-6">
           {/* 현장을 고르지 않았으면 현장별 현황부터 — 서류 점검은 여기서 시작한다. */}
-          {space === "site" && !siteId ? (
+          {space === "home" ? (
+            siteId ? (
+              <HomeDashboard
+                userName={user?.name ?? "사용자"}
+                roleLabel={user?.role ? ROLE_LABEL[user.role] : undefined}
+                siteName={sites.find((site) => site.id === siteId)?.name ?? ""}
+                hasSignature={Boolean(mySignature)}
+                overview={homeOverview}
+                progress={homeProgress}
+                newer={homeNewer}
+                onOpenDoc={(formId, sheetName) => void openDocAt(formId, sheetName)}
+                onGoSiteBox={() => setSpace("site")}
+                onRegisterSignature={() => setHomeSignOpen(true)}
+              />
+            ) : (
+              <SitesAudit rows={homeAudit} onOpenSite={(id) => selectSite(id)} />
+            )
+          ) : space === "site" && !siteId ? (
             <SiteOverview
               rows={summarizeSites(sites, siteDocs, totalSlots)}
               onOpen={(id) => selectSite(id)}
@@ -1619,6 +1696,18 @@ export default function FormsPage() {
           )}
         </div>
 
+        {homeSignOpen && user && (
+          <SignatureDialog
+            onCancel={() => setHomeSignOpen(false)}
+            onSave={(dataUrl) => {
+              setHomeSignOpen(false);
+              if (!writeSignature(user.id, dataUrl)) {
+                setStorageWarning("이 브라우저에서는 서명을 저장할 수 없습니다(사이트 데이터 차단).");
+              }
+            }}
+          />
+        )}
+
         {pasteTarget && (
           <PasteTaxonomyDialog
             division={taxonomies.find((taxonomy) => taxonomy.id === pasteTarget)?.division ?? ""}
@@ -1628,7 +1717,7 @@ export default function FormsPage() {
         )}
 
         {state.status === "ready" && sheet && openFormInSite && (
-          <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+          <section id="form-viewer" className="scroll-mt-32 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
             {/* 배포 원본 — 고칠 수 없다는 것과, 작성은 어디서 하는지를 맨 위에 알린다. */}
             {readOnly && (
               <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
@@ -2107,6 +2196,7 @@ export default function FormsPage() {
  */
 function SpaceTabs({ space, onChange }: { space: Space; onChange: (space: Space) => void }) {
   const tabs: { value: Space; label: string; icon: typeof BookOpen; title: string }[] = [
+    { value: "home", label: "홈", icon: House, title: "내 결재함·서류 진척도·알림" },
     { value: "library", label: "배포 양식함", icon: BookOpen, title: "회사가 배포한 원본 양식 — 고칠 수 없습니다" },
     { value: "site", label: "현장 서류함", icon: FolderOpen, title: "현장별로 작성하는 서류" },
   ];

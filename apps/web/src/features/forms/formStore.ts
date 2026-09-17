@@ -16,7 +16,9 @@
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
 import { planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
+import { findApprovalBoxes } from "./approval.ts";
 import type { Approval, Assignee } from "./approvalLine.ts";
+import type { ApprovalSheetSummary } from "./homeStats.ts";
 import type { FormSite } from "./sites.ts";
 import { LEGACY_TAXONOMY_ID, type Taxonomy } from "./taxonomy.ts";
 import type { FormSheet, FormValues } from "./types";
@@ -146,6 +148,8 @@ export interface FormSummary {
   openedAt: number;
   sheetNames: string[];
   editedCount: number;
+  /** 결재칸이 있는 시트들의 결재 상태(홈 화면용). 배포 원본·견본 시트는 없다. */
+  approvalSheets: ApprovalSheetSummary[];
 }
 
 /**
@@ -362,6 +366,27 @@ export function isTemplateSheet(sheet: FormSheet): boolean {
   return words.some((word) => name.includes(word));
 }
 
+/**
+ * 결재칸이 있는 시트마다 결재선·결재 기록을 요약한다(서명 그림은 뺀다 — 목록이 무거워진다).
+ * 결재칸은 저장해 두지 않고 격자에서 다시 찾는다 — 양식을 다시 읽으면 결재칸도 새 격자를 따른다.
+ */
+function approvalSheetsOf(form: StoredForm): ApprovalSheetSummary[] {
+  if (form.kind !== "site") return [];
+  const result: ApprovalSheetSummary[] = [];
+  for (const sheet of withCustomSheets(form.sheets, form.customSheets)) {
+    if (isTemplateSheet(sheet)) continue;
+    const slots = findApprovalBoxes(sheet).flatMap((box) =>
+      box.slots.map((slot) => ({ label: slot.label, signKey: slot.signKey })),
+    );
+    if (slots.length === 0) continue;
+    const approvals = Object.fromEntries(
+      Object.entries(form.approvals[sheet.name] ?? {}).map(([key, { signature: _signature, ...rest }]) => [key, rest]),
+    );
+    result.push({ sheetName: sheet.name, slots, line: form.approvalLines[sheet.name] ?? {}, approvals });
+  }
+  return result;
+}
+
 function summarize(form: StoredForm): FormSummary {
   return {
     id: form.id,
@@ -384,6 +409,7 @@ function summarize(form: StoredForm): FormSummary {
       (sum, cells) => sum + Object.keys(cells).length,
       0,
     ),
+    approvalSheets: approvalSheetsOf(form),
   };
 }
 

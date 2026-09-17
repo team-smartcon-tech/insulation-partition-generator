@@ -25,6 +25,8 @@ export interface Assignee {
   role: string;
   /** 현장 조직에서 골랐으면 그 사람 id(직접 입력이면 없다) */
   memberId?: string;
+  /** 이 칸에 이 사람을 정한 시각(ms) — "며칠째 멈춘 결재"를 세는 기준 */
+  assignedAt?: number;
 }
 
 /** 결재칸 한 칸 — `approval.ts` 의 ApprovalSlot 중 여기서 쓰는 것만 */
@@ -262,4 +264,25 @@ export function pruneApprovals(
 export function approvalDateText(ms: number): string {
   const date = new Date(ms);
   return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * 결재선을 저장할 때 칸마다 "정한 시각"을 붙인다. **같은 사람이 그대로면 처음 정한 시각을 지킨다** —
+ * 결재선 창을 열었다 닫을 때마다 시각이 새로 찍히면 멈춘 결재가 영영 안 잡힌다.
+ */
+export function stampAssignedAt(
+  previous: Record<string, Assignee> | undefined,
+  next: Record<string, Assignee>,
+  now: number,
+): Record<string, Assignee> {
+  const stamped: Record<string, Assignee> = {};
+  for (const [key, person] of Object.entries(next)) {
+    const before = previous?.[key];
+    const same =
+      before !== undefined &&
+      compactName(before.name) === compactName(person.name) &&
+      before.position === person.position;
+    stamped[key] = { ...person, assignedAt: same ? (before.assignedAt ?? now) : now };
+  }
+  return stamped;
 }
