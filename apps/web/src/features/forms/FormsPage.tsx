@@ -67,6 +67,7 @@ import {
   deleteForm,
   findTemplateSheet,
   getForm,
+  isTemplateSheet,
   removeCustomSheet,
   renameCustomSheet,
   isStorageAvailable,
@@ -1208,7 +1209,12 @@ export default function FormsPage() {
   const extraRowCount = baseSheet ? (extraRows[baseSheet.name] ?? 0) : 0;
   const sheet = baseSheet ? withExtraRows(baseSheet, extraRowCount) : null;
   // 결재칸(작성·검토·승인). 원본 시트 격자에서 찾는다 — 더한 줄과는 상관없다.
-  const approvalBoxes = useMemo(() => (baseSheet ? findApprovalBoxes(baseSheet) : []), [baseSheet]);
+  // 견본 시트는 결재할 문서가 아니라 작성 예시라 찾지 않는다(사용자 판단). 견본을 복사해
+  // 더한 장은 실제 문서라 찾는다.
+  const approvalBoxes = useMemo(
+    () => (baseSheet && !isTemplateSheet(baseSheet) ? findApprovalBoxes(baseSheet) : []),
+    [baseSheet],
+  );
   const signKeys = useMemo(
     () => new Set(approvalBoxes.flatMap((box) => box.slots.map((slot) => slot.signKey))),
     [approvalBoxes],

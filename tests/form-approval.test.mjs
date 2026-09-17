@@ -64,3 +64,12 @@ test('담당·팀장·소장처럼 직책이 섞인 결재칸, 날짜 줄이 없
     ['담당', '2:1', undefined], ['팀장', '2:3', undefined], ['소장', '2:5', undefined],
   ]);
 });
+
+import { isTemplateSheet } from '../apps/web/src/features/forms/formStore.ts';
+
+test('견본 시트는 결재할 문서가 아니다 — 견본을 복사해 더한 장은 문서다', async () => {
+  const sheets = await load('6.1 리스크와 기회관리.xlsx');
+  assert.deepEqual(sheets.filter(isTemplateSheet).map((s) => s.name), ['견본', '견본(2)']);
+  const copied = { ...sheets.find((s) => s.name === '견본'), name: '26.09', custom: true };
+  assert.equal(isTemplateSheet(copied), false);
+});

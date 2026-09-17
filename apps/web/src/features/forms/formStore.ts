@@ -338,13 +338,18 @@ export function blankValuesFor(sheets: FormSheet[], source: FormSheet): Record<s
  * 없으면 부르는 쪽이 지금 보는 시트로 대신한다.
  */
 export function findTemplateSheet(sheets: FormSheet[]): FormSheet | undefined {
+  return sheets.find(isTemplateSheet);
+}
+
+/**
+ * 빈 양식(견본·샘플) 시트인가 — 이름으로 알아본다.
+ * 사용자가 더한 장은 아니다 — 견본을 복사했어도 그건 이미 작성 중인 문서다.
+ */
+export function isTemplateSheet(sheet: FormSheet): boolean {
+  if (sheet.custom) return false;
   const words = ["견본", "샘플", "서식", "양식", "sample", "template", "form"];
-  return sheets.find((sheet) => {
-    // 사용자가 더한 장은 후보가 아니다 — 그건 이미 작성 중인 문서다.
-    if (sheet.custom) return false;
-    const name = sheet.name.trim().toLowerCase();
-    return words.some((word) => name.includes(word));
-  });
+  const name = sheet.name.trim().toLowerCase();
+  return words.some((word) => name.includes(word));
 }
 
 function summarize(form: StoredForm): FormSummary {
