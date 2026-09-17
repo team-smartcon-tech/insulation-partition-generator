@@ -1134,6 +1134,17 @@ export default function FormsPage() {
   const readOnly = state.status === "ready" && state.kind === "template";
   const canEdit = editable && !readOnly;
   const openedSummary = state.status === "ready" ? forms.find((form) => form.id === state.id) : undefined;
+  /** 현장 서류함의 서류는 여기서 시작한다 — 배포 양식함으로 가서 고르고 [작성하기]. */
+  const importButton = (
+    <button
+      type="button"
+      onClick={() => setSpace("library")}
+      title="배포 양식함으로 가서 양식을 고르고 [작성하기]를 누르세요."
+      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700"
+    >
+      <Plus size={13} /> 배포 양식에서 가져오기
+    </button>
+  );
   const newerTemplate = openedSummary ? newerTemplateFor(openedSummary, templates, taxonomies) : undefined;
   // 코드표의 칸 수(회사 공통) — 현장별 현황의 분모다.
   const totalSlots = taxonomies.reduce(
@@ -1284,19 +1295,9 @@ export default function FormsPage() {
                   : "이 현장의 작성본입니다. 빈 칸의 [작성하기]는 배포 양식으로 바로 사본을 만듭니다."
               }
               manageTaxonomy={space === "library"}
-              uploadLabel={space === "library" ? "배포 양식 올리기" : "파일 올리기"}
-              toolbarExtra={
-                space === "site" ? (
-                  <button
-                    type="button"
-                    onClick={() => setSpace("library")}
-                    title="배포 양식함으로 가서 양식을 고르고 [작성하기]를 누르세요."
-                    className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200 transition hover:bg-blue-50"
-                  >
-                    <Plus size={13} /> 배포 양식에서 가져오기
-                  </button>
-                ) : undefined
-              }
+              // 현장 서류함의 서류는 배포 양식에서 가져온다. 원본이 없는 칸만 그 칸의 [올리기]로 올린다.
+              uploadLabel={space === "library" ? "배포 양식 올리기" : null}
+              toolbarExtra={space === "site" ? importButton : undefined}
               extraBadges={(form) => {
                 const newer = newerTemplateFor(form, templates, taxonomies);
                 return newer
@@ -1341,13 +1342,24 @@ export default function FormsPage() {
               onToggleFavorite={(form) => void patchMeta(form.id, { favorite: !form.favorite })}
               onChangeCategory={(form, category) => void patchMeta(form.id, { category })}
               onDelete={(form) => void handleDelete(form)}
-              onUpload={() => handleUpload()}
+              onUpload={space === "library" ? () => handleUpload() : undefined}
               // 카드 목록 아래 작은 글씨로 두었더니 찾지 못했다. 도구 줄 버튼으로 둔다.
-              onUploadTaxonomy={() => taxonomyInputRef.current?.click()}
-              onCreateTaxonomy={() => {
-                setEditingTaxonomy(true);
-                void handleAddDivision();
-              }}
+              onUploadTaxonomy={space === "library" ? () => taxonomyInputRef.current?.click() : undefined}
+              onCreateTaxonomy={
+                space === "library"
+                  ? () => {
+                      setEditingTaxonomy(true);
+                      void handleAddDivision();
+                    }
+                  : undefined
+              }
+              title={space === "library" ? "배포 양식함" : `${writeSite?.name ?? "현장"} 서류함`}
+              emptyText={
+                space === "library"
+                  ? "아직 배포 양식이 없습니다. “양식 올리기”로 .xlsx 파일을 올려 주세요."
+                  : "아직 이 현장 서류가 없습니다. “배포 양식에서 가져오기”로 양식을 골라 작성하세요."
+              }
+              toolbarExtra={space === "site" ? importButton : undefined}
             />
           )}
         </div>

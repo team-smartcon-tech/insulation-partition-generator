@@ -155,8 +155,8 @@ interface FormTreeProps {
    * 현장 서류함에까지 두면 한 현장에서 칸을 지워 다른 현장 목록까지 바뀐다.
    */
   manageTaxonomy?: boolean;
-  /** "양식 올리기" 단추 글자 */
-  uploadLabel?: string;
+  /** "양식 올리기" 단추 글자. null 이면 단추를 감춘다(빈 칸의 올리기는 남는다). */
+  uploadLabel?: string | null;
   /** 도구 줄 맨 앞에 더 붙일 것(예: 배포 양식에서 가져오기) */
   toolbarExtra?: ReactNode;
   /** 화면이 더 붙이는 표시(예: 새 판 있음) */
@@ -829,6 +829,7 @@ export default function FormTree({
           </button>
           )}
 
+          {uploadLabel !== null && (
           <button
             type="button"
             onClick={() => onUpload(preferredTaxonomyId)}
@@ -838,6 +839,7 @@ export default function FormTree({
           >
             <Upload size={13} /> {busy ? "읽는 중..." : uploadLabel}
           </button>
+          )}
         </div>
       </div>
 
