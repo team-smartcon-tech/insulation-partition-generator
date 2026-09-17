@@ -6,8 +6,8 @@
  */
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { LogOut } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
+import ProfileCard from "@/features/profile/ProfileCard";
 
 /** DCR role 코드 → 한국어 라벨 */
 const ROLE_LABEL: Record<string, string> = {
@@ -116,6 +116,8 @@ export function SmartHeader({
 }) {
   const { user, logout } = useAuth();
   const roleLabel = user?.role ? (ROLE_LABEL[user.role] ?? undefined) : undefined;
+  // 이름을 누르면 내 정보 카드(결재 서명 등록·로그아웃). 사내 Smart Works 와 같은 자리·모양.
+  const [profileOpen, setProfileOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(8,22,52,0.4)] backdrop-blur-xl">
@@ -131,7 +133,13 @@ export function SmartHeader({
         {/* 가운데 — 지금 무엇을 보고 있는지(예: 현장). 좁은 화면에서는 숨긴다. */}
         {center && <div className="hidden min-w-0 md:block">{center}</div>}
 
-        <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setProfileOpen(true)}
+          disabled={!user}
+          title="내 정보 · 결재 서명"
+          className="flex items-center gap-3 rounded-xl px-2 py-1 transition hover:bg-slate-100 disabled:cursor-default disabled:hover:bg-transparent"
+        >
           {user && (
             <div className="hidden text-right leading-tight sm:block">
               <div className="text-[13.5px] font-bold text-slate-800">{user.name} 님</div>
@@ -141,17 +149,20 @@ export function SmartHeader({
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#2a8fe6] via-[#0a63b8] to-[#003a78] text-[13px] font-bold text-white shadow-[0_4px_12px_-2px_rgba(0,71,145,0.5)] ring-1 ring-white/30">
             {user?.name?.trim().charAt(0) ?? "?"}
           </div>
-          <button
-            type="button"
-            onClick={() => logout()}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
-            title="로그아웃"
-          >
-            <LogOut className="h-[18px] w-[18px]" />
-          </button>
-        </div>
+        </button>
       </div>
       {subbar && <div className="border-t border-slate-200/80 px-8">{subbar}</div>}
+      {profileOpen && user && (
+        <ProfileCard
+          user={user}
+          roleLabel={roleLabel}
+          onClose={() => setProfileOpen(false)}
+          onLogout={() => {
+            setProfileOpen(false);
+            void logout();
+          }}
+        />
+      )}
     </header>
   );
 }
