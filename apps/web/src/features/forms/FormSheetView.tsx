@@ -133,8 +133,8 @@ interface FormSheetViewProps {
   tint?: boolean;
   /** 결재 서명 자리 — 파란 점선 테두리로 알린다(`approval.ts` 가 찾는다). */
   signKeys?: Set<string>;
-  /** 서명 자리 키 → 지정된 결재자(`김성훈 대리`). 칸 아래쪽에 작게 보인다. */
-  signCaptions?: Map<string, string>;
+  /** 결재칸에 얹을 것: 서명 자리의 서명 그림·결재자 이름, 날짜 자리의 `09/17` */
+  cellMarks?: Map<string, CellMark>;
   /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
   scale?: FormScale;
 }
@@ -162,7 +162,46 @@ function useElementSize(ref: React.RefObject<HTMLElement | null>, deps: unknown[
 
 /** 결재칸이 없는 시트 — 줄 메모가 듣도록 늘 같은 빈 묶음을 넘긴다. */
 const EMPTY_KEYS: Set<string> = new Set();
-const EMPTY_CAPTIONS: Map<string, string> = new Map();
+const EMPTY_MARKS: Map<string, CellMark> = new Map();
+
+/** 칸 위에 얹는 결재 표시 */
+export interface CellMark {
+  /** 서명 그림(data URL) — 칸 가운데 */
+  image?: string;
+  /** 결재자 이름 — 칸 아래쪽에 작게 */
+  caption?: string;
+  /** 칸 글자를 덮어 보일 글자(날짜 자리의 `/` 대신 `09/17`) */
+  text?: string;
+}
+
+/**
+ * 결재 표시. 칸 글자를 고치는 것을 막지 않도록 누르기는 통과시킨다.
+ * 날짜는 원본의 `/` 위에 흰 바탕으로 덮는다 — 엑셀 값은 내려받기 단계에서 바꾼다.
+ */
+function CellMarkLayer({ mark }: { mark: CellMark | undefined }) {
+  if (!mark) return null;
+  return (
+    <>
+      {mark.image && (
+        <img
+          src={mark.image}
+          alt=""
+          className="pointer-events-none absolute inset-x-1 bottom-4 top-1 m-auto max-h-[calc(100%-1.25rem)] max-w-[calc(100%-0.5rem)] object-contain"
+        />
+      )}
+      {mark.caption && (
+        <span className="pointer-events-none absolute inset-x-0 bottom-0.5 truncate px-1 text-center text-[11px] font-medium text-blue-800">
+          {mark.caption}
+        </span>
+      )}
+      {mark.text && (
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white text-[12px] tabular-nums text-slate-800">
+          {mark.text}
+        </span>
+      )}
+    </>
+  );
+}
 
 /**
  * 한 줄. **줄 단위로 메모**해 둔다 — 한 칸에 글자를 치면 시트 전체가 다시 그려지는데,
@@ -177,12 +216,12 @@ const SheetRow = memo(function SheetRow({
   values,
   spillable,
   signKeys,
-  signCaptions,
+  cellMarks,
   onChangeValue,
   onCommitValue,
 }: {
   cells: FormCell[];
-  signCaptions: Map<string, string>;
+  cellMarks: Map<string, CellMark>;
   /** 결재 서명 자리 */
   signKeys: Set<string>;
   height: number | undefined;
@@ -227,6 +266,7 @@ const SheetRow = memo(function SheetRow({
               ? { backgroundImage: "linear-gradient(rgba(125, 211, 252, 0.38), rgba(125, 211, 252, 0.38))" }
               : {}),
             // 결재 서명 자리 — 엑셀 테두리를 가리지 않게 안쪽에 점선을 그린다.
+            ...(cellMarks.has(cell.key) ? { position: "relative" as const } : {}),
             ...(signKeys.has(cell.key)
               ? {
                   outline: "2px dashed rgba(37, 99, 235, 0.55)",
@@ -237,14 +277,7 @@ const SheetRow = memo(function SheetRow({
               : {}),
           }}
         >
-          {/* 지정된 결재자. 칸 글자를 가리지 않게 아래쪽에 작게 두고, 누르기를 막지 않는다. */}
-          {signCaptions.has(cell.key) && (
-            <span
-              className="pointer-events-none absolute inset-x-0 bottom-1 truncate px-1 text-center text-[11px] font-medium text-blue-800"
-            >
-              {signCaptions.get(cell.key)}
-            </span>
-          )}
+          <CellMarkLayer mark={cellMarks.get(cell.key)} />
           <FormCellContent
             cell={cell}
             // 엑셀에서 잠긴 칸은 여기서도 못 고친다(시트 보호가 걸린 시트에만 표시가 붙는다).
@@ -269,7 +302,7 @@ export default function FormSheetView({
   onCommitValue,
   tint = true,
   signKeys = EMPTY_KEYS,
-  signCaptions = EMPTY_CAPTIONS,
+  cellMarks = EMPTY_MARKS,
   scale = 1,
 }: FormSheetViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -373,7 +406,7 @@ export default function FormSheetView({
               values={rowValues[rowIndex] ?? EMPTY_VALUES}
               spillable={spillable}
               signKeys={signKeys}
-              signCaptions={signCaptions}
+              cellMarks={cellMarks}
               onChangeValue={handleChange}
               onCommitValue={handleCommit}
             />

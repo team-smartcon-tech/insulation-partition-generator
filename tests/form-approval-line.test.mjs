@@ -80,3 +80,64 @@ test('다음 빈칸 찾기와 칸에 보일 글자', () => {
   assert.equal(assigneeCaption(x), '김성훈 대리');
   assert.equal(assigneeCaption({ name: '외부 감리', position: '', role: '' }), '외부 감리');
 });
+
+import {
+  approvalDateText,
+  cancellableIndex,
+  isSamePerson,
+  pruneApprovals,
+  slotStates,
+} from '../apps/web/src/features/forms/approvalLine.ts';
+
+const three = [
+  { label: '작성', signKey: 'a' },
+  { label: '검토', signKey: 'b' },
+  { label: '승인', signKey: 'c' },
+];
+const person = (name) => ({ name, position: '', role: '' });
+const signed = (name, userId) => ({ name, position: '', userId, signature: 'data:', approvedAt: 0 });
+
+test('로그인한 사람 알아보기 — 공백·직급이 붙어도 같은 사람', () => {
+  assert.equal(isSamePerson(person('이상영'), '이상영'), true);
+  assert.equal(isSamePerson(person('이 상영'), '이상영'), true);
+  assert.equal(isSamePerson(person('이상영'), '이상영 대리'), true);
+  assert.equal(isSamePerson(person('이상'), '이상영'), false, '앞부분만 같으면 다른 사람');
+  assert.equal(isSamePerson(person('이상영'), undefined), false);
+});
+
+test('결재는 앞 칸부터 차례로 — 내 칸이 아니면 못 한다', () => {
+  const line = { a: person('김성훈'), b: person('문홍주'), c: person('조형규') };
+
+  assert.deepEqual(slotStates(three, line, {}, '김성훈').map((s) => s.status), ['ready', 'other', 'other']);
+  assert.deepEqual(slotStates(three, line, {}, '문홍주').map((s) => s.status), ['other', 'waiting', 'other']);
+  assert.equal(slotStates(three, line, {}, '문홍주')[1].before, '작성');
+
+  const afterWrite = { a: signed('김성훈', 'u1') };
+  assert.deepEqual(slotStates(three, line, afterWrite, '문홍주').map((s) => s.status), ['done', 'ready', 'other']);
+  assert.deepEqual(slotStates(three, line, afterWrite, '조형규').map((s) => s.status), ['done', 'other', 'waiting']);
+
+  const noReviewer = { a: person('김성훈'), c: person('조형규') };
+  assert.deepEqual(slotStates(three, noReviewer, afterWrite, '조형규').map((s) => s.status), ['done', 'unassigned', 'waiting'], '앞 칸 결재선이 비어도 기다린다');
+});
+
+test('결재 취소는 내가 마지막으로 한 결재만', () => {
+  const approvals = { a: signed('김성훈', 'u1'), b: signed('문홍주', 'u2') };
+  assert.equal(cancellableIndex(three, approvals, 'u2'), 1);
+  assert.equal(cancellableIndex(three, approvals, 'u1'), -1, '뒤 사람이 이미 서명');
+  assert.equal(cancellableIndex(three, {}, 'u1'), -1);
+});
+
+test('결재선이 바뀌면 바뀐 칸과 그 뒤 결재를 지운다', () => {
+  const approvals = { a: signed('김성훈', 'u1'), b: signed('문홍주', 'u2'), c: signed('조형규', 'u3') };
+  const same = { a: person('김성훈'), b: person('문홍주'), c: person('조형규') };
+  assert.deepEqual(pruneApprovals(three, same, approvals), { approvals, removed: 0 });
+
+  const changed = { a: person('김성훈'), b: person('윤효환'), c: person('조형규') };
+  const pruned = pruneApprovals(three, changed, approvals);
+  assert.deepEqual(Object.keys(pruned.approvals), ['a']);
+  assert.equal(pruned.removed, 2, '바뀐 검토와 그 뒤 승인');
+});
+
+test('날짜 자리 글자', () => {
+  assert.equal(approvalDateText(new Date(2026, 8, 7).getTime()), '09/07');
+});

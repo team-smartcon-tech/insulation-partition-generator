@@ -16,7 +16,7 @@
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
 import { planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
-import type { Assignee } from "./approvalLine.ts";
+import type { Approval, Assignee } from "./approvalLine.ts";
 import type { FormSite } from "./sites.ts";
 import { LEGACY_TAXONOMY_ID, type Taxonomy } from "./taxonomy.ts";
 import type { FormSheet, FormValues } from "./types";
@@ -112,6 +112,8 @@ export interface StoredForm {
    * 칸 순서가 아니라 서명 자리 키로 담아, 양식을 다시 읽어도 같은 칸에 붙어 있다.
    */
   approvalLines: Record<string, Record<string, Assignee>>;
+  /** 시트 이름 → (서명 자리 키 → 결재 기록). 결재한 서명 그림을 함께 담는다. */
+  approvals: Record<string, Record<string, Approval>>;
 }
 
 /**
@@ -181,6 +183,7 @@ function normalize(raw: StoredForm): StoredForm {
     customSheets: raw.customSheets ?? [],
     extraRows: raw.extraRows ?? {},
     approvalLines: raw.approvalLines ?? {},
+    approvals: raw.approvals ?? {},
     values: restoreBlankedTitles(
       normalizeValues(raw.values, raw.sheets ?? []),
       raw.sheets ?? [],
@@ -535,6 +538,7 @@ export async function saveForm(input: {
     customSheets: [],
     extraRows: {},
     approvalLines: {},
+    approvals: {},
   };
   await run("readwrite", (store) => store.put(form));
   return form;
@@ -743,18 +747,26 @@ export async function setExtraRows(id: string, sheetName: string, count: number)
   });
 }
 
-/** 한 시트의 결재선을 저장한다. 비어 있으면 그 시트 표시를 지운다. */
-export async function setApprovalLine(
+/**
+ * 한 시트의 결재선과 결재 기록을 **함께** 저장한다. 비어 있으면 그 시트 표시를 지운다.
+ * 따로 쓰면, 결재선을 바꾼 뒤 지워야 할 결재가 남은 채 저장이 끊길 수 있다.
+ */
+export async function setSheetApproval(
   id: string,
   sheetName: string,
-  line: Record<string, Assignee>,
+  change: { line?: Record<string, Assignee>; approvals?: Record<string, Approval> },
 ): Promise<void> {
-  await patchForm(id, (form) => {
-    const next = { ...form.approvalLines };
-    if (Object.keys(line).length > 0) next[sheetName] = line;
+  const put = <T,>(record: Record<string, T>, value: T | undefined) => {
+    const next = { ...record };
+    if (value && Object.keys(value as object).length > 0) next[sheetName] = value;
     else delete next[sheetName];
-    return { approvalLines: next, updatedAt: Date.now() };
-  });
+    return next;
+  };
+  await patchForm(id, (form) => ({
+    ...(change.line ? { approvalLines: put(form.approvalLines, change.line) } : {}),
+    ...(change.approvals ? { approvals: put(form.approvals, change.approvals) } : {}),
+    updatedAt: Date.now(),
+  }));
 }
 
 /** 이 양식에서 이미 쓰이고 있는 시트 이름(원본 + 더한 것). */
@@ -824,8 +836,14 @@ export async function renameCustomSheet(
       approvalLines[name] = approvalLines[from];
       delete approvalLines[from];
     }
+    const approvals = { ...form.approvals };
+    if (approvals[from]) {
+      approvals[name] = approvals[from];
+      delete approvals[from];
+    }
     return {
       approvalLines,
+      approvals,
       customSheets: form.customSheets.map((item) =>
         item.name === from ? { ...item, name } : item,
       ),
@@ -845,8 +863,11 @@ export async function removeCustomSheet(id: string, name: string): Promise<void>
     delete values[name];
     const approvalLines = { ...form.approvalLines };
     delete approvalLines[name];
+    const approvals = { ...form.approvals };
+    delete approvals[name];
     return {
       approvalLines,
+      approvals,
       customSheets: form.customSheets.filter((item) => item.name !== name),
       values,
       updatedAt: Date.now(),

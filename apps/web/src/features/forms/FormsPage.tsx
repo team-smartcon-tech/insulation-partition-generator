@@ -10,6 +10,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import BrandWordmark from "@/components/brand/BrandWordmark";
 import { SmartBackground, SmartHeader } from "@/components/layout/SmartShell";
+import { useAuth } from "@/features/auth/AuthContext";
+import SignatureDialog, { useSignature } from "@/features/profile/SignatureDialog";
+import { writeSignature } from "@/features/profile/signature";
 import {
   ArrowRight,
   BookOpen,
@@ -28,6 +31,7 @@ import {
   RotateCcw,
   Trash2,
   TriangleAlert,
+  PenLine,
   UserRound,
   Users,
 } from "lucide-react";
@@ -46,7 +50,18 @@ import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import { findApprovalBoxes } from "./approval";
 import ApprovalLineDialog, { type ApprovalLineResult } from "./ApprovalLineDialog";
-import { assigneeCaption, initialLine, lineRecord, rememberDefaults, type Assignee } from "./approvalLine";
+import {
+  approvalDateText,
+  assigneeCaption,
+  cancellableIndex,
+  initialLine,
+  lineRecord,
+  pruneApprovals,
+  rememberDefaults,
+  slotStates,
+  type Approval,
+  type Assignee,
+} from "./approvalLine";
 import {
   isSiteDoc,
   isTemplate,
@@ -54,7 +69,7 @@ import {
   newerTemplateFor,
   type FormKind,
 } from "./library";
-import FormSheetView, { type FormScale } from "./FormSheetView";
+import FormSheetView, { type CellMark, type FormScale } from "./FormSheetView";
 import {
   FIRST_SITE_NAME,
   addSite,
@@ -84,7 +99,7 @@ import {
   saveForm,
   saveSites,
   saveTaxonomies,
-  setApprovalLine,
+  setSheetApproval,
   setExtraRows,
   setFormCode,
   touchForm,
@@ -194,6 +209,12 @@ export default function FormsPage() {
   const [extraRows, setExtraRowsState] = useState<Record<string, number>>({});
   /** 시트 이름 → (서명 자리 키 → 결재자) */
   const [approvalLines, setApprovalLinesState] = useState<Record<string, Record<string, Assignee>>>({});
+  /** 시트 이름 → (서명 자리 키 → 결재 기록) */
+  const [approvals, setApprovalsState] = useState<Record<string, Record<string, Approval>>>({});
+  /** 서명이 없어 등록 창을 띄웠을 때, 등록하면 이어서 결재할 칸 */
+  const [signFor, setSignFor] = useState<number | null>(null);
+  const { user } = useAuth();
+  const mySignature = useSignature(user?.id);
   /** 결재선 지정 창이 열려 있나 */
   const [lineDialogOpen, setLineDialogOpen] = useState(false);
   /** 내려받기 선택 메뉴가 열려 있나 */
@@ -307,6 +328,7 @@ export default function FormsPage() {
     setValues(form.values);
     setExtraRowsState(form.extraRows ?? {});
     setApprovalLinesState(form.approvalLines ?? {});
+    setApprovalsState(form.approvals ?? {});
     setActiveSheet(0);
     setState({
       status: "ready",
@@ -449,6 +471,7 @@ export default function FormsPage() {
     setActiveSheet(0);
     setExtraRowsState({});
     setApprovalLinesState({});
+    setApprovalsState({});
     historyRef.current = { past: [], future: [] };
     // 다른 양식을 올리면 앞 양식에 적은 값은 의미가 없다.
     // 아래 justLoadedRef 와 같은 객체를 써야 "방금 불러온 그대로"로 인식돼 헛저장을 안 한다.
@@ -860,23 +883,73 @@ export default function FormsPage() {
         ? { lineDefaults: rememberDefaults(docSite.lineDefaults, lineSlots, result.line) }
         : {}),
     });
+    // 사람이 바뀐 칸(과 그 뒤)의 결재는 지운다 — 다른 사람 칸에 남은 서명은 거짓이다.
+    const pruned = pruneApprovals(lineSlots, record, sheetApprovals);
     try {
-      await setApprovalLine(state.id, baseSheet.name, record);
+      await setSheetApproval(state.id, baseSheet.name, { line: record, approvals: pruned.approvals });
       await saveSites(nextSites);
       setSites(nextSites);
-      setApprovalLinesState((prev) => {
-        const next = { ...prev };
-        if (Object.keys(record).length > 0) next[baseSheet.name] = record;
-        else delete next[baseSheet.name];
-        return next;
-      });
+      setApprovalLinesState((prev) => ({ ...prev, [baseSheet.name]: record }));
+      setApprovalsState((prev) => ({ ...prev, [baseSheet.name]: pruned.approvals }));
       setLineDialogOpen(false);
-      setStorageWarning(null);
+      setStorageWarning(
+        pruned.removed > 0 ? `결재선이 바뀌어 이미 한 결재 ${pruned.removed}건을 지웠습니다. 바뀐 칸부터 다시 결재해야 합니다.` : null,
+      );
     } catch (error) {
       setStorageWarning(
         error instanceof Error ? `결재선을 저장하지 못했습니다: ${error.message}` : "결재선을 저장하지 못했습니다.",
       );
     }
+  }
+
+  /** 결재 기록을 저장하고 화면에 반영한다. 실패하면 화면은 그대로 둔다. */
+  async function saveApprovals(next: Record<string, Approval>) {
+    if (state.status !== "ready" || !baseSheet) return false;
+    try {
+      await setSheetApproval(state.id, baseSheet.name, { approvals: next });
+      setApprovalsState((prev) => ({ ...prev, [baseSheet.name]: next }));
+      return true;
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `결재를 저장하지 못했습니다: ${error.message}` : "결재를 저장하지 못했습니다.",
+      );
+      return false;
+    }
+  }
+
+  /**
+   * 내 차례의 칸에 결재한다 — 등록해 둔 서명과 오늘 날짜가 찍힌다.
+   * 서명이 없으면 서명 등록 창부터 띄우고, 등록하면 이어서 결재한다(카드까지 돌아가지 않게).
+   */
+  async function handleApprove(index: number, signature = mySignature) {
+    const slot = lineSlots[index];
+    const assignee = slot ? sheetLine?.[slot.signKey] : undefined;
+    if (!slot || !assignee || !user) return;
+    if (!signature) {
+      setSignFor(index);
+      return;
+    }
+    if (!window.confirm(`“${slot.label}” 칸에 결재합니다. 등록한 서명과 오늘 날짜가 찍힙니다.`)) return;
+    const ok = await saveApprovals({
+      ...sheetApprovals,
+      [slot.signKey]: {
+        name: assignee.name,
+        position: assignee.position,
+        userId: user.id,
+        signature,
+        approvedAt: Date.now(),
+      },
+    });
+    if (ok) setStorageWarning(null);
+  }
+
+  async function handleCancelApproval(index: number) {
+    const slot = lineSlots[index];
+    if (!slot) return;
+    if (!window.confirm(`“${slot.label}” 칸의 결재를 취소합니다. 서명과 날짜가 지워집니다.`)) return;
+    const next = { ...sheetApprovals };
+    delete next[slot.signKey];
+    await saveApprovals(next);
   }
 
   /** 한 칸에 적은 값을 되돌리기 기록에 남긴다. */
@@ -987,14 +1060,15 @@ export default function FormsPage() {
    * 막지는 않지만, 모르고 두 번 누르면 같은 서류가 둘 생긴다.
    */
   async function handleWrite(templateId: string, targetSiteId: string | undefined) {
-    const template = templates.find((form) => form.id === templateId);
     const target = sites.find((site) => site.id === targetSiteId);
-    if (!template || !target) {
+    if (!target) {
       setStorageWarning("작성할 현장을 먼저 골라 주세요.");
       return;
     }
+    // 원본이 목록에 아직 없을 수 있다(올리자마자 누르면 목록 새로고침보다 빠르다). 원본이 정말
+    // 있는지는 저장소가 복사하면서 확인하므로, 여기서는 목록에 없다고 막지 않는다.
     const existing = forms.filter(
-      (form) => isSiteDoc(form) && form.siteId === target.id && form.templateId === template.id,
+      (form) => isSiteDoc(form) && form.siteId === target.id && form.templateId === templateId,
     ).length;
     if (
       existing > 0 &&
@@ -1005,7 +1079,7 @@ export default function FormsPage() {
       return;
     }
     try {
-      const copy = await copyTemplateToSite(template.id, target.id);
+      const copy = await copyTemplateToSite(templateId, target.id);
       selectSite(target.id);
       setSpace("site");
       await refreshList();
@@ -1264,10 +1338,42 @@ export default function FormsPage() {
   );
   const lineSlots = useMemo(() => approvalBoxes.flatMap((box) => box.slots), [approvalBoxes]);
   const sheetLine = baseSheet ? approvalLines[baseSheet.name] : undefined;
-  const signCaptions = useMemo(
-    () => new Map(Object.entries(sheetLine ?? {}).map(([key, person]) => [key, assigneeCaption(person)])),
-    [sheetLine],
+  const sheetApprovals = useMemo(
+    () => (baseSheet ? (approvals[baseSheet.name] ?? {}) : {}),
+    [approvals, baseSheet],
   );
+  const states = useMemo(
+    () => slotStates(lineSlots, sheetLine ?? {}, sheetApprovals, user?.name),
+    [lineSlots, sheetLine, sheetApprovals, user?.name],
+  );
+  const readyIndex = states.findIndex((item) => item.status === "ready");
+  const waitingState = states.find((item) => item.status === "waiting");
+  const cancelIndex = cancellableIndex(lineSlots, sheetApprovals, user?.id);
+  const approvedCount = states.filter((item) => item.status === "done").length;
+  // 점선은 아직 서명이 없는 자리에만 — 결재한 칸은 도장처럼 깔끔하게 보이게.
+  const pendingSignKeys = useMemo(
+    () => new Set([...signKeys].filter((key) => !sheetApprovals[key])),
+    [signKeys, sheetApprovals],
+  );
+  /** 결재칸에 얹을 것: 결재했으면 서명·이름·날짜, 결재선만 정했으면 이름 */
+  const cellMarks = useMemo(() => {
+    const marks = new Map<string, CellMark>();
+    lineSlots.forEach((slot, index) => {
+      const item = states[index];
+      if (item?.status === "done") {
+        marks.set(slot.signKey, {
+          image: item.approval.signature,
+          caption: [item.approval.name, item.approval.position].filter(Boolean).join(" "),
+        });
+        const dateKey = approvalBoxes.flatMap((box) => box.slots).find((entry) => entry.signKey === slot.signKey)?.dateKey;
+        if (dateKey) marks.set(dateKey, { text: approvalDateText(item.approval.approvedAt) });
+        return;
+      }
+      const person = sheetLine?.[slot.signKey];
+      if (person) marks.set(slot.signKey, { caption: assigneeCaption(person) });
+    });
+    return marks;
+  }, [lineSlots, states, sheetLine, approvalBoxes]);
   /** 이 서류가 속한 현장 — 조직·기본 결재선을 여기서 꺼낸다(헤더에서 고른 현장과 같다). */
   const docSite = sites.find((site) => site.id === (openedSummary?.siteId ?? siteId));
   // 새 장을 만들 때 복사해 올 빈 양식. 없으면 지금 보는 시트를 쓴다.
@@ -1789,7 +1895,67 @@ export default function FormsPage() {
                   </span>
                 </button>
               )}
+
+              {/* 결재 — 진행 상황, 내 차례면 [결재하기], 내가 마지막으로 했으면 [결재 취소] */}
+              {lineSlots.length > 0 && !readOnly && state.id !== "" && Object.keys(sheetLine ?? {}).length > 0 && (
+                <>
+                  <span
+                    className={
+                      approvedCount === lineSlots.length
+                        ? "inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
+                        : "inline-flex items-center gap-1 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-200"
+                    }
+                  >
+                    {approvedCount === lineSlots.length ? (
+                      <>
+                        <Check size={13} /> 결재 완료
+                      </>
+                    ) : (
+                      <>
+                        결재 <span className="tabular-nums">{approvedCount}/{lineSlots.length}</span>
+                      </>
+                    )}
+                  </span>
+                  {readyIndex >= 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void handleApprove(readyIndex)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700"
+                    >
+                      <PenLine size={14} /> 결재하기 ({lineSlots[readyIndex].label})
+                    </button>
+                  )}
+                  {readyIndex < 0 && waitingState?.status === "waiting" && (
+                    <span className="text-xs text-slate-400">{waitingState.before} 결재 후 결재할 수 있습니다</span>
+                  )}
+                  {cancelIndex >= 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void handleCancelApproval(cancelIndex)}
+                      className="rounded-lg px-2.5 py-1.5 text-xs text-slate-500 ring-1 ring-slate-300 transition hover:bg-slate-50"
+                    >
+                      결재 취소 ({lineSlots[cancelIndex].label})
+                    </button>
+                  )}
+                </>
+              )}
             </div>
+
+            {/* 서명이 없을 때 결재하기 → 서명부터 등록하고 이어서 결재 */}
+            {signFor !== null && user && (
+              <SignatureDialog
+                onCancel={() => setSignFor(null)}
+                onSave={(dataUrl) => {
+                  const index = signFor;
+                  setSignFor(null);
+                  if (!writeSignature(user.id, dataUrl)) {
+                    setStorageWarning("이 브라우저에서는 서명을 저장할 수 없습니다(사이트 데이터 차단).");
+                    return;
+                  }
+                  void handleApprove(index, dataUrl);
+                }}
+              />
+            )}
 
             {lineDialogOpen && docSite && (
               <ApprovalLineDialog
@@ -1862,8 +2028,8 @@ export default function FormsPage() {
               values={sheetValues}
               onCommitValue={handleCommitValue}
               tint={showEditableTint}
-              signKeys={signKeys}
-              signCaptions={signCaptions}
+              signKeys={pendingSignKeys}
+              cellMarks={cellMarks}
               onChangeValue={(cellKey, value) =>
                 setValues((prev) => ({
                   ...prev,

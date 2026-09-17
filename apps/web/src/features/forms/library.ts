@@ -52,6 +52,7 @@ export function siteCopyFields(
     customSheets: [],
     extraRows: {},
     approvalLines: {},
+    approvals: {},
   };
 }
 

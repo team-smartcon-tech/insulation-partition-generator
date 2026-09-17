@@ -144,3 +144,122 @@ export function nextEmptyIndex(line: (Assignee | undefined)[], from: number): nu
 
 /** 칸에 짧게 보일 글자: `김성훈 대리` */
 export const assigneeCaption = (person: Assignee) => [person.name, person.position].filter(Boolean).join(" ");
+
+// ─── 결재 ──────────────────────────────────────────────────
+
+/** 한 칸의 결재 기록. 서명 그림을 **복사해** 담는다 — 나중에 서명을 바꿔도 이미 한 결재는 그대로. */
+export interface Approval {
+  name: string;
+  position: string;
+  userId: string;
+  /** 결재할 때의 서명 PNG(data URL) */
+  signature: string;
+  /** 결재한 시각(ms) */
+  approvedAt: number;
+}
+
+/** 칸 하나의 결재 상태 */
+export type SlotState =
+  | { status: "done"; approval: Approval }
+  /** 로그인한 사람이 지금 결재할 수 있다 */
+  | { status: "ready" }
+  /** 앞 칸이 아직 — `before` 는 기다리는 칸 이름 */
+  | { status: "waiting"; before: string }
+  /** 다른 사람 차례(또는 앞 칸이 끝나면 다른 사람이 할 칸) */
+  | { status: "other" }
+  /** 결재선이 비어 있다 */
+  | { status: "unassigned" };
+
+const compactName = (text: string) => text.replace(/\s+/g, "");
+
+/**
+ * 결재선의 사람이 로그인한 사람인가 — 이름으로 본다(현장 조직은 계정과 아직 이어져 있지 않다).
+ * 계정 이름이 `이상영 대리`처럼 직급까지 붙어 있어도 맞게, 공백을 빼고 같거나 첫 낱말이 같으면 같은 사람.
+ */
+export function isSamePerson(assignee: Assignee, userName: string | undefined): boolean {
+  if (!userName) return false;
+  const name = compactName(assignee.name);
+  return name !== "" && (name === compactName(userName) || name === userName.trim().split(/\s+/)[0]);
+}
+
+/**
+ * 칸마다 결재 상태. **앞 칸부터 차례로** 한다(작성 → 검토 → 승인) — 검토자가 작성보다 먼저 서명하면
+ * 결재의 뜻이 없다. 앞 칸에 결재선이 비어 있어도 막는다(누가 할지 정해야 넘어간다).
+ */
+export function slotStates(
+  slots: LineSlot[],
+  line: Record<string, Assignee>,
+  approvals: Record<string, Approval>,
+  userName: string | undefined,
+): SlotState[] {
+  let blockedBy: string | undefined;
+  return slots.map((slot) => {
+    const approval = approvals[slot.signKey];
+    if (approval) return { status: "done", approval };
+    const assignee = line[slot.signKey];
+    const state: SlotState = !assignee
+      ? { status: "unassigned" }
+      : blockedBy !== undefined
+        ? isSamePerson(assignee, userName)
+          ? { status: "waiting", before: blockedBy }
+          : { status: "other" }
+        : isSamePerson(assignee, userName)
+          ? { status: "ready" }
+          : { status: "other" };
+    blockedBy ??= slot.label;
+    return state;
+  });
+}
+
+/**
+ * 결재를 취소할 수 있는 칸 — 내가 한 결재 중 **다음 칸이 아직 결재하지 않은** 것.
+ * 뒤 사람이 이미 서명했으면 앞 결재를 빼면 순서가 깨진다.
+ */
+export function cancellableIndex(
+  slots: LineSlot[],
+  approvals: Record<string, Approval>,
+  userId: string | undefined,
+): number {
+  if (!userId) return -1;
+  for (let index = slots.length - 1; index >= 0; index -= 1) {
+    const approval = approvals[slots[index].signKey];
+    if (!approval) continue;
+    return approval.userId === userId ? index : -1;
+  }
+  return -1;
+}
+
+/**
+ * 결재선이 바뀌면, 사람이 바뀌었거나 빠진 칸의 결재는 지운다 — 다른 사람 칸에 남은 서명은 거짓이다.
+ * 그 뒤 칸들도 지운다(앞 칸이 다시 결재해야 순서가 맞다). 남은 결재와 지운 칸 수를 돌려준다.
+ */
+export function pruneApprovals(
+  slots: LineSlot[],
+  line: Record<string, Assignee>,
+  approvals: Record<string, Approval>,
+): { approvals: Record<string, Approval>; removed: number } {
+  const kept: Record<string, Approval> = {};
+  let broken = false;
+  let removed = 0;
+  for (const slot of slots) {
+    const approval = approvals[slot.signKey];
+    if (!approval) {
+      broken = true;
+      continue;
+    }
+    const assignee = line[slot.signKey];
+    if (broken || !assignee || compactName(assignee.name) !== compactName(approval.name)) {
+      broken = true;
+      removed += 1;
+      continue;
+    }
+    kept[slot.signKey] = approval;
+  }
+  return { approvals: kept, removed };
+}
+
+/** 결재칸 날짜 자리에 넣을 글자: `09/17` */
+export function approvalDateText(ms: number): string {
+  const date = new Date(ms);
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+}
