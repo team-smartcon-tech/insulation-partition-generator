@@ -182,15 +182,18 @@ function CellMarkLayer({ mark }: { mark: CellMark | undefined }) {
   if (!mark) return null;
   return (
     <>
+      {/* 서명은 이름 줄 위의 남은 자리에 맞춘다(이름과 겹치지 않게). */}
       {mark.image && (
-        <img
-          src={mark.image}
-          alt=""
-          className="pointer-events-none absolute inset-x-1 bottom-4 top-1 m-auto max-h-[calc(100%-1.25rem)] max-w-[calc(100%-0.5rem)] object-contain"
-        />
+        <span className="pointer-events-none absolute inset-x-1 bottom-[18px] top-1 flex items-center justify-center">
+          <img src={mark.image} alt="" className="max-h-full max-w-full object-contain" />
+        </span>
       )}
+      {/*
+        이름 줄 — 위에 가는 선을 그어 서명과 나눈다(사용자 판단: 선이 없으면 서명과 이름이 섞여 보인다).
+        화면에만 얹는 선이라 엑셀 양식(합친 칸)은 그대로다.
+      */}
       {mark.caption && (
-        <span className="pointer-events-none absolute inset-x-0 bottom-0.5 truncate px-1 text-center text-[11px] font-medium text-blue-800">
+        <span className="pointer-events-none absolute inset-x-1 bottom-0 flex h-[17px] items-center justify-center truncate border-t border-slate-300 text-[11px] font-medium leading-none text-blue-800">
           {mark.caption}
         </span>
       )}
