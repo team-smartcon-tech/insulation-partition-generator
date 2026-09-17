@@ -25,6 +25,25 @@ export interface LibraryEntry {
   templateId?: string;
   /** 현장 서류: 만들 때 그 배포 양식이 올라온 시각 — 이보다 새로 올라온 원본이 "새 판"이다 */
   templateUploadedAt?: number;
+  /** 보기 이름(판 비교에 쓴다) */
+  title?: string;
+}
+
+/**
+ * 판을 가리지 않는 서류 이름 — `(현장명) 인조강화석공사_현장설명서_Ver3_25.11` → `현장명인조강화석공사현장설명서`.
+ *
+ * 한 칸에 **서로 다른 서류**가 여럿 올라온다(공종별 현장설명서 9종). 같은 칸에 나중에 올라왔다고 모두
+ * "새 판"으로 보면, 인조강화석공사 현장설명서에 주방가구공사 것이 새 판이라고 뜬다(실제로 그랬다).
+ * 그래서 판 표시(Ver3, Ver3-4)·날짜(25.11, 2026-06)·앞 기호(●)를 떼고 **이름이 같을 때만** 새 판으로 본다.
+ * 이름을 크게 바꿔 올리면 새 판으로 못 알아보지만, 엉뚱한 서류를 새 판이라고 하는 것보다 낫다.
+ */
+export function editionName(title: string | undefined): string {
+  return (title ?? "")
+    .replace(/\.xlsx$/i, "")
+    .replace(/(?<![a-z])(?:ver|v)\.?\s*\d+(?:[.\-]\d+)*/gi, "")
+    .replace(/(?:19|20)?\d{2}[.\-/]\d{1,2}(?:[.\-/]\d{1,2})?/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .toLowerCase();
 }
 
 export const isTemplate = (form: { kind?: FormKind }) => form.kind === "template";
@@ -78,15 +97,39 @@ export function newerTemplateFor<T extends LibraryEntry>(
   const slot = slotOf(doc, taxonomies);
   if (!slot) return undefined;
   const since = doc.templateUploadedAt ?? 0;
+  // 현장에서 서류 이름을 바꿨을 수 있어, 만들 때 쓴 원본의 이름으로 견준다(원본이 지워졌으면 서류 이름).
+  const name = editionName(templates.find((template) => template.id === doc.templateId)?.title ?? doc.title);
   return templates
     .filter(
       (template) =>
         isTemplate(template) &&
         template.id !== doc.templateId &&
         template.uploadedAt > since &&
-        slotOf(template, taxonomies) === slot,
+        slotOf(template, taxonomies) === slot &&
+        editionName(template.title) === name,
     )
     .sort((a, b) => b.uploadedAt - a.uploadedAt)[0];
+}
+
+/**
+ * 이 칸에 올라온 배포 양식들 — 한 칸에 서로 다른 서류가 여럿일 수 있다(공종별 현장설명서).
+ * **같은 서류의 옛 판은 빼고** 서류마다 최신 판만, 이름 순으로 돌려준다.
+ */
+export function templatesIn<T extends LibraryEntry>(
+  taxonomyId: string,
+  code: string,
+  templates: T[],
+  taxonomies: Taxonomy[],
+): T[] {
+  const slot = `${taxonomyId}:${code}`;
+  const latest = new Map<string, T>();
+  for (const template of templates) {
+    if (!isTemplate(template) || slotOf(template, taxonomies) !== slot) continue;
+    const key = editionName(template.title) || template.id;
+    const current = latest.get(key);
+    if (!current || template.uploadedAt > current.uploadedAt) latest.set(key, template);
+  }
+  return [...latest.values()].sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "", "ko"));
 }
 
 /** 이 칸에 올라온 배포 양식 중 가장 최근 것 — 현장 서류함의 빈 칸에서 "작성하기"에 쓴다. */

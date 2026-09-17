@@ -87,3 +87,24 @@ test('옛 서류 — 적은 내용은 사라지지 않고 현장 사본으로 �
   const noSite = planLegacyForm({ ...form, siteId: undefined }, 'first', () => 'copy-2');
   assert.equal(noSite.copy.siteId, 'first');
 });
+
+import { editionName, templatesIn } from '../apps/web/src/features/forms/library.ts';
+
+test('판 이름: 버전·날짜·기호를 떼고 견준다', () => {
+  assert.equal(editionName('(현장명) 인조강화석공사_현장설명서_Ver3_25.11'), editionName('(현장명) 인조강화석공사_현장설명서_Ver3-4_26.06'));
+  assert.notEqual(editionName('(현장명) 인조강화석공사_현장설명서_Ver3_25.11'), editionName('(현장명) 주방가구공사_현장설명서_Ver3_25.11'));
+  assert.equal(editionName('● (현장명) OO공사 현장설명서(공통사항)_Ver3-4_26.06.xlsx'), '현장명oo공사현장설명서공통사항');
+});
+
+test('한 칸에 서로 다른 서류가 여럿이면, 나중에 올라온 다른 서류는 새 판이 아니다', () => {
+  const kitchen = { id: 'k', kind: 'template', code: '712', taxonomyId: 'q', uploadedAt: 200, title: '(현장명) 주방가구공사_현장설명서_Ver3_25.11' };
+  const stone = { id: 's1', kind: 'template', code: '712', taxonomyId: 'q', uploadedAt: 100, title: '(현장명) 인조강화석공사_현장설명서_Ver3_25.11' };
+  const stoneV2 = { id: 's2', kind: 'template', code: '712', taxonomyId: 'q', uploadedAt: 300, title: '(현장명) 인조강화석공사_현장설명서_Ver3-4_26.06' };
+  const doc = { id: 'd', kind: 'site', siteId: 'x', code: '712', taxonomyId: 'q', uploadedAt: 150, templateId: 's1', templateUploadedAt: 100, title: '우리 현장 인조석 (이름 바꿈)' };
+
+  assert.equal(newerTemplateFor(doc, [stone, kitchen], taxonomies), undefined, '주방가구는 새 판이 아니다');
+  assert.equal(newerTemplateFor(doc, [stone, kitchen, stoneV2], taxonomies)?.id, 's2', '같은 서류의 새 판 — 현장에서 이름을 바꿨어도 원본 이름으로 견준다');
+
+  // 칸의 서류 목록: 서류마다 최신 판 하나씩, 이름 순
+  assert.deepEqual(templatesIn('q', '712', [stone, kitchen, stoneV2, doc], taxonomies).map((t) => t.id), ['s2', 'k']);
+});

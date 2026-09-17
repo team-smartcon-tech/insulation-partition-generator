@@ -50,6 +50,7 @@ import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import HomeDashboard, { SitesAudit } from "./HomeDashboard";
+import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
 import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
@@ -70,8 +71,10 @@ import {
 import {
   isSiteDoc,
   isTemplate,
+  editionName,
   latestTemplateIn,
   newerTemplateFor,
+  templatesIn,
   type FormKind,
 } from "./library";
 import FormSheetView, { type CellMark, type FormScale } from "./FormSheetView";
@@ -205,6 +208,9 @@ export default function FormsPage() {
   /** 지금 보는 곳. 원본(배포 양식함)과 작성본(현장 서류함)을 섞어 보여 주지 않는다. */
   // 들어오면 홈에서 시작한다 — 오늘 내 차례인 결재와 알림을 먼저 본다(사용자와 정한 흐름).
   const [space, setSpaceState] = useState<Space>("home");
+  /** 한 칸에 배포 양식이 여럿일 때 고르는 창 */
+  const [slotWrite, setSlotWrite] = useState<{ slotLabel: string; choices: SlotWriteChoice[] } | null>(null);
+  const [slotWriting, setSlotWriting] = useState(false);
   /** 홈에서 [서명 등록하기] 를 눌렀나 */
   const [homeSignOpen, setHomeSignOpen] = useState(false);
   /** 시트 이름 → 아래에 더한 빈 줄 수 */
@@ -1103,9 +1109,30 @@ export default function FormsPage() {
   function handleUploadFor(taxonomyId: string, item: TaxonomyItem) {
     // 현장 서류함에서 그 칸의 배포 양식이 있으면 파일을 고르지 않고 원본으로 바로 작성한다.
     if (space === "site" && siteId) {
-      const template = latestTemplateIn(taxonomyId, item.code, templates, taxonomies);
-      if (template) {
-        void handleWrite(template.id, siteId);
+      const list = templatesIn(taxonomyId, item.code, templates, taxonomies);
+      if (list.length === 1) {
+        void handleWrite(list[0].id, siteId);
+        return;
+      }
+      // 한 칸에 서로 다른 배포 양식이 여럿(공종별 현장설명서 등) — 골라서 한 번에 만든다.
+      if (list.length > 1) {
+        setSlotWrite({
+          slotLabel: `${item.code} ${item.name}`,
+          choices: list.map((template) => ({
+            id: template.id,
+            title: template.title,
+            uploadedAt: template.uploadedAt,
+            existing: forms.filter(
+              (form) =>
+                isSiteDoc(form) &&
+                form.siteId === siteId &&
+                form.code === template.code &&
+                (form.templateId === template.id ||
+                  editionName(templates.find((entry) => entry.id === form.templateId)?.title ?? form.title) ===
+                    editionName(template.title)),
+            ).length,
+          })),
+        });
         return;
       }
       // 원본이 없는 칸 — 현장 서류함에서는 파일을 직접 올리지 않는다.
@@ -1154,6 +1181,36 @@ export default function FormsPage() {
         error instanceof Error ? `작성할 서류를 만들지 못했습니다: ${error.message}` : "작성할 서류를 만들지 못했습니다.",
       );
     }
+  }
+
+  /**
+   * 고른 배포 양식 여러 개를 한 번에 현장 서류함에 만든다. 하나라도 실패하면 만든 것까지만 알리고
+   * 멈추지 않는다 — 9종 중 1종 실패로 나머지 8종까지 못 만들면 더 불편하다.
+   */
+  async function handleWriteMany(templateIds: string[]) {
+    const target = sites.find((site) => site.id === siteId);
+    if (!target || templateIds.length === 0) return;
+    setSlotWriting(true);
+    const made: string[] = [];
+    const failed: string[] = [];
+    for (const id of templateIds) {
+      try {
+        made.push((await copyTemplateToSite(id, target.id)).id);
+      } catch (error) {
+        failed.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    setSlotWriting(false);
+    setSlotWrite(null);
+    await refreshList();
+    if (made[0]) {
+      await openStored(made[0]);
+      setSaveState("saved");
+    }
+    setStorageWarning(
+      `“${target.name}” 서류함에 ${made.length}종을 만들었습니다.` +
+        (failed.length > 0 ? ` ⚠ ${failed.length}종은 만들지 못했습니다: ${failed.join(" / ")}` : " 첫 서류를 열었습니다."),
+    );
   }
 
   /** 그냥 올리기. 보고 있던 1차 분류를 기억해 둔다. */
@@ -1648,10 +1705,14 @@ export default function FormsPage() {
                   : [];
               }}
               slotAction={(taxonomyId, item) => {
-                if (space === "site" && latestTemplateIn(taxonomyId, item.code, templates, taxonomies)) {
+                const available = space === "site" ? templatesIn(taxonomyId, item.code, templates, taxonomies).length : 0;
+                if (available > 0) {
                   return {
-                    label: "작성하기",
-                    title: `배포 양식으로 ${item.code} ${item.name}을(를) 이 현장 서류함에 만듭니다`,
+                    label: available > 1 ? `작성하기 (${available}종)` : "작성하기",
+                    title:
+                      available > 1
+                        ? `이 칸의 배포 양식 ${available}종을 골라 한 번에 이 현장 서류함에 만듭니다`
+                        : `배포 양식으로 ${item.code} ${item.name}을(를) 이 현장 서류함에 만듭니다`,
                     write: true,
                   };
                 }
@@ -1707,6 +1768,17 @@ export default function FormsPage() {
             />
           )}
         </div>
+
+        {slotWrite && (
+          <SlotWriteDialog
+            slotLabel={slotWrite.slotLabel}
+            siteName={sites.find((site) => site.id === siteId)?.name ?? ""}
+            choices={slotWrite.choices}
+            busy={slotWriting}
+            onCancel={() => setSlotWrite(null)}
+            onConfirm={(ids) => void handleWriteMany(ids)}
+          />
+        )}
 
         {homeSignOpen && user && (
           <SignatureDialog
