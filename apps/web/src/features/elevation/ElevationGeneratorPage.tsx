@@ -1257,7 +1257,9 @@ export default function ElevationGeneratorPage() {
       exteriorSide: exteriorSideOf(w), // 체인별 외부 방향 — 열린 선은 모양으로 자동 판정
       plyInward,
       minPieceWidth,
-      placement,
+      // 조각 배치는 두 모드 모두 시공성 우선(창 좌우 일직선 절단·재분할·버림).
+      // 물량 최소는 2P 시작 위치를 고르는 기준만 다르다(computePlyDev).
+      placement: "constructability",
       discardWidth,
       constructMinPieceWidth: constructMinW,
       openings: opsDevX,
@@ -1303,7 +1305,7 @@ export default function ElevationGeneratorPage() {
     dev2: PlyDevelopment | null;
     conflictSegs: JointSeg[];
   };
-  // 2P 면별 위치 탐색(면 × 20위치)으로 계산이 무거워,
+  // 물량 최소 모드는 2P 면별 위치 탐색(면 × 20위치)으로 계산이 무거워,
   // 같은 입력이면 결과를 재사용한다. 키는 전개에 들어가는 입력 전부.
   const plyDevCacheRef = useRef(new Map<string, PlyDevResult>());
   const buildPlyDev = (
@@ -1319,8 +1321,9 @@ export default function ElevationGeneratorPage() {
       y0: o.sill,
       y1: o.sill + o.height,
     }));
+    if (placement !== "min-waste") return computePlyDev(w, floorHeight, opsStruct);
     const key = JSON.stringify([
-      placement, w.points, w.closed, resolveSegInsul(w), exteriorSideOf(w), opsStruct,
+      w.points, w.closed, resolveSegInsul(w), exteriorSideOf(w), opsStruct,
       floorHeight, boardLength, boardHeight, boardThickness, optimizeSP,
       discardWidth, constructMinW, minPieceWidth, minJointGap, plyInward,
     ]);
@@ -1337,8 +1340,11 @@ export default function ElevationGeneratorPage() {
     floorHeight: number,
     opsStruct: { x0: number; x1: number; y0: number; y1: number }[]
   ): PlyDevResult => {
+    const minWaste = placement === "min-waste";
     const p1 = makeParams(w, w.points, false, opsStruct, floorHeight);
-    const dev1 = optimizeSP ? developPlyMinBoards(p1).dev : developPly(p1);
+    // 물량 최소도 1P 는 시공성 우선 그대로(SP 최적배치 미적용)
+    const dev1 =
+      !minWaste && optimizeSP ? developPlyMinBoards(p1).dev : developPly(p1);
 
     // 2P 생성 여부는 '두께'로만 판단한다. 모든 변이 2P=0(또는 배치 안함)이면
     // 2P 겹 자체가 없다 → 빈 전개면/0T 물량 방지.
@@ -1360,22 +1366,22 @@ export default function ElevationGeneratorPage() {
 
     const j1 = jointSegsOf(dev1);
     const L = boardLength;
-    const minWaste = placement === "min-waste";
     type Cand = { dev: PlyDevelopment; segs: JointSeg[]; boards: number };
     const evalDev = (dev: PlyDevelopment): Cand => ({
       dev,
       segs: conflictSegsOf(j1, 0, jointSegsOf(dev), 0, minJointGap),
-      boards: summarizeBoards(dev.cells, L, boardHeight, {
-        allowRotate: minWaste,
-      }).orderBoardCount,
+      boards: summarizeBoards(dev.cells, L, boardHeight).orderBoardCount,
     });
-    // 2P 위치 우선순위 — 두 모드 모두 판수 → 결로 경고.
-    // (예전엔 결로 경고를 먼저 봐서 경고 몇 개를 줄이려고 판을 여러 장 더 썼다.
-    //  남원주역세권1차 84C 2P: 경고 우선 48~49판 ↔ 판수 우선 42판, 현장 도면 44판)
-    // 1P 배치(시공성 우선 = 창 좌우 일직선 절단)와 조각 회전(물량 최소만)은 모드별 그대로.
+    // 2P 위치 우선순위 — 시공성 우선: 결로 경고 → 판수 (기존 그대로)
+    //                    물량 최소: 판수 → 결로 경고
+    // (결로 경고를 먼저 보면 경고 몇 개를 줄이려고 판을 여러 장 더 쓴다.
+    //  남원주역세권1차 84C 2P: 경고 우선 48판 ↔ 판수 우선 42판, 현장 도면 44판)
     const better = (a: Cand, b: Cand) =>
-      a.boards < b.boards ||
-      (a.boards === b.boards && a.segs.length < b.segs.length);
+      minWaste
+        ? a.boards < b.boards ||
+          (a.boards === b.boards && a.segs.length < b.segs.length)
+        : a.segs.length < b.segs.length ||
+          (a.segs.length === b.segs.length && a.boards < b.boards);
 
     // ① 벽 전체 시작 위치 0~950 을 50 간격으로 훑는다
     let best: Cand | null = null;
@@ -1389,19 +1395,21 @@ export default function ElevationGeneratorPage() {
     }
     if (!best) return { dev1, dev2: developPly(p2), conflictSegs: [] };
 
-    // ② 면마다 시작 위치를 따로 골라 본다(①의 위치에서 출발, 한 바퀴).
+    // ② 물량 최소: 면마다 시작 위치를 따로 골라 본다(①의 위치에서 출발, 한 바퀴).
     //    판은 코너를 못 넘어 면마다 새로 깔리는데, 위치 하나를 벽 전체에 쓰면
     //    어떤 면은 양 끝이 다 잘린다. 판수가 같아도 결로 경고가 줄어드는 쪽을 택한다.
-    const offs = new Array<number>(best.dev.segLengths.length).fill(bestOff);
-    for (let f = 0; f < offs.length; f++) {
-      for (let off = 0; off < L; off += 50) {
-        if (off === offs[f]) continue;
-        const trial = offs.slice();
-        trial[f] = off;
-        const c = evalDev(developPly({ ...p2, segStartOffsets: trial }));
-        if (better(c, best)) {
-          best = c;
-          offs[f] = off;
+    if (minWaste) {
+      const offs = new Array<number>(best.dev.segLengths.length).fill(bestOff);
+      for (let f = 0; f < offs.length; f++) {
+        for (let off = 0; off < L; off += 50) {
+          if (off === offs[f]) continue;
+          const trial = offs.slice();
+          trial[f] = off;
+          const c = evalDev(developPly({ ...p2, segStartOffsets: trial }));
+          if (better(c, best)) {
+            best = c;
+            offs[f] = off;
+          }
         }
       }
     }
@@ -2423,7 +2431,7 @@ export default function ElevationGeneratorPage() {
         }
 
         // 보드 번호(원형) + 치수 — 정척="온장", 절단=전용그룹 N-1/N-2
-        const labels = numberBoards(dev.cells, boardLength, boardHeight, { allowRotate: placement === "min-waste" });
+        const labels = numberBoards(dev.cells, boardLength, boardHeight);
         // 클릭 상세용 시트 등록 (fit 좌표계 히트 영역은 아래 forEach 에서 기록)
         const sheetIdx =
           elevSheetsRef.current.push({
@@ -2562,7 +2570,7 @@ export default function ElevationGeneratorPage() {
         }
 
         // ── 물량 집계 ──
-        const sum = summarizeBoards(dev.cells, boardLength, boardHeight, { allowRotate: placement === "min-waste" });
+        const sum = summarizeBoards(dev.cells, boardLength, boardHeight);
         // 헤더 우측: 총 장수/면적
         ctx.fillStyle = "#0284c7";
         ctx.font = `bold ${metaFont}px 'Noto Sans KR', sans-serif`;
@@ -3496,7 +3504,7 @@ export default function ElevationGeneratorPage() {
     ply: number,
     segInsul: SegInsul[]
   ): InsulationExport => {
-    const s = summarizeBoards(dev.cells, boardLength, boardHeight, { allowRotate: placement === "min-waste" });
+    const s = summarizeBoards(dev.cells, boardLength, boardHeight);
     const isP2 = ply === 2;
     // 노출 구간(직접/간접외기) 밴드 — 연속 같은 노출은 병합. 전개좌표(dev.segLengths) 기준.
     const exposureBands: NonNullable<InsulationExport["exposureBands"]> = [];
@@ -3553,7 +3561,7 @@ export default function ElevationGeneratorPage() {
     // 버림(폐기) 자투리는 도면에서 뺀다 — 발주·시공 대상이 아닌데 번호·치수가 찍히면
     // 현장에서 시공해야 할 조각으로 오독된다(물량 집계에서도 이미 제외돼 있다).
     // 번호는 전체 셀 기준으로 먼저 매기고 인덱스로 걸러야 남는 조각 번호가 안 밀린다.
-    const allLabels = numberBoards(dev.cells, boardLength, boardHeight, { allowRotate: placement === "min-waste" });
+    const allLabels = numberBoards(dev.cells, boardLength, boardHeight);
     const keep: number[] = [];
     dev.cells.forEach((c, i) => {
       if (!c.discarded) keep.push(i);
@@ -3698,7 +3706,7 @@ export default function ElevationGeneratorPage() {
 
       // 절단판 — 한 온장에서 재단되는 조각 묶음 = 1판 (묶음은 두께 단일이 보장된다)
       // 번호는 도면과 같은 규칙으로 두께별 시퀀스를 쓴다 → 도면의 90-2 와 표의 90-2 가 같은 판
-      const bins = packCutBoards(cells, L, H, { allowRotate: placement === "min-waste" });
+      const bins = packCutBoards(cells, L, H);
       const binSeq = new Map<number, number>();
       bins.forEach(items => {
         const thk = Math.round(cells[items[0]].thickness);
@@ -3768,7 +3776,7 @@ export default function ElevationGeneratorPage() {
     // 두께별로 주문 판수(정척+절단판) 산출 → 면적 = 판수 × 정척면적 (현장식)
     for (const t of new Set(cells.map(c => Math.round(c.thickness)))) {
       const sub = cells.filter(c => Math.round(c.thickness) === t);
-      const boards = summarizeBoards(sub, boardLength, boardHeight, { allowRotate: placement === "min-waste" }).orderBoardCount;
+      const boards = summarizeBoards(sub, boardLength, boardHeight).orderBoardCount;
       m.set(t, { ea: boards, areaM2: boards * fullArea });
     }
     return m;
@@ -4111,8 +4119,7 @@ export default function ElevationGeneratorPage() {
             summary: summarizeBoards(
               [...dev1.cells, ...(dev2?.cells ?? [])],
               boardLength,
-              boardHeight,
-              { allowRotate: placement === "min-waste" }
+              boardHeight
             ),
           };
         }),
@@ -4840,35 +4847,12 @@ export default function ElevationGeneratorPage() {
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                  {placement === "min-waste" ? (
-                    <>
-                      <label className="flex items-center gap-2 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={optimizeSP}
-                          onChange={e => setOptimizeSP(e.target.checked)}
-                          className="accent-[#004791]"
-                        />
-                        <span className="font-semibold text-slate-700">
-                          최적배치 (SP 자동 — 최소 물량)
-                        </span>
-                      </label>
-                      <LabelInput
-                        label="최소 조각 폭 (시공성 — 슬리버 제거)"
-                        control={
-                          <NumberInput
-                            value={minPieceWidth}
-                            onChange={setMinPieceWidth}
-                            suffix="mm"
-                            step={10}
-                            min={0}
-                            max={1000}
-                            compact
-                          />
-                        }
-                      />
-                    </>
-                  ) : (
+                  {placement === "min-waste" && (
+                    <p className="text-[10.5px] leading-snug text-slate-500">
+                      물량 최소: 조각 배치(1P·2P)는 시공성 우선과 같고, 2P 시작 위치를
+                      벽 면마다 판수가 가장 적게 드는 쪽으로 고릅니다.
+                    </p>
+                  )}
                     <>
                       <LabelInput
                         label="최소 조각 폭 (미만이면 옆 판과 재분할 · 0=끔)"
@@ -4899,7 +4883,6 @@ export default function ElevationGeneratorPage() {
                         }
                       />
                     </>
-                  )}
                   </div>
                   <LabelInput
                     label="결로방지 최소 조인트 이격 (2P↔1P)"
