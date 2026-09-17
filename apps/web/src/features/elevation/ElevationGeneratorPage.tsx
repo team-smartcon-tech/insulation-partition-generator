@@ -838,7 +838,9 @@ export default function ElevationGeneratorPage() {
         autoExtract,
         hiddenLayers: Array.from(hiddenLayers),
       },
-      presets: [],
+      // 노출 프리셋(직접/간접외기 두께). 예전엔 항상 [] 로 저장해 새로고침·REV 로드마다
+      // 기본값(90/50·50/50)으로 돌아갔다.
+      presets: exposurePresets,
       walls,
       openings,
       buildings: [],
@@ -847,7 +849,7 @@ export default function ElevationGeneratorPage() {
     [
       fileName, boardLength, boardHeight, boardThickness, insulOn, placement,
       optimizeSP, discardWidth, constructMinW, minJointGap, minPieceWidth, plyInward, defaultFloorHeight,
-      defaultSill, autoExtract, hiddenLayers, walls, openings, typeMatrix,
+      defaultSill, autoExtract, hiddenLayers, walls, openings, typeMatrix, exposurePresets,
     ]
   );
 
@@ -868,6 +870,21 @@ export default function ElevationGeneratorPage() {
     setDefaultSill(st.ui.defaultSill);
     setAutoExtract(st.ui.autoExtract);
     setHiddenLayers(new Set(st.ui.hiddenLayers ?? []));
+    {
+      // 노출 프리셋 — 저장된 값이 있으면 노출타입별로 덮어쓰고, 없으면(구 REV: presets=[]) 기본값.
+      const saved = ((st.presets ?? []) as Partial<ExposurePreset>[]).filter(
+        p =>
+          !!p &&
+          !!p.exposure &&
+          typeof p.ply1 === "number" &&
+          typeof p.ply2 === "number"
+      ) as ExposurePreset[];
+      setExposurePresets(
+        DEFAULT_EXPOSURE_PRESETS.map(
+          d => saved.find(p => p.exposure === d.exposure) ?? d
+        )
+      );
+    }
     {
       // 옛 REV 마이그레이션: 수동 2P 입면(refChainId 보유)은 이제 1P 체인이
       // 1P·2P를 자동 생성하므로 중복(물량 2배) → 로드 시 제거하고 안내.
