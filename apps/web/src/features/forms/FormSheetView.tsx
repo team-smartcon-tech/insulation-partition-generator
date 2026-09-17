@@ -131,6 +131,8 @@ interface FormSheetViewProps {
   onCommitValue?: (cellKey: string, before: string | undefined, after: string) => void;
   /** 고칠 수 있는 칸에 하늘색을 칠할까. 잠긴 시트에서만 뜻이 있다. */
   tint?: boolean;
+  /** 결재 서명 자리 — 파란 점선 테두리로 알린다(`approval.ts` 가 찾는다). */
+  signKeys?: Set<string>;
   /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
   scale?: FormScale;
 }
@@ -156,6 +158,9 @@ function useElementSize(ref: React.RefObject<HTMLElement | null>, deps: unknown[
   return size;
 }
 
+/** 결재칸이 없는 시트 — 줄 메모가 듣도록 늘 같은 빈 묶음을 넘긴다. */
+const EMPTY_KEYS: Set<string> = new Set();
+
 /**
  * 한 줄. **줄 단위로 메모**해 둔다 — 한 칸에 글자를 치면 시트 전체가 다시 그려지는데,
  * 큰 시트(수천 칸)에서는 그것만으로 타자가 눈에 띄게 밀린다. 값이 바뀐 줄만 다시 그린다.
@@ -168,10 +173,13 @@ const SheetRow = memo(function SheetRow({
   tint,
   values,
   spillable,
+  signKeys,
   onChangeValue,
   onCommitValue,
 }: {
   cells: FormCell[];
+  /** 결재 서명 자리 */
+  signKeys: Set<string>;
   height: number | undefined;
   editable: boolean;
   /** 엑셀에서 시트 보호가 걸린 시트인가 — 이때만 "고칠 수 있는 칸"을 칠해 준다. */
@@ -194,7 +202,13 @@ const SheetRow = memo(function SheetRow({
           key={cell.key}
           colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
           rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-          title={editable && cell.locked ? "엑셀에서 잠가 둔 칸이라 고칠 수 없습니다(엑셀 원본에 잠금이 걸려 있습니다)." : undefined}
+          title={
+            signKeys.has(cell.key)
+              ? "결재 서명 자리로 인식한 칸입니다."
+              : editable && cell.locked
+                ? "엑셀에서 잠가 둔 칸이라 고칠 수 없습니다(엑셀 원본에 잠금이 걸려 있습니다)."
+                : undefined
+          }
           style={{
             ...cellCss(cell.style, effectiveAlign(cell)),
             // 잠긴 시트에서 "여기에 적으면 된다"를 한눈에 보이게 연한 하늘색을 덧칠한다.
@@ -206,6 +220,14 @@ const SheetRow = memo(function SheetRow({
             ...(sheetLocked && tint && canEdit && cell.text.trim() !== ""
 
               ? { backgroundImage: "linear-gradient(rgba(125, 211, 252, 0.38), rgba(125, 211, 252, 0.38))" }
+              : {}),
+            // 결재 서명 자리 — 엑셀 테두리를 가리지 않게 안쪽에 점선을 그린다.
+            ...(signKeys.has(cell.key)
+              ? {
+                  outline: "2px dashed rgba(37, 99, 235, 0.55)",
+                  outlineOffset: "-4px",
+                  backgroundColor: "rgba(219, 234, 254, 0.35)",
+                }
               : {}),
           }}
         >
@@ -232,6 +254,7 @@ export default function FormSheetView({
   onChangeValue,
   onCommitValue,
   tint = true,
+  signKeys = EMPTY_KEYS,
   scale = 1,
 }: FormSheetViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -334,6 +357,7 @@ export default function FormSheetView({
               tint={tint}
               values={rowValues[rowIndex] ?? EMPTY_VALUES}
               spillable={spillable}
+              signKeys={signKeys}
               onChangeValue={handleChange}
               onCommitValue={handleCommit}
             />

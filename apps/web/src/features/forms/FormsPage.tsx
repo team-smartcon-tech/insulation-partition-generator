@@ -6,7 +6,7 @@
  * ({@link ./formStore}). 목록은 분류 탭·즐겨찾기로 고르는 서식함 모양이다
  * ({@link ./FormGallery}). 서버 저장·공유는 다음 단계에서 이 위에 얹는다.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import BrandWordmark from "@/components/brand/BrandWordmark";
 import { SmartBackground, SmartHeader } from "@/components/layout/SmartShell";
@@ -43,6 +43,7 @@ import { parseFormWorkbook } from "./formParser";
 import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
+import { findApprovalBoxes } from "./approval";
 import {
   isSiteDoc,
   isTemplate,
@@ -1206,6 +1207,12 @@ export default function FormsPage() {
   // 시트 아래에 더한 빈 줄. 원본 격자는 그대로 두고 그릴 때만 이어 붙인다.
   const extraRowCount = baseSheet ? (extraRows[baseSheet.name] ?? 0) : 0;
   const sheet = baseSheet ? withExtraRows(baseSheet, extraRowCount) : null;
+  // 결재칸(작성·검토·승인). 원본 시트 격자에서 찾는다 — 더한 줄과는 상관없다.
+  const approvalBoxes = useMemo(() => (baseSheet ? findApprovalBoxes(baseSheet) : []), [baseSheet]);
+  const signKeys = useMemo(
+    () => new Set(approvalBoxes.flatMap((box) => box.slots.map((slot) => slot.signKey))),
+    [approvalBoxes],
+  );
   // 새 장을 만들 때 복사해 올 빈 양식. 없으면 지금 보는 시트를 쓴다.
   const template = state.status === "ready" ? findTemplateSheet(state.sheets) : undefined;
   // 고친 글자는 시트마다 따로 담긴다. 화면에는 지금 보는 시트 것만 넘긴다.
@@ -1739,6 +1746,14 @@ export default function FormsPage() {
                   🔒 잠긴 시트 · 고칠 수 있는 칸 {sheet.cells.filter((c) => !c.locked).length}개
                 </span>
               )}
+              {approvalBoxes.length > 0 && (
+                <span
+                  className="text-blue-700"
+                  title="서류 안의 결재칸을 찾아 서명 자리에 파란 점선을 그렸습니다. 결재선 지정은 다음 단계에서 붙습니다."
+                >
+                  결재칸 인식: {approvalBoxes.map((box) => box.slots.map((slot) => slot.label).join(" · ")).join(" / ")}
+                </span>
+              )}
               {editedCount > 0 && <span className="text-blue-600">고친 칸 {editedCount}개</span>}
               {totalEdited > editedCount && (
                 <span className="text-slate-400">전체 {totalEdited}개</span>
@@ -1764,6 +1779,7 @@ export default function FormsPage() {
               values={sheetValues}
               onCommitValue={handleCommitValue}
               tint={showEditableTint}
+              signKeys={signKeys}
               onChangeValue={(cellKey, value) =>
                 setValues((prev) => ({
                   ...prev,
