@@ -174,7 +174,11 @@ function normalize(raw: StoredForm): StoredForm {
     openedAt: raw.openedAt ?? raw.updatedAt,
     customSheets: raw.customSheets ?? [],
     extraRows: raw.extraRows ?? {},
-    values: normalizeValues(raw.values, raw.sheets ?? []),
+    values: restoreBlankedTitles(
+      normalizeValues(raw.values, raw.sheets ?? []),
+      raw.sheets ?? [],
+      raw.customSheets ?? [],
+    ),
   };
 }
 
@@ -200,6 +204,47 @@ export function withCustomSheets(sheets: FormSheet[], custom: CustomSheet[]): Fo
     });
   }
   return result;
+}
+
+/**
+ * 시트 제목 칸(들)의 키. 제목은 **그 시트에서 가장 큰 글씨**다.
+ *
+ * 같은 양식이라도 장마다 제목이 조금씩 다르다(견본 "현장 지식등록 대장" / 작성본 "현장 지식관리
+ * 대장"). "장마다 다르면 내용"이라는 규칙만 쓰면 제목이 내용으로 몰려 지워졌다(사용자 신고).
+ * 제목은 본문보다 확연히 크게 쓰므로, 가장 흔한 글씨 크기보다 1.4배 이상 큰 가장 큰 글씨만
+ * 제목으로 본다 — 글씨가 모두 같은 크기인 양식에서는 아무것도 제목으로 잡지 않는다.
+ */
+export function titleKeys(sheet: FormSheet): Set<string> {
+  const sized = sheet.cells.filter((cell) => cell.text.trim() !== "" && cell.style.fontSize);
+  if (sized.length === 0) return new Set();
+  const counts = new Map<number, number>();
+  for (const cell of sized) counts.set(cell.style.fontSize!, (counts.get(cell.style.fontSize!) ?? 0) + 1);
+  const common = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const largest = Math.max(...counts.keys());
+  if (largest < common * 1.4) return new Set();
+  return new Set(sized.filter((cell) => cell.style.fontSize === largest).map((cell) => cell.key));
+}
+
+/**
+ * 제목을 비워 만든 장을 고친다 — {@link titleKeys} 규칙이 생기기 전에 만든 장은 제목 칸에
+ * 빈 글자("")가 저장돼 있다. 사용자가 일부러 제목을 지웠을 리 없으므로 그 빈 값만 걷어내
+ * 견본의 제목이 다시 보이게 한다. 제목에 **글자를 적어 둔 것**은 건드리지 않는다.
+ */
+export function restoreBlankedTitles(values: FormValues, sheets: FormSheet[], custom: CustomSheet[]): FormValues {
+  let changed = false;
+  const next: FormValues = { ...values };
+  for (const item of custom) {
+    const cells = next[item.name];
+    const source = sheets.find((sheet) => sheet.name === item.source);
+    if (!cells || !source) continue;
+    for (const key of titleKeys(source)) {
+      if (cells[key] !== "") continue;
+      const { [key]: _removed, ...rest } = next[item.name];
+      next[item.name] = rest;
+      changed = true;
+    }
+  }
+  return changed ? next : values;
 }
 
 /** 비교용으로 글자를 다듬는다. 시트마다 `작성`/`작 성` 처럼 띄어쓰기가 달라 공백은 뺀다. */
@@ -238,11 +283,14 @@ export function blankValuesFor(sheets: FormSheet[], source: FormSheet): Record<s
     return seen.length > 0 && seen.some((value) => value !== text);
   };
 
+  // 제목 칸 — 장마다 달라도 내용이 아니라 비우지도, 줄 세기에 넣지도 않는다.
+  const titles = titleKeys(source);
+
   // 줄별로 "글자가 든 칸 수"와 "장마다 달라지는 칸 수"를 센다.
   const rows = new Map<number, { filled: number; varying: number }>();
   for (const cell of source.cells) {
     const text = compactText(cell.text);
-    if (text === "") continue;
+    if (text === "" || titles.has(cell.key)) continue;
     const row = rows.get(cell.row) ?? { filled: 0, varying: 0 };
     row.filled += 1;
     if (varies(cell.key, text)) row.varying += 1;
@@ -271,6 +319,8 @@ export function blankValuesFor(sheets: FormSheet[], source: FormSheet): Record<s
   for (const cell of source.cells) {
     const text = compactText(cell.text);
     if (text === "") continue;
+    // 제목은 장마다 달라도 내용이 아니다.
+    if (titles.has(cell.key)) continue;
 
     // 머리글 줄 아래는 전부 내용이다. 그 위는 칸 단위로 견준다(제목은 남고 현장명은 비운다).
     const isContent =
