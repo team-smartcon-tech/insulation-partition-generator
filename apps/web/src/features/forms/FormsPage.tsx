@@ -28,7 +28,16 @@ import {
   RotateCcw,
   Trash2,
   TriangleAlert,
+  UserRound,
 } from "lucide-react";
+import {
+  contactFor,
+  contactInputText,
+  formatContact,
+  parseContactInput,
+  setGroupContact,
+  setItemContact,
+} from "./contacts";
 import { buildFilledWorkbook, downloadBytes, filledFileName } from "./formExport";
 import { parseFormWorkbook } from "./formParser";
 import { withExtraRows } from "./sheetRows";
@@ -781,6 +790,41 @@ export default function FormsPage() {
     setStorageWarning(`번호를 정리했습니다. 칸 ${changes.length}개` + (moving.length > 0 ? `, 서류 ${moving.length}개` : ""));
   }
 
+  /**
+   * 담당 적기. 부서 / 이름 / 연락처를 한 줄로 받는다(코드표 편집의 다른 입력과 같은 방식).
+   * 중분류에 적으면 아래 칸이 물려받고, 칸에는 담당이 다를 때만 적는다.
+   */
+  async function handleEditGroupContact(taxonomyId: string, groupCode: string) {
+    const group = taxonomies.find((taxonomy) => taxonomy.id === taxonomyId)?.groups.find((g) => g.code === groupCode);
+    if (!group) return;
+    const answer = window.prompt(
+      `“${group.code} ${group.name}” 담당을 적어 주세요. 아래 칸들이 모두 물려받습니다.\n부서 / 이름 / 연락처 순서로 한 줄 (예: 품질팀 / 홍길동 대리 / 내선 1234)\n비우면 담당을 지웁니다.`,
+      contactInputText(group.contact),
+    );
+    if (answer === null) return;
+    await applyTaxonomies(
+      replaceTaxonomy(taxonomyId, (taxonomy) => setGroupContact(taxonomy, groupCode, parseContactInput(answer))),
+      null,
+    );
+  }
+
+  async function handleEditItemContact(taxonomyId: string, item: TaxonomyItem) {
+    const target = taxonomies.find((taxonomy) => taxonomy.id === taxonomyId);
+    if (!target) return;
+    const resolved = contactFor(target, item.code);
+    const groupNote =
+      resolved?.inherited ? `비우면 중분류 담당(${formatContact(resolved.contact)})을 따릅니다.` : "비우면 중분류 담당을 따릅니다.";
+    const answer = window.prompt(
+      `“${item.code} ${item.name}” 칸만 담당이 다르면 적어 주세요.\n부서 / 이름 / 연락처 순서로 한 줄 (예: 안전팀 / 이영희 과장 / 010-0000-0000)\n${groupNote}`,
+      contactInputText(item.contact),
+    );
+    if (answer === null) return;
+    await applyTaxonomies(
+      replaceTaxonomy(taxonomyId, (taxonomy) => setItemContact(taxonomy, item.code, parseContactInput(answer))),
+      null,
+    );
+  }
+
   /** 붙여넣기 상자에서 [이대로 넣기] 를 누르면 여기로 온다. */
   async function handlePasteApply(taxonomyId: string, lines: PastedLine[]) {
     const next = replaceTaxonomy(taxonomyId, (taxonomy) => applyPastedLines(taxonomy, lines));
@@ -1147,6 +1191,11 @@ export default function FormsPage() {
       <Plus size={13} /> 배포 양식에서 가져오기
     </button>
   );
+  // 열어 둔 서류의 담당 — 쓰다 막히면 누구에게 물어야 하는지 서류 바로 위에 보여 준다.
+  const openedTaxonomyId = openedSummary ? taxonomyIdOf(openedSummary, taxonomies) : undefined;
+  const openedTaxonomy = taxonomies.find((taxonomy) => taxonomy.id === openedTaxonomyId);
+  const openedContact =
+    openedTaxonomy && openedSummary?.code ? contactFor(openedTaxonomy, openedSummary.code) : undefined;
   const newerTemplate = openedSummary ? newerTemplateFor(openedSummary, templates, taxonomies) : undefined;
   // 코드표의 칸 수(회사 공통) — 현장별 현황의 분모다.
   const totalSlots = taxonomies.reduce(
@@ -1284,6 +1333,8 @@ export default function FormsPage() {
               }
               onMoveGroup={(taxonomyId, code, before) => void handleMoveGroup(taxonomyId, code, before)}
               onRenumberGroup={(taxonomyId, groupCode) => void handleRenumberGroup(taxonomyId, groupCode)}
+              onEditGroupContact={(taxonomyId, groupCode) => void handleEditGroupContact(taxonomyId, groupCode)}
+              onEditItemContact={(taxonomyId, item) => void handleEditItemContact(taxonomyId, item)}
               forms={listForms_}
               activeId={state.status === "ready" ? state.id : null}
               busy={state.status === "loading"}
@@ -1451,6 +1502,15 @@ export default function FormsPage() {
               >
                 <Pencil size={13} />
               </button>
+              {openedContact && (
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1 text-xs text-slate-600 ring-1 ring-slate-200"
+                  title="이 서류를 쓰다 궁금한 점은 담당에게 물어보세요."
+                >
+                  <UserRound size={13} className="text-slate-400" />
+                  담당 <span className="font-medium text-slate-800">{formatContact(openedContact.contact)}</span>
+                </span>
+              )}
               {saveState === "saving" && <span className="text-xs text-slate-400">저장 중...</span>}
               {saveState === "saved" && (
                 <span className="inline-flex items-center gap-1 text-xs text-emerald-600">

@@ -30,7 +30,9 @@ import {
   Trash2,
   TriangleAlert,
   Upload,
+  UserRound,
 } from "lucide-react";
+import { contactFor, formatContact, isEmptyContact } from "./contacts";
 import type { FormSummary } from "./formStore";
 import { fileNameCodes, taxonomyIdOf, type Taxonomy, type TaxonomyGroup, type TaxonomyItem } from "./taxonomy";
 
@@ -148,6 +150,10 @@ interface FormTreeProps {
   onMoveGroup: (taxonomyId: string, code: string, before?: string) => void;
   /** 한 중분류의 칸 번호를 지금 순서대로 다시 매기기 */
   onRenumberGroup: (taxonomyId: string, groupCode: string) => void;
+  /** 중분류 담당 적기(그 아래 칸이 물려받는다) */
+  onEditGroupContact?: (taxonomyId: string, groupCode: string) => void;
+  /** 칸 담당 적기(비우면 다시 중분류 담당을 따른다) */
+  onEditItemContact?: (taxonomyId: string, item: TaxonomyItem) => void;
   /** 머리 제목(배포 양식함 / 현장 서류함) */
   title?: string;
   /** 제목 아래 한 줄 설명 */
@@ -193,6 +199,8 @@ export default function FormTree({
   onMoveItem,
   onMoveGroup,
   onRenumberGroup,
+  onEditGroupContact,
+  onEditItemContact,
   title = "서류 목록",
   subtitle,
   manageTaxonomy = true,
@@ -429,6 +437,21 @@ export default function FormTree({
               {group.name}
             </span>
             <span className="text-xs tabular-nums text-slate-500">칸 {group.items.length}개</span>
+            {onEditGroupContact && (
+              <button
+                type="button"
+                onClick={() => onEditGroupContact(taxonomy.id, group.code)}
+                title="이 중분류의 기본 담당. 아래 칸들이 물려받습니다."
+                className={
+                  isEmptyContact(group.contact)
+                    ? "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-slate-500 ring-1 ring-dashed ring-slate-300 hover:bg-white"
+                    : "inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-xs text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50"
+                }
+              >
+                <UserRound size={12} />
+                {isEmptyContact(group.contact) ? "담당 정하기" : formatContact(group.contact!)}
+              </button>
+            )}
             <span className="ml-auto flex items-center gap-1">
               {group.items.length > 1 && (
                 <button
@@ -513,6 +536,29 @@ export default function FormTree({
                       </span>
                     )}
                     <span className="ml-auto flex shrink-0 items-center gap-1">
+                      {onEditItemContact && (
+                        <button
+                          type="button"
+                          onClick={() => onEditItemContact(taxonomy.id, item)}
+                          title={
+                            isEmptyContact(item.contact)
+                              ? "이 칸만 담당이 다르면 적습니다. 비워 두면 중분류 담당을 따릅니다."
+                              : "이 칸만의 담당입니다. 비우면 중분류 담당을 따릅니다."
+                          }
+                          className={
+                            isEmptyContact(item.contact)
+                              ? "inline-flex max-w-[16rem] items-center gap-1 truncate rounded px-1.5 py-1 text-[11px] text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+                              : "inline-flex max-w-[16rem] items-center gap-1 truncate rounded bg-blue-50 px-1.5 py-1 text-[11px] text-blue-700 hover:bg-blue-100"
+                          }
+                        >
+                          <UserRound size={12} className="shrink-0" />
+                          {isEmptyContact(item.contact)
+                            ? isEmptyContact(group.contact)
+                              ? "담당"
+                              : "중분류 담당"
+                            : formatContact(item.contact!)}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => onEditItem(taxonomy.id, item)}
@@ -608,6 +654,16 @@ export default function FormTree({
               {filledIn(taxonomy, group)}/{group.items.length}
             </span>
           </button>
+          {/* 서류를 쓰다 막히면 물어볼 곳. 중분류 제목 옆에 한 번만 — 칸마다 되풀이하면 목록이 글자로 덮인다. */}
+          {!isEmptyContact(group.contact) && (
+            <span
+              className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-normal text-slate-500"
+              title="이 중분류 서류의 담당입니다. 담당이 다른 칸은 칸 옆에 따로 표시됩니다."
+            >
+              <UserRound size={12} aria-hidden className="text-slate-400" />
+              담당 {formatContact(group.contact!)}
+            </span>
+          )}
         </h3>
 
         {!isCollapsed && (
@@ -628,7 +684,13 @@ export default function FormTree({
                             "min-w-0 truncate text-[11px] " +
                             (index === 0 ? "text-slate-500" : "text-transparent")
                           }
-                          title={`${item.code} ${item.name}`}
+                          title={(() => {
+                            const resolved = contactFor(taxonomy, item.code);
+                            return resolved
+                              ? `${item.code} ${item.name}
+담당 ${formatContact(resolved.contact)}`
+                              : `${item.code} ${item.name}`;
+                          })()}
                         >
                           <span className="tabular-nums">{item.code}</span> {item.name}
                         </p>
@@ -681,6 +743,7 @@ export default function FormTree({
                   <li key={`${item.code}-${index}`}>
                     <EmptyRow
                       item={item}
+                      ownContact={contactFor(taxonomy, item.code)?.inherited === false ? formatContact(item.contact!) : undefined}
                       action={actionFor(taxonomy.id, item)}
                       onUpload={() => onUploadFor(taxonomy.id, item)}
                     />
@@ -1263,16 +1326,26 @@ function DocCard({
 function EmptyRow({
   item,
   action,
+  ownContact,
   onUpload,
 }: {
   item: TaxonomyItem;
   action: SlotAction;
+  /** 중분류와 담당이 다른 칸이면 그 담당 */
+  ownContact?: string;
   onUpload: () => void;
 }) {
   return (
     <div className="flex h-9 items-center gap-3 border-b border-slate-100 text-sm">
       <span className="w-9 shrink-0 text-xs tabular-nums text-slate-400">{item.code}</span>
-      <span className="min-w-0 flex-1 truncate text-slate-600">{item.name}</span>
+      <span className="min-w-0 flex-1 truncate text-slate-600">
+        {item.name}
+        {ownContact && (
+          <span className="ml-2 text-[11px] text-slate-400" title="이 칸의 담당(중분류 담당과 다름)">
+            담당 {ownContact}
+          </span>
+        )}
+      </span>
       {action.none ? (
         <span title={action.title} className="shrink-0 px-1.5 text-xs text-slate-300">
           {action.label}

@@ -13,6 +13,7 @@
  * 중분류 칸은 세로로 병합돼 있는데, 파서가 병합을 `rowSpan` 으로 넘겨 주므로 어느 줄이
  * 어느 중분류에 속하는지 그대로 알 수 있다.
  */
+import { carryContacts, type Contact } from "./contacts.ts";
 import type { FormSheet } from "./types";
 
 export interface TaxonomyItem {
@@ -21,6 +22,8 @@ export interface TaxonomyItem {
   name: string;
   /** 속한 2차 분류 코드(예: "100") */
   groupCode: string;
+  /** 이 칸만의 담당. 없으면 중분류 담당을 물려받는다(`contacts.ts`). */
+  contact?: Contact;
 }
 
 export interface TaxonomyGroup {
@@ -28,6 +31,8 @@ export interface TaxonomyGroup {
   code: string;
   name: string;
   items: TaxonomyItem[];
+  /** 이 중분류 칸들의 기본 담당 */
+  contact?: Contact;
 }
 
 export interface Taxonomy {
@@ -233,7 +238,8 @@ export function upsertTaxonomies(
     const index = result.findIndex((current) =>
       next.division ? current.division === next.division : current.fileName === next.fileName,
     );
-    if (index >= 0) result[index] = { ...next, id: result[index].id };
+    // 화면에서 적어 둔 담당은 엑셀에 없다 — 같은 번호에 옮겨 붙여야 다시 올려도 안 사라진다.
+    if (index >= 0) result[index] = { ...carryContacts(result[index], next), id: result[index].id };
     else result.push({ ...next, id: makeId() });
   }
   return result;
