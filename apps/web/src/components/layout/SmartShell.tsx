@@ -104,7 +104,16 @@ export function WoomiLogo() {
  * 흰 글래스 상단 바 — 좌: 우미 로고 | 도구 워드마크, 가운데: 화면이 넣는 것(현장 선택 등),
  * 우: 사용자·로그아웃.
  */
-export function SmartHeader({ brand, center }: { brand: ReactNode; center?: ReactNode }) {
+export function SmartHeader({
+  brand,
+  center,
+  subbar,
+}: {
+  brand: ReactNode;
+  center?: ReactNode;
+  /** 헤더 바로 아래 얇은 줄(예: 배포 양식함 | 현장 서류함). 로고 옆에 끼우면 좁아 조잡해 보인다. */
+  subbar?: ReactNode;
+}) {
   const { user, logout } = useAuth();
   const roleLabel = user?.role ? (ROLE_LABEL[user.role] ?? undefined) : undefined;
 
@@ -142,6 +151,7 @@ export function SmartHeader({ brand, center }: { brand: ReactNode; center?: Reac
           </button>
         </div>
       </div>
+      {subbar && <div className="border-t border-slate-200/80 px-8">{subbar}</div>}
     </header>
   );
 }

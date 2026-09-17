@@ -11,8 +11,12 @@ import { Link } from "wouter";
 import BrandWordmark from "@/components/brand/BrandWordmark";
 import { SmartBackground, SmartHeader } from "@/components/layout/SmartShell";
 import {
+  ArrowRight,
+  BookOpen,
   Building2,
   Check,
+  FolderOpen,
+  Lock,
   ChevronDown,
   Search,
   Download,
@@ -30,6 +34,13 @@ import { parseFormWorkbook } from "./formParser";
 import { withExtraRows } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
+import {
+  isSiteDoc,
+  isTemplate,
+  latestTemplateIn,
+  newerTemplateFor,
+  type FormKind,
+} from "./library";
 import FormSheetView, { type FormScale } from "./FormSheetView";
 import {
   FIRST_SITE_NAME,
@@ -42,6 +53,7 @@ import {
 } from "./sites";
 import {
   addCustomSheet,
+  copyTemplateToSite,
   deleteForm,
   findTemplateSheet,
   getForm,
@@ -52,6 +64,7 @@ import {
   readLastOpenedId,
   loadSites,
   loadTaxonomies,
+  migrateLegacyForms,
   reparseForm,
   saveForm,
   saveSites,
@@ -92,7 +105,18 @@ type LoadState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; id: string; fileName: string; title: string; sheets: FormSheet[] };
+  | {
+      status: "ready";
+      id: string;
+      fileName: string;
+      title: string;
+      sheets: FormSheet[];
+      /** 배포 양식(원본)이면 고칠 수 없다 */
+      kind?: FormKind;
+    };
+
+/** 배포 양식함(원본) · 현장 서류함(작성본) */
+type Space = "library" | "site";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -117,6 +141,8 @@ const SCALES: { value: FormScale; label: string }[] = [
  */
 /** 마지막으로 보던 현장(브라우저에만 기억한다) */
 const LAST_SITE_KEY = "ipg-forms:last-site";
+/** 마지막으로 보던 곳(배포 양식함 / 현장 서류함) */
+const SPACE_KEY = "ipg-forms:space";
 const SPARSE_TEXT_CELLS = 3;
 const SPARSE_MIN_AREA = 50;
 /** 글자를 칠 때마다 저장하면 과하다. 손을 멈춘 뒤 이만큼 있다가 저장한다. */
@@ -140,6 +166,14 @@ export default function FormsPage() {
   /** 현장 목록과 지금 보고 있는 현장 */
   const [sites, setSites] = useState<FormSite[]>([]);
   const [siteId, setSiteId] = useState<string | undefined>(undefined);
+  /** 지금 보는 곳. 원본(배포 양식함)과 작성본(현장 서류함)을 섞어 보여 주지 않는다. */
+  const [space, setSpaceState] = useState<Space>(() => {
+    try {
+      return localStorage.getItem(SPACE_KEY) === "library" ? "library" : "site";
+    } catch {
+      return "site";
+    }
+  });
   /** 시트 이름 → 아래에 더한 빈 줄 수 */
   const [extraRows, setExtraRowsState] = useState<Record<string, number>>({});
   /** 내려받기 선택 메뉴가 열려 있나 */
@@ -178,6 +212,17 @@ export default function FormsPage() {
     setSiteId(id || undefined);
     try {
       localStorage.setItem(LAST_SITE_KEY, id);
+    } catch {
+      // 저장이 막힌 브라우저 — 이번 화면에서만 유지된다.
+    }
+  }
+
+  function setSpace(next: Space) {
+    setSpaceState(next);
+    // 다른 곳으로 옮기면 코드표 편집은 끈다 — 편집 도구는 배포 양식함에만 있다.
+    if (next === "site") setEditingTaxonomy(false);
+    try {
+      localStorage.setItem(SPACE_KEY, next);
     } catch {
       // 저장이 막힌 브라우저 — 이번 화면에서만 유지된다.
     }
@@ -248,6 +293,7 @@ export default function FormsPage() {
       fileName: form.fileName,
       title: form.title,
       sheets: form.sheets,
+      kind: form.kind,
     });
     writeLastOpenedId(form.id);
     // 저장본을 새 파서로 다시 읽지 못했으면 알린다. 조용히 넘기면 "기능이 안 되는" 걸로만 보인다.
@@ -294,6 +340,12 @@ export default function FormsPage() {
           })();
           setSiteId(list.some((site) => site.id === remembered) ? remembered : list[0].id);
         }
+
+        // 구분이 생기기 전에 올린 서류를 배포 양식 / 현장 서류로 나눈다(처음 한 번만 할 일이 있다).
+        // 적어 둔 내용이 있던 서류는 사본이 그 내용을 들고 현장 서류함으로 간다 — 지우는 것은 없다.
+        const moved = await migrateLegacyForms(list[0]?.id);
+        const last = readLastOpenedId();
+        if (last && moved.has(last)) writeLastOpenedId(moved.get(last) ?? null);
       } catch {
         // 현장을 못 읽어도 서류는 보여야 한다.
       }
@@ -368,6 +420,7 @@ export default function FormsPage() {
     // 위쪽 "양식 올리기"로 골랐으면 파일 이름 앞 번호로 각자 자리를 찾는다.
     const pendingPlace = pendingPlaceRef.current;
     const preferred = preferredTaxonomyRef.current;
+    const uploadKind: FormKind = space === "library" ? "template" : "site";
     pendingPlaceRef.current = undefined;
     preferredTaxonomyRef.current = undefined;
 
@@ -409,7 +462,8 @@ export default function FormsPage() {
             sheets,
             code: place?.code,
             taxonomyId: place?.taxonomyId,
-            // 올린 서류는 지금 보고 있는 현장 것이다.
+            // 배포 양식함에서 올리면 원본, 현장 서류함에서 올리면 그 현장 서류다.
+            kind: uploadKind,
             siteId,
           });
           id = saved.id;
@@ -448,6 +502,7 @@ export default function FormsPage() {
       fileName: first.fileName,
       title: first.fileName.replace(/\.xlsx$/i, ""),
       sheets: first.sheets,
+      kind: uploadKind,
     });
 
     // 한 장이면 굳이 알리지 않는다(화면에 그 양식이 떠 있는 것이 곧 결과다).
@@ -821,9 +876,56 @@ export default function FormsPage() {
 
   /** 빈 칸을 눌러 그 코드표의 그 코드로 양식을 올린다. */
   function handleUploadFor(taxonomyId: string, item: TaxonomyItem) {
+    // 현장 서류함에서 그 칸의 배포 양식이 있으면 파일을 고르지 않고 원본으로 바로 작성한다.
+    if (space === "site" && siteId) {
+      const template = latestTemplateIn(taxonomyId, item.code, templates, taxonomies);
+      if (template) {
+        void handleWrite(template.id, siteId);
+        return;
+      }
+    }
     pendingPlaceRef.current = { taxonomyId, code: item.code };
     preferredTaxonomyRef.current = undefined;
     fileInputRef.current?.click();
+  }
+
+  /**
+   * 배포 양식으로 현장 서류를 만든다 — 원본을 복사해 그 현장 서류함에 넣고 바로 연다.
+   *
+   * 같은 원본으로 이미 만든 서류가 있으면 한 번 묻는다. 월별로 여러 부 만드는 일이 흔해
+   * 막지는 않지만, 모르고 두 번 누르면 같은 서류가 둘 생긴다.
+   */
+  async function handleWrite(templateId: string, targetSiteId: string | undefined) {
+    const template = templates.find((form) => form.id === templateId);
+    const target = sites.find((site) => site.id === targetSiteId);
+    if (!template || !target) {
+      setStorageWarning("작성할 현장을 먼저 골라 주세요.");
+      return;
+    }
+    const existing = forms.filter(
+      (form) => isSiteDoc(form) && form.siteId === target.id && form.templateId === template.id,
+    ).length;
+    if (
+      existing > 0 &&
+      !window.confirm(
+        `“${target.name}” 서류함에 이 양식으로 만든 서류가 이미 ${existing}부 있습니다.\n한 부 더 만들까요?`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const copy = await copyTemplateToSite(template.id, target.id);
+      selectSite(target.id);
+      setSpace("site");
+      await refreshList();
+      await openStored(copy.id);
+      setSaveState("saved");
+      setStorageWarning(`“${target.name}” 서류함에 “${copy.title}”을(를) 만들었습니다. 여기서 작성하세요.`);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `작성할 서류를 만들지 못했습니다: ${error.message}` : "작성할 서류를 만들지 못했습니다.",
+      );
+    }
   }
 
   /** 그냥 올리기. 보고 있던 1차 분류를 기억해 둔다. */
@@ -926,7 +1028,9 @@ export default function FormsPage() {
 
   async function handleDelete(summary: FormSummary) {
     const ok = window.confirm(
-      `“${summary.title}”을(를) 지웁니다.\n적어 둔 내용도 함께 사라지고 되돌릴 수 없습니다. 계속할까요?`,
+      isTemplate(summary)
+        ? `배포 양식 “${summary.title}”을(를) 지웁니다.\n이 양식으로 이미 만든 현장 서류는 지워지지 않습니다. 되돌릴 수 없습니다. 계속할까요?`
+        : `“${summary.title}”을(를) 지웁니다.\n적어 둔 내용도 함께 사라지고 되돌릴 수 없습니다. 계속할까요?`,
     );
     if (!ok) return;
     try {
@@ -1005,8 +1109,13 @@ export default function FormsPage() {
     }
   }
 
-  // 지금 보고 있는 현장의 서류만 목록에 올린다.
-  const siteForms = formsOfSite(forms, sites, siteId);
+  // 원본과 작성본을 나눈다. 현장 서류함에는 지금 보고 있는 현장의 서류만 올린다.
+  const templates = forms.filter(isTemplate);
+  const siteDocs = forms.filter(isSiteDoc);
+  const siteForms = formsOfSite(siteDocs, sites, siteId);
+  const listForms_ = space === "library" ? templates : siteForms;
+  // 배포 양식함에서 "작성하기"를 누를 때 사본이 들어갈 현장. 전 현장 보기였으면 첫 현장.
+  const writeSite = sites.find((site) => site.id === siteId) ?? sites[0];
   /**
    * 열어 둔 서류를 아래에 펼칠지.
    *
@@ -1016,9 +1125,16 @@ export default function FormsPage() {
    */
   const openFormInSite =
     state.status === "ready" &&
-    Boolean(siteId) &&
-    // 저장에 실패한 양식(id 없음)은 목록에 없지만, 방금 올린 것이라 그대로 보여 줘야 한다.
-    (state.id === "" || siteForms.some((form) => form.id === state.id));
+    (space === "library"
+      ? state.kind === "template"
+      : Boolean(siteId) &&
+        // 저장에 실패한 양식(id 없음)은 목록에 없지만, 방금 올린 것이라 그대로 보여 줘야 한다.
+        (state.id === "" ? state.kind === "site" : siteForms.some((form) => form.id === state.id)));
+  /** 배포 원본을 보고 있나 — 그러면 아무것도 고칠 수 없다. */
+  const readOnly = state.status === "ready" && state.kind === "template";
+  const canEdit = editable && !readOnly;
+  const openedSummary = state.status === "ready" ? forms.find((form) => form.id === state.id) : undefined;
+  const newerTemplate = openedSummary ? newerTemplateFor(openedSummary, templates, taxonomies) : undefined;
   // 코드표의 칸 수(회사 공통) — 현장별 현황의 분모다.
   const totalSlots = taxonomies.reduce(
     (sum, taxonomy) => sum + taxonomy.groups.reduce((count, group) => count + group.items.length, 0),
@@ -1075,15 +1191,24 @@ export default function FormsPage() {
           </Link>
         }
         center={
-          <SitePicker
-            sites={sites}
-            currentId={siteId}
-            onSelect={(id) => selectSite(id)}
-            onSelectAll={() => selectSite("")}
-            onAdd={() => void handleAddSite()}
-            onRename={() => void handleRenameSite()}
-          />
+          space === "site" ? (
+            <SitePicker
+              sites={sites}
+              currentId={siteId}
+              onSelect={(id) => selectSite(id)}
+              onSelectAll={() => selectSite("")}
+              onAdd={() => void handleAddSite()}
+              onRename={() => void handleRenameSite()}
+            />
+          ) : (
+            // 원본은 어느 현장 것도 아니라 현장을 고를 일이 없다. 자리는 남겨 흐리게 둔다.
+            <div className="flex flex-col items-center px-4 py-1 opacity-40" title="현장은 현장 서류함에서 고릅니다.">
+              <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Project</span>
+              <span className="text-[15px] font-bold text-slate-700">현장 서류함에서 고릅니다</span>
+            </div>
+          )
         }
+        subbar={<SpaceTabs space={space} onChange={setSpace} />}
       />
 
       {/* 넓은 양식(21열짜리 대장 등)이 있어 폭을 넉넉히 잡는다. 좁으면 "가로 맞춤"
@@ -1122,9 +1247,9 @@ export default function FormsPage() {
 
         <div className="mb-6">
           {/* 현장을 고르지 않았으면 현장별 현황부터 — 서류 점검은 여기서 시작한다. */}
-          {!siteId ? (
+          {space === "site" && !siteId ? (
             <SiteOverview
-              rows={summarizeSites(sites, forms, totalSlots)}
+              rows={summarizeSites(sites, siteDocs, totalSlots)}
               onOpen={(id) => selectSite(id)}
               onAdd={() => void handleAddSite()}
             />
@@ -1146,12 +1271,61 @@ export default function FormsPage() {
               }
               onMoveGroup={(taxonomyId, code, before) => void handleMoveGroup(taxonomyId, code, before)}
               onRenumberGroup={(taxonomyId, groupCode) => void handleRenumberGroup(taxonomyId, groupCode)}
-              forms={siteForms}
+              forms={listForms_}
               activeId={state.status === "ready" ? state.id : null}
               busy={state.status === "loading"}
               onOpen={(id) => void handleOpen(id)}
               onToggleFavorite={(form) => void patchMeta(form.id, { favorite: !form.favorite })}
               onDelete={(form) => void handleDelete(form)}
+              title={space === "library" ? "배포 양식함" : `${writeSite?.name ?? "현장"} 서류함`}
+              subtitle={
+                space === "library"
+                  ? "회사가 배포한 원본입니다. 열어서 확인하고 [작성하기]를 누르면 현장 서류함에 사본이 생깁니다."
+                  : "이 현장의 작성본입니다. 빈 칸의 [작성하기]는 배포 양식으로 바로 사본을 만듭니다."
+              }
+              manageTaxonomy={space === "library"}
+              uploadLabel={space === "library" ? "배포 양식 올리기" : "파일 올리기"}
+              toolbarExtra={
+                space === "site" ? (
+                  <button
+                    type="button"
+                    onClick={() => setSpace("library")}
+                    title="배포 양식함으로 가서 양식을 고르고 [작성하기]를 누르세요."
+                    className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200 transition hover:bg-blue-50"
+                  >
+                    <Plus size={13} /> 배포 양식에서 가져오기
+                  </button>
+                ) : undefined
+              }
+              extraBadges={(form) => {
+                const newer = newerTemplateFor(form, templates, taxonomies);
+                return newer
+                  ? [
+                      {
+                        label: "새 판 있음",
+                        title: `${new Date(newer.uploadedAt).toLocaleDateString("ko-KR")}에 올라온 새 배포 양식이 있습니다. 이 서류는 그대로 둡니다.`,
+                        tone: "blue" as const,
+                      },
+                    ]
+                  : [];
+              }}
+              slotAction={(taxonomyId, item) => {
+                if (space === "site" && latestTemplateIn(taxonomyId, item.code, templates, taxonomies)) {
+                  return {
+                    label: "작성하기",
+                    title: `배포 양식으로 ${item.code} ${item.name}을(를) 이 현장 서류함에 만듭니다`,
+                    write: true,
+                  };
+                }
+                return {
+                  label: "올리기",
+                  title:
+                    space === "library"
+                      ? `${item.code} ${item.name} 칸에 배포 양식을 올립니다`
+                      : `이 칸의 배포 양식이 없어 파일을 직접 올립니다`,
+                  write: false,
+                };
+              }}
               onUploadFor={handleUploadFor}
               onUpload={handleUpload}
               onUploadTaxonomy={() => taxonomyInputRef.current?.click()}
@@ -1160,7 +1334,7 @@ export default function FormsPage() {
             />
           ) : (
             <FormGallery
-              forms={siteForms}
+              forms={listForms_}
               activeId={state.status === "ready" ? state.id : null}
               busy={state.status === "loading"}
               onOpen={(id) => void handleOpen(id)}
@@ -1188,6 +1362,60 @@ export default function FormsPage() {
 
         {state.status === "ready" && sheet && openFormInSite && (
           <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            {/* 배포 원본 — 고칠 수 없다는 것과, 작성은 어디서 하는지를 맨 위에 알린다. */}
+            {readOnly && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-700">
+                  <Lock size={14} /> 배포 원본
+                </span>
+                <span className="text-xs text-slate-500">
+                  여기서는 고칠 수 없습니다. 작성하려면 현장 서류함에 사본을 만드세요.
+                </span>
+                <span className="ml-auto flex items-center gap-2">
+                  {sites.length > 1 && (
+                    <select
+                      value={writeSite?.id ?? ""}
+                      onChange={(event) => selectSite(event.target.value)}
+                      aria-label="작성할 현장"
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700"
+                    >
+                      {sites.map((site) => (
+                        <option key={site.id} value={site.id}>
+                          {site.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!writeSite || state.id === ""}
+                    onClick={() => void handleWrite(state.id, writeSite?.id)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:bg-slate-300"
+                  >
+                    {writeSite ? `${writeSite.name}에 작성하기` : "작성하기"} <ArrowRight size={13} />
+                  </button>
+                </span>
+              </div>
+            )}
+
+            {/* 현장 서류인데 원본이 새 판으로 바뀌었다 — 이 서류는 그대로 두고 알리기만 한다. */}
+            {!readOnly && newerTemplate && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-blue-50 px-4 py-3 text-xs text-blue-900 ring-1 ring-blue-200">
+                <span className="font-semibold">새 판 있음</span>
+                <span>
+                  {new Date(newerTemplate.uploadedAt).toLocaleDateString("ko-KR")}에 새 배포 양식 “{newerTemplate.title}”이
+                  올라왔습니다. 이 서류는 적어 둔 그대로 둡니다.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleWrite(newerTemplate.id, siteId)}
+                  className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 font-medium text-blue-700 ring-1 ring-blue-300 hover:bg-blue-100"
+                >
+                  새 판으로 한 부 만들기 <ArrowRight size={13} />
+                </button>
+              </div>
+            )}
+
             {/* 열려 있는 서류의 도구 줄 */}
             <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-slate-200 pb-4">
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800">
@@ -1210,6 +1438,7 @@ export default function FormsPage() {
               )}
 
               <div className="ml-auto flex flex-wrap items-center gap-3">
+                {!readOnly && (
                 <div className="inline-flex overflow-hidden rounded-lg ring-1 ring-slate-300">
                   {[
                     { value: true, label: "편집" },
@@ -1229,8 +1458,9 @@ export default function FormsPage() {
                     </button>
                   ))}
                 </div>
+                )}
 
-                {sheet.locked && editable && (
+                {sheet.locked && canEdit && (
                   <button
                     type="button"
                     onClick={() => setShowEditableTint((on) => !on)}
@@ -1246,6 +1476,15 @@ export default function FormsPage() {
                   </button>
                 )}
 
+                {readOnly ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDownload(false)}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50"
+                  >
+                    <Download size={13} /> 원본 내려받기
+                  </button>
+                ) : (
                 <div className="relative">
                   <button
                     type="button"
@@ -1286,6 +1525,7 @@ export default function FormsPage() {
                     </>
                   )}
                 </div>
+                )}
 
                 <label className="inline-flex items-center gap-2 text-sm text-slate-600">
                   배율
@@ -1304,6 +1544,7 @@ export default function FormsPage() {
                   </select>
                 </label>
 
+                {!readOnly && (
                 <button
                   type="button"
                   onClick={() =>
@@ -1321,6 +1562,7 @@ export default function FormsPage() {
                 >
                   <RotateCcw size={13} /> 이 시트 되돌리기
                 </button>
+                )}
 
                 <button
                   type="button"
@@ -1356,6 +1598,7 @@ export default function FormsPage() {
                 </button>
               ))}
 
+              {!readOnly && (
               <button
                 type="button"
                 onClick={() => void handleAddSheet()}
@@ -1364,8 +1607,9 @@ export default function FormsPage() {
               >
                 <Plus size={13} /> 시트 추가
               </button>
+              )}
 
-              {sheet.custom && (
+              {sheet.custom && !readOnly && (
                 <>
                   <button
                     type="button"
@@ -1401,7 +1645,7 @@ export default function FormsPage() {
                   인쇄 영역 {sheet.printArea}까지만 표시
                 </span>
               )}
-              {!sheet.locked && editable && (
+              {!sheet.locked && canEdit && (
                 <span title="이 시트에는 엑셀 잠금이 걸려 있지 않아, 어느 칸이든 눌러 고칠 수 있습니다.">
                   잠금 없음 · 모든 칸 편집 가능
                 </span>
@@ -1418,7 +1662,7 @@ export default function FormsPage() {
               {totalEdited > editedCount && (
                 <span className="text-slate-400">전체 {totalEdited}개</span>
               )}
-              {editable && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
+              {canEdit && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
             </div>
 
             {looksDrawn && (
@@ -1435,7 +1679,7 @@ export default function FormsPage() {
 
             <FormSheetView
               sheet={sheet}
-              editable={editable}
+              editable={canEdit}
               values={sheetValues}
               onCommitValue={handleCommitValue}
               tint={showEditableTint}
@@ -1450,7 +1694,7 @@ export default function FormsPage() {
 
             {/* 줄 늘리기 — 편집 중에만, 표 **아래 한 곳**에만 둔다. 줄마다 버튼을 붙이면
                 표가 버튼으로 뒤덮여 양식처럼 보이지 않는다. */}
-            {editable && (
+            {canEdit && (
               <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-dashed border-slate-200 pt-3">
                 <button
                   type="button"
@@ -1480,6 +1724,43 @@ export default function FormsPage() {
         )}
       </main>
     </SmartBackground>
+  );
+}
+
+/**
+ * 헤더 아래 얇은 줄의 [배포 양식함 | 현장 서류함] 탭.
+ *
+ * 로고 옆에 끼우면 헤더가 좁아져 조잡해 보여서(사용자와 시안으로 비교) 아래 줄로 내렸다.
+ * 밑줄 탭으로 둔 것은 목록 안의 1차 분류 탭(서류철 모양)과 겹쳐 보이지 않게 하려는 것이다.
+ */
+function SpaceTabs({ space, onChange }: { space: Space; onChange: (space: Space) => void }) {
+  const tabs: { value: Space; label: string; icon: typeof BookOpen; title: string }[] = [
+    { value: "library", label: "배포 양식함", icon: BookOpen, title: "회사가 배포한 원본 양식 — 고칠 수 없습니다" },
+    { value: "site", label: "현장 서류함", icon: FolderOpen, title: "현장별로 작성하는 서류" },
+  ];
+  return (
+    <nav className="flex h-11 items-stretch gap-6" aria-label="양식함 고르기">
+      {tabs.map(({ value, label, icon: Icon, title }) => {
+        const active = space === value;
+        return (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onChange(value)}
+            aria-current={active ? "page" : undefined}
+            title={title}
+            className={
+              "-mb-px inline-flex items-center gap-1.5 border-b-2 text-sm font-semibold transition " +
+              (active
+                ? "border-blue-600 text-blue-700"
+                : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800")
+            }
+          >
+            <Icon size={15} aria-hidden /> {label}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 

@@ -11,13 +11,14 @@
  * 1차 분류(공무관련·품질관련 …)마다 코드표가 따로 있고 **코드 번호가 서로 겹친다**
  * (둘 다 101 을 쓴다). 그래서 칸은 늘 "코드표 id + 코드"로 가리킨다.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
   ClipboardPaste,
   Eye,
   EyeOff,
+  FilePenLine,
   FolderTree,
   GripVertical,
   ListOrdered,
@@ -92,10 +93,18 @@ function toggled(set: Set<string>, key: string): Set<string> {
   return next;
 }
 
-interface Badge {
+export interface Badge {
   label: string;
   title: string;
-  tone: "amber" | "rose";
+  tone: "amber" | "rose" | "blue";
+}
+
+/** 빈 칸·(+) 단추가 무엇을 하는지. 현장 서류함에서는 원본이 있으면 "작성하기"가 된다. */
+export interface SlotAction {
+  label: string;
+  title: string;
+  /** true 면 배포 양식에서 사본 만들기, false 면 파일 올리기 */
+  write: boolean;
 }
 
 interface FormTreeProps {
@@ -137,6 +146,23 @@ interface FormTreeProps {
   onMoveGroup: (taxonomyId: string, code: string, before?: string) => void;
   /** 한 중분류의 칸 번호를 지금 순서대로 다시 매기기 */
   onRenumberGroup: (taxonomyId: string, groupCode: string) => void;
+  /** 머리 제목(배포 양식함 / 현장 서류함) */
+  title?: string;
+  /** 제목 아래 한 줄 설명 */
+  subtitle?: ReactNode;
+  /**
+   * 코드표를 고치고 올리는 도구를 보일지. 코드표는 회사 공통이라 배포 양식함에서만 다룬다 —
+   * 현장 서류함에까지 두면 한 현장에서 칸을 지워 다른 현장 목록까지 바뀐다.
+   */
+  manageTaxonomy?: boolean;
+  /** "양식 올리기" 단추 글자 */
+  uploadLabel?: string;
+  /** 도구 줄 맨 앞에 더 붙일 것(예: 배포 양식에서 가져오기) */
+  toolbarExtra?: ReactNode;
+  /** 화면이 더 붙이는 표시(예: 새 판 있음) */
+  extraBadges?: (form: FormSummary) => Badge[];
+  /** 칸마다 올리기/작성하기 중 무엇을 할지. 없으면 늘 올리기. */
+  slotAction?: (taxonomyId: string, item: TaxonomyItem) => SlotAction;
 }
 
 export default function FormTree({
@@ -165,7 +191,20 @@ export default function FormTree({
   onMoveItem,
   onMoveGroup,
   onRenumberGroup,
+  title = "서류 목록",
+  subtitle,
+  manageTaxonomy = true,
+  uploadLabel = "양식 올리기",
+  toolbarExtra,
+  extraBadges,
+  slotAction,
 }: FormTreeProps) {
+  const actionFor = (taxonomyId: string, item: TaxonomyItem): SlotAction =>
+    slotAction?.(taxonomyId, item) ?? {
+      label: "올리기",
+      title: `${item.code} ${item.name} 칸에 파일을 올립니다`,
+      write: false,
+    };
   const [selected, setSelected] = useState<string>(ALL);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [query, setQuery] = useState("");
@@ -263,7 +302,7 @@ export default function FormTree({
         });
       }
     }
-    return badges;
+    return extraBadges ? [...badges, ...extraBadges(form)] : badges;
   }
 
   const needle = query.trim().toLowerCase();
@@ -597,8 +636,12 @@ export default function FormTree({
                           <button
                             type="button"
                             onClick={() => onUploadFor(taxonomy.id, item)}
-                            title={`${item.code} ${item.name} 칸에 파일을 더 올립니다`}
-                            aria-label={`${item.code} ${item.name} 칸에 파일 더 올리기`}
+                            title={
+                              actionFor(taxonomy.id, item).write
+                                ? `${item.code} ${item.name} 한 부 더 작성하기`
+                                : `${item.code} ${item.name} 칸에 파일을 더 올립니다`
+                            }
+                            aria-label={`${item.code} ${item.name} 칸에 한 부 더`}
                             className="shrink-0 rounded p-0.5 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
                           >
                             <Plus size={12} />
@@ -634,7 +677,11 @@ export default function FormTree({
                 {visibleEmpty.map(({ item }, index) => (
                   // 같은 번호가 두 줄인 코드표가 있어 번호만으로는 열쇠가 겹친다.
                   <li key={`${item.code}-${index}`}>
-                    <EmptyRow item={item} onUpload={() => onUploadFor(taxonomy.id, item)} />
+                    <EmptyRow
+                      item={item}
+                      action={actionFor(taxonomy.id, item)}
+                      onUpload={() => onUploadFor(taxonomy.id, item)}
+                    />
                   </li>
                 ))}
               </ul>
@@ -681,7 +728,7 @@ export default function FormTree({
       <div className="flex flex-wrap items-start gap-3">
         <div className="mr-auto">
           <h2 className="text-lg font-semibold text-slate-900">
-            서류 목록{" "}
+            {title}{" "}
             <span className="text-sm font-normal tabular-nums text-slate-500">
               {totalFilled} / {totalItems}
             </span>
@@ -696,9 +743,11 @@ export default function FormTree({
           >
             <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${percent}%` }} />
           </div>
+          {subtitle && <p className="mt-2 text-xs text-slate-500">{subtitle}</p>}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {toolbarExtra}
           <div className="relative">
             <Search
               size={14}
@@ -742,6 +791,7 @@ export default function FormTree({
             {hideEmpty ? "빈 항목 보이기" : "빈 항목 숨기기"}
           </button>
 
+          {manageTaxonomy && (
           <button
             type="button"
             onClick={onToggleEditing}
@@ -755,6 +805,7 @@ export default function FormTree({
           >
             <Pencil size={13} /> {editing ? "편집 끝내기" : "코드표 편집"}
           </button>
+          )}
 
           {editing && (
             <button
@@ -767,6 +818,7 @@ export default function FormTree({
           )}
 
           {/* 1차 분류를 더하는 입구. 안내 문구 속 링크로 두면 찾지 못한다 — 버튼으로 둔다. */}
+          {manageTaxonomy && (
           <button
             type="button"
             onClick={onUploadTaxonomy}
@@ -775,6 +827,7 @@ export default function FormTree({
           >
             <FolderTree size={13} /> 코드표 올리기
           </button>
+          )}
 
           <button
             type="button"
@@ -783,7 +836,7 @@ export default function FormTree({
             title="엑셀 양식을 올립니다. 여러 개를 한 번에 골라도 됩니다 — 파일 이름 앞 번호로 각자 제자리에 들어갑니다."
             className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            <Upload size={13} /> {busy ? "읽는 중..." : "양식 올리기"}
+            <Upload size={13} /> {busy ? "읽는 중..." : uploadLabel}
           </button>
         </div>
       </div>
@@ -906,6 +959,7 @@ export default function FormTree({
                       {filledOf(taxonomy)}/{totalOf(taxonomy)}
                     </span>
                   </button>
+                  {manageTaxonomy && (
                   <button
                     type="button"
                     onClick={() => onRenameDivision(taxonomy.id)}
@@ -915,6 +969,7 @@ export default function FormTree({
                   >
                     <Pencil size={12} />
                   </button>
+                  )}
                 </div>
 
                 {!folded && (
@@ -957,6 +1012,7 @@ export default function FormTree({
             );
           })}
 
+          {manageTaxonomy && (
           <div className="mt-4 border-t border-slate-200 pt-3 text-[11px] text-slate-400">
             <p className="mb-1">분류 기준</p>
             <ul className="space-y-1">
@@ -978,6 +1034,7 @@ export default function FormTree({
               ))}
             </ul>
           </div>
+          )}
         </nav>
 
         {/* ── 오른쪽: 서류 ── */}
@@ -1130,7 +1187,9 @@ function DocCard({
                 className={
                   badge.tone === "amber"
                     ? "rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800"
-                    : "rounded bg-rose-100 px-1 py-0.5 text-[10px] font-medium text-rose-700"
+                    : badge.tone === "blue"
+                      ? "rounded bg-blue-100 px-1 py-0.5 text-[10px] font-semibold text-blue-700"
+                      : "rounded bg-rose-100 px-1 py-0.5 text-[10px] font-medium text-rose-700"
                 }
               >
                 {badge.label}
@@ -1197,7 +1256,15 @@ function DocCard({
 }
 
 /** 아직 안 올린 칸 — 한 줄짜리 행. 누르면 그 칸으로 바로 올린다. */
-function EmptyRow({ item, onUpload }: { item: TaxonomyItem; onUpload: () => void }) {
+function EmptyRow({
+  item,
+  action,
+  onUpload,
+}: {
+  item: TaxonomyItem;
+  action: SlotAction;
+  onUpload: () => void;
+}) {
   return (
     <div className="flex h-9 items-center gap-3 border-b border-slate-100 text-sm">
       <span className="w-9 shrink-0 text-xs tabular-nums text-slate-400">{item.code}</span>
@@ -1205,10 +1272,15 @@ function EmptyRow({ item, onUpload }: { item: TaxonomyItem; onUpload: () => void
       <button
         type="button"
         onClick={onUpload}
-        aria-label={`${item.code} ${item.name} 올리기`}
-        className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-xs text-blue-600 transition hover:bg-blue-50"
+        aria-label={`${item.code} ${item.name} ${action.label}`}
+        title={action.title}
+        className={
+          action.write
+            ? "inline-flex shrink-0 items-center gap-1 rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white transition hover:bg-blue-700"
+            : "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-xs text-blue-600 transition hover:bg-blue-50"
+        }
       >
-        <Upload size={12} aria-hidden /> 올리기
+        {action.write ? <FilePenLine size={12} aria-hidden /> : <Upload size={12} aria-hidden />} {action.label}
       </button>
     </div>
   );

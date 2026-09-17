@@ -15,6 +15,7 @@
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
+import { planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
 import type { FormSite } from "./sites.ts";
 import { LEGACY_TAXONOMY_ID, type Taxonomy } from "./taxonomy.ts";
 import type { FormSheet, FormValues } from "./types";
@@ -70,6 +71,15 @@ export interface StoredForm {
    * (`sites.ts`). 안 그러면 현장을 만든 순간 이미 올려 둔 서류가 어느 목록에도 안 보인다.
    */
   siteId?: string;
+  /**
+   * 배포 양식(원본, 읽기 전용)인지 현장 서류(사본, 작성용)인지. 구분이 생기기 전에 올린 것은
+   * 비어 있고, 화면에 들어올 때 {@link migrateLegacyForms} 가 나눈다.
+   */
+  kind?: FormKind;
+  /** 현장 서류: 어느 배포 양식에서 만들었나 */
+  templateId?: string;
+  /** 현장 서류: 만들 때 그 배포 양식이 올라온 시각("새 판 있음" 판단용) */
+  templateUploadedAt?: number;
   /** 즐겨찾기(카드 모서리의 별) */
   favorite: boolean;
   /** 처음 올린 시각(ms) */
@@ -120,6 +130,9 @@ export interface FormSummary {
   taxonomyId?: string;
   /** 어느 현장의 서류인지. 현장이 생기기 전에 올린 것은 비어 있다(첫 현장으로 본다). */
   siteId?: string;
+  kind?: FormKind;
+  templateId?: string;
+  templateUploadedAt?: number;
   uploadedAt: number;
   updatedAt: number;
   openedAt: number;
@@ -294,6 +307,9 @@ function summarize(form: StoredForm): FormSummary {
     code: form.code,
     taxonomyId: form.taxonomyId,
     siteId: form.siteId,
+    kind: form.kind,
+    templateId: form.templateId,
+    templateUploadedAt: form.templateUploadedAt,
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
@@ -430,6 +446,7 @@ export async function saveForm(input: {
   code?: string;
   taxonomyId?: string;
   siteId?: string;
+  kind: FormKind;
 }): Promise<StoredForm> {
   const now = Date.now();
   const form: StoredForm = {
@@ -442,7 +459,9 @@ export async function saveForm(input: {
     category: input.category || UNCATEGORIZED,
     code: input.code,
     taxonomyId: input.taxonomyId,
-    siteId: input.siteId,
+    // 배포 양식은 어느 현장 것도 아니다.
+    siteId: input.kind === "site" ? input.siteId : undefined,
+    kind: input.kind,
     favorite: false,
     uploadedAt: now,
     updatedAt: now,
@@ -493,6 +512,65 @@ async function patchForm(
     transaction.onabort = () =>
       reject(failure ?? transaction.error ?? new Error("저장이 취소되었습니다."));
   });
+}
+
+/**
+ * 배포 양식을 현장 서류함으로 복사한다. 새로 생긴 현장 서류를 돌려준다.
+ *
+ * 원본 바이트까지 **통째로** 복사한다 — 나중에 원본이 지워지거나 새 판으로 바뀌어도
+ * 현장 서류는 만들 때 모양 그대로 열리고 내려받아져야 한다.
+ */
+export async function copyTemplateToSite(templateId: string, siteId: string): Promise<StoredForm> {
+  const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(templateId));
+  if (!raw) throw new Error("그 배포 양식은 이미 지워졌습니다.");
+  const template = normalize(raw);
+  if (template.kind !== "template") throw new Error("배포 양식이 아니라 복사할 수 없습니다.");
+
+  const now = Date.now();
+  const copy: StoredForm = {
+    ...template,
+    ...siteCopyFields(template, siteId),
+    id: crypto.randomUUID(),
+    favorite: false,
+    uploadedAt: now,
+    updatedAt: now,
+    openedAt: now,
+    bytes: template.bytes.slice(0),
+  };
+  await run("readwrite", (store) => store.put(copy));
+  return copy;
+}
+
+/**
+ * 구분이 생기기 전에 올린 서류를 배포 양식 / 현장 서류로 나눈다(한 번만 돈다).
+ *
+ * 한 트랜잭션으로 처리한다 — 반쯤 옮기다 멈춰 원본과 사본이 어긋나지 않게.
+ * **지우는 것은 없다.** 적어 둔 내용은 사본이 그대로 들고 간다.
+ * 돌려주는 값: 옛 id → 사본 id (마지막으로 열었던 서류를 사본으로 이어 열 때 쓴다).
+ */
+export async function migrateLegacyForms(firstSiteId: string | undefined): Promise<Map<string, string>> {
+  const moved = new Map<string, string>();
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE, "readwrite");
+    const store = transaction.objectStore(STORE);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      for (const raw of request.result as StoredForm[]) {
+        if (raw.kind) continue;
+        const plan = planLegacyForm(normalize(raw), firstSiteId, () => crypto.randomUUID());
+        store.put(plan.template);
+        if (plan.copy) {
+          store.put(plan.copy);
+          moved.set(raw.id, plan.copy.id);
+        }
+      }
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error ?? new Error("옮겨 담기가 취소되었습니다."));
+  });
+  return moved;
 }
 
 /** 고친 글자만 갱신한다. */
