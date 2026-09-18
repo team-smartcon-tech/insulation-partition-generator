@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="TC/HOIST 발주의뢰서 심볼">
+  <title>TC/HOIST 발주의뢰서 — 심볼</title>
+  <defs>
+    <linearGradient id="tm-warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F79236"/><stop offset="1" stop-color="#EC6A16"/>
+    </linearGradient>
+  </defs>
+  <!-- 아이콘은 32px 에서도 읽혀야 한다 — 래티스·로프는 빼고 '크레인 실루엣 + 기간 막대'만 남긴다 -->
+  <rect width="512" height="512" rx="112" fill="#0D1B2A"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 지브 · 카운터지브 -->
+    <path d="M268 168h132M236 168h-96" stroke-width="20"/>
+    <!-- 타워 헤드 타이 -->
+    <path d="M252 112 384 164M252 112 152 164" stroke-width="12" opacity="0.7"/>
+    <path d="M252 112v28" stroke-width="12"/>
+    <!-- 마스트 -->
+    <path d="M232 172v168M272 172v168" stroke-width="20"/>
+    <!-- 권상 로프 + 후크 -->
+    <path d="M352 172v72" stroke-width="12"/>
+    <rect x="334" y="244" width="36" height="28" rx="6" stroke-width="12" fill="#0D1B2A"/>
+    <!-- 기초 -->
+    <path d="M204 340h96" stroke-width="22"/>
+  </g>
+  <!-- 임대기간 — 가운데 막대만 강조색 -->
+  <g>
+    <rect x="112" y="378" width="140" height="22" rx="11" fill="#7CC0FF" opacity="0.45"/>
+    <rect x="152" y="412" width="216" height="22" rx="11" fill="url(#tm-warm)"/>
+  </g>
+</svg>
