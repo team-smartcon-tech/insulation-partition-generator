@@ -24,6 +24,7 @@ import {
 } from "./auth";
 import market from "./market";
 import sites from "./sites";
+import tcRental from "./tcRental";
 
 export type { Env };
 
@@ -186,6 +187,13 @@ app.route("/api/market", market);
 
 // 현장(프로젝트 카드) — /api/elevation-sites* . 세부 프로젝트는 아래 /api/elevation-projects*.
 app.route("/api/elevation-sites", sites);
+
+// 같은 현장 목록의 도구 중립 별칭. 현장은 도구가 아니라 회사에 속하므로 여러 도구가 공유한다
+// (elev_sites 라는 이름은 단열 Layout 이 먼저 만든 흔적일 뿐이다).
+app.route("/api/sites", sites);
+
+// TC 임대계획 — /api/tc-rental-projects* . 현장은 위 /api/sites 를 함께 쓴다.
+app.route("/api/tc-rental-projects", tcRental);
 
 /** GET /api/elevation-projects — 프로젝트 목록 */
 app.get("/api/elevation-projects", async (c) => {

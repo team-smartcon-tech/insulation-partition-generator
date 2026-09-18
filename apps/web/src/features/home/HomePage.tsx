@@ -101,9 +101,14 @@ export default function HomePage() {
     );
 
     // 사용 가능(내장 → 게시) 먼저, 준비 중 자리표시자는 뒤로.
+    // sortLast 를 단 내장 도구는 게시 도구들보다 뒤에 놓는다(도구별로 자리를 지정할 수 있게).
+    const sortLastIds = new Set(TOOLS.filter((t) => t.sortLast).map((t) => t.id));
+    const isLast = (c: HomeCard) => sortLastIds.has(c.key.replace(/^tool:/, ""));
+    const availableBuiltIn = builtIn.filter((c) => c.available);
     return [
-      ...builtIn.filter((c) => c.available),
+      ...availableBuiltIn.filter((c) => !isLast(c)),
       ...published,
+      ...availableBuiltIn.filter(isLast),
       ...builtIn.filter((c) => !c.available),
     ];
   }, [marketApps]);

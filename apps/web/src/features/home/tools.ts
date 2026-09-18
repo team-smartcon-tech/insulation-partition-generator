@@ -7,7 +7,7 @@
  *   3) App.tsx 에 <Route path="/tools/xxx"> 연결
  * → 홈(HomePage)은 이 배열을 읽어 카드를 자동으로 그린다.
  */
-import { Square, Scissors, type LucideIcon } from "lucide-react";
+import { Square, TowerControl, type LucideIcon } from "lucide-react";
 
 export type ToolStatus = "available" | "comingSoon";
 
@@ -30,6 +30,8 @@ export interface ToolDef {
   thumbnail?: string;
   /** 도구 전용 로고(심볼) 경로. 있으면 카드 제목 앞과 썸네일 폴백에 lucide 아이콘 대신 쓴다 */
   logo?: string;
+  /** 게시(App Market) 도구들보다 뒤에 놓는다. 기본은 내장 도구가 앞 */
+  sortLast?: boolean;
 }
 
 export const TOOLS: ToolDef[] = [
@@ -44,15 +46,18 @@ export const TOOLS: ToolDef[] = [
     thumbnail: "/thumbs/insulation-logo.png",
     logo: "/brand/mark-insul-layout.svg",
   },
-  // ── 준비 중 (개발 예정) ──
   {
-    id: "joint-cutting",
-    name: "줄눈컷팅 자동화",
-    description: "타일 줄눈 라인을 인식해 컷팅 경로와 수량을 자동으로 산출합니다.",
-    path: "",
-    icon: Scissors,
-    status: "comingSoon",
-    tags: ["타일", "컷팅"],
+    id: "tc-rental",
+    name: "TC/HOIST 발주의뢰서",
+    description:
+      "동별 골조 공정으로 임대기간을 산정하고, 회사 표준 양식 그대로 발주의뢰서를 만듭니다.",
+    path: "/tools/tc-rental",
+    icon: TowerControl,
+    status: "available",
+    tags: ["타워크레인", "호이스트", "발주의뢰서"],
+    thumbnail: "/brand/logo-tc-rental.svg",
+    logo: "/brand/mark-tc-rental.svg",
+    sortLast: true,
   },
   // 빈 자리표시자 카드는 두지 않는다 — 홈은 "준비 중" 섹션에 컴팩트 타일로만 노출한다.
 ];

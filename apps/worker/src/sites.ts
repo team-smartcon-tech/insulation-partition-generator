@@ -230,14 +230,26 @@ sites.patch("/:siteId", async (c) => {
 sites.delete("/:siteId", async (c) => {
   const siteId = c.req.param("siteId");
   try {
-    const pRes = await supabaseRest(
-      c.env, "GET", `/elev_projects?site_id=eq.${encodeURIComponent(siteId)}&select=id`,
-    );
-    const projects = pRes.ok ? ((await pRes.json()) as unknown[]) : [];
-    if (projects.length > 0) {
+    // 현장은 여러 도구가 공유하므로, 어느 도구의 세부 프로젝트가 남아 있어도 삭제를 막는다.
+    // (TC 임대계획 쪽은 FK 가 on delete set null 이라 막지 않으면 조용히 "미분류"로 떨어진다)
+    const owners: Array<{ table: string; label: string }> = [
+      { table: "elev_projects", label: "단열 Layout" },
+      { table: "tc_rental_projects", label: "TC 임대계획" },
+    ];
+    const blocking: string[] = [];
+    for (const owner of owners) {
+      const res = await supabaseRest(
+        c.env, "GET", `/${owner.table}?site_id=eq.${encodeURIComponent(siteId)}&select=id`,
+      );
+      // 테이블이 아직 없는 환경(마이그레이션 미적용)은 건너뛴다 — 삭제를 막을 근거가 없다
+      if (!res.ok) continue;
+      const rows = (await res.json()) as unknown[];
+      if (rows.length > 0) blocking.push(`${owner.label} ${rows.length}개`);
+    }
+    if (blocking.length > 0) {
       return c.json(
         {
-          error: `세부 프로젝트 ${projects.length}개가 남아 있어 삭제할 수 없습니다. 먼저 옮기거나 삭제하세요.`,
+          error: `세부 프로젝트가 남아 있어 삭제할 수 없습니다 (${blocking.join(", ")}). 먼저 옮기거나 삭제하세요.`,
         },
         409,
       );
