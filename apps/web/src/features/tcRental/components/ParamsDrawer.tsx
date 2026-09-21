@@ -24,6 +24,11 @@ export default function ParamsDrawer({
     onChange({ ...params, tc: { ...params.tc, [k]: v } });
   const setHc = (k: keyof RentalParams["hc"], v: number) =>
     onChange({ ...params, hc: { ...params.hc, [k]: v } });
+  const setHeight = (k: keyof RentalParams["hc"]["floorHeight"], v: number) =>
+    onChange({
+      ...params,
+      hc: { ...params.hc, floorHeight: { ...params.hc.floorHeight, [k]: v } },
+    });
 
   return (
     <>
@@ -122,6 +127,32 @@ export default function ParamsDrawer({
               <Num value={params.hc.dismantleDays} onChange={(v) => setHc("dismantleDays", v)} />
             </Row>
           </Group>
+
+          <Group title="호이스트 층고 기본값">
+            <Row
+              label="1층"
+              hint="② 호기 배정에서 동별로 비워 둔 칸에 쓰입니다"
+              unit="m"
+            >
+              <Dec value={params.hc.floorHeight.first} onChange={(v) => setHeight("first", v)} />
+            </Row>
+            <Row label="기준층" hint="지상층수 − 2 개층에 곱합니다" unit="m">
+              <Dec value={params.hc.floorHeight.typical} onChange={(v) => setHeight("typical", v)} />
+            </Row>
+            <Row label="최상층" hint="" unit="m">
+              <Dec value={params.hc.floorHeight.top} onChange={(v) => setHeight("top", v)} />
+            </Row>
+            <Row label="연장" hint="최상층 위 여유 — 동과 무관한 표준값" unit="m">
+              <Dec
+                value={params.hc.extendHeight}
+                onChange={(v) => onChange({ ...params, hc: { ...params.hc, extendHeight: v } })}
+              />
+            </Row>
+            <p className="pt-0.5 text-[12px] leading-snug text-slate-400">
+              지층은 동마다 기초 레벨이 달라 기본값을 두지 않습니다 — ② 호기 배정에서 동별로
+              넣어야 설치높이가 완성됩니다.
+            </p>
+          </Group>
         </div>
 
         <footer className="border-t border-slate-200 px-5 py-3">
@@ -181,6 +212,20 @@ function Num({ value, onChange }: { value: number; onChange: (v: number) => void
       type="number"
       value={value}
       min={0}
+      onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+      className="h-8 w-[64px] rounded-lg border border-slate-200 bg-white px-2 text-right text-[14px] tabular-nums text-slate-700 outline-none focus:border-[#0a63b8]"
+    />
+  );
+}
+
+/** 소수 한두 자리까지 받는 입력 — 층고(m) 처럼 정수가 아닌 값 */
+function Dec({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <input
+      type="number"
+      value={value}
+      min={0}
+      step={0.01}
       onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
       className="h-8 w-[64px] rounded-lg border border-slate-200 bg-white px-2 text-right text-[14px] tabular-nums text-slate-700 outline-none focus:border-[#0a63b8]"
     />

@@ -70,6 +70,10 @@ export const DEFAULT_PARAMS: RentalParams = {
     installDays: 20,
     postFrameMonths: 4,
     dismantleDays: 20,
+    // 층고 기본값 — 공동주택 표준. 동별 구간을 안 정했을 때 `1층/기준층/최상층` 3구간을 만든다.
+    // 지층은 동마다 기초 레벨이 달라 기본값이 있을 수 없어 여기 두지 않는다(동별 실측).
+    floorHeight: { first: 3.08, typical: 2.88, top: 3.08 },
+    extendHeight: 3.0,
   },
   winter: { from: "12-01", to: "02-28" },
   idleWarnDays: 30,
@@ -87,7 +91,11 @@ export function mergeParams(saved?: Partial<RentalParams> | null): RentalParams 
     ...DEFAULT_PARAMS,
     ...(saved ?? {}),
     tc: { ...DEFAULT_PARAMS.tc, ...(saved?.tc ?? {}) },
-    hc: { ...DEFAULT_PARAMS.hc, ...(saved?.hc ?? {}) },
+    hc: {
+      ...DEFAULT_PARAMS.hc,
+      ...(saved?.hc ?? {}),
+      floorHeight: { ...DEFAULT_PARAMS.hc.floorHeight, ...(saved?.hc?.floorHeight ?? {}) },
+    },
     winter: { ...DEFAULT_PARAMS.winter, ...(saved?.winter ?? {}) },
   };
 }

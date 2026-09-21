@@ -40,6 +40,7 @@ import { useLoadPlan, useSaveRevision } from "./hooks";
 import type {
   BuildingFrameProfile,
   EquipmentKind,
+  HeightBand,
   RentalParams,
   TcRentalPlan,
 } from "./types";
@@ -396,7 +397,12 @@ export default function TcRentalPage() {
   const changeHoist = useCallback(
     (
       buildingId: string,
-      patch: { hoistAnchorFloor?: number | null; hoistPostFrameMonths?: number | null },
+      patch: {
+        hoistAnchorFloor?: number | null;
+        hoistPostFrameMonths?: number | null;
+        hoistBaseHeight?: number | null;
+        hoistHeightBands?: HeightBand[] | null;
+      },
     ) => {
       update((p) => ({
         ...p,
