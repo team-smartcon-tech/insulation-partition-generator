@@ -25,7 +25,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 11;
+export const PARSER_VERSION = 12;
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀.
@@ -485,6 +485,12 @@ export function parseFormSheet(
     shapes: [],
     // 실제로 잘라낸 경우에만 알린다. 인쇄 영역이 내용보다 넓으면 알릴 것이 없다.
     printArea: trimmed ? worksheet.pageSetup?.printArea : undefined,
+    // 복합기로 뽑을 때 쓰려고 용지 설정을 들고 간다(A4 가로 등).
+    page: {
+      orientation: worksheet.pageSetup?.orientation === "landscape" ? "landscape" : "portrait",
+      paperSize: worksheet.pageSetup?.paperSize,
+      margins: worksheet.pageSetup?.margins,
+    },
     ...(sheetLocked ? { locked: true } : {}),
   };
 }

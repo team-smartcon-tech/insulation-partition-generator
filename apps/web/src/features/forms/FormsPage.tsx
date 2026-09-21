@@ -28,6 +28,7 @@ import {
   Minus,
   Pencil,
   Plus,
+  Printer,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -81,6 +82,8 @@ import {
   type FormKind,
 } from "./library";
 import FormSheetView, { type CellMark, type FormScale } from "./FormSheetView";
+import SheetPrintView from "./SheetPrintView";
+import { paperLabel } from "./printSheet";
 import {
   FIRST_SITE_NAME,
   addSite,
@@ -229,6 +232,8 @@ export default function FormsPage() {
   const mySignature = useSignature(user?.id);
   /** 결재선 지정 창이 열려 있나 */
   const [lineDialogOpen, setLineDialogOpen] = useState(false);
+  /** 인쇄용 화면을 띄워 두었나(복합기로 보내는 동안만) */
+  const [printing, setPrinting] = useState(false);
   /** 내려받기 선택 메뉴가 열려 있나 */
   const [downloadOpen, setDownloadOpen] = useState(false);
   /** 고칠 수 있는 칸을 하늘색으로 칠할까. 인쇄하거나 원본 모양을 볼 때 끌 수 있다. */
@@ -1058,6 +1063,29 @@ export default function FormsPage() {
     delete next[slot.signKey];
     await saveApprovals(next);
   }
+
+  /**
+   * 복합기 인쇄 — 인쇄용 화면이 그려진 **다음 그림틀**에 인쇄 창을 연다.
+   * 바로 부르면 아직 화면이 없어 빈 종이가 나간다. 인쇄가 끝나면(또는 취소하면) 도로 감춘다.
+   */
+  useEffect(() => {
+    if (!printing) return;
+    const done = () => setPrinting(false);
+    window.addEventListener("afterprint", done);
+    const timer = window.setTimeout(() => {
+      try {
+        // 인쇄 창을 닫거나 취소하면 afterprint 가 온다 — 그때 인쇄용 화면을 치운다.
+        // 여기서 시간을 재서 치우면, 인쇄 창을 오래 열어 둔 사이에 화면이 사라져 빈 종이가 나간다.
+        window.print();
+      } catch {
+        done();
+      }
+    }, 50);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("afterprint", done);
+    };
+  }, [printing]);
 
   /** 한 칸에 적은 값을 되돌리기 기록에 남긴다. */
   const handleCommitValue = useCallback(
@@ -2026,6 +2054,16 @@ export default function FormsPage() {
                   </button>
                 )}
 
+                <button
+                  type="button"
+                  onClick={() => setPrinting(true)}
+                  title={`복합기로 이 시트를 뽑습니다. 엑셀에 적힌 용지 설정(${paperLabel(sheet.page)})을 그대로 씁니다.`}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50"
+                >
+                  <Printer size={13} /> 인쇄
+                  <span className="text-[11px] font-normal text-slate-400">{paperLabel(sheet.page)}</span>
+                </button>
+
                 {readOnly ? (
                   <button
                     type="button"
@@ -2321,6 +2359,8 @@ export default function FormsPage() {
                 </span>
               </p>
             )}
+
+            {printing && <SheetPrintView sheet={sheet} values={sheetValues} cellMarks={cellMarks} />}
 
             <FormSheetView
               sheet={sheet}

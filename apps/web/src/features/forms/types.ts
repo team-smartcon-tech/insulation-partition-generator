@@ -170,6 +170,8 @@ export interface FormSheet {
    * 안 그러면 원본에 있던 줄이 왜 없는지 알 방법이 없다. 지정이 없으면 undefined.
    */
   printArea?: string;
+  /** 엑셀에 적힌 인쇄 설정(용지·방향·여백) — 복합기로 뽑을 때 그대로 쓴다. */
+  page?: FormPageSetup;
   /**
    * 엑셀에서 "시트 보호"가 걸려 있는 시트인가.
    * 이 시트에서는 잠긴 칸(`FormCell.locked`)을 고칠 수 없다 — 엑셀과 같게 맞춘다.
@@ -193,3 +195,13 @@ export type FormCellValues = Record<string, string>;
  * 이게 곧 지난달 내용이 이번 달에 겹쳐 보이는 것이 된다.
  */
 export type FormValues = Record<string, FormCellValues>;
+
+/** 엑셀의 인쇄 설정 중 종이에 맞추는 데 필요한 것만 */
+export interface FormPageSetup {
+  /** 세로/가로 */
+  orientation?: "portrait" | "landscape";
+  /** 엑셀 용지 번호(9 = A4, 8 = A3 …) */
+  paperSize?: number;
+  /** 여백(인치) — 엑셀이 주는 단위 그대로 담는다 */
+  margins?: { top?: number; right?: number; bottom?: number; left?: number };
+}
