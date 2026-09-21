@@ -410,12 +410,17 @@ function layoutTotals(
   const specStyle = cols.map((c) => ({ ...ws.getCell(`${c}${specFirstRow}`).style }));
   const grandStyle = cols.map((c) => ({ ...ws.getCell(`${c}${specFirstRow + 1}`).style }));
   const labelStyle = { ...ws.getCell(`A${specFirstRow}`).style };
+  // 합계가 빈 줄 자리로 내려가면 그 줄은 높이가 스페이서 값(작다)이라 혼자 납작해진다
+  const specHeight = ws.getRow(specFirstRow).height;
+  const grandHeight = ws.getRow(specFirstRow + 1).height;
 
   const grandRow = specFirstRow + specs.length;
   unmergeRegion(ws, specFirstRow, grandRow, 1, 16);
   for (let r = specFirstRow; r <= grandRow; r += 1) {
     const isGrand = r === grandRow;
     const model = isGrand ? grandStyle : specStyle;
+    const h = isGrand ? grandHeight : specHeight;
+    if (h) ws.getRow(r).height = h;
     cols.forEach((c, i) => {
       ws.getCell(`${c}${r}`).style = { ...model[i] };
     });
@@ -472,10 +477,13 @@ function fillBoq(
   const SUBTOTAL_ROW = 22;
   const COLS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N"];
 
-  // 본보기 서식을 먼저 떠 둔다 — 행을 끼워 넣으면 아래가 밀린다
+  // 본보기 서식을 먼저 떠 둔다 — 행을 끼워 넣으면 아래가 밀린다.
+  // **행 높이도 같이 떠야 한다** — 끼워 넣은 행은 높이가 비어 있어 혼자 납작해진다.
   const model: Array<Array<Record<string, unknown>>> = [];
+  const modelHeight: Array<number | undefined> = [];
   for (let k = 0; k < BLOCK_ROWS; k += 1) {
     model.push(COLS.map((c) => ({ ...ws.getCell(`${c}${BLOCK_FIRST + k}`).style })));
+    modelHeight.push(ws.getRow(BLOCK_FIRST + k).height);
   }
 
   const extra = (specs.length - 1) * BLOCK_ROWS;
@@ -565,6 +573,8 @@ function fillBoq(
 
     for (let k = 0; k < BLOCK_ROWS; k += 1) {
       const r = base + k;
+      const h = modelHeight[k];
+      if (h) ws.getRow(r).height = h;
       COLS.forEach((c, i) => {
         ws.getCell(`${c}${r}`).style = { ...model[k][i] };
         ws.getCell(`${c}${r}`).value = null;
@@ -614,6 +624,9 @@ function fillBoq(
     ws.getCell(`${c}${sub}`).value = { formula: `SUM(${c}6:${c}${lastRow})` };
     ws.getCell(`${c}${grand}`).value = { formula: `${c}${sub}` };
   }
+
+  // 인쇄 영역은 양식 원본(23행)에 맞춰져 있다 — 늘어난 줄이 인쇄에서 잘린다
+  if (ws.pageSetup) ws.pageSetup.printArea = `A1:M${grand}`;
 }
 
 /** "중속싱글" → "중속" (내역서 항목명 표기) */
@@ -728,6 +741,9 @@ function fillCalc(
       `SUMIF($G$${ETC_FIRST_ROW}:$G$${ETC_FIRST_ROW + MAX_ROWS - 1},$C${row},$${col}$${ETC_FIRST_ROW}:$${col}$${ETC_FIRST_ROW + MAX_ROWS - 1})`,
     (col) => `SUM(${col}${ETC_FIRST_ROW}:${col}${ETC_FIRST_ROW + MAX_ROWS - 1})`,
   );
+  // 규격이 둘이면 합계가 한 줄 내려가 양식 인쇄 영역(34행) 밖으로 나간다
+  if (ws.pageSetup) ws.pageSetup.printArea = `A1:P${etc.grand}`;
+
   return { rent, etc };
 }
 
