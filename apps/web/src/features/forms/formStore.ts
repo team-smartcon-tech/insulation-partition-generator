@@ -301,10 +301,13 @@ export function blankValuesFor(sheets: FormSheet[], source: FormSheet): Record<s
   const titles = titleKeys(source);
 
   // 줄별로 "글자가 든 칸 수"와 "장마다 달라지는 칸 수"를 센다.
+  // 글자 없이 기호만 있는 칸(결재칸 날짜 자리의 `/`, 구분선용 `-`)은 머리글 후보로 세지 않는다.
+  const isWordCell = (text: string) => /[\p{L}\p{N}]/u.test(text);
+
   const rows = new Map<number, { filled: number; varying: number }>();
   for (const cell of source.cells) {
     const text = compactText(cell.text);
-    if (text === "" || titles.has(cell.key)) continue;
+    if (text === "" || titles.has(cell.key) || !isWordCell(text)) continue;
     const row = rows.get(cell.row) ?? { filled: 0, varying: 0 };
     row.filled += 1;
     if (varies(cell.key, text)) row.varying += 1;
@@ -317,15 +320,23 @@ export function blankValuesFor(sheets: FormSheet[], source: FormSheet): Record<s
    * 대장류 양식은 머리글 줄 **아래가 전부 내용**이다. 칸 단위로만 보면, 모든 장에서
    * 우연히 같은 값(담당부서가 늘 "공무")이 머리글로 잘못 남는다.
    *
-   * 머리글 줄의 조건: 글자 든 칸이 여럿이고, 그 칸들이 **장마다 하나도 안 바뀌며**,
+   * 머리글 줄의 조건: 글자 든 칸이 셋 이상이고, 그 칸들이 **장마다 거의 그대로이며**,
    * 그 아래에 달라지는 줄이 있다. 셋을 다 만족하는 가장 아래 줄을 고른다
    * (머리글이 두 줄인 표도 잡힌다).
+   *
+   * "하나도 안 바뀌며"가 아니라 **거의**인 이유: 같은 양식인데도 장마다 머리글이 조금씩 다르다
+   * (`분석일자` / `발생일`). 하나도 안 바뀌어야 한다고 보면 머리글을 못 찾고, 대신 결재칸 날짜
+   * 자리(`/ / /`)가 머리글로 잡혀 **표 머리글까지 통째로 비워졌다**(실제로 그랬다).
+   * 기호만 있는 칸은 위에서 이미 셈에서 뺐다.
    */
   const sorted = [...rows.entries()].sort(([a], [b]) => a - b);
   const hasVaryingBelow = (row: number) =>
     sorted.some(([other, info]) => other > row && info.varying > 0);
   const headerRow = sorted
-    .filter(([row, info]) => info.filled >= 3 && info.varying === 0 && hasVaryingBelow(row))
+    .filter(
+      ([row, info]) =>
+        info.filled >= 3 && info.varying <= Math.floor(info.filled * 0.2) && hasVaryingBelow(row),
+    )
     .map(([row]) => row)
     .pop();
 
@@ -335,6 +346,9 @@ export function blankValuesFor(sheets: FormSheet[], source: FormSheet): Record<s
     if (text === "") continue;
     // 제목은 장마다 달라도 내용이 아니다.
     if (titles.has(cell.key)) continue;
+
+    // 머리글 줄 자체는 남긴다 — 장마다 조금 다른 머리글(분석일자/발생일)도 머리글이다.
+    if (cell.row === headerRow) continue;
 
     // 머리글 줄 아래는 전부 내용이다. 그 위는 칸 단위로 견준다(제목은 남고 현장명은 비운다).
     const isContent =
