@@ -37,6 +37,30 @@ export interface WinterCuring {
 }
 
 /** 동(棟) 하나의 골조 정형 레코드 = 공정표 한 행 */
+/**
+ * 층고 기본값 (m) — 동별 구간을 따로 정하지 않았을 때 만들어 주는 세 값.
+ * `1층 / 기준층 / 최상층` 3구간이 가장 흔한 모양이라 이것을 기본형으로 둔다.
+ */
+export interface FloorHeights {
+  first: number;
+  typical: number;
+  top: number;
+}
+
+/**
+ * 지상 층고 구간 한 칸.
+ *
+ * 현장마다 층고가 나뉘는 자리가 다르다 — `1층만 높은` 동도 있고 `1~3F 가 같이 높은` 동도
+ * 있다. 그래서 "1층·기준층·최상층" 세 칸으로 고정하지 않고 **구간 목록**으로 받는다.
+ * 구간은 1층부터 차례로 이어지며, 마지막 구간은 최상층까지다.
+ */
+export interface HeightBand {
+  /** 이 구간의 마지막 지상층. null = 최상층까지 */
+  upTo: number | null;
+  /** 층고 (m) */
+  height: number;
+}
+
 export interface BuildingFrameProfile {
   id: string;
   /** "3601동" */
@@ -59,6 +83,18 @@ export interface BuildingFrameProfile {
    * 미지정이면 `RentalParams.hc.postFrameMonths` 를 쓴다.
    */
   hoistPostFrameMonths?: number | null;
+  /**
+   * 지층 높이 (m) — 기초 레벨부터 1층 바닥까지.
+   * 동마다 기초 레벨이 달라 **기본값을 둘 수 없는 실측값**이다. 비면 설치높이가 그만큼 짧다.
+   */
+  hoistBaseHeight?: number | null;
+  /**
+   * 지상 층고 구간. **설치높이 산정의 원천**이다 —
+   *   설치높이 = 지층 + Σ(구간 층수 × 층고) + 연장   (올림)
+   * 층수는 이 동의 지상층수에서, 연장은 표준값에서 자동으로 나오므로 입력받지 않는다.
+   * 비우면 `RentalParams.hc.floorHeight` 로 `1층 / 기준층 / 최상층` 3구간을 만들어 쓴다.
+   */
+  hoistHeightBands?: HeightBand[] | null;
   /**
    * 동절기 보양 횟수. 자동 산출값을 기본으로 채우되 사용자가 덮어쓸 수 있다
    * (회사 표준이 확정되기 전까지는 사람이 고칠 수 있어야 한다).
@@ -107,6 +143,13 @@ export interface RentalParams {
     postFrameMonths: number;
     /** 해체 소요 (네트워크 공정표 표준 20일) */
     dismantleDays: number;
+    /**
+     * 층고 기본값 (m) — 동별 구간을 정하지 않았을 때 `1층 / 기준층 / 최상층` 3구간을 만든다.
+     * 지층은 동마다 달라 여기 두지 않는다(동별 실측 입력).
+     */
+    floorHeight: FloorHeights;
+    /** 최상층 위로 올리는 연장 (m) — 동과 무관한 표준값이라 동별 입력을 받지 않는다 */
+    extendHeight: number;
   };
   winter: {
     /** 동절기 시작 "MM-DD" */

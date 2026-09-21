@@ -11,15 +11,21 @@
  * 구조이므로 **(호기, 동) 짝 하나가 한 줄**이 된다. 한 동에 두 호기를 걸면 그 동이 두 줄로
  * 나오고, 한 호기가 두 동을 맡으면 동이 둘로 나뉜다 — 양쪽 다 양식의 모양과 맞는다.
  *
+ * ── 설치높이 ──
+ * 층고는 ② 호기 배정에서 **동별로** 받는다(지층·1층·기준층·최상층). 층수와 연장은
+ * 입력이 아니라 그 동의 지상층수·표준값에서 자동으로 나온다. 지층만 비어 있을 수
+ * 있는데(동마다 기초 레벨이 다른 실측값), 그때는 비고에 표시한다 — 채우면 설치높이와
+ * 설치비 수량이 그 자리에서 따라 붙는다.
+ *
  * ── 우리가 채우지 않는 칸 ──
- * 라인(세대) 표기와 **지층 높이**는 현장 실측값이라 공정표에서 나오지 않는다. 비워 두고
- * 비고에 표시한다. 지층을 채우면 설치높이·설치비 수량이 그 자리에서 따라 붙는다.
+ * 라인(세대) 표기는 공정표에서 나오지 않는다.
  */
 // 타입만 정적으로 쓴다 — 라이브러리 본체(약 1MB)는 발주의뢰서를 실제로 만들 때만 받는다.
 // 정적 import 로 두면 도구를 열지도 않은 사람의 첫 화면까지 무거워진다.
 import type ExcelJS from "exceljs";
 import type { BuildingFrameProfile, RentalSpan, TcRentalPlan } from "./types";
 import { parseYmd } from "./engine/dates";
+import { resolveHoistHeight } from "./engine/profile";
 
 const TEMPLATE_URL = "/templates/hc-order-template.xlsx";
 
@@ -47,9 +53,6 @@ const HEIGHT_FIRST_ROW = 4; // 설치높이 산정
 const TERM_MONTH_FIRST_COL = 4;
 const TERM_MONTH_LAST_COL = 24;
 
-/** 설치높이 산정의 층고 기준 (m) — 양식 상단 "층고" 블록과 같은 값 */
-const FLOOR_HEIGHT = { first: 3.08, typical: 2.88, top: 3.08, extend: 3.0 } as const;
-
 /** 운용 형태 — 양식의 적용계수 표(V11:W14)에 있는 이름이라야 VLOOKUP 이 걸린다 */
 const DEFAULT_OPERATION = "중속싱글";
 
@@ -63,6 +66,8 @@ interface HcLine {
   no: number;
   building: BuildingFrameProfile;
   months: string[];
+  /** 동별 층고에서 나온 설치높이 — 화면(② 호기 배정)과 같은 계산을 쓴다 */
+  height: ReturnType<typeof resolveHoistHeight>;
 }
 
 /** 시작 달부터 count 개월 (YYYY-MM) */
@@ -84,6 +89,9 @@ function monthsFrom(ymd: string, count: number): string[] {
 }
 
 const overflow: string[] = [];
+
+/** 2.88 × 9 처럼 떨어지지 않는 곱셈이 `25.919999999999998` 로 실리지 않게 */
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** 공유 수식을 낱개 수식으로 펼친다 — 셀을 덮어쓰기 전에 해야 파일이 깨지지 않는다 */
 function unshareFormulas(ws: ExcelJS.Worksheet) {
@@ -304,21 +312,43 @@ function fillElevation(ws: ExcelJS.Worksheet, lines: HcLine[]) {
         return;
       }
       const above = ln.building.aboveFloors;
-      const typical = Math.max(0, above - 2);
+      const h = ln.height;
       ws.getCell(`${label}${headRow}`).value = `□ ${ln.building.name} (${above}층)`;
-      const rows: Array<[string, string, number | null]> = [
-        ["연장", `${FLOOR_HEIGHT.extend.toFixed(1)}m`, FLOOR_HEIGHT.extend],
-        ["최상층 ", `${FLOOR_HEIGHT.top}m*1층`, FLOOR_HEIGHT.top],
-        [`기준층(2~${above - 1}층) `, `${FLOOR_HEIGHT.typical}m*${typical}층`, null],
-        ["저층부(1층) ", `${FLOOR_HEIGHT.first}m*1층`, FLOOR_HEIGHT.first],
-        ["지층", "", null], // 현장 실측값
+
+      // 양식은 `연장 / 최상층 / 기준층 / 저층부 / 지층` 다섯 줄로 고정이다.
+      // 구간이 더 잘게 나뉘면(1~3F 가 한 구간인 현장 등) 중간 구간들을 한 줄로 접는다 —
+      // 줄을 늘리면 아래 합계 수식 범위가 어긋난다.
+      const bands = h.bands;
+      const topBand = bands[bands.length - 1];
+      const firstBand = bands[0];
+      const middle = bands.slice(1, -1);
+      const middleText = middle.map((x) => `${x.height}m*${x.count}층`).join(" + ");
+      const middleFormula = middle.map((x) => `${x.count}*${x.height}`).join("+");
+      const rows: Array<[string, string, ExcelJS.CellValue]> = [
+        ["연장", `${h.extend.toFixed(1)}m`, h.extend],
+        [
+          `최상층(${topBand?.label ?? ""}) `,
+          topBand ? `${topBand.height}m*${topBand.count}층` : "",
+          topBand ? round2(topBand.height * topBand.count) : null,
+        ],
+        [
+          middle.length > 0 ? `기준층(${middle[0].from}~${middle[middle.length - 1].to}층) ` : "기준층",
+          middleText,
+          middleFormula ? { formula: middleFormula } : null,
+        ],
+        [
+          `저층부(${firstBand?.label ?? ""}) `,
+          firstBand ? `${firstBand.height}m*${firstBand.count}층` : "",
+          firstBand ? round2(firstBand.height * firstBand.count) : null,
+        ],
+        ["지층", h.baseMissing ? "" : `${h.base}m`, h.baseMissing ? null : h.base],
       ];
+      // 구간이 둘뿐이면(저층부 = 최상층 바로 아래) 접을 중간이 없어 기준층 줄이 빈다
       rows.forEach(([name, formulaText, v], i) => {
         const r = headRow + 2 + i;
         ws.getCell(`${label}${r}`).value = name;
         ws.getCell(`${expr}${r}`).value = formulaText || null;
-        ws.getCell(`${value}${r}`).value =
-          v !== null ? v : name.startsWith("기준층") ? { formula: `${typical}*${FLOOR_HEIGHT.typical}` } : null;
+        ws.getCell(`${value}${r}`).value = v;
       });
       const sumRow = headRow + 7;
       ws.getCell(`${label}${sumRow}`).value = "합 계";
@@ -361,6 +391,11 @@ function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[], to
     ws.getCell("A2").value = `(${d.getUTCFullYear()}.${String(d.getUTCMonth() + 1).padStart(2, "0")})`;
   }
   ws.getCell("A3").value = `■ 현장명 : ${plan.siteName}`;
+  // 상단 "층고" 기준 블록 — 원본 현장 값이 박혀 있어 우리 기본값으로 바꾼다.
+  // (동별로 다르면 아래 설치높이 산정의 동별 값이 우선이고, 여기는 기준 표기다)
+  ws.getCell("C7").value = Math.round(plan.params.hc.floorHeight.typical * 1000);
+  ws.getCell("E7").value = Math.round(plan.params.hc.floorHeight.first * 1000);
+  ws.getCell("G7").value = Math.round(plan.params.hc.floorHeight.top * 1000);
 
   for (const first of [CALC_FIRST_ROW, ETC_FIRST_ROW]) {
     const last = first + MAX_ROWS - 1;
@@ -500,34 +535,44 @@ function fillHeight(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[]) 
 
   lines.forEach((ln, idx) => {
     const r = HEIGHT_FIRST_ROW + idx;
-    const typical = Math.max(0, ln.building.aboveFloors - 2); // 1층·최상층 제외
+    const h = ln.height;
     ws.getCell(`A${r}`).value = ln.building.name;
     ws.getCell(`B${r}`).value = { formula: `임대기간!B${TERM_FIRST_ROW + idx}` };
     ws.getCell(`C${r}`).value = { formula: `임대기간!C${TERM_FIRST_ROW + idx}` };
     ws.getCell(`D${r}`).value = "안방발코니";
-    const desc =
-      `(지층)+${FLOOR_HEIGHT.first}*1(1층)+${FLOOR_HEIGHT.typical}*${typical}(기준층)` +
-      `+${FLOOR_HEIGHT.top}(최상층)+${FLOOR_HEIGHT.extend.toFixed(1)}(연장)`;
-    ws.getCell(`E${r}`).value = desc;
-    fitColumn(ws, "E", desc);
-    ws.getCell(`F${r}`).value = { formula: `O${r}` };
+    ws.getCell(`E${r}`).value = h.describe;
+    fitColumn(ws, "E", h.describe);
+    // 값(F)은 **구간을 그대로 펼친 수식**이다. 양식 원본도 이 칸에
+    // `=8.75+3.08*1+2.88*22+3.08+3` 처럼 식을 적어 두므로 모양이 같다.
+    ws.getCell(`F${r}`).value = { formula: h.expression };
     ws.getCell(`G${r}`).value = { formula: `ROUNDUP(F${r},0)` };
-    ws.getCell(`H${r}`).value = "지층 높이 입력 필요";
+    ws.getCell(`H${r}`).value = h.baseMissing ? "지층 높이 입력 필요" : null;
 
-    ws.getCell(`I${r}`).value = null; // 지층 — 현장 실측값
-    ws.getCell(`J${r}`).value = FLOOR_HEIGHT.first;
-    ws.getCell(`K${r}`).value = FLOOR_HEIGHT.typical;
-    ws.getCell(`L${r}`).value = { formula: `C${r}-2` };
-    ws.getCell(`M${r}`).value = FLOOR_HEIGHT.top;
-    ws.getCell(`N${r}`).value = FLOOR_HEIGHT.extend;
-    ws.getCell(`O${r}`).value = { formula: `I${r}+J${r}*1+K${r}*L${r}+M${r}+N${r}` };
-    ws.getCell(`P${r}`).value = { formula: `ROUNDUP(O${r},0)` };
+    // I~P 는 양식의 보조 표인데 칸이 `1층 | 기준층 | 층수 | 최상층` 세 종류로 **고정**이다.
+    // 층고 구간이 그 모양일 때만 채우고, 1~3F 가 한 구간인 현장처럼 다른 모양이면
+    // 억지로 끼워 넣지 않고 비운다 — 옆 칸(F)과 어긋난 숫자가 남는 것이 더 나쁘다.
+    const helper = ["I", "J", "K", "L", "M", "N", "O", "P"];
+    if (h.simple) {
+      ws.getCell(`I${r}`).value = h.baseMissing ? null : h.base;
+      ws.getCell(`J${r}`).value = h.simple.first;
+      ws.getCell(`K${r}`).value = h.simple.typical;
+      ws.getCell(`L${r}`).value = { formula: `C${r}-2` };
+      ws.getCell(`M${r}`).value = h.simple.top;
+      ws.getCell(`N${r}`).value = h.extend;
+      ws.getCell(`O${r}`).value = { formula: `I${r}+J${r}*1+K${r}*L${r}+M${r}+N${r}` };
+      ws.getCell(`P${r}`).value = { formula: `ROUNDUP(O${r},0)` };
+    } else {
+      for (const col of helper) ws.getCell(`${col}${r}`).value = null;
+    }
   });
 
   mergeByBuilding(ws, "A", HEIGHT_FIRST_ROW, lines);
   ws.getCell(`F${last + 1}`).value = { formula: `ROUNDUP(SUM(F${HEIGHT_FIRST_ROW}:F${last}),0)` };
   ws.getCell(`G${last + 1}`).value = { formula: `SUM(G${HEIGHT_FIRST_ROW}:G${last})` };
-  ws.getCell(`P${last + 1}`).value = { formula: `SUM(P${HEIGHT_FIRST_ROW}:P${last})` };
+  // 보조 표(P)는 구간 모양이 양식과 다르면 비어 있으므로 합계도 비운다
+  ws.getCell(`P${last + 1}`).value = lines.every((l) => l.height.simple)
+    ? { formula: `SUM(P${HEIGHT_FIRST_ROW}:P${last})` }
+    : null;
 }
 
 export async function generateHcOrderForm({ plan, spans }: HcOrderInput): Promise<string[]> {
@@ -543,6 +588,7 @@ export async function generateHcOrderForm({ plan, spans }: HcOrderInput): Promis
         no: s.no,
         building: b,
         months: monthsFrom(s.mobilizeStart, Math.max(1, s.rentalMonths)),
+        height: resolveHoistHeight(b, plan.params),
       });
     }
   }

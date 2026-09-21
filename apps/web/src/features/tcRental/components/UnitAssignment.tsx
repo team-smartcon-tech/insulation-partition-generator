@@ -8,18 +8,25 @@
  * 한 동에 두 대(예: "2,3호기"), 한 대가 여러 동을 담당하는 경우가 모두 흔해서 N:M 이다.
  * 셀을 누르면 아래 담당 구간 막대가 곧바로 다시 그려진다.
  */
-import { useMemo } from "react";
-import { Plus, Minus, WandSparkles, TriangleAlert } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus, Minus, WandSparkles, TriangleAlert, X } from "lucide-react";
 import type {
   Assignment,
   BuildingFrameProfile,
   EquipmentKind,
+  HeightBand,
   EquipmentUnit,
   RentalParams,
   RentalSpan,
 } from "../types";
 import { addMonths, buildDecadeAxis, dayPercent, shortYmd } from "../engine/dates";
-import { floorFinish, frameFinish, frameStart } from "../engine/profile";
+import {
+  floorFinish,
+  frameFinish,
+  frameStart,
+  resolveBands,
+  resolveHoistHeight,
+} from "../engine/profile";
 import { unitColor } from "../theme";
 
 /** 담당 구간 한 줄(동 하나)의 높이 */
@@ -52,13 +59,22 @@ export default function UnitAssignment({
   onAutoSuggest: (kind: EquipmentKind) => void;
   onChangeHoist: (
     buildingId: string,
-    patch: { hoistAnchorFloor?: number | null; hoistPostFrameMonths?: number | null },
+    patch: {
+      hoistAnchorFloor?: number | null;
+      hoistPostFrameMonths?: number | null;
+      hoistBaseHeight?: number | null;
+      hoistHeightBands?: HeightBand[] | null;
+    },
   ) => void;
 }) {
   const assigned = useMemo(
     () => new Set(assignments.map((a) => `${a.unitId}|${a.buildingId}`)),
     [assignments],
   );
+  /** 층고 구간을 고치는 중인 동 */
+  const [bandEdit, setBandEdit] = useState<string | null>(null);
+  const editing = buildings.find((b) => b.id === bandEdit) ?? null;
+
   const tcUnits = units.filter((u) => u.kind === "tc").sort((a, b) => a.no - b.no);
   const hcUnits = units.filter((u) => u.kind === "hc").sort((a, b) => a.no - b.no);
 
@@ -116,6 +132,15 @@ export default function UnitAssignment({
                       설치 = 기준층 골조완료 후 · 해체 = 옥탑 골조완료 + N개월
                     </span>
                   </th>
+                  <th
+                    colSpan={3}
+                    className="border-l border-slate-200 px-2 py-1.5 text-center text-[12px] font-bold text-slate-500"
+                  >
+                    층고 (m)
+                    <span className="ml-1 font-normal text-slate-400">
+                      발주의뢰서 「설치높이 산정」의 원천 · 층수·연장은 동에서 자동
+                    </span>
+                  </th>
                 </tr>
                 <tr className="border-b border-slate-200">
                   {tcUnits.length === 0 ? (
@@ -144,6 +169,15 @@ export default function UnitAssignment({
                   <th className="px-2 py-1.5 text-center text-[12px] font-bold text-slate-500">
                     해체 완료
                   </th>
+                  <th className="border-l border-slate-200 px-2 py-1.5 text-center text-[12px] font-bold text-slate-500">
+                    지층
+                  </th>
+                  <th className="px-2 py-1.5 text-center text-[12px] font-bold text-slate-500">
+                    지상 층고 구간
+                  </th>
+                  <th className="px-2 py-1.5 text-center text-[12px] font-bold text-slate-500">
+                    설치높이
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -156,6 +190,7 @@ export default function UnitAssignment({
                   const dismantleAt = fin
                     ? addMonths(fin, b.hoistPostFrameMonths ?? params.hc.postFrameMonths)
                     : null;
+                  const height = resolveHoistHeight(b, params);
                   return (
                     <tr
                       key={b.id}
@@ -264,6 +299,54 @@ export default function UnitAssignment({
                           <span className="text-slate-300">—</span>
                         )}
                       </td>
+
+                      {/* 층고 — 동마다 기초 레벨도 층고가 나뉘는 자리도 다르다 */}
+                      <HeightCell
+                        value={b.hoistBaseHeight ?? null}
+                        placeholder="실측"
+                        warn={height.baseMissing}
+                        title="지층 높이(기초 레벨~1층 바닥). 동마다 달라 기본값이 없습니다 — 비우면 설치높이가 그만큼 짧게 나옵니다."
+                        first
+                        onChange={(v) => onChangeHoist(b.id, { hoistBaseHeight: v })}
+                      />
+                      <td className="px-2 py-1.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setBandEdit(b.id)}
+                          title="구간을 눌러 층고가 나뉘는 자리를 고칩니다"
+                          className={
+                            "inline-flex max-w-[260px] flex-wrap items-center justify-center gap-1 rounded border px-1.5 py-1 transition-colors " +
+                            (b.hoistHeightBands && b.hoistHeightBands.length > 0
+                              ? "border-[#0a63b8]/30 bg-[#eef5fd] hover:border-[#0a63b8]"
+                              : "border-slate-200 bg-white hover:border-[#0a63b8]")
+                          }
+                        >
+                          {height.bands.map((x) => (
+                            <span
+                              key={x.from}
+                              className="whitespace-nowrap rounded bg-white/80 px-1 text-[12px] tabular-nums text-slate-600"
+                            >
+                              <b className="font-semibold text-slate-700">{x.label}</b> {x.height}
+                            </span>
+                          ))}
+                        </button>
+                      </td>
+                      <td className="px-2 py-1.5 text-center">
+                        <span
+                          className={
+                            "inline-flex h-7 min-w-[58px] items-center justify-center rounded px-2 text-[13px] font-bold tabular-nums " +
+                            (height.baseMissing
+                              ? "bg-amber-50 text-amber-700"
+                              : "bg-[#eef5fd] text-[#0a63b8]")
+                          }
+                          title={
+                            `${height.describe} = ${height.total}m → 올림 ${height.installHeight}m` +
+                            (height.baseMissing ? " · 지층이 비어 있어 그만큼 짧습니다" : "")
+                          }
+                        >
+                          {height.installHeight}m
+                        </span>
+                      </td>
                     </tr>
                   );
                 })}
@@ -284,6 +367,15 @@ export default function UnitAssignment({
       </section>
 
       <CoverageStrip buildings={buildings} spans={spans} axisFrom={axisFrom} axisTo={axisTo} />
+
+      {editing && (
+        <BandEditor
+          building={editing}
+          params={params}
+          onClose={() => setBandEdit(null)}
+          onChange={(bands) => onChangeHoist(editing.id, { hoistHeightBands: bands })}
+        />
+      )}
     </div>
   );
 }
@@ -505,5 +597,201 @@ function CoverageStrip({
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * 층고 입력 한 칸.
+ *
+ * 비우면 기본값을 쓴다는 뜻이라 `0` 과 빈칸을 구분해야 한다 — placeholder 에 기본값을
+ * 띄워 두고, 지운 값은 `null` 로 올려 보낸다(그래야 기본값으로 되돌아간다).
+ */
+function HeightCell({
+  value,
+  placeholder,
+  title,
+  warn,
+  first,
+  onChange,
+}: {
+  value: number | null;
+  placeholder: string;
+  title: string;
+  warn?: boolean;
+  first?: boolean;
+  onChange: (v: number | null) => void;
+}) {
+  return (
+    <td className={"px-2 py-1.5 text-center" + (first ? " border-l border-slate-200" : "")}>
+      <input
+        type="number"
+        min={0}
+        step={0.01}
+        value={value ?? ""}
+        placeholder={placeholder}
+        title={title}
+        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+        className={
+          "h-7 w-[58px] rounded border px-1 text-center text-[13px] tabular-nums outline-none transition-colors focus:border-[#0a63b8] " +
+          (warn
+            ? "border-amber-300 bg-amber-50/60 text-amber-700 placeholder:text-amber-500"
+            : "border-slate-200 text-slate-700")
+        }
+      />
+    </td>
+  );
+}
+
+/**
+ * 층고 구간 편집 — 층고가 나뉘는 자리를 동마다 정한다.
+ *
+ * "1층 / 기준층 / 최상층" 세 칸으로 고정하면 `1~3F 가 같은 층고` 인 현장을 못 적는다.
+ * 그래서 **구간을 몇 개든 둘 수 있게** 하고, 각 구간은 `~N층까지 · 층고 Xm` 으로만 적는다.
+ * 마지막 구간은 항상 최상층까지라 끝 층을 받지 않는다 — 층수는 동에서 나온다.
+ */
+function BandEditor({
+  building,
+  params,
+  onClose,
+  onChange,
+}: {
+  building: BuildingFrameProfile;
+  params: RentalParams;
+  onClose: () => void;
+  onChange: (bands: HeightBand[] | null) => void;
+}) {
+  const resolved = resolveBands(building, params);
+  /** 저장된 값이 없으면 기본형을 펼쳐 보여 주고, 고치는 순간 그 모양이 저장된다 */
+  const bands: HeightBand[] =
+    building.hoistHeightBands && building.hoistHeightBands.length > 0
+      ? building.hoistHeightBands
+      : resolved.map((x, i) => ({
+          upTo: i === resolved.length - 1 ? null : x.to,
+          height: x.height,
+        }));
+
+  const height = resolveHoistHeight(building, params);
+  const patch = (next: HeightBand[]) => {
+    // 마지막은 언제나 최상층까지다 — 끝 층을 들고 있으면 층수가 바뀔 때 어긋난다
+    onChange(next.map((x, i) => (i === next.length - 1 ? { ...x, upTo: null } : x)));
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-slate-900/25 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fixed left-1/2 top-1/2 z-50 w-[480px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_30px_70px_-30px_rgba(8,22,52,0.5)]">
+        <header className="flex items-center justify-between border-b border-slate-200 px-5 py-3.5">
+          <div>
+            <h3 className="text-[14.5px] font-bold text-slate-800">{building.name} 층고 구간</h3>
+            <p className="mt-0.5 text-[12.5px] text-slate-400">
+              지상 {building.aboveFloors}층 · 층수는 동에서 자동으로 나옵니다
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+          >
+            <X className="h-[18px] w-[18px]" />
+          </button>
+        </header>
+
+        <div className="space-y-2 px-5 py-4">
+          {bands.map((band, i) => {
+            const r = resolved[i];
+            const last = i === bands.length - 1;
+            return (
+              <div key={i} className="flex items-center gap-2">
+                <span className="w-[72px] shrink-0 text-right text-[13px] font-semibold tabular-nums text-slate-600">
+                  {r ? r.label : "—"}
+                </span>
+                {last ? (
+                  <span className="h-8 w-[70px] text-center text-[13px] leading-8 text-slate-400">
+                    최상층
+                  </span>
+                ) : (
+                  <input
+                    type="number"
+                    min={1}
+                    max={building.aboveFloors}
+                    value={band.upTo ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value ? Number(e.target.value) : null;
+                      patch(bands.map((x, k) => (k === i ? { ...x, upTo: v } : x)));
+                    }}
+                    className="h-8 w-[70px] rounded-lg border border-slate-200 px-2 text-center text-[13.5px] tabular-nums text-slate-700 outline-none focus:border-[#0a63b8]"
+                  />
+                )}
+                <span className="text-[12.5px] text-slate-400">층까지</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={band.height}
+                  onChange={(e) =>
+                    patch(
+                      bands.map((x, k) =>
+                        k === i ? { ...x, height: Number(e.target.value) || 0 } : x,
+                      ),
+                    )
+                  }
+                  className="h-8 w-[76px] rounded-lg border border-slate-200 px-2 text-right text-[13.5px] tabular-nums text-slate-700 outline-none focus:border-[#0a63b8]"
+                />
+                <span className="text-[12.5px] text-slate-400">m</span>
+                <button
+                  type="button"
+                  disabled={bands.length <= 1}
+                  onClick={() => patch(bands.filter((_, k) => k !== i))}
+                  title="구간 삭제"
+                  className="ml-auto flex h-7 w-7 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-500 disabled:opacity-30"
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={() => {
+              const prevTo = resolved[Math.max(0, resolved.length - 2)]?.to ?? 1;
+              const tail = bands[bands.length - 1];
+              patch([
+                ...bands.slice(0, -1),
+                {
+                  upTo: Math.min(Math.max(1, building.aboveFloors - 1), prevTo + 1),
+                  height: tail.height,
+                },
+                tail,
+              ]);
+            }}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-3 text-[13px] font-semibold text-slate-500 transition-colors hover:border-[#0a63b8] hover:text-[#0a63b8]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            구간 추가
+          </button>
+        </div>
+
+        <footer className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/70 px-5 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[12px] text-slate-400" title={height.describe}>
+              {height.describe}
+            </div>
+            <div className="mt-0.5 text-[13px] text-slate-600">
+              합계 <b className="text-slate-800">{height.total}m</b> → 설치높이{" "}
+              <b className="text-[#0a63b8]">{height.installHeight}m</b>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            title={`1층 ${params.hc.floorHeight.first} · 기준층 ${params.hc.floorHeight.typical} · 최상층 ${params.hc.floorHeight.top}`}
+            className="shrink-0 text-[12.5px] font-semibold text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+          >
+            기본값으로
+          </button>
+        </footer>
+      </div>
+    </>
   );
 }

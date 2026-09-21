@@ -8,6 +8,7 @@
 import type {
   BuildingFrameProfile,
   FloorSegment,
+  HeightBand,
   RentalParams,
   WinterCuring,
 } from "../types";
@@ -212,4 +213,140 @@ export function resolveWinterCuring(
   params: RentalParams,
 ): WinterCuring {
   return b.winterCuring ?? countWinterCuring(b, params);
+}
+
+/**
+ * 호이스트 설치높이 — 동별 층고 구간에서 나온다.
+ *
+ *   설치높이 = 지층 + Σ(구간 층수 × 층고) + 연장   (올림)
+ *
+ * 층고가 나뉘는 자리는 현장마다 다르다 — `1층만 높은` 동도 있고 `1~3F 가 같이 높은`
+ * 동도 있다. 그래서 세 칸(1층·기준층·최상층)으로 고정하지 않고 **구간 목록**으로 받는다.
+ * 층수는 이 동의 지상층수에서, 연장은 표준값에서 자동으로 나오므로 입력받지 않는다.
+ *
+ * 화면과 엑셀이 **같은 값을 쓰도록** 계산을 여기 한 곳에 둔다.
+ */
+export interface ResolvedBand {
+  /** 시작 지상층 */
+  from: number;
+  /** 끝 지상층 */
+  to: number;
+  /** 층수 = to − from + 1 */
+  count: number;
+  height: number;
+  /** "1~3F" · "25F" */
+  label: string;
+}
+
+export interface HoistHeight {
+  base: number;
+  extend: number;
+  bands: ResolvedBand[];
+  /** 합계 (m) */
+  total: number;
+  /** 올림한 설치높이 (m) */
+  installHeight: number;
+  /** 지층이 비어 있다 — 실측값을 넣어야 완성된다 */
+  baseMissing: boolean;
+  /**
+   * 회사 양식의 `1층 | 기준층 | 최상층` 세 칸에 그대로 들어가는 모양인가.
+   * 3구간이고 첫 구간이 1층 하나, 마지막 구간이 최상층 하나일 때만 그렇다.
+   * 아니면 양식의 보조 칸은 비우고 합계 수식만 넣는다(값이 어긋나는 것보다 낫다).
+   */
+  simple: { first: number; typical: number; typicalCount: number; top: number } | null;
+  /** 엑셀 F열에 넣을 수식 — "8.75+3.05*3+2.88*21+3.08+3" */
+  expression: string;
+  /** 사람이 읽는 산식 — "8.75(지층)+3.05*3(1~3F)+..." */
+  describe: string;
+}
+
+/** 저장된 구간을 이 동의 층수에 맞게 정리한다 — 겹침·구멍 없이 1층부터 최상층까지 */
+export function resolveBands(
+  b: BuildingFrameProfile,
+  params: RentalParams,
+): ResolvedBand[] {
+  const above = Math.max(0, b.aboveFloors);
+  if (above <= 0) return [];
+  const d = params.hc.floorHeight;
+
+  const raw: HeightBand[] =
+    b.hoistHeightBands && b.hoistHeightBands.length > 0
+      ? b.hoistHeightBands
+      : // 기본형 — 1층 / 기준층 / 최상층
+        above >= 3
+        ? [
+            { upTo: 1, height: d.first },
+            { upTo: above - 1, height: d.typical },
+            { upTo: null, height: d.top },
+          ]
+        : above === 2
+          ? [
+              { upTo: 1, height: d.first },
+              { upTo: null, height: d.top },
+            ]
+          : [{ upTo: null, height: d.top }];
+
+  const out: ResolvedBand[] = [];
+  let from = 1;
+  raw.forEach((band, i) => {
+    if (from > above) return;
+    const isLast = i === raw.length - 1;
+    // 마지막 구간은 항상 최상층까지다. 중간 구간이 최상층을 넘으면 거기서 자른다.
+    const to = isLast ? above : Math.min(above, Math.max(from, band.upTo ?? above));
+    out.push({
+      from,
+      to,
+      count: to - from + 1,
+      height: band.height,
+      label: from === to ? `${to}F` : `${from}~${to}F`,
+    });
+    from = to + 1;
+  });
+  // 구간이 모자라 최상층까지 못 채웠으면 마지막 층고로 메운다
+  if (from <= above && out.length > 0) {
+    const last = out[out.length - 1];
+    last.to = above;
+    last.count = above - last.from + 1;
+    last.label = last.from === above ? `${above}F` : `${last.from}~${above}F`;
+  }
+  return out;
+}
+
+export function resolveHoistHeight(
+  b: BuildingFrameProfile,
+  params: RentalParams,
+): HoistHeight {
+  const bands = resolveBands(b, params);
+  const base = b.hoistBaseHeight ?? 0;
+  const extend = params.hc.extendHeight;
+  const total = base + bands.reduce((a, x) => a + x.height * x.count, 0) + extend;
+
+  const simple =
+    bands.length === 3 && bands[0].count === 1 && bands[2].count === 1
+      ? {
+          first: bands[0].height,
+          typical: bands[1].height,
+          typicalCount: bands[1].count,
+          top: bands[2].height,
+        }
+      : null;
+
+  const parts = bands.map((x) => (x.count === 1 ? `${x.height}` : `${x.height}*${x.count}`));
+  const described = bands.map(
+    (x) => `${x.height}${x.count === 1 ? "" : `*${x.count}`}(${x.label})`,
+  );
+
+  return {
+    base,
+    extend,
+    bands,
+    total: Math.round(total * 100) / 100,
+    installHeight: Math.ceil(total - 1e-9),
+    baseMissing: !(b.hoistBaseHeight && b.hoistBaseHeight > 0),
+    simple,
+    expression: [base > 0 ? String(base) : null, ...parts, String(extend)]
+      .filter(Boolean)
+      .join("+"),
+    describe: [base > 0 ? `${base}(지층)` : "(지층)", ...described, `${extend}(연장)`].join("+"),
+  };
 }
