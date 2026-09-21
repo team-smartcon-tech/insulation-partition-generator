@@ -121,8 +121,6 @@ export function SmartHeader({
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 shadow-[0_8px_24px_-16px_rgba(8,22,52,0.4)] backdrop-blur-xl">
-      {/* 배너를 뺀 화면이 밋밋해지지 않게, 머리 위에 얇은 파란 띠를 둔다. */}
-      <div className="h-1 w-full bg-[linear-gradient(90deg,#00224a_0%,#0a5aa8_38%,#1478d6_62%,#043a74_100%)]" />
       <div className="flex h-[68px] w-full items-center justify-between px-8">
         <div className="flex items-center gap-4">
           <WoomiLogo />
