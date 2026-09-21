@@ -536,3 +536,42 @@ export function applyPastedLines(taxonomy: Taxonomy, lines: PastedLine[]): Taxon
   }
   return result;
 }
+
+/**
+ * 같은 서류인데 다른 1차 분류에도 칸이 있는 곳 — **이름으로** 찾는다.
+ *
+ * 회사 코드표는 분류마다 따로 만들어져, 같은 서류라도 번호가 다르다(공무 104 품질환경방침 =
+ * 품질 103 품질환경방침). 그래서 번호로는 묶을 수 없다. 띄어쓰기·가운뎃점만 다른 것도 같은
+ * 서류로 본다(`개인업무분장표` = `개인 업무 분장표`).
+ *
+ * 배포 양식을 올릴 때 "여기도 같은 칸이 있는데 함께 배포할까요?"를 묻는 데 쓴다. 이름이 크게
+ * 다르면 못 찾지만, 엉뚱한 칸에 함께 배포하는 것보다 낫다.
+ */
+export function sameNameSlots(
+  taxonomies: Taxonomy[],
+  place: { taxonomyId: string; code: string },
+): { taxonomyId: string; division: string; code: string; name: string }[] {
+  const source = taxonomies.find((taxonomy) => taxonomy.id === place.taxonomyId);
+  const item = source && findItem(source, place.code);
+  if (!item) return [];
+
+  const key = (text: string) => text.replace(/[\s·/]+/g, "").toLowerCase();
+  const wanted = key(item.name);
+  const found: { taxonomyId: string; division: string; code: string; name: string }[] = [];
+  for (const taxonomy of taxonomies) {
+    if (taxonomy.id === place.taxonomyId) continue;
+    for (const group of taxonomy.groups) {
+      for (const entry of group.items) {
+        if (key(entry.name) === wanted) {
+          found.push({
+            taxonomyId: taxonomy.id,
+            division: taxonomy.division || "이름 없음",
+            code: entry.code,
+            name: entry.name,
+          });
+        }
+      }
+    }
+  }
+  return found;
+}

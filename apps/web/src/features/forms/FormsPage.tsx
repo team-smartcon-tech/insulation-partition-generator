@@ -136,6 +136,7 @@ import {
   removeGroup as removeGroupFromTaxonomy,
   removeItem,
   renumberGroup,
+  sameNameSlots,
   taxonomyIdOf,
   upsertTaxonomies,
   type PastedLine,
@@ -495,6 +496,11 @@ export default function FormsPage() {
     const failed: string[] = [];
     let placed = 0;
     let saveFailed = false;
+    /**
+     * 다른 1차 분류에도 같은 이름 칸이 있는 배포 양식 — 다 읽은 뒤 한 번만 묻고 함께 배포한다.
+     * 파일마다 물으면 서른 장을 올릴 때 서른 번 묻게 된다.
+     */
+    const alsoFor: { fileName: string; bytes: ArrayBuffer; sheets: FormSheet[]; targets: ReturnType<typeof sameNameSlots> }[] = [];
 
     for (const file of files) {
       // 여러 개를 올리면 한참 걸린다(큰 양식은 한 장에 몇 초). 어디까지 했는지 보여 준다.
@@ -531,6 +537,11 @@ export default function FormsPage() {
             error instanceof Error ? `${file.name}: 저장하지 못했습니다(${error.message})` : `${file.name}: 저장하지 못했습니다`,
           );
         }
+        // 회사 코드표는 분류마다 따로라 같은 서류가 여러 칸에 있다(번호는 다르다). 한 번 올려 함께 배포한다.
+        if (uploadKind === "template" && place) {
+          const targets = sameNameSlots(taxonomies, place);
+          if (targets.length > 0) alsoFor.push({ fileName: file.name, bytes, sheets, targets });
+        }
         opened.push({ id, fileName: file.name, sheets });
       } catch (error) {
         failed.push(
@@ -542,6 +553,43 @@ export default function FormsPage() {
     if (opened.length === 0) {
       setState({ status: "error", message: failed.join(" / ") || "엑셀을 읽지 못했습니다." });
       return;
+    }
+
+    // 같은 이름 칸에도 함께 배포할지 묻는다. 저장은 칸마다 따로 한다 — 나중에 한쪽만 새 판으로
+    // 바꾸거나 지울 수 있어야 하기 때문이다(칸이 파일 하나를 함께 쓰면 지우기·갈라지기가 꼬인다).
+    let alsoPlaced = 0;
+    if (alsoFor.length > 0) {
+      const lines = alsoFor.map(
+        (entry) => `· ${entry.fileName} → ${entry.targets.map((slot) => `${slot.division} ${slot.code} ${slot.name}`).join(", ")}`,
+      );
+      if (
+        window.confirm(
+          `다른 분류에도 같은 이름의 칸이 있습니다. 함께 배포할까요?\n\n${lines.join("\n")}\n\n` +
+            "칸마다 따로 저장되어, 나중에 한쪽만 새 판으로 바꾸거나 지울 수 있습니다.",
+        )
+      ) {
+        for (const entry of alsoFor) {
+          for (const slot of entry.targets) {
+            try {
+              await saveForm({
+                fileName: entry.fileName,
+                bytes: entry.bytes,
+                sheets: entry.sheets,
+                code: slot.code,
+                taxonomyId: slot.taxonomyId,
+                kind: "template",
+              });
+              alsoPlaced += 1;
+            } catch (error) {
+              failed.push(
+                error instanceof Error
+                  ? `${entry.fileName} → ${slot.division} ${slot.code}: 저장하지 못했습니다(${error.message})`
+                  : `${entry.fileName} → ${slot.division} ${slot.code}: 저장하지 못했습니다`,
+              );
+            }
+          }
+        }
+      }
     }
 
     const first = opened[0];
@@ -571,6 +619,7 @@ export default function FormsPage() {
           (opened.length - placed > 0 ? ` · 코드 없는 서류 ${opened.length - placed}개` : ""),
       );
     }
+    if (alsoPlaced > 0) notes.push(`다른 분류의 같은 칸에도 ${alsoPlaced}곳 함께 배포했습니다.`);
     if (failed.length > 0) notes.push(`⚠ ${failed.join(" / ")}`);
     if (saveFailed) notes.push("저장하지 못한 양식은 새로고침하면 사라집니다.");
     setStorageWarning(notes.length > 0 ? notes.join(" ") : null);
