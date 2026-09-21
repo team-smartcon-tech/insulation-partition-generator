@@ -370,11 +370,22 @@ export function isTemplateSheet(sheet: FormSheet): boolean {
  * 결재칸이 있는 시트마다 결재선·결재 기록을 요약한다(서명 그림은 뺀다 — 목록이 무거워진다).
  * 결재칸은 저장해 두지 않고 격자에서 다시 찾는다 — 양식을 다시 읽으면 결재칸도 새 격자를 따른다.
  */
-function approvalSheetsOf(form: StoredForm): ApprovalSheetSummary[] {
+export function approvalSheetsOf(form: StoredForm): ApprovalSheetSummary[] {
   if (form.kind !== "site") return [];
   const result: ApprovalSheetSummary[] = [];
   for (const sheet of withCustomSheets(form.sheets, form.customSheets)) {
     if (isTemplateSheet(sheet)) continue;
+    /**
+     * **작성 중인 장만** 센다(사용자 판단). 회사 양식에는 지난달 장이 그대로 들어 있어
+     * (`QA-4.2-2(25.09)`…), 결재칸이 있다고 다 세면 이미 종이로 끝난 과거 기록이 "결재선 미지정"에
+     * 쌓여 정작 처리할 것이 묻힌다. 앱에서 더한 장, 글자를 적은 장, 이미 결재선·결재가 있는 장만 본다.
+     */
+    const working =
+      sheet.custom === true ||
+      Object.keys(form.values[sheet.name] ?? {}).length > 0 ||
+      Object.keys(form.approvalLines[sheet.name] ?? {}).length > 0 ||
+      Object.keys(form.approvals[sheet.name] ?? {}).length > 0;
+    if (!working) continue;
     const slots = findApprovalBoxes(sheet).flatMap((box) =>
       box.slots.map((slot) => ({ label: slot.label, signKey: slot.signKey })),
     );
