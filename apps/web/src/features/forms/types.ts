@@ -204,4 +204,26 @@ export interface FormPageSetup {
   paperSize?: number;
   /** 여백(인치) — 엑셀이 주는 단위 그대로 담는다 */
   margins?: { top?: number; right?: number; bottom?: number; left?: number };
+  /**
+   * 엑셀 [페이지 설정]의 **확대/축소 배율**(%). `fitToPage` 가 켜져 있으면 엑셀은 이 값을 쓰지 않는다.
+   */
+  scale?: number;
+  /** "페이지에 맞추기"가 켜져 있나 — 켜져 있으면 아래 두 값이 몇 장에 맞출지를 정한다. */
+  fitToPage?: boolean;
+  /** 가로로 몇 장에 맞출까. `0` 이면 가로는 맞추지 않는다(기본 1). */
+  fitToWidth?: number;
+  /** 세로로 몇 장에 맞출까. `0` 이면 세로는 맞추지 않는다 — 길면 여러 장으로 나간다(기본 1). */
+  fitToHeight?: number;
+  /**
+   * 엑셀 머리글·바닥글. 엑셀 서식 문자열 그대로 담는다(`&R&"맑은 고딕,굵게"&9QA-4.3-4`).
+   * 현장 양식은 거의 모두 바닥글 오른쪽에 **서식 번호**가 들어 있어, 빠지면 종이가 달라 보인다.
+   */
+  header?: string;
+  footer?: string;
+  /** 종이 끝에서 머리글·바닥글까지 거리(인치). 엑셀 기본 0.3인치. */
+  headerMargin?: number;
+  footerMargin?: number;
+  /** [페이지 설정] → 페이지 가운데 맞춤(가로·세로). 켜져 있으면 종이 한가운데에 찍는다. */
+  horizontalCentered?: boolean;
+  verticalCentered?: boolean;
 }

@@ -25,20 +25,23 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 12;
+export const PARSER_VERSION = 13;
 
 /**
- * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭)에 해당하는 픽셀.
+ * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
  *
- * 흔히 쓰는 값 7 은 Calibri 11pt 기준이다. 국내 공문서 양식은 바탕·굴림 계열을
- * 쓰고 숫자가 더 넓어, 7 로 환산하면 실제보다 좁아져 글자가 원본보다 더 접힌다.
- * 좁아서 줄이 깨지는 쪽이 넓어서 여백이 남는 쪽보다 훨씬 눈에 띄므로 8 을 쓴다.
+ * 흔히 쓰는 값 7 은 Calibri 11pt 기준이다. 국내 양식의 기본 글꼴인 맑은 고딕 11pt 는 8 이다
+ * (실제 파일에서 확인: 저장된 너비 6.75 → 엑셀이 말하는 40.5pt = 54px = 6.75 × 8).
  */
 const COL_UNIT_PX = 8;
-/** 엑셀이 열에 항상 더하는 좌우 여백 */
-const COL_PADDING_PX = 5;
-/** 엑셀 기본 열 너비(문자 단위) */
-const DEFAULT_COL_WIDTH = 8.43;
+/**
+  * 열 너비가 적혀 있지 않은 시트에서 쓸 기본 너비(**파일에 적히는 단위** — 좌우 여백 포함).
+  *
+  * 엑셀 화면에 "8.38자"로 보이는 표준 너비가 파일에는 9 로 적힌다(여백 5px = 0.625자). 실제
+  * 파일에서 확인: `<cols>` 가 없는 시트의 열이 엑셀에서 72px = 9 × 8 이었다. 8.43 은 화면 단위의
+  * Calibri 기본값이라 여기에 그대로 쓰면 열마다 5px 씩 좁아진다.
+  */
+const DEFAULT_COL_WIDTH = 9;
 /** 엑셀 기본 행 높이(pt) */
 const DEFAULT_ROW_HEIGHT_PT = 15;
 /** pt → px (96dpi 기준) */
@@ -57,13 +60,26 @@ const BORDER_STYLES: Record<string, FormBorderStyle> = {
   double: "double",
 };
 
-function colWidthToPx(width: number | undefined): number {
-  const w = width ?? DEFAULT_COL_WIDTH;
-  return Math.round(w * COL_UNIT_PX + COL_PADDING_PX);
+/**
+ * 저장된 열 너비 → 픽셀. **엑셀의 셈법 그대로 쓴다.**
+ *
+ * 엑셀이 파일에 적는 너비에는 칸 좌우 여백이 **이미 들어 있다.** 여기에 여백 5px 를 한 번 더
+ * 더하고 있어서 열마다 5px 씩(약 9%) 넓었고, 그만큼 인쇄 배율이 달라져 엑셀로 뽑은 종이와
+ * 글자 위치가 어긋났다(아래로 갈수록 최대 7mm).
+ *
+ * `width` 가 없는 열은 그 시트의 기본 너비를 따른다(`defaultColWidth`).
+ */
+function colWidthToPx(width: number | undefined, defaultWidth: number | undefined): number {
+  const w = width ?? defaultWidth ?? DEFAULT_COL_WIDTH;
+  return Math.trunc(((256 * w + Math.trunc(128 / COL_UNIT_PX)) / 256) * COL_UNIT_PX);
 }
 
-function rowHeightToPx(heightPt: number | undefined): number {
-  return Math.round((heightPt ?? DEFAULT_ROW_HEIGHT_PT) * PT_TO_PX);
+/**
+ * 저장된 행 높이(pt) → 픽셀. 높이가 안 적힌 줄은 **그 시트의 기본 행 높이**를 따른다
+ * (`defaultRowHeight`). 엑셀 기본값 15pt 로 못 박으면 맑은 고딕 양식(13.5pt)에서 8% 씩 길어진다.
+ */
+function rowHeightToPx(heightPt: number | undefined, defaultPt: number | undefined): number {
+  return Math.round((heightPt ?? defaultPt ?? DEFAULT_ROW_HEIGHT_PT) * PT_TO_PX);
 }
 
 /** 셀 값은 문자열·숫자·날짜·서식글자·수식결과 등 여러 모양으로 온다. 화면에 쓸 문자열로 좁힌다. */
@@ -309,8 +325,8 @@ function readImages(
 ): FormImage[] {
   if (!workbook || typeof worksheet.getImages !== "function") return [];
 
-  const defaultCol = colWidthToPx(undefined);
-  const defaultRow = rowHeightToPx(undefined);
+  const defaultCol = colWidthToPx(undefined, worksheet.properties?.defaultColWidth);
+  const defaultRow = rowHeightToPx(undefined, worksheet.properties?.defaultRowHeight);
   const images: FormImage[] = [];
 
   for (const item of worksheet.getImages() ?? []) {
@@ -459,13 +475,16 @@ export function parseFormSheet(
     }
   }
 
+  // 시트마다 기본 너비·높이가 다르다(맑은 고딕 양식은 13.5pt, 엑셀 기본은 15pt).
+  const defaultColWidth: number | undefined = worksheet.properties?.defaultColWidth;
+  const defaultRowHeight: number | undefined = worksheet.properties?.defaultRowHeight;
   const colWidths: number[] = [];
   for (let col = 1; col <= maxCol; col++) {
-    colWidths.push(colWidthToPx(worksheet.getColumn(col).width));
+    colWidths.push(colWidthToPx(worksheet.getColumn(col).width, defaultColWidth));
   }
   const rowHeights: number[] = [];
   for (let row = 1; row <= maxRow; row++) {
-    rowHeights.push(rowHeightToPx(worksheet.getRow(row).height));
+    rowHeights.push(rowHeightToPx(worksheet.getRow(row).height, defaultRowHeight));
   }
 
   return {
@@ -490,6 +509,19 @@ export function parseFormSheet(
       orientation: worksheet.pageSetup?.orientation === "landscape" ? "landscape" : "portrait",
       paperSize: worksheet.pageSetup?.paperSize,
       margins: worksheet.pageSetup?.margins,
+      // 인쇄 배율 — 엑셀과 같은 장수로 뽑으려면 이 세 값이 필요하다(printSheet.ts 참고).
+      scale: worksheet.pageSetup?.scale,
+      fitToPage: worksheet.pageSetup?.fitToPage === true,
+      fitToWidth: worksheet.pageSetup?.fitToWidth,
+      fitToHeight: worksheet.pageSetup?.fitToHeight,
+      // 바닥글 — 현장 양식은 여기에 서식 번호(QA-4.3-4)가 들어 있다.
+      header: worksheet.headerFooter?.oddHeader,
+      footer: worksheet.headerFooter?.oddFooter,
+      headerMargin: worksheet.pageSetup?.margins?.header,
+      footerMargin: worksheet.pageSetup?.margins?.footer,
+      // 엑셀 [페이지 설정] → 페이지 가운데 맞춤. 켜져 있으면 종이 가운데에 찍힌다.
+      horizontalCentered: worksheet.pageSetup?.horizontalCentered === true,
+      verticalCentered: worksheet.pageSetup?.verticalCentered === true,
     },
     ...(sheetLocked ? { locked: true } : {}),
   };
@@ -550,7 +582,7 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
     const shapes = await parseWorkbookShapes(
       data,
       sizes,
-      { col: colWidthToPx(undefined), row: rowHeightToPx(undefined) },
+      { col: colWidthToPx(undefined, undefined), row: rowHeightToPx(undefined, undefined) },
       theme,
     );
     for (const sheet of sheets) {
