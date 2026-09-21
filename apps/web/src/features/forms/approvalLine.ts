@@ -158,6 +158,11 @@ export interface Approval {
   signature: string;
   /** 결재한 시각(ms) */
   approvedAt: number;
+  /**
+   * 결재할 때 그 시트의 내용 지문. 나중 내용과 견줘 **결재 뒤에 고쳤는지**를 안다.
+   * 이 칸이 없는 옛 결재는 "고쳤는지 모른다"로 두고 경고하지 않는다.
+   */
+  contentHash?: string;
 }
 
 /** 칸 하나의 결재 상태 */
@@ -258,6 +263,44 @@ export function pruneApprovals(
     kept[slot.signKey] = approval;
   }
   return { approvals: kept, removed };
+}
+
+/**
+ * 시트 하나의 내용 지문 — 적어 둔 글자(칸 → 값)를 순서 없이 한 줄로 만들어 짧게 줄인다.
+ *
+ * 무엇이 어떻게 바뀌었는지는 알 필요가 없다. "결재할 때와 지금이 같은가"만 보면 된다.
+ * 칸 순서가 달라도 같은 지문이 나오도록 키를 정렬한다.
+ */
+export function contentHash(cells: Record<string, string> | undefined): string {
+  const text = Object.entries(cells ?? {})
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\u0001");
+  // djb2 — 길이와 상관없이 짧게, 흔한 수정은 반드시 다른 값이 나오게.
+  let hash = 5381;
+  for (let i = 0; i < text.length; i += 1) hash = (((hash << 5) + hash) ^ text.charCodeAt(i)) >>> 0;
+  return `${text.length.toString(36)}-${hash.toString(36)}`;
+}
+
+/** 결재칸이 모두 결재되었나(= 결재 완료). 칸이 없으면 완료가 아니다. */
+export function isFullyApproved(
+  slots: LineSlot[],
+  approvals: Record<string, { approvedAt: number }>,
+): boolean {
+  return slots.length > 0 && slots.every((slot) => approvals[slot.signKey]);
+}
+
+/**
+ * 결재한 뒤 내용이 바뀌었나 — 마지막 결재의 지문과 지금 지문을 견준다.
+ * 지문이 없는 옛 결재는 모르니 경고하지 않는다(거짓 경고보다 낫다).
+ */
+export function changedAfterApproval(
+  approvals: Record<string, { approvedAt: number; contentHash?: string }>,
+  cells: Record<string, string> | undefined,
+): boolean {
+  const latest = Object.values(approvals).sort((a, b) => b.approvedAt - a.approvedAt)[0];
+  if (!latest?.contentHash) return false;
+  return latest.contentHash !== contentHash(cells);
 }
 
 /** 결재칸 날짜 자리에 넣을 글자: `09/17` */

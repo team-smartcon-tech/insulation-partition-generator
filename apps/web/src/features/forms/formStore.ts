@@ -17,7 +17,7 @@ import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
 import { planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
 import { findApprovalBoxes } from "./approval.ts";
-import type { Approval, Assignee } from "./approvalLine.ts";
+import { changedAfterApproval, type Approval, type Assignee } from "./approvalLine.ts";
 import type { ApprovalSheetSummary } from "./homeStats.ts";
 import type { FormSite } from "./sites.ts";
 import { LEGACY_TAXONOMY_ID, type Taxonomy } from "./taxonomy.ts";
@@ -407,7 +407,13 @@ export function approvalSheetsOf(form: StoredForm): ApprovalSheetSummary[] {
     const approvals = Object.fromEntries(
       Object.entries(form.approvals[sheet.name] ?? {}).map(([key, { signature: _signature, ...rest }]) => [key, rest]),
     );
-    result.push({ sheetName: sheet.name, slots, line: form.approvalLines[sheet.name] ?? {}, approvals });
+    result.push({
+      sheetName: sheet.name,
+      slots,
+      line: form.approvalLines[sheet.name] ?? {},
+      approvals,
+      changed: changedAfterApproval(form.approvals[sheet.name] ?? {}, form.values[sheet.name]),
+    });
   }
   return result;
 }

@@ -25,6 +25,8 @@ export interface ApprovalSheetSummary {
   slots: LineSlot[];
   line: Record<string, Assignee>;
   approvals: Record<string, ApprovalLite>;
+  /** 결재한 뒤 내용이 바뀌었나(목록에서 값을 다 싣지 않으려고 저장소에서 미리 판단한다) */
+  changed?: boolean;
 }
 
 /** 홈이 보는 서류 한 건 */
@@ -115,6 +117,8 @@ export interface ApprovalOverview {
   stalled: ApprovalItem[];
   /** 결재칸은 있는데 결재선을 하나도 안 정한 시트 */
   unassigned: { formId: string; title: string; siteId?: string; sheetName: string }[];
+  /** 결재한 뒤 내용이 바뀐 시트 — 결재를 다시 받아야 한다 */
+  changed: ApprovalItem[];
   /** 내가 어느 결재선에라도 들어 있나(서명 미등록 알림에 쓴다) */
   inAnyLine: boolean;
 }
@@ -128,6 +132,7 @@ export function approvalOverview(docs: HomeDoc[], user: HomeUser, now: number, s
     waitingByPerson: [],
     stalled: [],
     unassigned: [],
+    changed: [],
     inAnyLine: false,
   };
   const waiting = new Map<string, { name: string; position: string; count: number }>();
@@ -142,6 +147,7 @@ export function approvalOverview(docs: HomeDoc[], user: HomeUser, now: number, s
         continue;
       }
       const item = itemOf(doc, sheet);
+      if (sheet.changed) result.changed.push(item);
       const complete = sheet.slots.every((slot) => sheet.approvals[slot.signKey]);
       const mine = Object.values(sheet.line).some((person) => isSamePerson(person, user.name));
       if (mine) result.inAnyLine = true;
@@ -172,6 +178,7 @@ export function approvalOverview(docs: HomeDoc[], user: HomeUser, now: number, s
   result.myTurn.sort(bySince);
   result.requested.sort(bySince);
   result.stalled.sort(bySince);
+  result.changed.sort((a, b) => (b.lastApprovedAt ?? 0) - (a.lastApprovedAt ?? 0));
   result.completed.sort((a, b) => (b.lastApprovedAt ?? 0) - (a.lastApprovedAt ?? 0));
   result.waitingByPerson = [...waiting.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ko"));
   return result;

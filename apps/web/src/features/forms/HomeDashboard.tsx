@@ -11,7 +11,7 @@
  * 모든 현장 보기에서는 {@link SitesAudit}(현장별 점검표)가 대신 뜬다 — 오프라인 서류 점검용.
  */
 import { useEffect, useState } from "react";
-import { AlarmClock, ArrowRight, Check, FilePlus2, PenLine, Sparkles, UserX } from "lucide-react";
+import { AlarmClock, ArrowRight, Check, FilePlus2, PenLine, Sparkles, TriangleAlert, UserX } from "lucide-react";
 import {
   daysSince,
   percent,
@@ -390,6 +390,18 @@ export default function HomeDashboard({
                 key: `${entry.formId}|${entry.sheetName}`,
                 label: `${entry.title} · ${entry.sheetName}`,
                 onClick: () => onOpenDoc(entry.formId, entry.sheetName),
+              }))}
+            />
+            <AlertRow
+              icon={<TriangleAlert size={15} />}
+              tone="amber"
+              title="결재 뒤 수정됨"
+              text="결재한 뒤 내용이 바뀐 서류"
+              count={overview.changed.length}
+              items={overview.changed.map((item) => ({
+                key: `${item.formId}|${item.sheetName}`,
+                label: `${item.title} · ${item.sheetName}`,
+                onClick: () => onOpenDoc(item.formId, item.sheetName),
               }))}
             />
             <AlertRow

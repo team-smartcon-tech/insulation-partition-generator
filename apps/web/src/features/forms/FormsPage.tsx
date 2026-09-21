@@ -59,6 +59,9 @@ import {
   approvalDateText,
   assigneeCaption,
   cancellableIndex,
+  changedAfterApproval,
+  contentHash,
+  isFullyApproved,
   initialLine,
   lineRecord,
   pruneApprovals,
@@ -983,9 +986,19 @@ export default function FormsPage() {
         userId: user.id,
         signature,
         approvedAt: Date.now(),
+        // 결재한 순간의 내용을 지문으로 남긴다 — 나중에 고치면 "결재 뒤 수정됨"으로 알린다.
+        contentHash: contentHash(baseSheet ? values[baseSheet.name] : undefined),
       },
     });
     if (ok) setStorageWarning(null);
+  }
+
+  /** 결재 뒤 내용이 바뀌었을 때 — 이 시트의 결재를 모두 지우고 처음부터 다시 받는다. */
+  async function handleResetApprovals() {
+    if (!baseSheet) return;
+    if (!window.confirm("이 장의 결재를 모두 지우고 처음부터 다시 받습니다. 서명과 날짜가 지워집니다. 계속할까요?")) return;
+    const ok = await saveApprovals({});
+    if (ok) setStorageWarning("결재를 지웠습니다. 작성부터 다시 결재해 주세요.");
   }
 
   async function handleCancelApproval(index: number) {
@@ -1448,7 +1461,6 @@ export default function FormsPage() {
         (state.id === "" ? state.kind === "site" : siteForms.some((form) => form.id === state.id)));
   /** 배포 원본을 보고 있나 — 그러면 아무것도 고칠 수 없다. */
   const readOnly = state.status === "ready" && state.kind === "template";
-  const canEdit = editable && !readOnly;
   const openedSummary = state.status === "ready" ? forms.find((form) => form.id === state.id) : undefined;
   /** 현장 서류함의 서류는 여기서 시작한다 — 배포 양식함으로 가서 고르고 [작성하기]. */
   const importButton = (
@@ -1500,6 +1512,12 @@ export default function FormsPage() {
   const readyIndex = states.findIndex((item) => item.status === "ready");
   const waitingState = states.find((item) => item.status === "waiting");
   const cancelIndex = cancellableIndex(lineSlots, sheetApprovals, user?.id);
+  /** 이 시트의 결재가 모두 끝났나 — 끝나면 내용을 잠근다. */
+  const approvalDone = isFullyApproved(lineSlots, sheetApprovals);
+  /** 결재한 뒤 내용이 바뀌었나 */
+  const changedSinceApproval = changedAfterApproval(sheetApprovals, baseSheet ? values[baseSheet.name] : undefined);
+  // 결재가 끝난 장은 잠근다 — 결재 뒤에 내용이 바뀌면 그 결재가 무엇에 대한 것인지 알 수 없다.
+  const canEdit = editable && !readOnly && !approvalDone;
   const approvedCount = states.filter((item) => item.status === "done").length;
   // 점선은 아직 서명이 없는 자리에만 — 결재한 칸은 도장처럼 깔끔하게 보이게.
   const pendingSignKeys = useMemo(
@@ -1802,6 +1820,40 @@ export default function FormsPage() {
 
         {state.status === "ready" && sheet && openFormInSite && (
           <section id="form-viewer" className="scroll-mt-32 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            {/* 결재가 끝난 장 — 잠겼다는 것과 푸는 방법을 맨 위에 알린다. */}
+            {!readOnly && approvalDone && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-200">
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700">
+                  <Lock size={14} /> 결재 완료 · 잠김
+                </span>
+                <span className="text-xs text-emerald-800">
+                  이 장은 결재가 끝나 고칠 수 없습니다.
+                  {cancelIndex >= 0
+                    ? " 고치려면 오른쪽 위 [결재 취소]를 누르세요."
+                    : " 고치려면 마지막에 결재한 사람이 결재를 취소해야 합니다."}
+                </span>
+              </div>
+            )}
+
+            {/* 결재한 뒤에 내용이 바뀐 장 */}
+            {!readOnly && changedSinceApproval && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-200">
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-800">
+                  <TriangleAlert size={14} /> 결재 뒤 수정됨
+                </span>
+                <span className="text-xs text-amber-800">
+                  결재한 뒤에 내용이 바뀌었습니다. 지금 서명은 바뀐 내용에 대한 것이 아닙니다.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleResetApprovals()}
+                  className="ml-auto rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 ring-1 ring-amber-300 hover:bg-amber-100"
+                >
+                  결재 지우고 다시 받기
+                </button>
+              </div>
+            )}
+
             {/* 배포 원본 — 고칠 수 없다는 것과, 작성은 어디서 하는지를 맨 위에 알린다. */}
             {readOnly && (
               <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
@@ -2058,7 +2110,7 @@ export default function FormsPage() {
               </button>
               )}
 
-              {sheet.custom && !readOnly && (
+              {sheet.custom && !readOnly && !approvalDone && (
                 <>
                   <button
                     type="button"
@@ -2206,6 +2258,7 @@ export default function FormsPage() {
                 <span className="text-slate-400">전체 {totalEdited}개</span>
               )}
               {canEdit && <span>칸을 눌러 바로 고칠 수 있습니다.</span>}
+              {!readOnly && approvalDone && <span className="text-emerald-700">결재 완료 · 잠김</span>}
             </div>
 
             {looksDrawn && (
