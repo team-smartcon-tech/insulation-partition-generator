@@ -402,6 +402,7 @@ export default function TcRentalPage() {
         hoistPostFrameMonths?: number | null;
         hoistBaseHeight?: number | null;
         hoistHeightBands?: HeightBand[] | null;
+        hoistOperation?: string | null;
       },
     ) => {
       update((p) => ({

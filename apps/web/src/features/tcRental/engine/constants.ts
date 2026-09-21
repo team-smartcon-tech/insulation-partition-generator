@@ -74,6 +74,8 @@ export const DEFAULT_PARAMS: RentalParams = {
     // 지층은 동마다 기초 레벨이 달라 기본값이 있을 수 없어 여기 두지 않는다(동별 실측).
     floorHeight: { first: 3.08, typical: 2.88, top: 3.08 },
     extendHeight: 3.0,
+    // 회사 입찰기준 개선(안, 23.8.7) — 20층 이하 저속싱글 / 21층 이상 중속싱글
+    lowSpeedMaxFloors: 20,
   },
   winter: { from: "12-01", to: "02-28" },
   idleWarnDays: 30,

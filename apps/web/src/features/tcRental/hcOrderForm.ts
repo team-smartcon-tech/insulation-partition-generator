@@ -25,7 +25,7 @@
 import type ExcelJS from "exceljs";
 import type { BuildingFrameProfile, RentalSpan, TcRentalPlan } from "./types";
 import { parseYmd } from "./engine/dates";
-import { resolveHoistHeight } from "./engine/profile";
+import { resolveHoistHeight, resolveOperation } from "./engine/profile";
 
 const TEMPLATE_URL = "/templates/hc-order-template.xlsx";
 
@@ -53,9 +53,6 @@ const HEIGHT_FIRST_ROW = 4; // 설치높이 산정
 const TERM_MONTH_FIRST_COL = 4;
 const TERM_MONTH_LAST_COL = 24;
 
-/** 운용 형태 — 양식의 적용계수 표(V11:W14)에 있는 이름이라야 VLOOKUP 이 걸린다 */
-const DEFAULT_OPERATION = "중속싱글";
-
 export interface HcOrderInput {
   plan: TcRentalPlan;
   spans: RentalSpan[];
@@ -68,6 +65,8 @@ interface HcLine {
   months: string[];
   /** 동별 층고에서 나온 설치높이 — 화면(② 호기 배정)과 같은 계산을 쓴다 */
   height: ReturnType<typeof resolveHoistHeight>;
+  /** 운용 형태 — 층수로 갈린다(20층 이하 저속싱글 / 21층 이상 중속싱글) */
+  operation: string;
 }
 
 /** 시작 달부터 count 개월 (YYYY-MM) */
@@ -265,7 +264,7 @@ function fillPlacement(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[
     ws.getCell(`I${r}`).value = ln.building.name;
     ws.getCell(`J${r}`).value = null; // 코어(라인)는 현장 기입
     ws.getCell(`K${r}`).value = ln.building.aboveFloors;
-    ws.getCell(`L${r}`).value = `${DEFAULT_OPERATION}
+    ws.getCell(`L${r}`).value = `${ln.operation}
 인버터방식`;
     ws.getCell(`M${r}`).value = 1;
   });
@@ -370,13 +369,258 @@ function fillCover(wb: ExcelJS.Workbook, plan: TcRentalPlan, today: string) {
   ws.getCell("A21").value = plan.siteName;
 }
 
-function fillBoq(wb: ExcelJS.Workbook, plan: TcRentalPlan) {
+/** 규격 표기 순서 — 양식·입찰기준 표와 같은 순서 */
+const SPEC_ORDER = ["저속싱글", "중속싱글", "고속트윈"];
+
+/** 이 현장에 실제로 쓰이는 규격 (표기 순서대로) */
+function specsOf(lines: HcLine[]): string[] {
+  const used = new Set(lines.map((l) => l.operation));
+  return [
+    ...SPEC_ORDER.filter((s) => used.has(s)),
+    ...[...used].filter((s) => !SPEC_ORDER.includes(s)),
+  ];
+}
+
+/** 규격별 합계 줄이 실제로 놓인 행 — 내역서가 이 행을 참조한다 */
+interface TotalRows {
+  /** 규격 → 그 규격의 합계 행 */
+  spec: Map<string, number>;
+  /** 총합계 행 */
+  grand: number;
+}
+
+/**
+ * 합계 블록을 규격 수만큼 늘린다.
+ *
+ * 양식은 `규격 한 줄 + 총합계 한 줄` 로 되어 있고 그 아래가 빈 줄이다. 규격이 둘이면
+ * 빈 줄을 총합계 자리로 쓰고 규격 줄을 하나 더 만든다 — **행을 새로 끼워 넣지 않는다.**
+ * 행을 밀면 위쪽 SUMIF 범위가 따라오지 않아 합계가 제 자신을 포함하게 된다.
+ */
+function layoutTotals(
+  ws: ExcelJS.Worksheet,
+  specFirstRow: number,
+  specs: string[],
+  /** 서식을 입힐 칸 전체 */
+  cols: string[],
+  /** 합계를 넣을 칸 — 양식이 쓰는 열만. 운용형태 같은 글자 칸에 SUM 을 넣으면 안 된다 */
+  sumCols: string[],
+  sumifFor: (row: number, col: string) => string,
+  sumFor: (col: string) => string,
+): TotalRows {
+  const specStyle = cols.map((c) => ({ ...ws.getCell(`${c}${specFirstRow}`).style }));
+  const grandStyle = cols.map((c) => ({ ...ws.getCell(`${c}${specFirstRow + 1}`).style }));
+  const labelStyle = { ...ws.getCell(`A${specFirstRow}`).style };
+
+  const grandRow = specFirstRow + specs.length;
+  unmergeRegion(ws, specFirstRow, grandRow, 1, 16);
+  for (let r = specFirstRow; r <= grandRow; r += 1) {
+    const isGrand = r === grandRow;
+    const model = isGrand ? grandStyle : specStyle;
+    cols.forEach((c, i) => {
+      ws.getCell(`${c}${r}`).style = { ...model[i] };
+    });
+    for (const c of ["A", "B"]) ws.getCell(`${c}${r}`).style = { ...labelStyle };
+    ws.getCell(`A${r}`).value = r === specFirstRow ? "합        계" : null;
+    ws.getCell(`C${r}`).value = isGrand ? "합      계" : specs[r - specFirstRow];
+    for (const c of cols) {
+      if (["A", "B", "C"].includes(c)) continue;
+      ws.getCell(`${c}${r}`).value = sumCols.includes(c)
+        ? { formula: isGrand ? sumFor(c) : sumifFor(r, c) }
+        : null;
+    }
+    ws.mergeCells(`C${r}:F${r}`);
+  }
+  ws.mergeCells(`A${specFirstRow}:B${grandRow}`);
+
+  return {
+    spec: new Map(specs.map((s, i) => [s, specFirstRow + i])),
+    grand: grandRow,
+  };
+}
+
+/** 내역서 한 줄 — 명칭·규격·단위와 수량이 어느 칸에서 오는지 */
+interface BoqLine {
+  name: string;
+  spec: string | null;
+  unit: string;
+  /** 수량 수식. `prev` 는 바로 윗줄과 같다는 뜻(양식의 `=D12` 자리) */
+  qty: string | "prev";
+}
+
+/**
+ * 내역서 — 규격마다 `임대료 7줄 + 공사비 6줄` 한 세트를 만든다.
+ *
+ * 저속싱글과 중속싱글은 임대료 단가가 다르므로 한 줄에 묶을 수 없다. 양식에는 한 세트뿐이라
+ * 규격 수만큼 행을 끼워 넣고, 소계·합계 범위를 다시 쓴다.
+ * (수량은 전부 임대기간산출의 **규격별 합계 행**을 가리킨다 — 숫자를 여기 박지 않는다.)
+ */
+function fillBoq(
+  wb: ExcelJS.Workbook,
+  plan: TcRentalPlan,
+  lines: HcLine[],
+  rent: TotalRows,
+  etc: TotalRows,
+) {
   const ws = wb.getWorksheet("내역서");
   if (!ws) return;
-  // 수량(D열)은 산출 시트를 물고 있는 수식이라 건드리지 않는다 — 숫자로 덮으면 두 문서가 어긋난다
   ws.getCell("A1").value = `[${plan.siteName}] 건설용 리프트 임대, 설치, 해체 내역서`;
   ws.getCell("A5").value = `■ ${plan.siteName}`;
+
+  const specs = specsOf(lines);
+  const BLOCK_FIRST = 7;
+  const BLOCK_ROWS = 15; // 임대료 헤더 1 + 7줄 + 공사비 헤더 1 + 6줄
+  const SUBTOTAL_ROW = 22;
+  const COLS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N"];
+
+  // 본보기 서식을 먼저 떠 둔다 — 행을 끼워 넣으면 아래가 밀린다
+  const model: Array<Array<Record<string, unknown>>> = [];
+  for (let k = 0; k < BLOCK_ROWS; k += 1) {
+    model.push(COLS.map((c) => ({ ...ws.getCell(`${c}${BLOCK_FIRST + k}`).style })));
+  }
+
+  const extra = (specs.length - 1) * BLOCK_ROWS;
+  if (extra > 0) {
+    ws.spliceRows(SUBTOTAL_ROW, 0, ...Array.from({ length: extra }, () => []));
+  }
+
+  const rentLines = (spec: string, specRow: number, etcRow: number): BoqLine[] => [
+    {
+      name: `건설용 리프트 임대료(${short(spec)})`,
+      // 속도 표기는 규격마다 다른데 입찰기준(안)에 저속 속도가 없다 — 중속만 적고 나머지는 비운다
+      spec: spec === "중속싱글" ? "70m/min 이상" : null,
+      unit: "월",
+      qty: `'(건설용리프트)임대기간산출'!M${specRow}`,
+    },
+    {
+      name: "무인운행장치 임대료",
+      spec: "세대호출기 포함",
+      unit: "월",
+      qty: `'(건설용리프트)임대기간산출'!I${etcRow}`,
+    },
+    {
+      name: "안전문 임대료",
+      spec: "안전난간포함",
+      unit: "개",
+      qty: `'(건설용리프트)임대기간산출'!J${etcRow}`,
+    },
+    {
+      name: "세대출입용 경사로발판",
+      spec: "분합문 보호덮개 포함(2회 설치)",
+      unit: "개",
+      qty: `'(건설용리프트)임대기간산출'!K${etcRow}`,
+    },
+    {
+      name: "층표시판",
+      spec: "양면형",
+      unit: "개",
+      qty: `'(건설용리프트)임대기간산출'!L${etcRow}`,
+    },
+    { name: "자동개폐장치", spec: "비접촉형(기계식 일체형)", unit: "개", qty: "prev" },
+    {
+      name: "건설용 리프트 방호선반",
+      spec: null,
+      unit: "SET",
+      qty: `'(건설용리프트)임대기간산출'!P${etcRow}`,
+    },
+  ];
+
+  const workLines = (spec: string, etcRow: number): BoqLine[] => [
+    {
+      name: `설치비(${short(spec)})`,
+      spec: null,
+      unit: "M",
+      qty: `'(건설용리프트)임대기간산출'!M${etcRow}`,
+    },
+    {
+      name: `해체비(${short(spec)})`,
+      spec: null,
+      unit: "M",
+      qty: `'(건설용리프트)임대기간산출'!M${etcRow}`,
+    },
+    {
+      name: "운반비",
+      spec: "소운반포함",
+      unit: "대",
+      qty: `'(건설용리프트)임대기간산출'!N${etcRow}`,
+    },
+    {
+      name: "무인운행 설,해체비",
+      spec: "세대호출기 포함",
+      unit: "대",
+      qty: `'(건설용리프트)임대기간산출'!O${etcRow}`,
+    },
+    {
+      name: "장비비",
+      spec: "지게차",
+      unit: "대",
+      qty: `'(건설용리프트)임대기간산출'!P${etcRow}`,
+    },
+    { name: "비상통화장치", spec: null, unit: "대", qty: "prev" },
+  ];
+
+  specs.forEach((spec, si) => {
+    const base = BLOCK_FIRST + si * BLOCK_ROWS;
+    const specRow = rent.spec.get(spec) ?? rent.grand;
+    const etcRow = etc.spec.get(spec) ?? etc.grand;
+
+    for (let k = 0; k < BLOCK_ROWS; k += 1) {
+      const r = base + k;
+      COLS.forEach((c, i) => {
+        ws.getCell(`${c}${r}`).style = { ...model[k][i] };
+        ws.getCell(`${c}${r}`).value = null;
+      });
+    }
+
+    const write = (r: number, ln: BoqLine, prevRow: number | null) => {
+      ws.getCell(`A${r}`).value = ln.name;
+      fitColumn(ws, "A", ln.name);
+      ws.getCell(`B${r}`).value = ln.spec;
+      ws.getCell(`C${r}`).value = ln.unit;
+      ws.getCell(`D${r}`).value =
+        ln.qty === "prev"
+          ? prevRow
+            ? { formula: `D${prevRow}` }
+            : null
+          : { formula: ln.qty };
+      ws.getCell(`F${r}`).value = { formula: `TRUNC($D${r}*E${r})` };
+      ws.getCell(`H${r}`).value = { formula: `TRUNC($D${r}*G${r})` };
+      ws.getCell(`J${r}`).value = { formula: `TRUNC($D${r}*I${r})` };
+      ws.getCell(`K${r}`).value = { formula: `E${r}+G${r}+I${r}` };
+      ws.getCell(`L${r}`).value = { formula: `K${r}*D${r}` };
+    };
+
+    // 임대료
+    ws.getCell(`A${base}`).value = `${spec}<임대료>`;
+    ws.getCell(`K${base}`).value = { formula: `E${base}+G${base}+I${base}` };
+    ws.getCell(`L${base}`).value = { formula: `K${base}*D${base}` };
+    if (si === 0) ws.getCell(`N${base}`).value = "인버터방식, 케이지 부착형 내민발판";
+    rentLines(spec, specRow, etcRow).forEach((ln, k) =>
+      write(base + 1 + k, ln, k === 0 ? null : base + k),
+    );
+
+    // 공사비
+    const work = base + 8;
+    ws.getCell(`A${work}`).value = `${spec}<공사비>`;
+    ws.getCell(`K${work}`).value = { formula: `E${work}+G${work}+I${work}` };
+    ws.getCell(`L${work}`).value = { formula: `K${work}*D${work}` };
+    workLines(spec, etcRow).forEach((ln, k) => write(work + 1 + k, ln, k === 0 ? null : work + k));
+  });
+
+  // 소계·합계 — 블록이 늘어난 만큼 범위를 다시 쓴다
+  const lastRow = BLOCK_FIRST + specs.length * BLOCK_ROWS - 1;
+  const sub = lastRow + 1;
+  const grand = sub + 1;
+  for (const c of ["F", "H", "J", "L"]) {
+    ws.getCell(`${c}${sub}`).value = { formula: `SUM(${c}6:${c}${lastRow})` };
+    ws.getCell(`${c}${grand}`).value = { formula: `${c}${sub}` };
+  }
 }
+
+/** "중속싱글" → "중속" (내역서 항목명 표기) */
+function short(spec: string): string {
+  return spec.replace(/싱글|트윈/g, "");
+}
+
 
 /**
  * (건설용리프트)임대기간산출 — 이 문서의 원천.
@@ -385,7 +629,12 @@ function fillBoq(wb: ExcelJS.Workbook, plan: TcRentalPlan) {
  *    옆 칸에 임대기간 시트의 월 합계(**현장**)를 나란히 놓아 차이를 보여준다.
  * 2. 기타장비(25~32행): 대수·EA 는 운용 형태 계수(V11:W14)와 층수에서 따라 나온다.
  */
-function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[], today: string) {
+function fillCalc(
+  ws: ExcelJS.Worksheet,
+  plan: TcRentalPlan,
+  lines: HcLine[],
+  today: string,
+): { rent: TotalRows; etc: TotalRows } {
   const d = parseYmd(today);
   if (d) {
     ws.getCell("A2").value = `(${d.getUTCFullYear()}.${String(d.getUTCMonth() + 1).padStart(2, "0")})`;
@@ -417,7 +666,7 @@ function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[], to
     ws.getCell(`G${r}`).value = { formula: `+D${r}*$E$6+E${r}*$G$6+$I$6*F${r}` };
     ws.getCell(`H${r}`).value = { formula: `G${r}/365*12` };
     ws.getCell(`I${r}`).value = { formula: `+MAX($H${r}:$H${r})+4` };
-    ws.getCell(`J${r}`).value = DEFAULT_OPERATION;
+    ws.getCell(`J${r}`).value = ln.operation;
     ws.getCell(`K${r}`).value = 1;
     ws.getCell(`L${r}`).value = { formula: `+ROUNDUP(I${r}*K${r},0)` };
     ws.getCell(`M${r}`).value = { formula: `임대기간!Y${TERM_FIRST_ROW + i}` };
@@ -430,7 +679,7 @@ function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[], to
     ws.getCell(`D${e}`).value = { formula: `+C${e}-5` };
     ws.getCell(`E${e}`).value = 1;
     ws.getCell(`F${e}`).value = Math.max(0, b.phFloors);
-    ws.getCell(`G${e}`).value = DEFAULT_OPERATION;
+    ws.getCell(`G${e}`).value = ln.operation;
     ws.getCell(`H${e}`).value = { formula: `M${r}` };
     ws.getCell(`I${e}`).value = { formula: `VLOOKUP($G${e},$V$11:$W$14,2,0)*H${e}` };
     ws.getCell(`J${e}`).value = { formula: `VLOOKUP($G${e},$V$11:$W$14,2,0)*(C${e})` };
@@ -448,6 +697,38 @@ function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[], to
   }
   mergeByBuilding(ws, "A", CALC_FIRST_ROW, lines);
   mergeByBuilding(ws, "A", ETC_FIRST_ROW, lines);
+
+  // 규격별 합계 — 저속싱글과 중속싱글은 단가가 달라 한 줄로 묶을 수 없다
+  let specs = specsOf(lines);
+  if (specs.length > 2) {
+    // 양식의 빈 줄이 하나뿐이라 규격 셋은 못 담는다
+    overflow.push(`규격 ${specs.length - 2}종이 합계에서 빠졌습니다 — 따로 발주해야 합니다`);
+    specs = specs.slice(0, 2);
+  }
+  const rent = layoutTotals(
+    ws,
+    CALC_FIRST_ROW + MAX_ROWS, // 19행
+    specs,
+    ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"],
+    // 공기(G) · 임대기간(I) · 설치라인(K) · 견적(L) · 현장(M) · 차이(N)
+    ["G", "I", "K", "L", "M", "N"],
+    (row, col) =>
+      `SUMIF($J$${CALC_FIRST_ROW}:$J$${CALC_FIRST_ROW + MAX_ROWS - 1},$C${row},$${col}$${CALC_FIRST_ROW}:$${col}$${CALC_FIRST_ROW + MAX_ROWS - 1})`,
+    (col) => `SUM(${col}${CALC_FIRST_ROW}:${col}${CALC_FIRST_ROW + MAX_ROWS - 1})`,
+  );
+  const etc = layoutTotals(
+    ws,
+    ETC_FIRST_ROW + MAX_ROWS, // 33행
+    specs,
+    ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"],
+    // 임대기간(H) · 무인운행(I) · 안전문(J) · 발판(K) · 층표시판(L) · 설치해체(M)
+    // · 운반비(N) · 무인운행 설해체(O) · 장비비(P)
+    ["H", "I", "J", "K", "L", "M", "N", "O", "P"],
+    (row, col) =>
+      `SUMIF($G$${ETC_FIRST_ROW}:$G$${ETC_FIRST_ROW + MAX_ROWS - 1},$C${row},$${col}$${ETC_FIRST_ROW}:$${col}$${ETC_FIRST_ROW + MAX_ROWS - 1})`,
+    (col) => `SUM(${col}${ETC_FIRST_ROW}:${col}${ETC_FIRST_ROW + MAX_ROWS - 1})`,
+  );
+  return { rent, etc };
 }
 
 /** 임대기간 — 월별 투입 그리드. 칠한 칸 수가 곧 "현장" 임대개월이 된다 */
@@ -589,6 +870,7 @@ export async function generateHcOrderForm({ plan, spans }: HcOrderInput): Promis
         building: b,
         months: monthsFrom(s.mobilizeStart, Math.max(1, s.rentalMonths)),
         height: resolveHoistHeight(b, plan.params),
+        operation: resolveOperation(b, plan.params),
       });
     }
   }
@@ -624,12 +906,14 @@ export async function generateHcOrderForm({ plan, spans }: HcOrderInput): Promis
   const elev = wb.getWorksheet("입면도");
   if (elev) fillElevation(elev, used);
   const calc = wb.getWorksheet("(건설용리프트)임대기간산출");
-  if (calc) fillCalc(calc, plan, used, today);
+  const totals = calc
+    ? fillCalc(calc, plan, used, today)
+    : { rent: { spec: new Map<string, number>(), grand: 20 }, etc: { spec: new Map<string, number>(), grand: 34 } };
   const term = wb.getWorksheet("임대기간");
   if (term) fillTerm(term, plan, used);
   const height = wb.getWorksheet("설치높이 산정");
   if (height) fillHeight(height, plan, used);
-  fillBoq(wb, plan);
+  fillBoq(wb, plan, used, totals.rent, totals.etc);
 
   pruneMedia(wb);
 
