@@ -178,6 +178,7 @@ export function maxShapeId(drawingXml: string): number {
 
 export const REL_DRAWING = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
 export const REL_IMAGE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+export const REL_WORKSHEET = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
 export const DRAWING_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.drawing+xml";
 
 /** `data:image/png;base64,...` → 바이트 */

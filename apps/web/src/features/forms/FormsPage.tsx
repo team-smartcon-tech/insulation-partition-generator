@@ -1071,7 +1071,7 @@ export default function FormsPage() {
           }
         }
       }
-      const { bytes, skippedSheets } = await buildFilledWorkbook(form.bytes, exportValues, stamps);
+      const { bytes, skippedSheets } = await buildFilledWorkbook(form.bytes, exportValues, stamps, form.customSheets);
       downloadBytes(bytes, filledFileName(form.fileName));
       setStorageWarning(
         skippedSheets.length > 0

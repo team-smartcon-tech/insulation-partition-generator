@@ -72,3 +72,22 @@ test('칸도 줄도 없던 자리에는 새로 만들어 넣는다', () => {
   // 빈 글자는 칸을 비운다(서식은 남긴다).
   assert.match(patchSheetXml(xml, { '1:1': '' }), /<c r="A1" s="3"\/>/);
 });
+
+test('빈 칸에 글자를 써도 뒤따르는 칸이 지워지지 않는다', () => {
+  // `<c r="A1" s="44"/>` 처럼 닫힌 칸에 쓸 때, 뒤 칸들까지 한 덩어리로 잡아 지우던 문제(제목이 사라졌다).
+  const row = '<row r="1" spans="1:18"><c r="A1" s="44"/><c r="B1" s="44"/><c r="C1" s="44"/><c r="D1" s="45" t="s"><v>9</v></c><c r="E1" s="46"/></row>';
+  const xml = `<worksheet><sheetData>${row}</sheetData></worksheet>`;
+
+  const written = patchSheetXml(xml, { '1:1': 'X' });
+  assert.match(written, /<c r="A1" s="44" t="inlineStr"><is><t xml:space="preserve">X<\/t><\/is><\/c>/);
+  for (const piece of ['<c r="B1" s="44"/>', '<c r="C1" s="44"/>', '<c r="E1" s="46"/>']) {
+    assert.ok(written.includes(piece), `${piece} 가 남아야 한다`);
+  }
+  assert.match(written, /<c r="D1" s="45" t="s"><v>9<\/v><\/c>/, '제목 칸(D1)은 그대로');
+
+  // 닫힌 줄(<row .../>)이 사이에 있어도 그 줄만 바뀐다
+  const rows = '<row r="1" spans="1:3"/><row r="2" spans="1:3"><c r="A2" s="7" t="s"><v>1</v></c></row>';
+  const patched = patchSheetXml(`<worksheet><sheetData>${rows}</sheetData></worksheet>`, { '1:1': 'Y' });
+  assert.match(patched, /<row r="2" spans="1:3"><c r="A2" s="7" t="s"><v>1<\/v><\/c><\/row>/, '다음 줄은 그대로');
+  assert.match(patched, /<row r="1" spans="1:3"><c r="A1" t="inlineStr"><is><t xml:space="preserve">Y<\/t><\/is><\/c><\/row>/);
+});

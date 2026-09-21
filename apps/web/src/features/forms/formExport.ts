@@ -16,6 +16,7 @@ import {
   EMPTY_RELS,
   REL_DRAWING,
   REL_IMAGE,
+  REL_WORKSHEET,
   addRelationship,
   insertDrawingTag,
   maxShapeId,
@@ -23,7 +24,24 @@ import {
   stampAnchorsXml,
   type ApprovalStamp,
 } from "./approvalExport.ts";
+import {
+  addSheetToWorkbook,
+  copiedSheetXml,
+  copyPrintArea,
+  stripSampleAnchors,
+} from "./sheetCopyExport.ts";
 import type { FormValues } from "./types";
+
+const SHEET_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+/** 관계 파일 경로(`xl/worksheets/sheet1.xml` → `xl/worksheets/_rels/sheet1.xml.rels`) */
+const relsPathOf = (partPath: string) => partPath.replace(/([^/]+)$/, "_rels/$1.rels");
+/** 관계 파일에서 id 로 대상 경로 찾기 */
+function relTarget(relsXml: string, id: string): string | undefined {
+  for (const rel of relsXml.match(/<Relationship\b[^>]*\/?>/g) ?? []) {
+    if (new RegExp(`\\bId="${id}"`).test(rel)) return /\bTarget="([^"]+)"/.exec(rel)?.[1];
+  }
+  return undefined;
+}
 import { crc32, deflateText, readZipIndex, readZipItems, readZipText, writeZip } from "./zip.ts";
 
 /** `3:2` → 3행 2열. 셀 키는 저장 때부터 이 모양이다. */
@@ -126,7 +144,9 @@ export function patchSheetXml(xml: string, cells: Record<string, string>): strin
     changes.sort((a, b) => a.col - b.col);
 
     // 1) 그 줄을 찾는다.
-    const rowPattern = new RegExp(`<row[^>]*\\br="${rowNumber}"[^>]*(?:/>|>[\\s\\S]*?</row>)`);
+    // `[^>]*` 를 **최소로** 집는다. 욕심내면 `<row .../>` 의 `/` 까지 삼킨 뒤 다음 줄의 `</row>` 까지
+    // 한 덩어리로 잡아, 사이에 있는 줄이 통째로 지워진다.
+    const rowPattern = new RegExp(`<row[^>]*?\\br="${rowNumber}"[^>]*?(?:/>|>[\\s\\S]*?</row>)`);
     const rowMatch = rowPattern.exec(result);
     if (!rowMatch) {
       // 줄이 아예 없으면 새로 만들어 sheetData 안 제자리에 끼운다.
@@ -154,7 +174,9 @@ export function patchSheetXml(xml: string, cells: Record<string, string>): strin
     if (row.endsWith("/>")) row = `${row.slice(0, -2)}></row>`;
 
     for (const change of changes) {
-      const cellPattern = new RegExp(`<c\\b[^>]*\\br="${change.ref}"[^>]*(?:/>|>[\\s\\S]*?</c>)`);
+      // 위와 같은 이유로 최소 일치. `<c r="A1" s="44"/>` 에 글자를 쓰면 뒤따르는 칸들이 지워졌다
+      // (실제로 복사한 장에서 제목 칸이 사라졌다).
+      const cellPattern = new RegExp(`<c\\b[^>]*?\\br="${change.ref}"[^>]*?(?:/>|>[\\s\\S]*?</c>)`);
       const cellMatch = cellPattern.exec(row);
       if (cellMatch) {
         const styleAttr = / s="(\d+)"/.exec(cellMatch[0])?.[0] ?? "";
@@ -217,6 +239,8 @@ export async function buildFilledWorkbook(
   values: FormValues,
   /** 시트 이름 → 결재칸에 찍을 도장(서명·구분선·이름). 날짜는 values 로 넘긴다. */
   stamps: Record<string, ApprovalStamp[]> = {},
+  /** 앱에서 더한 장(월별 시트) — 원본 시트를 복사해 진짜 시트로 만들어 넣는다. */
+  customSheets: { name: string; source: string }[] = [],
 ): Promise<FilledWorkbook> {
   const index = readZipIndex(data);
   const paths = await sheetPaths(data, index);
@@ -244,7 +268,7 @@ export async function buildFilledWorkbook(
     while (items.some((item) => item.name === make(n))) n += 1;
     return make(n);
   };
-  const newOverrides: string[] = [];
+  const newOverrides: { part: string; type: string }[] = [];
   let addedImages = false;
 
   /** 시트에 결재 도장을 얹는다. 시트에 그림 판(drawing)이 없으면 만들어 붙인다. 고친 시트 XML 을 돌려준다. */
@@ -268,7 +292,7 @@ export async function buildFilledWorkbook(
       sheetRels = added.xml;
       await putText(relsPath, sheetRels);
       xml = insertDrawingTag(xml, added.id);
-      newOverrides.push(`/${drawingPath}`);
+      newOverrides.push({ part: `/${drawingPath}`, type: DRAWING_CONTENT_TYPE });
     }
 
     const drawingRelsPath = drawingPath.replace(/([^/]+)$/, "_rels/$1.rels");
@@ -296,6 +320,64 @@ export async function buildFilledWorkbook(
     await putText(drawingPath, drawingXml.replace("</xdr:wsDr>", `${anchors}</xdr:wsDr>`));
     await putText(drawingRelsPath, drawingRels);
     return xml;
+  }
+
+  /**
+   * 앱에서 더한 장을 진짜 시트로 만들어 붙인다 — 원본 시트 XML 을 그대로 복사하고 이름만 바꾼다.
+   * 그림 판은 따로 복사해 견본 표시(워터마크·"제출 시 삭제" 상자)를 뺀다. 화면의 복사 규칙과 같다.
+   */
+  let workbookXml = (await readText("xl/workbook.xml")) ?? "";
+  let workbookRels = (await readText("xl/_rels/workbook.xml.rels")) ?? EMPTY_RELS;
+  let addedSheet = false;
+  for (const custom of customSheets) {
+    if (paths.has(custom.name)) continue; // 같은 이름의 진짜 시트가 이미 있다
+    const sourcePath = paths.get(custom.source);
+    const sourceXml = sourcePath ? await readText(sourcePath) : undefined;
+    if (!sourcePath || !sourceXml || !workbookXml) {
+      skippedSheets.push(custom.name);
+      continue;
+    }
+
+    // 1) 그림 판 복사(견본 표시 빼고). 두 시트가 같은 그림 판을 가리키면 엑셀이 파일을 고친다.
+    const sourceRels = (await readText(relsPathOf(sourcePath))) ?? EMPTY_RELS;
+    const sourceDrawingId = /<drawing\b[^>]*\br:id="([^"]+)"/.exec(sourceXml)?.[1];
+    const sourceDrawingTarget = sourceDrawingId ? relTarget(sourceRels, sourceDrawingId) : undefined;
+    let newSheetRels: string | undefined;
+    let drawingRelId: string | undefined;
+    if (sourceDrawingTarget) {
+      const sourceDrawingPath = resolvePath(sourcePath, sourceDrawingTarget);
+      const sourceDrawing = await readText(sourceDrawingPath);
+      if (sourceDrawing) {
+        const newDrawingPath = freeName((n) => `xl/drawings/drawing${n}.xml`);
+        await putText(newDrawingPath, stripSampleAnchors(sourceDrawing).xml);
+        newOverrides.push({ part: `/${newDrawingPath}`, type: DRAWING_CONTENT_TYPE });
+        // 그림 파일(로고 등)은 그대로 다시 쓴다 — 관계 파일만 복사하면 같은 media 를 가리킨다.
+        const sourceDrawingRels = await readText(relsPathOf(sourceDrawingPath));
+        if (sourceDrawingRels) await putText(relsPathOf(newDrawingPath), sourceDrawingRels);
+        const rel = addRelationship(EMPTY_RELS, REL_DRAWING, `../drawings/${newDrawingPath.split("/").pop()}`);
+        newSheetRels = rel.xml;
+        drawingRelId = rel.id;
+      }
+    }
+
+    // 2) 시트 XML 복사 → 새 파일로
+    const newSheetPath = freeName((n) => `xl/worksheets/sheet${n}.xml`);
+    await putText(newSheetPath, copiedSheetXml(sourceXml, drawingRelId));
+    if (newSheetRels) await putText(relsPathOf(newSheetPath), newSheetRels);
+    newOverrides.push({ part: `/${newSheetPath}`, type: SHEET_CONTENT_TYPE });
+
+    // 3) 워크북에 등록하고 인쇄 영역도 따라 붙인다(새 시트는 맨 뒤).
+    const wbRel = addRelationship(workbookRels, REL_WORKSHEET, `worksheets/${newSheetPath.split("/").pop()}`);
+    workbookRels = wbRel.xml;
+    workbookXml = addSheetToWorkbook(workbookXml, custom.name, wbRel.id);
+    workbookXml = copyPrintArea(workbookXml, order.indexOf(custom.source), order.length, custom.name);
+    order.push(custom.name);
+    paths.set(custom.name, newSheetPath);
+    addedSheet = true;
+  }
+  if (addedSheet) {
+    await putText("xl/_rels/workbook.xml.rels", workbookRels);
+    await putText("xl/workbook.xml", workbookXml);
   }
 
   const sheetNames = new Set([
@@ -331,17 +413,17 @@ export async function buildFilledWorkbook(
     if (addedImages && !/<Default\b[^>]*Extension="png"/i.test(types)) {
       types = types.replace("</Types>", '<Default Extension="png" ContentType="image/png"/></Types>');
     }
-    for (const part of newOverrides) {
-      types = types.replace("</Types>", `<Override PartName="${part}" ContentType="${DRAWING_CONTENT_TYPE}"/></Types>`);
+    for (const { part, type } of newOverrides) {
+      types = types.replace("</Types>", `<Override PartName="${part}" ContentType="${type}"/></Types>`);
     }
     await putText("[Content_Types].xml", types);
   }
 
   // 인쇄 영역도 함께 늘린다(줄을 더해 적은 경우).
-  const workbookXml = await readZipText(data, index, "xl/workbook.xml");
-  if (workbookXml && lastRowBySheetIndex.size > 0) {
-    const nextWorkbook = extendPrintArea(workbookXml, lastRowBySheetIndex);
-    if (nextWorkbook !== workbookXml) await putText("xl/workbook.xml", nextWorkbook);
+  const latestWorkbook = (await readText("xl/workbook.xml")) ?? "";
+  if (latestWorkbook && lastRowBySheetIndex.size > 0) {
+    const nextWorkbook = extendPrintArea(latestWorkbook, lastRowBySheetIndex);
+    if (nextWorkbook !== latestWorkbook) await putText("xl/workbook.xml", nextWorkbook);
   }
 
   return { bytes: writeZip(items), skippedSheets };
