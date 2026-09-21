@@ -194,6 +194,22 @@ const SPARSE_MIN_AREA = 50;
 /** 글자를 칠 때마다 저장하면 과하다. 손을 멈춘 뒤 이만큼 있다가 저장한다. */
 const SAVE_DELAY_MS = 400;
 
+/**
+ * 목록 아래에 펴지는 서류 자리로 화면을 내려 준다.
+ *
+ * 서류를 열면 곧바로 그려지지 않는다(엑셀을 읽어 시트를 만든 뒤에야 나타난다). 한 번만
+ * 찾고 말면 아직 없어서 그냥 넘어가, 누른 사람은 145종짜리 목록 한가운데에 그대로 남는다.
+ * 그려질 때까지 몇 그림틀 기다린다.
+ */
+function scrollToViewer(tries = 30) {
+  const element = document.getElementById("form-viewer");
+  if (element) {
+    element.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (tries > 0) window.requestAnimationFrame(() => scrollToViewer(tries - 1));
+}
+
 export default function FormsPage() {
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [forms, setForms] = useState<FormSummary[]>([]);
@@ -631,7 +647,11 @@ export default function FormsPage() {
   }
 
   async function handleOpen(id: string) {
-    if (state.status === "ready" && state.id === id) return;
+    // 같은 서류를 다시 눌렀을 때도 화면은 내려 준다 — 누른 사람은 그 서류를 보러 누른 것이다.
+    if (state.status === "ready" && state.id === id) {
+      scrollToViewer();
+      return;
+    }
     try {
       const opened = await openStored(id);
       if (!opened) {
@@ -640,6 +660,8 @@ export default function FormsPage() {
         return;
       }
       setSaveState("saved");
+      // 목록이 길어서(145종) 열기만 하면 서류가 화면 밖에 남는다. 그 자리로 데려간다.
+      scrollToViewer();
     } catch (error) {
       setState({
         status: "error",
@@ -994,10 +1016,7 @@ export default function FormsPage() {
         }
         setSaveState("saved");
       }
-      // 목록 아래의 서류로 내려가 보여 준다.
-      window.requestAnimationFrame(() =>
-        document.getElementById("form-viewer")?.scrollIntoView({ behavior: "smooth", block: "start" }),
-      );
+      scrollToViewer();
     } catch (error) {
       setStorageWarning(error instanceof Error ? `서류를 열지 못했습니다: ${error.message}` : "서류를 열지 못했습니다.");
     }
