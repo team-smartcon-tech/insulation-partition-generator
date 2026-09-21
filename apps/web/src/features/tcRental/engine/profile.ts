@@ -350,3 +350,20 @@ export function resolveHoistHeight(
     describe: [base > 0 ? `${base}(지층)` : "(지층)", ...described, `${extend}(연장)`].join("+"),
   };
 }
+
+/**
+ * 호이스트 운용 형태 — 층수로 갈린다.
+ *
+ * 회사 입찰기준 개선(안, 23.8.7): **20층 이하 저속싱글 / 21층 이상 중속싱글.**
+ * 발주의뢰서 양식의 적용계수 표(V11:W14)에 있는 이름이라야 VLOOKUP 이 걸리므로
+ * 문자열을 임의로 바꾸면 안 된다.
+ *
+ * 고속트윈은 층수로 갈리는 항목이 아니라(트윈은 2대) 필요한 동만 사람이 직접 고른다 —
+ * 동에 `hoistOperation` 이 적혀 있으면 그 값을 그대로 쓴다.
+ */
+export const HOIST_OPERATIONS = ["저속싱글", "중속싱글", "고속트윈"] as const;
+
+export function resolveOperation(b: BuildingFrameProfile, params: RentalParams): string {
+  if (b.hoistOperation) return b.hoistOperation;
+  return b.aboveFloors <= params.hc.lowSpeedMaxFloors ? "저속싱글" : "중속싱글";
+}

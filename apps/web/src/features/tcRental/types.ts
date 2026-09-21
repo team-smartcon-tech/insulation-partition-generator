@@ -96,6 +96,12 @@ export interface BuildingFrameProfile {
    */
   hoistHeightBands?: HeightBand[] | null;
   /**
+   * 운용 형태 (저속싱글·중속싱글·고속트윈). 비우면 층수로 자동 판정한다 —
+   * 회사 입찰기준 개선(안, 23.8.7): **20층 이하 저속싱글 / 21층 이상 중속싱글**.
+   * 고속트윈은 층수로 갈리지 않으므로 필요한 동만 사람이 직접 고른다.
+   */
+  hoistOperation?: string | null;
+  /**
    * 동절기 보양 횟수. 자동 산출값을 기본으로 채우되 사용자가 덮어쓸 수 있다
    * (회사 표준이 확정되기 전까지는 사람이 고칠 수 있어야 한다).
    */
@@ -150,6 +156,11 @@ export interface RentalParams {
     floorHeight: FloorHeights;
     /** 최상층 위로 올리는 연장 (m) — 동과 무관한 표준값이라 동별 입력을 받지 않는다 */
     extendHeight: number;
+    /**
+     * 저속싱글로 보는 지상층수 상한. 이 층수 **이하면 저속싱글**, 넘으면 중속싱글이다.
+     * 회사 입찰기준 개선(안, 23.8.7) 기준 20층. 기준이 바뀌면 이 값만 고친다.
+     */
+    lowSpeedMaxFloors: number;
   };
   winter: {
     /** 동절기 시작 "MM-DD" */

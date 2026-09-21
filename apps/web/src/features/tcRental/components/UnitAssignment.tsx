@@ -26,6 +26,7 @@ import {
   frameStart,
   resolveBands,
   resolveHoistHeight,
+  resolveOperation,
 } from "../engine/profile";
 import { unitColor } from "../theme";
 
@@ -64,6 +65,7 @@ export default function UnitAssignment({
       hoistPostFrameMonths?: number | null;
       hoistBaseHeight?: number | null;
       hoistHeightBands?: HeightBand[] | null;
+      hoistOperation?: string | null;
     },
   ) => void;
 }) {
@@ -133,12 +135,12 @@ export default function UnitAssignment({
                     </span>
                   </th>
                   <th
-                    colSpan={3}
+                    colSpan={4}
                     className="border-l border-slate-200 px-2 py-1.5 text-center text-[12px] font-bold text-slate-500"
                   >
-                    층고 (m)
+                    규격 · 층고 (m)
                     <span className="ml-1 font-normal text-slate-400">
-                      발주의뢰서 「설치높이 산정」의 원천 · 층수·연장은 동에서 자동
+                      규격은 층수로 자동(20층 이하 저속싱글) · 층수·연장은 동에서 자동
                     </span>
                   </th>
                 </tr>
@@ -170,6 +172,9 @@ export default function UnitAssignment({
                     해체 완료
                   </th>
                   <th className="border-l border-slate-200 px-2 py-1.5 text-center text-[12px] font-bold text-slate-500">
+                    운용 형태
+                  </th>
+                  <th className="px-2 py-1.5 text-center text-[12px] font-bold text-slate-500">
                     지층
                   </th>
                   <th className="px-2 py-1.5 text-center text-[12px] font-bold text-slate-500">
@@ -191,6 +196,7 @@ export default function UnitAssignment({
                     ? addMonths(fin, b.hoistPostFrameMonths ?? params.hc.postFrameMonths)
                     : null;
                   const height = resolveHoistHeight(b, params);
+                  const operation = resolveOperation(b, params);
                   return (
                     <tr
                       key={b.id}
@@ -300,13 +306,33 @@ export default function UnitAssignment({
                         )}
                       </td>
 
+                      {/* 운용 형태 — 입찰기준(안): 20층 이하 저속싱글 / 21층 이상 중속싱글 */}
+                      <td className="border-l border-slate-200 px-2 py-1.5 text-center">
+                        <select
+                          value={b.hoistOperation ?? ""}
+                          title={`비우면 층수로 자동 판정합니다 (${params.hc.lowSpeedMaxFloors}층 이하 저속싱글)`}
+                          onChange={(e) =>
+                            onChangeHoist(b.id, { hoistOperation: e.target.value || null })
+                          }
+                          className={
+                            "h-7 w-[86px] rounded border px-1 text-center text-[12.5px] outline-none transition-colors focus:border-[#0a63b8] " +
+                            (b.hoistOperation
+                              ? "border-[#0a63b8]/40 bg-[#eef5fd] font-semibold text-[#0a63b8]"
+                              : "border-slate-200 text-slate-600")
+                          }
+                        >
+                          <option value="">{operation} (자동)</option>
+                          <option value="저속싱글">저속싱글</option>
+                          <option value="중속싱글">중속싱글</option>
+                        </select>
+                      </td>
+
                       {/* 층고 — 동마다 기초 레벨도 층고가 나뉘는 자리도 다르다 */}
                       <HeightCell
                         value={b.hoistBaseHeight ?? null}
                         placeholder="실측"
                         warn={height.baseMissing}
                         title="지층 높이(기초 레벨~1층 바닥). 동마다 달라 기본값이 없습니다 — 비우면 설치높이가 그만큼 짧게 나옵니다."
-                        first
                         onChange={(v) => onChangeHoist(b.id, { hoistBaseHeight: v })}
                       />
                       <td className="px-2 py-1.5 text-center">
