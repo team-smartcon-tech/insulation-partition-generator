@@ -41,6 +41,14 @@ test('복사한 시트: 그림 판은 새 것을 가리키고, 프린터 설정 
   assert.equal(copiedSheetXml('<worksheet><sheetData/></worksheet>', undefined), '<worksheet><sheetData/></worksheet>');
 });
 
+test('복사한 시트는 탭 색을 물려받지 않는다', () => {
+  // 견본 시트는 빨간 탭인 경우가 많다 — 복사본까지 빨가면 작성한 장이 견본처럼 보인다.
+  const source = '<worksheet><sheetPr><tabColor rgb="FFC00000"/><pageSetUpPr fitToPage="1"/></sheetPr><sheetData/></worksheet>';
+  const copied = copiedSheetXml(source, undefined);
+  assert.equal(copied.includes('tabColor'), false);
+  assert.match(copied, /<pageSetUpPr fitToPage="1"\/>/, '다른 시트 설정은 그대로');
+});
+
 test('워크북에 시트를 맨 뒤에 더하고, 인쇄 영역도 따라 붙인다', () => {
   const workbook =
     '<workbook><sheets><sheet name="견본" sheetId="6" r:id="rId1"/><sheet name="QA-1" sheetId="11" r:id="rId2"/></sheets>' +

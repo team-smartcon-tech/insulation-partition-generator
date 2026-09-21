@@ -57,9 +57,13 @@ const escapeXml = (text: string) =>
  * - 그림 판은 **새로 만든 복사본**을 가리킨다(두 시트가 같은 그림 판을 가리키면 엑셀이 파일을 고친다).
  * - 프린터 설정(`pageSetup r:id`)은 뗀다 — 원본 시트의 관계 파일을 가리키던 것이라 복사본에는 없다.
  *   종이 크기·배율 같은 인쇄 설정은 pageSetup 속성에 그대로 남는다.
+ * - **탭 색은 지운다.** 견본 시트는 눈에 띄라고 빨간 탭인 경우가 많은데, 복사본까지 빨가면
+ *   작성한 장이 견본처럼 보인다(사용자 지적).
  */
 export function copiedSheetXml(sourceXml: string, drawingRelId: string | undefined): string {
   let xml = sourceXml.replace(/(<pageSetup\b[^>]*?)\s+r:id="[^"]*"/, "$1");
+  // 탭 색 지우기. 비어 버린 <sheetPr> 는 그대로 둬도 엑셀이 받아들인다.
+  xml = xml.replace(/<tabColor\b[^>]*\/>/, "");
   xml = xml.replace(/<drawing\b[^>]*\/>/, "");
   xml = xml.replace(/<legacyDrawing\b[^>]*\/>/, "");
   if (drawingRelId) {
