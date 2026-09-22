@@ -8,7 +8,7 @@
  * 원본이 새 판으로 바뀌어도 현장 사본은 그대로 둔다 — 이미 적어 둔 내용을 조용히 바꾸면
  * 안 된다. 대신 "새 판 있음"을 띄워 현장이 알고 옮겨 가게 한다.
  */
-import { taxonomyIdOf, type Taxonomy } from "./taxonomy.ts";
+import { sameNameSlots, taxonomyIdOf, type Taxonomy } from "./taxonomy.ts";
 
 /** template = 배포 양식(원본, 읽기 전용) · site = 현장 서류(사본, 작성용) */
 export type FormKind = "template" | "site";
@@ -21,6 +21,8 @@ export interface LibraryEntry {
   code?: string;
   taxonomyId?: string;
   uploadedAt: number;
+  /** 배포 양식: 한 번의 배포로 함께 올라간 묶음 번호 */
+  batchId?: string;
   /** 현장 서류: 어느 배포 양식에서 만들었나 */
   templateId?: string;
   /** 현장 서류: 만들 때 그 배포 양식이 올라온 시각 — 이보다 새로 올라온 원본이 "새 판"이다 */
@@ -143,6 +145,126 @@ export function latestTemplateIn<T extends LibraryEntry>(
   return templates
     .filter((template) => isTemplate(template) && slotOf(template, taxonomies) === slot)
     .sort((a, b) => b.uploadedAt - a.uploadedAt)[0];
+}
+
+/**
+ * 다른 1차 분류의 **같은 이름 칸**에만 새 판이 올라와, 이 칸이 옛 판으로 남은 경우.
+ *
+ * 회사 코드표는 분류마다 따로라 같은 서류가 공무관련·품질관련에 함께 들어 있다(번호는 다르다).
+ * 올릴 때는 한 번에 함께 배포하지만, 나중에 한쪽 칸에만 새 파일을 올리면 **다른 쪽은 조용히
+ * 옛 판으로 남는다.** 현장에서는 그 사실을 알 길이 없어 옛 양식으로 서류를 만든다.
+ */
+export interface StaleSlot<T> {
+  /** 옛 판이 남아 있는 칸 */
+  taxonomyId: string;
+  division: string;
+  code: string;
+  name: string;
+  /** 이 칸의 가장 새 판(그래도 옛 판) */
+  old: T;
+  /** 다른 분류에 올라온 더 새 판 */
+  newer: T;
+  newerDivision: string;
+  newerCode: string;
+}
+
+/**
+ * 배포 묶음 번호가 **없던 시절에 올린 양식**을 위한 관용 시간.
+ *
+ * 함께 배포하면 칸마다 따로 저장되어 시각이 몇 ms 씩 다르다. 묶음 번호가 있으면 그것으로
+ * 가리지만, 옛 기록에는 없어서 시간으로 봐줄 수밖에 없다. 진짜 새 판은 며칠·몇 달 뒤에 온다.
+ */
+const SAME_BATCH_MS = 60_000;
+
+/**
+ * 저 양식이 이 양식보다 **나중에 올라온 새 판**인가.
+ *
+ * 묶음 번호가 양쪽에 다 있으면 그것만 본다 — 같은 묶음이면 함께 배포한 것이라 새 판이 아니고,
+ * 다른 묶음이면 시각 그대로 견준다(같은 날 새로 올려도 잡힌다). 한쪽이라도 번호가 없으면
+ * 옛 기록이라 {@link SAME_BATCH_MS} 만큼 봐준다.
+ */
+function isNewerEdition(candidate: LibraryEntry, current: LibraryEntry): boolean {
+  if (candidate.batchId && current.batchId) {
+    return candidate.batchId !== current.batchId && candidate.uploadedAt > current.uploadedAt;
+  }
+  return candidate.uploadedAt > current.uploadedAt + SAME_BATCH_MS;
+}
+
+/** 칸 하나에 올라온 배포 양식을 서류별(판 무시) 최신 한 장씩으로 간추린다. */
+function latestByEdition<T extends LibraryEntry>(
+  slot: string,
+  templates: T[],
+  taxonomies: Taxonomy[],
+): Map<string, T> {
+  const latest = new Map<string, T>();
+  for (const template of templates) {
+    if (!isTemplate(template) || slotOf(template, taxonomies) !== slot) continue;
+    const key = editionName(template.title) || template.id;
+    const current = latest.get(key);
+    if (!current || template.uploadedAt > current.uploadedAt) latest.set(key, template);
+  }
+  return latest;
+}
+
+/**
+ * 다른 분류에만 새 판이 올라온 칸들을 찾는다. 새 판이 먼저 오게 정렬한다.
+ *
+ * 서류를 맞추는 방법이 두 가지다.
+ * 1. **이름이 같은 파일끼리**({@link editionName}) — 한 번에 함께 배포하면 파일이 같으니 이게 맞는다.
+ * 2. 이름이 안 맞고 **양쪽 칸에 서류가 하나씩만** 있으면 그 둘을 같은 서류로 본다 — 파일 이름
+ *    앞에 분류 번호를 붙여 올리면(`104. 품질환경방침` / `103. 품질환경방침`) 이름이 갈리기 때문이다.
+ *    한 칸에 서로 다른 서류가 여럿이면(공종별 현장설명서) 짝을 잘못 지을 수 있어 1번만 쓴다.
+ */
+export function staleAcrossDivisions<T extends LibraryEntry>(
+  templates: T[],
+  taxonomies: Taxonomy[],
+): StaleSlot<T>[] {
+  const rows: StaleSlot<T>[] = [];
+  const bySlot = new Map<string, Map<string, T>>();
+  const editions = (taxonomyId: string, code: string) => {
+    const slot = `${taxonomyId}:${code}`;
+    let found = bySlot.get(slot);
+    if (!found) {
+      found = latestByEdition(slot, templates, taxonomies);
+      bySlot.set(slot, found);
+    }
+    return found;
+  };
+
+  for (const taxonomy of taxonomies) {
+    for (const group of taxonomy.groups) {
+      for (const item of group.items) {
+        const mine = editions(taxonomy.id, item.code);
+        if (mine.size === 0) continue;
+        const others = sameNameSlots(taxonomies, { taxonomyId: taxonomy.id, code: item.code });
+        if (others.length === 0) continue;
+
+        for (const [key, old] of mine) {
+          let best: { template: T; slot: (typeof others)[number] } | undefined;
+          for (const other of others) {
+            const theirs = editions(other.taxonomyId, other.code);
+            // ① 같은 이름의 파일, ② 없으면 양쪽 모두 서류가 하나뿐일 때만 그 하나.
+            const candidate =
+              theirs.get(key) ?? (mine.size === 1 && theirs.size === 1 ? [...theirs.values()][0] : undefined);
+            if (!candidate || !isNewerEdition(candidate, old)) continue;
+            if (!best || candidate.uploadedAt > best.template.uploadedAt) best = { template: candidate, slot: other };
+          }
+          if (!best) continue;
+          rows.push({
+            taxonomyId: taxonomy.id,
+            division: taxonomy.division || "이름 없음",
+            code: item.code,
+            name: item.name,
+            old,
+            newer: best.template,
+            newerDivision: best.slot.division,
+            newerCode: best.slot.code,
+          });
+        }
+      }
+    }
+  }
+  return rows.sort((a, b) => b.newer.uploadedAt - a.newer.uploadedAt);
 }
 
 /** 옛 저장본(구분이 생기기 전)을 옮겨 담는 방법. */

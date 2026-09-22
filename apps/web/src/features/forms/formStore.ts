@@ -79,6 +79,14 @@ export interface StoredForm {
    * 비어 있고, 화면에 들어올 때 {@link migrateLegacyForms} 가 나눈다.
    */
   kind?: FormKind;
+  /**
+   * 배포 양식: **한 번의 배포로 함께 올라간 묶음 번호.**
+   *
+   * 같은 서류가 공무관련·품질관련에 함께 들어 있어 한 번 올릴 때 여러 칸에 배포한다. 저장은
+   * 칸마다 따로라 시각이 몇 ms 씩 다른데, 그 차이를 "새 판"으로 오해하지 않으려면 **함께 올라간
+   * 것인지**를 알아야 한다. 이 번호가 생기기 전에 올린 양식은 비어 있다.
+   */
+  batchId?: string;
   /** 현장 서류: 어느 배포 양식에서 만들었나 */
   templateId?: string;
   /** 현장 서류: 만들 때 그 배포 양식이 올라온 시각("새 판 있음" 판단용) */
@@ -141,6 +149,8 @@ export interface FormSummary {
   /** 어느 현장의 서류인지. 현장이 생기기 전에 올린 것은 비어 있다(첫 현장으로 본다). */
   siteId?: string;
   kind?: FormKind;
+  /** 배포 양식: 한 번의 배포로 함께 올라간 묶음 번호 */
+  batchId?: string;
   templateId?: string;
   templateUploadedAt?: number;
   uploadedAt: number;
@@ -429,6 +439,7 @@ function summarize(form: StoredForm): FormSummary {
     taxonomyId: form.taxonomyId,
     siteId: form.siteId,
     kind: form.kind,
+    batchId: form.batchId,
     templateId: form.templateId,
     templateUploadedAt: form.templateUploadedAt,
     uploadedAt: form.uploadedAt,
@@ -569,6 +580,8 @@ export async function saveForm(input: {
   taxonomyId?: string;
   siteId?: string;
   kind: FormKind;
+  /** 여러 칸에 함께 배포할 때 같은 번호를 넘긴다(같은 배포임을 나중에 알아보려고). */
+  batchId?: string;
 }): Promise<StoredForm> {
   const now = Date.now();
   const form: StoredForm = {
@@ -581,6 +594,7 @@ export async function saveForm(input: {
     category: input.category || UNCATEGORIZED,
     code: input.code,
     taxonomyId: input.taxonomyId,
+    batchId: input.kind === "template" ? input.batchId : undefined,
     // 배포 양식은 어느 현장 것도 아니다.
     siteId: input.kind === "site" ? input.siteId : undefined,
     kind: input.kind,
@@ -657,6 +671,41 @@ export async function copyTemplateToSite(templateId: string, siteId: string): Pr
     id: crypto.randomUUID(),
     favorite: false,
     uploadedAt: now,
+    updatedAt: now,
+    openedAt: now,
+    bytes: template.bytes.slice(0),
+  };
+  await run("readwrite", (store) => store.put(copy));
+  return copy;
+}
+
+/**
+ * 배포 양식을 **다른 분류의 같은 서류 칸에도** 배포한다(원본 파일을 다시 찾아 올리지 않아도 되게).
+ *
+ * 올릴 때 함께 배포하는 것과 같은 방식이다 — 파일을 나눠 쓰지 않고 **칸마다 따로 저장한다.**
+ * 그래야 나중에 한쪽만 새 판으로 바꾸거나 지울 수 있다.
+ */
+export async function copyTemplateToSlot(
+  templateId: string,
+  slot: { taxonomyId: string; code: string },
+): Promise<StoredForm> {
+  const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(templateId));
+  if (!raw) throw new Error("그 배포 양식은 이미 지워졌습니다.");
+  const template = normalize(raw);
+  if (template.kind !== "template") throw new Error("배포 양식이 아니라 배포할 수 없습니다.");
+
+  const now = Date.now();
+  const copy: StoredForm = {
+    ...template,
+    id: crypto.randomUUID(),
+    taxonomyId: slot.taxonomyId,
+    code: slot.code,
+    favorite: false,
+    // 올라온 시각은 **원본 그대로** 둔다. 지금 시각으로 바꾸면 이 사본이 다시 "새 판"이 되어
+    // 원래 칸이 옛 판으로 뒤집힌다(둘이 서로를 새 판이라 가리키게 된다).
+    uploadedAt: template.uploadedAt,
+    // 같은 배포로 본다 — 안 그러면 방금 맞춰 놓은 두 칸이 서로를 새 판이라 가리킨다.
+    batchId: template.batchId ?? crypto.randomUUID(),
     updatedAt: now,
     openedAt: now,
     bytes: template.bytes.slice(0),

@@ -78,8 +78,10 @@ import {
   editionName,
   latestTemplateIn,
   newerTemplateFor,
+  staleAcrossDivisions,
   templatesIn,
   type FormKind,
+  type StaleSlot,
 } from "./library";
 import FormSheetView, { type CellMark, type FormScale } from "./FormSheetView";
 import SheetPrintView from "./SheetPrintView";
@@ -97,6 +99,7 @@ import {
 import {
   addCustomSheet,
   copyTemplateToSite,
+  copyTemplateToSlot,
   deleteForm,
   findTemplateSheet,
   getForm,
@@ -521,7 +524,14 @@ export default function FormsPage() {
      * 다른 1차 분류에도 같은 이름 칸이 있는 배포 양식 — 다 읽은 뒤 한 번만 묻고 함께 배포한다.
      * 파일마다 물으면 서른 장을 올릴 때 서른 번 묻게 된다.
      */
-    const alsoFor: { fileName: string; bytes: ArrayBuffer; sheets: FormSheet[]; targets: ReturnType<typeof sameNameSlots> }[] = [];
+    const alsoFor: {
+      fileName: string;
+      bytes: ArrayBuffer;
+      sheets: FormSheet[];
+      targets: ReturnType<typeof sameNameSlots>;
+      /** 이 파일을 여러 칸에 넣을 때 함께 달아 둘 묶음 번호 */
+      batchId: string;
+    }[] = [];
 
     for (const file of files) {
       // 여러 개를 올리면 한참 걸린다(큰 양식은 한 장에 몇 초). 어디까지 했는지 보여 준다.
@@ -531,6 +541,9 @@ export default function FormsPage() {
       try {
         const bytes = await file.arrayBuffer();
         const sheets = await parseFormWorkbook(bytes);
+        // 같은 파일을 여러 칸에 넣어도 **한 번의 배포**임을 나중에 알아보려고 번호를 하나 만든다.
+        // 이게 없으면 칸마다 저장 시각이 몇 ms 달라, 서로를 "새 판"으로 오해한다.
+        const batchId = crypto.randomUUID();
         if (sheets.length === 0) {
           failed.push(`${file.name}: 시트가 없습니다`);
           continue;
@@ -549,6 +562,7 @@ export default function FormsPage() {
             // 배포 양식함에서 올리면 원본, 현장 서류함에서 올리면 그 현장 서류다.
             kind: uploadKind,
             siteId,
+            batchId,
           });
           id = saved.id;
         } catch (error) {
@@ -561,7 +575,7 @@ export default function FormsPage() {
         // 회사 코드표는 분류마다 따로라 같은 서류가 여러 칸에 있다(번호는 다르다). 한 번 올려 함께 배포한다.
         if (uploadKind === "template" && place) {
           const targets = sameNameSlots(taxonomies, place);
-          if (targets.length > 0) alsoFor.push({ fileName: file.name, bytes, sheets, targets });
+          if (targets.length > 0) alsoFor.push({ fileName: file.name, bytes, sheets, targets, batchId });
         }
         opened.push({ id, fileName: file.name, sheets });
       } catch (error) {
@@ -599,6 +613,7 @@ export default function FormsPage() {
                 code: slot.code,
                 taxonomyId: slot.taxonomyId,
                 kind: "template",
+                batchId: entry.batchId,
               });
               alsoPlaced += 1;
             } catch (error) {
@@ -1293,6 +1308,38 @@ export default function FormsPage() {
   }
 
   /**
+   * 다른 분류에만 올라온 새 판을 **이 칸에도 배포**한다.
+   *
+   * 배포 담당자가 한쪽 칸에만 새 파일을 올렸을 때, 원본 파일을 다시 찾지 않아도 맞출 수 있게 한다.
+   * 올릴 때 함께 배포하는 것과 같게 **칸마다 따로 저장**한다.
+   */
+  async function handleDeployHere(row: StaleSlot<FormSummary>) {
+    const where = `${row.division} ${row.code} ${row.name}`;
+    if (
+      !window.confirm(
+        `“${row.newer.title}”을(를) ${where} 칸에도 배포할까요?
+
+` +
+          `지금 이 칸에는 ${new Date(row.old.uploadedAt).toLocaleDateString("ko-KR")}에 올라온 옛 판이 있고, ` +
+          `${row.newerDivision} ${row.newerCode} 칸에는 ${new Date(row.newer.uploadedAt).toLocaleDateString("ko-KR")}에 올라온 새 판이 있습니다.
+` +
+          "옛 판은 지우지 않습니다.",
+      )
+    ) {
+      return;
+    }
+    try {
+      const copy = await copyTemplateToSlot(row.newer.id, { taxonomyId: row.taxonomyId, code: row.code });
+      await refreshList();
+      setStorageWarning(`${where} 칸에 “${copy.title}” 새 판을 배포했습니다. 옛 판은 그대로 두었습니다.`);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `배포하지 못했습니다: ${error.message}` : "배포하지 못했습니다.",
+      );
+    }
+  }
+
+  /**
    * 고른 배포 양식 여러 개를 한 번에 현장 서류함에 만든다. 하나라도 실패하면 만든 것까지만 알리고
    * 멈추지 않는다 — 9종 중 1종 실패로 나머지 8종까지 못 만들면 더 불편하다.
    */
@@ -1518,6 +1565,13 @@ export default function FormsPage() {
     () => documentProgress(taxonomies, forms, siteId ?? ""),
     [taxonomies, forms, siteId],
   );
+  /**
+   * 다른 분류의 같은 칸에만 새 판이 올라와, 이 칸이 옛 판으로 남은 곳.
+   * 배포 양식함의 문제라 현장과 상관없이 늘 같다.
+   */
+  const homeStale = useMemo(() => staleAcrossDivisions(templates, taxonomies), [templates, taxonomies]);
+  /** 옛 판으로 남은 배포 양식 id — 목록 카드에 표시를 붙인다. */
+  const staleIds = useMemo(() => new Set(homeStale.map((row) => row.old.id)), [homeStale]);
   const homeNewer = useMemo(
     () =>
       siteForms
@@ -1754,6 +1808,12 @@ export default function FormsPage() {
                 overview={homeOverview}
                 progress={homeProgress}
                 newer={homeNewer}
+                stale={homeStale.map((row) => ({
+                  key: `${row.taxonomyId}:${row.code}:${row.old.id}`,
+                  label: `${row.division} ${row.code} ${row.name}`,
+                  onOpen: () => void openDocAt(row.old.id),
+                  onDeploy: () => void handleDeployHere(row),
+                }))}
                 onOpenDoc={(formId, sheetName) => void openDocAt(formId, sheetName)}
                 onGoSiteBox={() => setSpace("site")}
                 onRegisterSignature={() => setHomeSignOpen(true)}
@@ -1807,6 +1867,19 @@ export default function FormsPage() {
               uploadLabel={space === "library" ? "배포 양식 올리기" : null}
               toolbarExtra={space === "site" ? importButton : undefined}
               extraBadges={(form) => {
+                // 배포 양식함: 다른 분류에만 새 판이 올라와 이 칸이 옛 판으로 남은 경우.
+                if (staleIds.has(form.id)) {
+                  const row = homeStale.find((entry) => entry.old.id === form.id);
+                  return [
+                    {
+                      label: "다른 분류에 새 판",
+                      title: row
+                        ? `${row.newerDivision} ${row.newerCode} 칸에 ${new Date(row.newer.uploadedAt).toLocaleDateString("ko-KR")}에 올라온 새 판이 있습니다. 홈 알림에서 이 칸에도 배포할 수 있습니다.`
+                        : "다른 분류에 새 판이 있습니다.",
+                      tone: "amber" as const,
+                    },
+                  ];
+                }
                 const newer = newerTemplateFor(form, templates, taxonomies);
                 return newer
                   ? [

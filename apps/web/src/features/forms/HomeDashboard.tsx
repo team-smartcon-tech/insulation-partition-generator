@@ -11,7 +11,7 @@
  * 모든 현장 보기에서는 {@link SitesAudit}(현장별 점검표)가 대신 뜬다 — 오프라인 서류 점검용.
  */
 import { useEffect, useState } from "react";
-import { AlarmClock, ArrowRight, Check, FilePlus2, PenLine, Sparkles, TriangleAlert, UserX } from "lucide-react";
+import { AlarmClock, ArrowRight, Check, CopyPlus, FilePlus2, PenLine, Sparkles, TriangleAlert, UserX } from "lucide-react";
 import {
   daysSince,
   percent,
@@ -84,6 +84,11 @@ export interface HomeDashboardProps {
   progress: DocumentProgress;
   /** 새 판이 올라온 현장 서류 */
   newer: { formId: string; title: string }[];
+  /**
+   * 다른 분류의 같은 칸에만 새 판이 올라와, 이 칸이 옛 판으로 남은 곳.
+   * 현장이 아니라 **배포 양식함**의 문제라, 고치는 것도 여기서 한 번에 한다.
+   */
+  stale: { key: string; label: string; onOpen: () => void; onDeploy: () => void }[];
   onOpenDoc: (formId: string, sheetName?: string) => void;
   onGoSiteBox: () => void;
   onRegisterSignature: () => void;
@@ -97,6 +102,7 @@ export default function HomeDashboard({
   overview,
   progress,
   newer,
+  stale,
   onOpenDoc,
   onGoSiteBox,
   onRegisterSignature,
@@ -381,6 +387,19 @@ export default function HomeDashboard({
               items={newer.map((doc) => ({ key: doc.formId, label: doc.title, onClick: () => onOpenDoc(doc.formId) }))}
             />
             <AlertRow
+              icon={<CopyPlus size={15} />}
+              tone="amber"
+              title="다른 분류에 새 판"
+              text="옆 분류에만 새 양식이 올라온 칸"
+              count={stale.length}
+              items={stale.map((row) => ({
+                key: row.key,
+                label: row.label,
+                onClick: row.onOpen,
+                action: { label: "이 칸에도 배포", onClick: row.onDeploy },
+              }))}
+            />
+            <AlertRow
               icon={<FilePlus2 size={15} />}
               tone="amber"
               title="결재선 미지정"
@@ -457,7 +476,13 @@ function AlertRow({
   title: string;
   text: string;
   count: number;
-  items: { key: string; label: string; onClick: () => void }[];
+  items: {
+    key: string;
+    label: string;
+    onClick: () => void;
+    /** 그 줄에서 바로 처리할 수 있는 일(예: 이 칸에도 배포) */
+    action?: { label: string; onClick: () => void };
+  }[];
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -485,15 +510,25 @@ function AlertRow({
       {open && (
         <ul className="pb-2">
           {items.map((item) => (
-            <li key={item.key}>
+            // 단추 안에 단추를 넣을 수 없어, 줄을 나누고 각각 단추로 둔다.
+            <li key={item.key} className="flex items-center gap-1 pr-3 hover:bg-slate-50">
               <button
                 type="button"
                 onClick={item.onClick}
-                className="flex w-full items-center gap-1 truncate py-1.5 pl-[3.75rem] pr-5 text-left text-xs text-slate-600 hover:bg-slate-50 hover:text-blue-700"
+                className="flex min-w-0 flex-1 items-center gap-1 py-1.5 pl-[3.75rem] pr-2 text-left text-xs text-slate-600 hover:text-blue-700"
               >
                 <span className="truncate">{item.label}</span>
                 <ArrowRight size={12} className="shrink-0" />
               </button>
+              {item.action && (
+                <button
+                  type="button"
+                  onClick={item.action.onClick}
+                  className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-200 hover:bg-blue-50"
+                >
+                  {item.action.label}
+                </button>
+              )}
             </li>
           ))}
         </ul>
