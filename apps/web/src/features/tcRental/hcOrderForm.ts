@@ -26,6 +26,16 @@ import type ExcelJS from "exceljs";
 import type { BuildingFrameProfile, RentalSpan, TcRentalPlan } from "./types";
 import { parseYmd } from "./engine/dates";
 import { resolveHoistHeight, resolveOperation } from "./engine/profile";
+import {
+  cloneRows,
+  insertRows,
+  mergeRanges,
+  parseRange,
+  remapFormulas,
+  shiftRow,
+  unmerge,
+  type RowInsert,
+} from "./sheetRows";
 
 const TEMPLATE_URL = "/templates/hc-order-template.xlsx";
 
@@ -42,12 +52,52 @@ const KEEP_SHEETS = [
   "첨부2. 호이스트 입찰 기준안",
 ];
 
-/** 각 시트의 데이터 구간 — 양식이 8줄(동 4개 × 라인 2개)로 고정돼 있다 */
+/**
+ * 양식 원본(부산장안 — 동 4개 × 라인 2개 = **8줄**)의 행 배치.
+ *
+ * 우리 현장이 더 크면 `growSheets` 가 이 자리에 줄을 끼워 넣는다. 아래 숫자는 그때도
+ * **양식 원본 기준점**으로 남고, 실제 행 번호는 `HcLayout` 에서 받아 쓴다.
+ */
 const MAX_ROWS = 8;
 const CALC_FIRST_ROW = 11; // (건설용리프트)임대기간산출 — 1. 임대기간 산정
 const ETC_FIRST_ROW = 25; // 같은 시트 — 2. 기타장비
 const TERM_FIRST_ROW = 5; // 임대기간
 const HEIGHT_FIRST_ROW = 4; // 설치높이 산정
+const PLACE_FIRST_ROW = 5; // 건설용리프트설치위치도 — 대수 표
+/**
+ * 입면도 — 한 블록이 **도면 한 장**(37행)이고 리프트 2대를 담는다.
+ *
+ *   제목 1행 + 도면 자리 26행 + 소제목 1행 + 표 8행(머리글·5줄·합계) + 여백 2행 = 37
+ *
+ * 양식에는 4블록(리프트 8대)이 그려져 있다. 더 필요하면 `growElevation` 이 **마지막 블록을
+ * 시트 뒤에 그대로 복제**한다 — 표처럼 줄을 끼워 넣으면 도면 자리가 무너지기 때문이다.
+ */
+const ELEV_BLOCK_ROWS = 37;
+const ELEV_FIRST_TITLE = 2;
+/** 소제목(높이 산식 표의 머리)은 제목에서 27행 아래 */
+const ELEV_HEAD_OFFSET = 27;
+/** 양식에 원래 그려져 있는 블록 수 */
+const ELEV_TEMPLATE_BLOCKS = 4;
+/** 블록 번호(0부터) → [제목행, 소제목행] */
+const elevBlock = (k: number): [number, number] => {
+  const title = ELEV_FIRST_TITLE + k * ELEV_BLOCK_ROWS;
+  return [title, title + ELEV_HEAD_OFFSET];
+};
+
+/** 리프트 대수에 맞춰 입면도 블록을 늘린다. 양식의 마지막 블록이 본보기다 */
+function growElevation(ws: ExcelJS.Worksheet, need: number): void {
+  const add = need - ELEV_TEMPLATE_BLOCKS;
+  if (add <= 0) return;
+  const [srcTitle] = elevBlock(ELEV_TEMPLATE_BLOCKS - 1);
+  const srcLast = srcTitle + ELEV_BLOCK_ROWS - 1;
+  for (let b = 0; b < add; b += 1) {
+    const [dstTitle] = elevBlock(ELEV_TEMPLATE_BLOCKS + b);
+    cloneRows(ws, srcTitle, srcLast, dstTitle - srcTitle, [1, 14]);
+  }
+  // 인쇄 영역을 늘어난 끝까지 넓힌다 — 그러지 않으면 새 블록이 인쇄에서 잘린다
+  const lastRow = elevBlock(need - 1)[0] + ELEV_BLOCK_ROWS - 1;
+  if (ws.pageSetup) ws.pageSetup.printArea = `A1:J${lastRow}`;
+}
 
 /** 임대기간 시트의 월 칸 — D(4) ~ X(24) */
 const TERM_MONTH_FIRST_COL = 4;
@@ -56,6 +106,69 @@ const TERM_MONTH_LAST_COL = 24;
 export interface HcOrderInput {
   plan: TcRentalPlan;
   spans: RentalSpan[];
+}
+
+/** 줄을 끼워 넣은 뒤의 **실제** 행 번호 — 채우는 코드는 전부 이 값만 본다 */
+interface HcLayout {
+  /** 실제로 쓰는 줄 수 (양식 8줄보다 적으면 8줄을 그대로 두고 남는 줄을 비운다) */
+  rows: number;
+  calcFirst: number;
+  calcLast: number;
+  etcFirst: number;
+  etcLast: number;
+  termLast: number;
+  heightLast: number;
+  placeLast: number;
+  /** 양식에 남아 있는 **다른 현장(501~505동) 표** — 밀려 내려간 자리 */
+  strayFirst: number;
+  strayLast: number;
+}
+
+/**
+ * 양식의 데이터 구간을 우리 대수만큼 **늘린다.**
+ *
+ * 줄은 언제나 **블록의 마지막 줄 앞**에 끼워 넣는다 — 그래야 `SUM(G11:G18)` 같은 범위의
+ * 끝이 함께 밀려 새 줄을 품는다. 근거와 함정은 `sheetRows.ts` 에 적어 두었다.
+ */
+function growSheets(wb: ExcelJS.Workbook, count: number): HcLayout {
+  const add = Math.max(0, count - MAX_ROWS);
+  const last = (first: number) => first + MAX_ROWS - 1;
+  const ins = {
+    "(건설용리프트)임대기간산출": [
+      { at: last(CALC_FIRST_ROW), count: add },
+      { at: last(ETC_FIRST_ROW), count: add },
+    ],
+    임대기간: [{ at: last(TERM_FIRST_ROW), count: add }],
+    "설치높이 산정": [{ at: last(HEIGHT_FIRST_ROW), count: add }],
+    건설용리프트설치위치도: [{ at: last(PLACE_FIRST_ROW), count: add }],
+  } satisfies Record<string, RowInsert[]>;
+
+  const shifts = new Map<string, RowInsert[]>(Object.entries(ins));
+  for (const [name, list] of shifts) {
+    const ws = wb.getWorksheet(name);
+    if (!ws) continue;
+    // 아래쪽부터 끼워야 위쪽 삽입이 아래 지점의 행 번호를 밀지 않는다
+    for (const { at, count: n } of [...list].sort((a, b) => b.at - a.at)) {
+      insertRows(ws, at, n, at, [1, 26]);
+    }
+  }
+  remapFormulas(wb, shifts);
+
+  const rows = Math.max(count, MAX_ROWS);
+  const etcFirst = ETC_FIRST_ROW + add;
+  const placeAt = (row: number) => shiftRow(ins.건설용리프트설치위치도, row);
+  return {
+    rows,
+    calcFirst: CALC_FIRST_ROW,
+    calcLast: CALC_FIRST_ROW + rows - 1,
+    etcFirst,
+    etcLast: etcFirst + rows - 1,
+    termLast: TERM_FIRST_ROW + rows - 1,
+    heightLast: HEIGHT_FIRST_ROW + rows - 1,
+    placeLast: PLACE_FIRST_ROW + rows - 1,
+    strayFirst: placeAt(29),
+    strayLast: placeAt(34),
+  };
 }
 
 /** 한 줄 = 리프트 한 대 (호기 + 담당 동) */
@@ -123,22 +236,6 @@ function pruneDefinedNames(wb: ExcelJS.Workbook, keep: string[]) {
   dn!.model = model.filter((e) => (e.ranges?.length ?? 0) > 0);
 }
 
-/** "B11:B12" → 범위 숫자 */
-function parseRange(range: string) {
-  const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range.replace(/\$/g, ""));
-  if (!m) return null;
-  const col = (t: string) => [...t].reduce((a, ch) => a * 26 + (ch.charCodeAt(0) - 64), 0);
-  return { c1: col(m[1]), r1: Number(m[2]), c2: col(m[3]), r2: Number(m[4]) };
-}
-
-function unmerge(ws: ExcelJS.Worksheet, range: string) {
-  try {
-    ws.unMergeCells(range);
-  } catch {
-    /* 이미 병합이 아니면 무시 */
-  }
-}
-
 /**
  * 구간에 걸친 병합을 전부 푼다.
  *
@@ -146,11 +243,7 @@ function unmerge(ws: ExcelJS.Worksheet, range: string) {
  * 짐작으로 풀면 반드시 빠뜨리고, 빠뜨린 자리는 음영·테두리가 어긋난 채 남는다.
  */
 function unmergeRegion(ws: ExcelJS.Worksheet, r1: number, r2: number, c1: number, c2: number) {
-  const raw = (ws as unknown as { _merges?: Record<string, { range?: string }> })._merges ?? {};
-  const ranges = Object.values(raw)
-    .map((m) => (typeof m === "string" ? m : m?.range))
-    .filter((x): x is string => typeof x === "string");
-  for (const range of ranges) {
+  for (const range of mergeRanges(ws)) {
     const g = parseRange(range);
     if (!g) continue;
     if (g.r2 < r1 || g.r1 > r2 || g.c2 < c1 || g.c1 > c2) continue;
@@ -250,12 +343,12 @@ function pruneMedia(wb: ExcelJS.Workbook) {
  * 설치계획 및 주변현황도 — 도면은 지우고 옆의 대수 표만 우리 배정으로 채운다.
  * 아래쪽(29~34행)에는 또 다른 현장(501~505동)의 표가 남아 있어 함께 비운다.
  */
-function fillPlacement(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[]) {
+function fillPlacement(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[], L: HcLayout) {
   dropImages(ws);
   ws.getCell("A2").value = `■ 현장명 : ${plan.siteName}`;
 
-  const first = 5;
-  const last = first + MAX_ROWS - 1;
+  const first = PLACE_FIRST_ROW;
+  const last = L.placeLast;
   unmergeRegion(ws, first, last, 9, 13);
   stampRows(ws, first, last, 9, 13, first);
   clearRegion(ws, first, last, 9, 13);
@@ -271,7 +364,7 @@ function fillPlacement(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[
   mergeByBuilding(ws, "I", first, lines);
 
   // 다른 현장의 잔재 표
-  clearRegion(ws, 29, 34, 15, 26);
+  clearRegion(ws, L.strayFirst, L.strayLast, 15, 26);
 }
 
 /**
@@ -283,14 +376,11 @@ function fillPlacement(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[
 function fillElevation(ws: ExcelJS.Worksheet, lines: HcLine[]) {
   dropImages(ws);
 
-  /** [제목행, 소제목행] — 소제목 아래 6줄이 산식 표다 */
-  const blocks: Array<[number, number]> = [
-    [2, 29],
-    [39, 66],
-    [76, 103],
-    [113, 140],
-  ];
+  // 두 대가 한 블록이다. 홀수면 마지막 블록의 오른쪽 칸이 빈다
+  const need = Math.max(ELEV_TEMPLATE_BLOCKS, Math.ceil(lines.length / 2));
+  growElevation(ws, need);
 
+  const blocks = Array.from({ length: need }, (_, k) => elevBlock(k));
   blocks.forEach(([titleRow, headRow], k) => {
     const pair = [lines[k * 2], lines[k * 2 + 1]];
     const names = pair.filter(Boolean).map((l) => l.building.name);
@@ -647,6 +737,7 @@ function fillCalc(
   plan: TcRentalPlan,
   lines: HcLine[],
   today: string,
+  L: HcLayout,
 ): { rent: TotalRows; etc: TotalRows } {
   const d = parseYmd(today);
   if (d) {
@@ -659,8 +750,10 @@ function fillCalc(
   ws.getCell("E7").value = Math.round(plan.params.hc.floorHeight.first * 1000);
   ws.getCell("G7").value = Math.round(plan.params.hc.floorHeight.top * 1000);
 
-  for (const first of [CALC_FIRST_ROW, ETC_FIRST_ROW]) {
-    const last = first + MAX_ROWS - 1;
+  for (const [first, last] of [
+    [L.calcFirst, L.calcLast],
+    [L.etcFirst, L.etcLast],
+  ]) {
     unmergeRegion(ws, first, last, 1, 16);
     stampRows(ws, first, last, 1, 16, first);
     clearRegion(ws, first, last, 1, 18);
@@ -668,7 +761,7 @@ function fillCalc(
 
   lines.forEach((ln, i) => {
     const b = ln.building;
-    const r = CALC_FIRST_ROW + i;
+    const r = L.calcFirst + i;
     ws.getCell(`A${r}`).value = b.name;
     fitColumn(ws, "A", b.name);
     ws.getCell(`B${r}`).value = null; // 라인(세대)은 현장 기입
@@ -686,7 +779,7 @@ function fillCalc(
     ws.getCell(`N${r}`).value = { formula: `M${r}-L${r}` };
     ws.getCell(`O${r}`).value = `${ln.no}호기`;
 
-    const e = ETC_FIRST_ROW + i;
+    const e = L.etcFirst + i;
     ws.getCell(`A${e}`).value = b.name;
     ws.getCell(`C${e}`).value = b.aboveFloors;
     ws.getCell(`D${e}`).value = { formula: `+C${e}-5` };
@@ -705,11 +798,11 @@ function fillCalc(
   });
 
   // 비고(O:P)는 양식이 줄마다 두 칸을 묶는다 — 병합을 풀었으니 다시 묶어 준다
-  for (let r = CALC_FIRST_ROW; r < CALC_FIRST_ROW + MAX_ROWS; r += 1) {
+  for (let r = L.calcFirst; r <= L.calcLast; r += 1) {
     ws.mergeCells(`O${r}:P${r}`);
   }
-  mergeByBuilding(ws, "A", CALC_FIRST_ROW, lines);
-  mergeByBuilding(ws, "A", ETC_FIRST_ROW, lines);
+  mergeByBuilding(ws, "A", L.calcFirst, lines);
+  mergeByBuilding(ws, "A", L.etcFirst, lines);
 
   // 규격별 합계 — 저속싱글과 중속싱글은 단가가 달라 한 줄로 묶을 수 없다
   let specs = specsOf(lines);
@@ -720,26 +813,26 @@ function fillCalc(
   }
   const rent = layoutTotals(
     ws,
-    CALC_FIRST_ROW + MAX_ROWS, // 19행
+    L.calcLast + 1, // 양식 원본 기준 19행
     specs,
     ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"],
     // 공기(G) · 임대기간(I) · 설치라인(K) · 견적(L) · 현장(M) · 차이(N)
     ["G", "I", "K", "L", "M", "N"],
     (row, col) =>
-      `SUMIF($J$${CALC_FIRST_ROW}:$J$${CALC_FIRST_ROW + MAX_ROWS - 1},$C${row},$${col}$${CALC_FIRST_ROW}:$${col}$${CALC_FIRST_ROW + MAX_ROWS - 1})`,
-    (col) => `SUM(${col}${CALC_FIRST_ROW}:${col}${CALC_FIRST_ROW + MAX_ROWS - 1})`,
+      `SUMIF($J$${L.calcFirst}:$J$${L.calcLast},$C${row},$${col}$${L.calcFirst}:$${col}$${L.calcLast})`,
+    (col) => `SUM(${col}${L.calcFirst}:${col}${L.calcLast})`,
   );
   const etc = layoutTotals(
     ws,
-    ETC_FIRST_ROW + MAX_ROWS, // 33행
+    L.etcLast + 1, // 양식 원본 기준 33행
     specs,
     ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"],
     // 임대기간(H) · 무인운행(I) · 안전문(J) · 발판(K) · 층표시판(L) · 설치해체(M)
     // · 운반비(N) · 무인운행 설해체(O) · 장비비(P)
     ["H", "I", "J", "K", "L", "M", "N", "O", "P"],
     (row, col) =>
-      `SUMIF($G$${ETC_FIRST_ROW}:$G$${ETC_FIRST_ROW + MAX_ROWS - 1},$C${row},$${col}$${ETC_FIRST_ROW}:$${col}$${ETC_FIRST_ROW + MAX_ROWS - 1})`,
-    (col) => `SUM(${col}${ETC_FIRST_ROW}:${col}${ETC_FIRST_ROW + MAX_ROWS - 1})`,
+      `SUMIF($G$${L.etcFirst}:$G$${L.etcLast},$C${row},$${col}$${L.etcFirst}:$${col}$${L.etcLast})`,
+    (col) => `SUM(${col}${L.etcFirst}:${col}${L.etcLast})`,
   );
   // 규격이 둘이면 합계가 한 줄 내려가 양식 인쇄 영역(34행) 밖으로 나간다
   if (ws.pageSetup) ws.pageSetup.printArea = `A1:P${etc.grand}`;
@@ -748,7 +841,7 @@ function fillCalc(
 }
 
 /** 임대기간 — 월별 투입 그리드. 칠한 칸 수가 곧 "현장" 임대개월이 된다 */
-function fillTerm(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[]) {
+function fillTerm(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[], L: HcLayout) {
   ws.getCell("A2").value = `■ 현장명 : ${plan.siteName}`;
 
   const all = lines.flatMap((l) => l.months).sort();
@@ -788,7 +881,7 @@ function fillTerm(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[]) {
     i = j + 1;
   }
 
-  const last = TERM_FIRST_ROW + MAX_ROWS - 1;
+  const last = L.termLast;
   unmergeRegion(ws, TERM_FIRST_ROW, last, 1, 26);
   stampRows(ws, TERM_FIRST_ROW, last, 1, 26, TERM_FIRST_ROW);
   clearRegion(ws, TERM_FIRST_ROW, last, 1, 26);
@@ -798,10 +891,10 @@ function fillTerm(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[]) {
     ws.getCell(`A${r}`).value = ln.building.name;
     fitColumn(ws, "A", ln.building.name);
     ws.getCell(`B${r}`).value = {
-      formula: `'(건설용리프트)임대기간산출'!B${CALC_FIRST_ROW + idx}`,
+      formula: `'(건설용리프트)임대기간산출'!B${L.calcFirst + idx}`,
     };
     ws.getCell(`C${r}`).value = {
-      formula: `'(건설용리프트)임대기간산출'!C${CALC_FIRST_ROW + idx}`,
+      formula: `'(건설용리프트)임대기간산출'!C${L.calcFirst + idx}`,
     };
     const on = new Set(ln.months);
     for (let k = 0; k < capacity; k += 1) {
@@ -822,10 +915,10 @@ function fillTerm(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[]) {
  * 추정해 넣으면 그대로 설치비·해체비 수량(M)이 된다. 비고에 표시해 두면 한 칸만 채워도
  * 값과 설치높이가 그 자리에서 맞춰진다.
  */
-function fillHeight(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[]) {
+function fillHeight(ws: ExcelJS.Worksheet, plan: TcRentalPlan, lines: HcLine[], L: HcLayout) {
   ws.getCell("A2").value = `■ 현장명 : ${plan.siteName}`;
 
-  const last = HEIGHT_FIRST_ROW + MAX_ROWS - 1;
+  const last = L.heightLast;
   unmergeRegion(ws, HEIGHT_FIRST_ROW, last, 1, 16);
   stampRows(ws, HEIGHT_FIRST_ROW, last, 1, 16, HEIGHT_FIRST_ROW);
   clearRegion(ws, HEIGHT_FIRST_ROW, last, 1, 16);
@@ -893,11 +986,6 @@ export async function generateHcOrderForm({ plan, spans }: HcOrderInput): Promis
   if (lines.length === 0) {
     throw new Error("건설용리프트 배정이 없습니다. ② 호기 배정에서 먼저 지정하세요.");
   }
-  if (lines.length > MAX_ROWS) {
-    overflow.push(`${lines.length - MAX_ROWS}개 라인이 양식 줄 수(${MAX_ROWS})를 넘어 빠졌습니다`);
-  }
-  const used = lines.slice(0, MAX_ROWS);
-
   const XL = (await import("exceljs")).default;
 
   const res = await fetch(TEMPLATE_URL);
@@ -916,20 +1004,27 @@ export async function generateHcOrderForm({ plan, spans }: HcOrderInput): Promis
     now.getDate(),
   ).padStart(2, "0")}`;
 
+  // 우리 현장이 양식(8줄)보다 크면 **먼저 줄을 늘린다.** 값을 채운 뒤에 늘리면
+  // 방금 쓴 수식까지 한 번 더 밀려 내려간다.
+  const L = growSheets(wb, lines.length);
+
   fillCover(wb, plan, today);
   const place = wb.getWorksheet("건설용리프트설치위치도");
-  if (place) fillPlacement(place, plan, used);
+  if (place) fillPlacement(place, plan, lines, L);
   const elev = wb.getWorksheet("입면도");
-  if (elev) fillElevation(elev, used);
+  if (elev) fillElevation(elev, lines);
   const calc = wb.getWorksheet("(건설용리프트)임대기간산출");
   const totals = calc
-    ? fillCalc(calc, plan, used, today)
-    : { rent: { spec: new Map<string, number>(), grand: 20 }, etc: { spec: new Map<string, number>(), grand: 34 } };
+    ? fillCalc(calc, plan, lines, today, L)
+    : {
+        rent: { spec: new Map<string, number>(), grand: L.calcLast + 2 },
+        etc: { spec: new Map<string, number>(), grand: L.etcLast + 2 },
+      };
   const term = wb.getWorksheet("임대기간");
-  if (term) fillTerm(term, plan, used);
+  if (term) fillTerm(term, plan, lines, L);
   const height = wb.getWorksheet("설치높이 산정");
-  if (height) fillHeight(height, plan, used);
-  fillBoq(wb, plan, used, totals.rent, totals.etc);
+  if (height) fillHeight(height, plan, lines, L);
+  fillBoq(wb, plan, lines, totals.rent, totals.etc);
 
   pruneMedia(wb);
 

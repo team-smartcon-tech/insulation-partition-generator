@@ -17,15 +17,41 @@ import type ExcelJS from "exceljs";
 import type { RentalSpan, TcRentalPlan } from "./types";
 import { parseYmd } from "./engine/dates";
 import { addReviewSheet } from "./tcReviewSheet";
+import {
+  insertRows,
+  mergeRanges,
+  parseRange,
+  remapFormulas,
+  shiftRow,
+  unmerge,
+  type RowInsert,
+} from "./sheetRows";
 
 const TEMPLATE_URL = "/templates/tc-order-template.xlsx";
 
 /** 요청받은 6개 탭만 남긴다 */
 const KEEP_SHEETS = ["표지", "내역서", "산출서", "발주수량 검토", "임대기간", "타워크레인 건널다리"];
 
-/** 임대기간 시트의 데이터 구간 (템플릿 기준 11~22행, 6호기 12행) */
-/** 양식 원본 현장의 타워 대수 — 공사비 수량에 이 숫자로 박혀 있어 우리 호기 수로 바꾼다 */
-const TEMPLATE_UNITS = 6;
+/**
+ * 양식 원본(이천중리2차 — 타워 **6호기**, 임대기간 **12줄**)의 행 배치.
+ *
+ * 우리 현장이 더 크면 `growSheets` 가 이 자리에 줄을 끼워 넣는다. 아래 숫자는 그때도
+ * **양식 원본 기준점**으로 남고, 실제 행 번호는 `shiftRow` 로 옮겨 쓴다.
+ */
+const TPL = {
+  /** 원본 현장의 타워 대수 — 공사비 수량에 이 숫자로 박혀 있어 우리 호기 수로 바꾼다 */
+  units: 6,
+  /** 임대기간: 11~22 데이터, 23 합계, 25 해체시기 안내 */
+  rent: { first: 11, rows: 12, sum: 23, note: 25 },
+  /** 산출서: 5~10 호기, 11 계, 12~38 추가마스터, 39 합계 */
+  calc: { first: 5, rows: 6, sum: 11, extraFirst: 12, extraLast: 38, total: 39 },
+  /** 발주수량 검토: 7~12 임대료, 13 추가마스터, 15~29 공사비, 31~36 초과근무, 38~40 보험 */
+  qty: { first: 7, master: 13, workFirst: 15, workLast: 29, otFirst: 31, insFirst: 38, insLast: 40 },
+  /** 내역서: 6~11 임대료, 12 추가마스터, 15~29 공사비, 32~37 초과근무, 41~45 보험 */
+  boq: { first: 6, master: 12, workFirst: 15, workLast: 29, otFirst: 32, insFirst: 41, insLast: 45 },
+} as const;
+
+const TEMPLATE_UNITS = TPL.units;
 
 /**
  * 양식에 박힌 원본 현장 수량을 우리 현장 값으로 옮긴다.
@@ -51,14 +77,26 @@ function siteQty(v: unknown, units: number): number | null {
   return null;
 }
 
-const RENT_FIRST_ROW = 11;
-const RENT_MODEL_ROWS = 12;
+/** 초과근무수당 규격 — 양식이 호기마다 같은 글자를 적어 둔다 */
+const OT_SPEC = "(평일:1시간,토요일:7시간)";
+
+/**
+ * 내역서의 금액 칸을 채운다 — 재료비·노무비·경비 금액과 합계.
+ *
+ * 양식은 줄마다 `F=D*E · H=D*G · J=D*I · K=E+G+I · L=F+H+J` 를 갖고 있는데,
+ * **새로 끼워 넣은 줄에는 없다.** 단가를 적어도 금액이 0 으로 남아 합계에서 빠진다.
+ */
+function money(ws: ExcelJS.Worksheet, r: number) {
+  ws.getCell(`F${r}`).value = { formula: `D${r}*E${r}` };
+  ws.getCell(`H${r}`).value = { formula: `D${r}*G${r}` };
+  ws.getCell(`J${r}`).value = { formula: `D${r}*I${r}` };
+  ws.getCell(`K${r}`).value = { formula: `E${r}+G${r}+I${r}` };
+  ws.getCell(`L${r}`).value = { formula: `F${r}+H${r}+J${r}` };
+}
+
 /** 호기 블록 단위로 병합되는 칸 (타워·임대개월·비고) */
 const RENT_BLOCK_COLS = ["B", "I", "J", "K", "L", "M", "N", "O", "P"];
 
-/** 산출서 시트의 호기 구간 (템플릿 기준 5~10행) */
-const CALC_FIRST_ROW = 5;
-const CALC_MODEL_ROWS = 6;
 /** 산출서 월 칸 — H(8) ~ AF(32) */
 const CALC_MONTH_FIRST_COL = 8;
 const CALC_MONTH_LAST_COL = 32;
@@ -68,10 +106,131 @@ const CALC_MONTH_LAST_COL = 32;
  * 이래야 6호기까지 행을 늘리지 않고 들어간다. 브레싱 차수·EA·층은 현장이 채우는 칸이라
  * 라벨과 소계 수식만 깔아 둔다.
  */
-const EXTRA_FIRST_ROW = 12;
-const EXTRA_LAST_ROW = 38;
 const EXTRA_BLOCK_ROWS = 4;
-const EXTRA_TOTAL_ROW = 39;
+
+/** 줄을 끼워 넣은 뒤의 **실제** 행 번호 — 채우는 코드는 전부 이 값만 본다 */
+interface TcLayout {
+  /** 타워 대수 (양식 원본보다 적으면 양식 줄 수를 그대로 쓰고 남는 줄을 비운다) */
+  units: number;
+  rent: { first: number; rows: number; last: number; sum: number; note: number };
+  calc: {
+    first: number;
+    rows: number;
+    last: number;
+    sum: number;
+    extraFirst: number;
+    extraLast: number;
+    total: number;
+  };
+  qty: {
+    first: number;
+    rows: number;
+    master: number;
+    workFirst: number;
+    workLast: number;
+    otFirst: number;
+    insFirst: number;
+    insLast: number;
+  };
+  boq: {
+    first: number;
+    rows: number;
+    master: number;
+    workFirst: number;
+    workLast: number;
+    otFirst: number;
+    insFirst: number;
+    insLast: number;
+  };
+}
+
+/**
+ * 양식의 데이터 구간을 우리 현장 크기로 **늘린다.**
+ *
+ * 줄은 언제나 **블록의 마지막 줄 앞**에 끼워 넣는다 — 그래야 그 블록을 더하는 범위
+ * (`SUM(F6:F12)` 등)의 끝이 함께 밀려 새 호기를 품는다. 자세한 근거는 `sheetRows.ts`.
+ * 끼워 넣기가 끝나면 `remapFormulas` 가 양식에 박힌 옛 행 번호를 한 번에 옮긴다.
+ */
+function growSheets(wb: ExcelJS.Workbook, units: number, rentRows: number): TcLayout {
+  const addUnits = Math.max(0, units - TPL.units);
+  const addRent = Math.max(0, rentRows - TPL.rent.rows);
+  /** 추가마스터 구간이 호기당 4줄을 담으려면 몇 줄이 더 필요한가 */
+  const extraCapacity = TPL.calc.extraLast - TPL.calc.extraFirst + 1;
+  const addExtra = Math.max(0, units * EXTRA_BLOCK_ROWS - extraCapacity);
+
+  const ins = {
+    임대기간: [{ at: TPL.rent.first + TPL.rent.rows - 1, count: addRent }],
+    산출서: [
+      { at: TPL.calc.first + TPL.calc.rows - 1, count: addUnits },
+      { at: TPL.calc.extraLast, count: addExtra },
+    ],
+    "발주수량 검토": [
+      { at: TPL.qty.first + TPL.units - 1, count: addUnits },
+      { at: TPL.qty.otFirst + TPL.units - 1, count: addUnits },
+    ],
+    내역서: [
+      { at: TPL.boq.first + TPL.units - 1, count: addUnits },
+      { at: TPL.boq.otFirst + TPL.units - 1, count: addUnits },
+    ],
+  } satisfies Record<string, RowInsert[]>;
+
+  const shifts = new Map<string, RowInsert[]>(Object.entries(ins));
+  for (const [name, list] of shifts) {
+    const ws = wb.getWorksheet(name);
+    if (!ws) continue;
+    // 아래쪽부터 끼워야 위쪽 삽입이 아래 지점의 행 번호를 밀지 않는다
+    for (const { at, count } of [...list].sort((a, b) => b.at - a.at)) {
+      insertRows(ws, at, count, at, [1, 34]);
+    }
+  }
+  remapFormulas(wb, shifts);
+
+  const rentAt = (row: number) => shiftRow(ins.임대기간, row);
+  const calcAt = (row: number) => shiftRow(ins.산출서, row);
+  const qtyAt = (row: number) => shiftRow(ins["발주수량 검토"], row);
+  const boqAt = (row: number) => shiftRow(ins.내역서, row);
+  const rows = Math.max(units, TPL.units);
+
+  return {
+    units,
+    rent: {
+      first: TPL.rent.first,
+      rows: Math.max(rentRows, TPL.rent.rows),
+      last: rentAt(TPL.rent.first + TPL.rent.rows - 1),
+      sum: rentAt(TPL.rent.sum),
+      note: rentAt(TPL.rent.note),
+    },
+    calc: {
+      first: TPL.calc.first,
+      rows,
+      last: calcAt(TPL.calc.first + TPL.calc.rows - 1),
+      sum: calcAt(TPL.calc.sum),
+      extraFirst: calcAt(TPL.calc.extraFirst),
+      extraLast: calcAt(TPL.calc.extraLast),
+      total: calcAt(TPL.calc.total),
+    },
+    qty: {
+      first: TPL.qty.first,
+      rows,
+      master: qtyAt(TPL.qty.master),
+      workFirst: qtyAt(TPL.qty.workFirst),
+      workLast: qtyAt(TPL.qty.workLast),
+      otFirst: qtyAt(TPL.qty.otFirst),
+      insFirst: qtyAt(TPL.qty.insFirst),
+      insLast: qtyAt(TPL.qty.insLast),
+    },
+    boq: {
+      first: TPL.boq.first,
+      rows,
+      master: boqAt(TPL.boq.master),
+      workFirst: boqAt(TPL.boq.workFirst),
+      workLast: boqAt(TPL.boq.workLast),
+      otFirst: boqAt(TPL.boq.otFirst),
+      insFirst: boqAt(TPL.boq.insFirst),
+      insLast: boqAt(TPL.boq.insLast),
+    },
+  };
+}
 
 export interface TcOrderInput {
   plan: TcRentalPlan;
@@ -173,14 +332,6 @@ function clearRegion(ws: ExcelJS.Worksheet, r1: number, r2: number, c1: number, 
   }
 }
 
-/** "B11:B12" → {r1,c1,r2,c2} */
-function parseRange(range: string) {
-  const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range.replace(/\$/g, ""));
-  if (!m) return null;
-  const col = (t: string) => [...t].reduce((a, ch) => a * 26 + (ch.charCodeAt(0) - 64), 0);
-  return { c1: col(m[1]), r1: Number(m[2]), c2: col(m[3]), r2: Number(m[4]) };
-}
-
 /**
  * 구간에 걸친 병합을 **전부** 푼다.
  *
@@ -189,11 +340,7 @@ function parseRange(range: string) {
  * 그래서 시트가 실제로 가진 병합 목록을 훑어 겹치는 것을 지운다.
  */
 function unmergeRegion(ws: ExcelJS.Worksheet, r1: number, r2: number, c1: number, c2: number) {
-  const raw = (ws as unknown as { _merges?: Record<string, { range?: string }> })._merges ?? {};
-  const ranges = Object.values(raw)
-    .map((m) => (typeof m === "string" ? m : m?.range))
-    .filter((x): x is string => typeof x === "string");
-  for (const range of ranges) {
+  for (const range of mergeRanges(ws)) {
     const g = parseRange(range);
     if (!g) continue;
     if (g.r2 < r1 || g.r1 > r2 || g.c2 < c1 || g.c1 > c2) continue;
@@ -232,15 +379,6 @@ function stampBlockStyles(
     blockCols.forEach((c, i) => {
       ws.getCell(`${c}${r}`).style = { ...blockHead[i] };
     });
-  }
-}
-
-/** 병합을 지운다 — 범위가 비어 있어도 조용히 넘어간다 */
-function unmerge(ws: ExcelJS.Worksheet, range: string) {
-  try {
-    ws.unMergeCells(range);
-  } catch {
-    /* 이미 병합이 아니면 무시 */
   }
 }
 
@@ -288,6 +426,7 @@ function fillRental(
   plan: TcRentalPlan,
   tc: RentalSpan[],
   today: string,
+  L: TcLayout,
 ): Map<number, number> {
   const byId = new Map(plan.buildings.map((b) => [b.id, b]));
   const blocks = tc.map((s) => ({
@@ -304,13 +443,14 @@ function fillRental(
   ws.getCell("A3").value = `■ 현장명 : ${plan.siteName}`;
 
   // 기존 병합을 모두 풀고(행 수가 달라지므로) 데이터 구간을 다시 만든다
-  const last = RENT_FIRST_ROW + RENT_MODEL_ROWS - 1;
-  unmergeRegion(ws, RENT_FIRST_ROW, last, 1, 16);
+  const first = L.rent.first;
+  const last = L.rent.last;
+  unmergeRegion(ws, first, last, 1, 16);
 
   // 우리 호기 배치대로 블록 첫 행을 미리 정한다 — 서식을 찍으려면 먼저 알아야 한다
   const headRows = new Set<number>();
   {
-    let r = RENT_FIRST_ROW;
+    let r = first;
     for (const blk of blocks) {
       const n = Math.max(1, blk.buildings.length);
       if (r + n - 1 > last) break;
@@ -323,25 +463,25 @@ function fillRental(
   // 3호기 줄만 음영·테두리가 빠져 보였다.
   stampBlockStyles(
     ws,
-    RENT_FIRST_ROW,
+    first,
     last,
     ["C", "D", "E", "F", "G", "H"], // 동마다 한 줄인 칸
     RENT_BLOCK_COLS, // 호기 블록으로 묶이는 칸
-    RENT_FIRST_ROW,
-    RENT_FIRST_ROW + 1,
+    first,
+    first + 1,
     headRows,
   );
   // 현장명 열은 표 전체를 하나로 묶는 칸이라 첫 행 서식을 그대로 깐다
-  for (let r = RENT_FIRST_ROW; r <= last; r += 1) {
-    ws.getCell(`A${r}`).style = { ...ws.getCell(`A${RENT_FIRST_ROW}`).style };
+  for (let r = first; r <= last; r += 1) {
+    ws.getCell(`A${r}`).style = { ...ws.getCell(`A${first}`).style };
   }
 
   // 병합을 푼 뒤 값을 지워야 한다 — 병합된 칸은 값을 못 쓴다
-  clearRegion(ws, RENT_FIRST_ROW, last, 1, 19);
+  clearRegion(ws, first, last, 1, 19);
 
   /** 호기 → 블록 시작행. 발주수량 검토가 이 행을 참조한다 */
   const startRows = new Map<number, number>();
-  let row = RENT_FIRST_ROW;
+  let row = first;
   for (const blk of blocks) {
     // 양식의 칸을 넘으면 더 쓰지 않는다 — 넘겨 쓰면 합계 행을 덮어써 문서가 깨진다
     if (row + Math.max(1, blk.buildings.length) - 1 > last) {
@@ -379,25 +519,25 @@ function fillRental(
     }
   }
 
-  ws.getCell(`A${RENT_FIRST_ROW}`).value = plan.siteName;
+  ws.getCell(`A${first}`).value = plan.siteName;
   fitColumn(ws, "A", plan.siteName);
-  ws.mergeCells(`A${RENT_FIRST_ROW}:A${last}`);
+  ws.mergeCells(`A${first}:A${last}`);
 
   // 합계 행은 **양식에 고정된 자리**(데이터 구간 바로 아래)다. 채운 행 수에 따라 옮기면
   // 데이터 한가운데 합계가 끼어들고, 양식 원래 합계 행의 옛 수식(범위가 어긋난 것)이 그대로 남는다.
-  const sumRow = last + 1;
+  const sumRow = L.rent.sum;
   for (const col of ["I", "J", "K", "L", "M", "N", "O"]) {
     ws.getCell(`${col}${sumRow}`).value = {
-      formula: `SUM(${col}${RENT_FIRST_ROW}:${col}${last})`,
+      formula: `SUM(${col}${first}:${col}${last})`,
     };
   }
-  ws.getCell(`A${sumRow + 2}`).value =
+  ws.getCell(`A${L.rent.note}`).value =
     `★T/C 해체시기: 골조완료+${plan.params.tc.postFrameMonths}개월(全동 동일적용)+α`;
   return startRows;
 }
 
 /** 산출서 — 호기별 월 투입 그리드 */
-function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, tc: RentalSpan[]) {
+function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, tc: RentalSpan[], L: TcLayout) {
   ws.getCell("B2").value = `현장명 : ${plan.siteName}`;
 
   // 칠하는 칸 수가 곧 합계이고, 그 합계가 내역서 수량이 된다. 달력상 걸치는 달 수
@@ -443,19 +583,13 @@ function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, tc: RentalSpan[]) {
     i = j + 1;
   }
 
-  clearRegion(
-    ws,
-    CALC_FIRST_ROW,
-    CALC_FIRST_ROW + CALC_MODEL_ROWS - 1,
-    2,
-    34,
-  );
-  if (tc.length > CALC_MODEL_ROWS) {
-    overflow.push(`산출서: ${tc.length - CALC_MODEL_ROWS}개 호기`);
+  clearRegion(ws, L.calc.first, L.calc.last, 2, 34);
+  if (tc.length > L.calc.rows) {
+    overflow.push(`산출서: ${tc.length - L.calc.rows}개 호기`);
   }
 
-  tc.slice(0, CALC_MODEL_ROWS).forEach((s, idx) => {
-    const r = CALC_FIRST_ROW + idx;
+  tc.slice(0, L.calc.rows).forEach((s, idx) => {
+    const r = L.calc.first + idx;
     ws.getCell(`B${r}`).value = `타워크레인 (${s.no}호기)`;
     ws.getCell(`C${r}`).value = null; // 규격은 업체 선정 후 채운다
     ws.getCell(`D${r}`).value = "월";
@@ -478,7 +612,18 @@ function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, tc: RentalSpan[]) {
     ws.getCell(`AG${r}`).value = { formula: `SUM(H${r}:AF${r})` };
   });
 
-  fillExtraMaster(ws, tc);
+  // 계 행 — 늘어난 구간을 그대로 더한다(양식에 박힌 옛 범위를 믿지 않는다)
+  for (let c = CALC_MONTH_FIRST_COL; c <= CALC_MONTH_LAST_COL; c += 1) {
+    const col = ws.getColumn(c).letter;
+    ws.getRow(L.calc.sum).getCell(c).value = {
+      formula: `SUM(${col}${L.calc.first}:${col}${L.calc.last})`,
+    };
+  }
+  ws.getCell(`AG${L.calc.sum}`).value = {
+    formula: `SUM(AG${L.calc.first}:AG${L.calc.last})`,
+  };
+
+  fillExtraMaster(ws, tc, L);
 }
 
 /**
@@ -488,7 +633,7 @@ function fillCalc(ws: ExcelJS.Worksheet, plan: TcRentalPlan, tc: RentalSpan[]) {
  * 그렇다고 통째로 비우면 양식이 반쪽이 되므로, 우리 호기 수만큼 블록을 다시 세우고
  * 숫자 칸은 비워 둔다. 블록 경계가 원본과 달라지니 서식도 함께 다시 찍는다.
  */
-function fillExtraMaster(ws: ExcelJS.Worksheet, tc: RentalSpan[]) {
+function fillExtraMaster(ws: ExcelJS.Worksheet, tc: RentalSpan[], L: TcLayout) {
   const C1 = 2;
   const C2 = 34;
   const capture = (r: number) => {
@@ -497,23 +642,27 @@ function fillExtraMaster(ws: ExcelJS.Worksheet, tc: RentalSpan[]) {
     return out;
   };
   // 본보기는 병합을 풀기 **전에** 떠 둔다 — 풀면 아래 칸 서식이 지워진다
-  const model = { base: capture(12), step: capture(13), sub: capture(15) };
+  const model = {
+    base: capture(L.calc.extraFirst),
+    step: capture(L.calc.extraFirst + 1),
+    sub: capture(L.calc.extraFirst + EXTRA_BLOCK_ROWS - 1),
+  };
   const stamp = (r: number, m: Array<Record<string, unknown>>) => {
     for (let c = C1; c <= C2; c += 1) ws.getRow(r).getCell(c).style = { ...m[c - C1] };
   };
 
-  unmergeRegion(ws, EXTRA_FIRST_ROW, EXTRA_TOTAL_ROW, C1, C2);
-  for (let r = EXTRA_FIRST_ROW; r <= EXTRA_LAST_ROW; r += 1) {
+  unmergeRegion(ws, L.calc.extraFirst, L.calc.total, C1, C2);
+  for (let r = L.calc.extraFirst; r <= L.calc.extraLast; r += 1) {
     for (let c = C1; c <= C2; c += 1) ws.getRow(r).getCell(c).value = null;
   }
 
-  const capacity = Math.floor((EXTRA_LAST_ROW - EXTRA_FIRST_ROW + 1) / EXTRA_BLOCK_ROWS);
+  const capacity = Math.floor((L.calc.extraLast - L.calc.extraFirst + 1) / EXTRA_BLOCK_ROWS);
   const units = tc.slice(0, capacity);
   if (tc.length > capacity) overflow.push(`산출서 추가마스터: ${tc.length - capacity}개 호기`);
 
   const subRows: number[] = [];
   for (let i = 0; i < units.length; i += 1) {
-    const start = EXTRA_FIRST_ROW + i * EXTRA_BLOCK_ROWS;
+    const start = L.calc.extraFirst + i * EXTRA_BLOCK_ROWS;
     const sub = start + EXTRA_BLOCK_ROWS - 1;
     const no = units[i].no;
     subRows.push(sub);
@@ -546,17 +695,17 @@ function fillExtraMaster(ws: ExcelJS.Worksheet, tc: RentalSpan[]) {
   }
 
   // 남는 줄은 빈 표 줄로 둔다 — 원본 블록의 음영·굵은 선이 남지 않게
-  for (let r = EXTRA_FIRST_ROW + units.length * EXTRA_BLOCK_ROWS; r <= EXTRA_LAST_ROW; r += 1) {
+  for (let r = L.calc.extraFirst + units.length * EXTRA_BLOCK_ROWS; r <= L.calc.extraLast; r += 1) {
     stamp(r, model.step);
   }
 
   // 합계 행은 양식 고정 자리다. 소계 행이 바뀌었으니 참조를 다시 쓴다
   for (let c = CALC_MONTH_FIRST_COL; c <= CALC_MONTH_LAST_COL; c += 1) {
     const col = ws.getColumn(c).letter;
-    ws.getRow(EXTRA_TOTAL_ROW).getCell(c).value =
+    ws.getRow(L.calc.total).getCell(c).value =
       subRows.length > 0 ? { formula: subRows.map((r) => `${col}${r}`).join("+") } : null;
   }
-  ws.getCell(`AG${EXTRA_TOTAL_ROW}`).value =
+  ws.getCell(`AG${L.calc.total}`).value =
     subRows.length > 0 ? { formula: subRows.map((r) => `AG${r}`).join("+") } : null;
 }
 
@@ -566,11 +715,12 @@ function fillQty(
   plan: TcRentalPlan,
   tc: RentalSpan[],
   startRows: Map<number, number>,
+  L: TcLayout,
 ) {
   ws.getCell("B2").value = `[${plan.siteName}]`;
 
-  const firstRow = 7;
-  for (let i = 0; i < 6; i += 1) {
+  const firstRow = L.qty.first;
+  for (let i = 0; i < L.qty.rows; i += 1) {
     const r = firstRow + i;
     const s = tc[i];
     // 이 표는 **두 값을 나란히 놓고 차이를 보는 자리**다. 왼쪽 E 는 "가실행 수량(건축예산팀)",
@@ -590,44 +740,56 @@ function fillQty(
     ws.getCell(`F${r}`).value = s ? `타워크레인 (${s.no}호기)` : null;
     ws.getCell(`C${r}`).value = null; // 규격 — 업체 선정 후
     ws.getCell(`G${r}`).value = null;
+    // 단위는 양식이 채워 두지만 **새로 끼워 넣은 줄은 비어 있다**
+    ws.getCell(`D${r}`).value = s ? "월" : null;
     if (!s) {
-      for (const col of ["D", "H"]) ws.getCell(`${col}${r}`).value = null;
+      for (const col of ["H"]) ws.getCell(`${col}${r}`).value = null;
     }
   }
   // 추가마스터 임대료 — 우리가 산출하지 않는 항목이라 원본 값(280)을 그대로 두면 안 된다
-  ws.getCell("E13").value = null;
-  ws.getCell("I13").value = null;
+  ws.getCell(`E${L.qty.master}`).value = null;
+  ws.getCell(`I${L.qty.master}`).value = null;
   // 2. 공사비 — 양식에 박힌 "6" 은 원본 현장의 **타워 대수**다(기초앙카 6조, 설치·해체 6회…).
   // 그래서 그 자리만 우리 호기 수로 바꾼다. 16(인상·브레싱 횟수)이나 280(추가마스터 개월)은
   // 층수·설계에 달린 값이라 우리가 산출하지 않으므로 비운다. 1(풍속계 1조)은 대수와 무관해 둔다.
   const units = tc.length;
-  for (const r of [...rangeRows(15, 29), ...rangeRows(38, 40)]) {
+  for (const r of [
+    ...rangeRows(L.qty.workFirst, L.qty.workLast),
+    ...rangeRows(L.qty.insFirst, L.qty.insLast),
+  ]) {
     const qty = siteQty(ws.getCell(`E${r}`).value, units);
     ws.getCell(`E${r}`).value = qty;
     ws.getCell(`I${r}`).value = qty;
   }
   // 3. 초과근무수당 — 임대 개월과 같은 값이라 임대료 행을 그대로 따라간다(좌·우 각각)
-  for (let i = 0; i < 6; i += 1) {
-    const r = 31 + i;
-    if (!tc[i]) {
+  for (let i = 0; i < L.qty.rows; i += 1) {
+    const r = L.qty.otFirst + i;
+    const s = tc[i];
+    if (!s) {
       for (const col of ["B", "C", "D", "E", "F", "G", "H", "I"]) {
         ws.getCell(`${col}${r}`).value = null;
       }
       continue;
     }
+    // 품명·규격·단위는 양식이 6호기까지만 채워 두었다 — 끼워 넣은 줄에 직접 쓴다
+    ws.getCell(`B${r}`).value = `${s.no}호기`;
+    ws.getCell(`C${r}`).value = OT_SPEC;
+    ws.getCell(`D${r}`).value = "개월";
+    ws.getCell(`F${r}`).value = `${s.no}호기`;
+    ws.getCell(`G${r}`).value = OT_SPEC;
     ws.getCell(`E${r}`).value = { formula: `E${firstRow + i}` };
     ws.getCell(`I${r}`).value = { formula: `I${firstRow + i}` };
   }
 }
 
 /** 내역서 — 규격 비우고, 공사비 수량 비운다. 임대료 수량은 수식이 끌어온다 */
-function fillBoq(ws: ExcelJS.Worksheet, plan: TcRentalPlan, tc: RentalSpan[]) {
+function fillBoq(ws: ExcelJS.Worksheet, plan: TcRentalPlan, tc: RentalSpan[], L: TcLayout) {
   ws.getCell("A1").value = `[${plan.siteName}] 타워크레인 내역서`;
 
   // 1. 임대료 — 양식은 품명을 `=산출서!B5` 로 끌어온다. 없는 호기 행까지 참조가 살아 있으면
   // 산출서를 비운 뒤 "0" 이 남아 4·5·6호기가 있는 것처럼 보인다. 있는 호기만 글자로 적고 나머지는 비운다.
-  for (let i = 0; i < 6; i += 1) {
-    const r = 6 + i;
+  for (let i = 0; i < L.boq.rows; i += 1) {
+    const r = L.boq.first + i;
     const s = tc[i];
     if (!s) {
       for (const col of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]) {
@@ -641,34 +803,42 @@ function fillBoq(ws: ExcelJS.Worksheet, plan: TcRentalPlan, tc: RentalSpan[]) {
     ws.getCell(`B${r}`).value = null; // 규격은 업체 선정 후 채운다
     ws.getCell(`C${r}`).value = "월";
     // 수량은 발주수량 검토 → 임대기간 으로 이어지는 양식의 연결을 그대로 쓴다
-    ws.getCell(`D${r}`).value = { formula: `'발주수량 검토'!I${7 + i}` };
+    ws.getCell(`D${r}`).value = { formula: `'발주수량 검토'!I${L.qty.first + i}` };
+    money(ws, r);
   }
   // 추가마스터 임대료 — 품명은 양식대로 두되 수량은 우리가 산출하지 않으므로 비운다
-  ws.getCell("A12").value = "추가마스터 임대료";
-  ws.getCell("B12").value = null;
-  ws.getCell("C12").value = "개당월";
-  ws.getCell("D12").value = null;
+  ws.getCell(`A${L.boq.master}`).value = "추가마스터 임대료";
+  ws.getCell(`B${L.boq.master}`).value = null;
+  ws.getCell(`C${L.boq.master}`).value = "개당월";
+  ws.getCell(`D${L.boq.master}`).value = null;
 
   // 2. 공사비 수량은 건드리지 않는다 — `='발주수량 검토'!I15` 처럼 수식으로 물려 있어
   // 그쪽만 고치면 따라온다. 여기서 숫자로 덮으면 두 문서가 어긋난다.
   // 4. 보험료 기타는 양식에 숫자가 박혀 있다(12·18·6·1·1) — 타워 대수를 우리 것으로 바꾼다
   const units = tc.length;
-  for (const r of rangeRows(41, 45)) {
+  for (const r of rangeRows(L.boq.insFirst, L.boq.insLast)) {
     ws.getCell(`D${r}`).value = siteQty(ws.getCell(`D${r}`).value, units);
   }
 
-  // 3. 초과근무수당 — 없는 호기 행은 통째로 비운다
-  for (let i = 0; i < 6; i += 1) {
-    if (tc[i]) continue;
-    const r = 32 + i;
-    for (const col of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]) {
-      ws.getCell(`${col}${r}`).value = null;
+  // 3. 초과근무수당 — 없는 호기 행은 통째로 비우고, 끼워 넣은 줄은 품명부터 새로 쓴다
+  for (let i = 0; i < L.boq.rows; i += 1) {
+    const r = L.boq.otFirst + i;
+    const s = tc[i];
+    if (!s) {
+      for (const col of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"]) {
+        ws.getCell(`${col}${r}`).value = null;
+      }
+      continue;
     }
+    ws.getCell(`A${r}`).value = `${s.no}호기`;
+    ws.getCell(`B${r}`).value = OT_SPEC;
+    ws.getCell(`C${r}`).value = "개월";
+    ws.getCell(`D${r}`).value = { formula: `'발주수량 검토'!I${L.qty.otFirst + i}` };
+    money(ws, r);
   }
-
 }
 
-export async function generateTcOrderForm({ plan, spans }: TcOrderInput): Promise<void> {
+export async function generateTcOrderForm({ plan, spans }: TcOrderInput): Promise<string[]> {
   const tc = spans
     .filter((s) => s.kind === "tc" && !s.problem)
     .sort((a, b) => a.no - b.no);
@@ -695,15 +865,24 @@ export async function generateTcOrderForm({ plan, spans }: TcOrderInput): Promis
     now.getDate(),
   ).padStart(2, "0")}`;
 
+  // 우리 현장이 양식보다 크면 **먼저 줄을 늘린다.** 값을 채운 뒤에 늘리면
+  // 방금 쓴 수식까지 한 번 더 밀려 내려간다.
+  const byId = new Map(plan.buildings.map((b) => [b.id, b]));
+  const rentRows = tc.reduce(
+    (acc, s) => acc + Math.max(1, s.buildingIds.filter((id) => byId.has(id)).length),
+    0,
+  );
+  const L = growSheets(wb, tc.length, rentRows);
+
   fillCover(wb, plan, today);
   const rent = wb.getWorksheet("임대기간");
-  const startRows = rent ? fillRental(rent, plan, tc, today) : new Map<number, number>();
+  const startRows = rent ? fillRental(rent, plan, tc, today, L) : new Map<number, number>();
   const calc = wb.getWorksheet("산출서");
-  if (calc) fillCalc(calc, plan, tc);
+  if (calc) fillCalc(calc, plan, tc, L);
   const qty = wb.getWorksheet("발주수량 검토");
-  if (qty) fillQty(qty, plan, tc, startRows);
+  if (qty) fillQty(qty, plan, tc, startRows, L);
   const boq = wb.getWorksheet("내역서");
-  if (boq) fillBoq(boq, plan, tc);
+  if (boq) fillBoq(boq, plan, tc, L);
 
   // 맨 뒤에 현장산출검토 한 장 — 양식이 아니라 우리가 그리는 설득 자료다
   addReviewSheet(wb, { plan, spans, params: plan.params });
@@ -723,4 +902,5 @@ export async function generateTcOrderForm({ plan, spans }: TcOrderInput): Promis
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return [...overflow];
 }

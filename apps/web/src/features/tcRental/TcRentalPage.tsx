@@ -768,9 +768,12 @@ export default function TcRentalPage() {
   const exportTcOrderForm = useCallback(async () => {
     if (!plan) return;
     try {
-      await generateTcOrderForm({ plan, spans });
+      const warn = await generateTcOrderForm({ plan, spans });
       toast.success("타워크레인 발주의뢰서를 내려받았습니다.", {
-        description: "표지 · 내역서 · 산출서 · 발주수량 검토 · 임대기간 · 건널다리 · 현장산출검토 7개 탭",
+        description:
+          warn.length > 0
+            ? warn.join(" · ")
+            : "표지 · 내역서 · 산출서 · 발주수량 검토 · 임대기간 · 건널다리 · 현장산출검토 7개 탭",
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "발주의뢰서 생성에 실패했습니다.");
