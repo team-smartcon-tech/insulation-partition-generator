@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { FolderOpen, Upload, X } from "lucide-react";
+import { isExcelFile } from "./library";
 
 export default function DropUploadDialog({
   title,
@@ -46,10 +47,30 @@ export default function DropUploadDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
+  /**
+   * 못 받는 파일에는 **왜 안 되는지**를 알려 준다. 그냥 "엑셀만 됩니다"라고만 하면, 엑셀을 올린
+   * 사람은(옛 `.xls`) 무엇이 잘못됐는지 모른다.
+   */
+  const why = (name: string) => {
+    const lower = name.toLowerCase();
+    if (lower.endsWith(".xls")) {
+      return `“${name}”은(는) 옛 엑셀 형식(.xls)입니다.
+엑셀에서 열어 [다른 이름으로 저장] → .xlsx 로 바꾼 뒤 올려 주세요.`;
+    }
+    if (lower.endsWith(".hwp") || lower.endsWith(".hwpx")) {
+      return `“${name}”은(는) 한글 파일입니다.
+한글 서식은 화면에서 칸을 채울 수 없어 아직 받지 않습니다.`;
+    }
+    return `“${name}”은(는) 엑셀 파일이 아닙니다.
+엑셀(.xlsx, .xlsm)만 올릴 수 있습니다.`;
+  };
+
   const take = (list: FileList | null) => {
     // 엑셀만 받는다 — 폴더를 통째로 끌어다 놓거나 PDF 를 놓는 일이 흔하다.
-    const files = Array.from(list ?? []).filter((file) => file.name.toLowerCase().endsWith(".xlsx"));
+    const all = Array.from(list ?? []);
+    const files = all.filter((file) => isExcelFile(file.name));
     if (files.length > 0) onFiles(files);
+    else if (all.length > 0) window.alert(why(all[0].name));
     return files.length;
   };
 
@@ -97,9 +118,7 @@ export default function DropUploadDialog({
               event.preventDefault();
               depth.current = 0;
               setOver(false);
-              if (take(event.dataTransfer.files) === 0) {
-                window.alert("엑셀 파일(.xlsx)만 올릴 수 있습니다.");
-              }
+              take(event.dataTransfer.files);
             }}
             className={
               "flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition " +
@@ -110,7 +129,7 @@ export default function DropUploadDialog({
             <p className="text-sm font-semibold text-slate-700">
               {busy ? "읽는 중입니다…" : "여기에 엑셀 파일을 끌어다 놓으세요"}
             </p>
-            <p className="text-xs text-slate-500">여러 개를 한 번에 놓아도 됩니다 · .xlsx</p>
+            <p className="text-xs text-slate-500">여러 개를 한 번에 놓아도 됩니다 · .xlsx · .xlsm</p>
           </div>
 
           <div className="mt-4 flex items-center gap-2">

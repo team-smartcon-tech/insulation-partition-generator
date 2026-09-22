@@ -77,6 +77,7 @@ import {
   isSiteDoc,
   isTemplate,
   editionName,
+  EXCEL_FILE_RE,
   latestTemplateIn,
   newerTemplateFor,
   staleAcrossDivisions,
@@ -656,7 +657,7 @@ export default function FormsPage() {
       status: "ready",
       id: first.id,
       fileName: first.fileName,
-      title: first.fileName.replace(/\.xlsx$/i, ""),
+      title: first.fileName.replace(EXCEL_FILE_RE, ""),
       sheets: first.sheets,
       kind: uploadKind,
     });
@@ -1798,7 +1799,8 @@ export default function FormsPage() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".xlsx"
+          // 매크로가 든 엑셀(.xlsm)도 속은 같은 구조라 그대로 읽힌다.
+          accept=".xlsx,.xlsm"
           // 여러 개를 한 번에 고를 수 있다(파일 이름 앞 번호로 각자 제자리에 들어간다).
           multiple
           className="hidden"

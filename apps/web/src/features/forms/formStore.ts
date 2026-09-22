@@ -15,7 +15,7 @@
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
-import { planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
+import { EXCEL_FILE_RE, planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
 import { findApprovalBoxes } from "./approval.ts";
 import { changedAfterApproval, type Approval, type Assignee } from "./approvalLine.ts";
 import type { ApprovalSheetSummary } from "./homeStats.ts";
@@ -590,7 +590,7 @@ export async function saveForm(input: {
     // 원본은 **복사해서** 담는다. 파싱에 넘긴 버퍼를 그대로 저장하면, 라이브러리가
     // 그것을 소유·이관해 비워 버렸을 때 "원본이 빈" 양식이 저장된다.
     // 파일 이름에서 확장자만 뗀다. 보기 이름은 나중에 바꿀 수 있다.
-    title: input.fileName.replace(/\.xlsx$/i, ""),
+    title: input.fileName.replace(EXCEL_FILE_RE, ""),
     category: input.category || UNCATEGORIZED,
     code: input.code,
     taxonomyId: input.taxonomyId,

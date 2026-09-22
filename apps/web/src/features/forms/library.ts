@@ -32,6 +32,15 @@ export interface LibraryEntry {
 }
 
 /**
+ * 열 수 있는 엑셀 파일 확장자.
+ *
+ * `.xlsm`(매크로 포함)은 속이 `.xlsx` 와 같은 구조라 그대로 읽힌다 — 현장 양식에 수식·매크로가
+ * 들어 있는 경우가 흔해 막아 둘 이유가 없다. `.xls`(2003년 형식)는 구조가 아예 달라 못 읽는다.
+ */
+export const EXCEL_FILE_RE = /\.xls[xm]$/i;
+export const isExcelFile = (fileName: string) => EXCEL_FILE_RE.test(fileName);
+
+/**
  * 판을 가리지 않는 서류 이름 — `(현장명) 인조강화석공사_현장설명서_Ver3_25.11` → `현장명인조강화석공사현장설명서`.
  *
  * 한 칸에 **서로 다른 서류**가 여럿 올라온다(공종별 현장설명서 9종). 같은 칸에 나중에 올라왔다고 모두
@@ -41,7 +50,7 @@ export interface LibraryEntry {
  */
 export function editionName(title: string | undefined): string {
   return (title ?? "")
-    .replace(/\.xlsx$/i, "")
+    .replace(EXCEL_FILE_RE, "")
     .replace(/(?<![a-z])(?:ver|v)\.?\s*\d+(?:[.\-]\d+)*/gi, "")
     .replace(/(?:19|20)?\d{2}[.\-/]\d{1,2}(?:[.\-/]\d{1,2})?/g, "")
     .replace(/[^\p{L}\p{N}]+/gu, "")

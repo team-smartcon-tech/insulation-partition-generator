@@ -10,6 +10,7 @@
  * 시트 파일 하나만 고치고 나머지는 압축된 바이트 그대로 복사**한다. 우리가 모르는 것
  * (차트·SmartArt·수식·인쇄 설정)은 손대지 않으니 그대로 남는다.
  */
+import { EXCEL_FILE_RE } from "./library.ts";
 import {
   DRAWING_CONTENT_TYPE,
   EMPTY_DRAWING,
@@ -429,10 +430,16 @@ export async function buildFilledWorkbook(
   return { bytes: writeZip(items), skippedSheets };
 }
 
-/** 내려받을 파일 이름 — `101. 이해관계자.xlsx` → `101. 이해관계자 (작성본).xlsx` */
+/**
+ * 내려받을 파일 이름 — `101. 이해관계자.xlsx` → `101. 이해관계자 (작성본).xlsx`
+ *
+ * 확장자는 **원본 그대로** 둔다. 매크로가 든 `.xlsm` 을 `.xlsx` 로 내려받으면 엑셀이 매크로를
+ * 버리거나 "확장자가 내용과 다르다"고 경고한다.
+ */
 export function filledFileName(fileName: string): string {
-  const base = fileName.replace(/\.xlsx$/i, "");
-  return `${base} (작성본).xlsx`;
+  const extension = fileName.match(EXCEL_FILE_RE)?.[0] ?? ".xlsx";
+  const base = fileName.replace(EXCEL_FILE_RE, "");
+  return `${base} (작성본)${extension}`;
 }
 
 /** 바이트를 파일로 저장시킨다. 브라우저에서만 쓴다. */
