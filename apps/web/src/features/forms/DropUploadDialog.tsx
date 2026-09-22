@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { FolderOpen, Upload, X } from "lucide-react";
-import { isExcelFile } from "./library";
+import { isUploadableFile } from "./library";
 
 export default function DropUploadDialog({
   title,
@@ -57,18 +57,14 @@ export default function DropUploadDialog({
       return `“${name}”은(는) 옛 엑셀 형식(.xls)입니다.
 엑셀에서 열어 [다른 이름으로 저장] → .xlsx 로 바꾼 뒤 올려 주세요.`;
     }
-    if (lower.endsWith(".hwp") || lower.endsWith(".hwpx")) {
-      return `“${name}”은(는) 한글 파일입니다.
-한글 서식은 화면에서 칸을 채울 수 없어 아직 받지 않습니다.`;
-    }
-    return `“${name}”은(는) 엑셀 파일이 아닙니다.
-엑셀(.xlsx, .xlsm)만 올릴 수 있습니다.`;
+    return `“${name}”은(는) 받을 수 없는 파일입니다.
+엑셀(.xlsx, .xlsm) 또는 한글(.hwp, .hwpx)만 올릴 수 있습니다.`;
   };
 
   const take = (list: FileList | null) => {
-    // 엑셀만 받는다 — 폴더를 통째로 끌어다 놓거나 PDF 를 놓는 일이 흔하다.
+    // 엑셀과 한글만 받는다 — 폴더를 통째로 끌어다 놓거나 PDF 를 놓는 일이 흔하다.
     const all = Array.from(list ?? []);
-    const files = all.filter((file) => isExcelFile(file.name));
+    const files = all.filter((file) => isUploadableFile(file.name));
     if (files.length > 0) onFiles(files);
     else if (all.length > 0) window.alert(why(all[0].name));
     return files.length;
@@ -127,9 +123,11 @@ export default function DropUploadDialog({
           >
             <Upload size={28} className={over ? "text-blue-600" : "text-slate-400"} aria-hidden />
             <p className="text-sm font-semibold text-slate-700">
-              {busy ? "읽는 중입니다…" : "여기에 엑셀 파일을 끌어다 놓으세요"}
+              {busy ? "읽는 중입니다…" : "여기에 파일을 끌어다 놓으세요"}
             </p>
-            <p className="text-xs text-slate-500">여러 개를 한 번에 놓아도 됩니다 · .xlsx · .xlsm</p>
+            <p className="text-xs text-slate-500">
+              여러 개를 한 번에 놓아도 됩니다 · 엑셀 .xlsx · .xlsm · 한글 .hwp · .hwpx
+            </p>
           </div>
 
           <div className="mt-4 flex items-center gap-2">

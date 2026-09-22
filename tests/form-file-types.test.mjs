@@ -5,7 +5,14 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { parseFormWorkbook } from '../apps/web/src/features/forms/formParser.ts';
-import { editionName, isExcelFile } from '../apps/web/src/features/forms/library.ts';
+import {
+  baseFileName,
+  editionName,
+  isAttachmentFile,
+  isExcelFile,
+  isUploadableFile,
+  fileSizeText,
+} from '../apps/web/src/features/forms/library.ts';
 import { filledFileName } from '../apps/web/src/features/forms/formExport.ts';
 
 test('받는 파일 가리기', () => {
@@ -36,4 +43,30 @@ test('내려받는 이름은 원본 확장자를 지킨다', () => {
 
 test('판 이름 비교에서도 .xlsm 을 확장자로 뗀다', () => {
   assert.equal(editionName('품질목표관리.xlsm'), editionName('품질목표관리.xlsx'));
+});
+
+test('한글 파일은 첨부로 받는다 — 엑셀과는 다른 길', () => {
+  assert.ok(isAttachmentFile('601. 검측요청서.hwp'));
+  assert.ok(isAttachmentFile('601. 검측요청서.HWPX'));
+  assert.equal(isAttachmentFile('601. 검측요청서.xlsx'), false, '엑셀은 첨부가 아니라 열어서 채운다');
+
+  // 올릴 수 있는 것 = 엑셀 + 한글
+  assert.ok(isUploadableFile('a.xlsx') && isUploadableFile('a.xlsm'));
+  assert.ok(isUploadableFile('a.hwp') && isUploadableFile('a.hwpx'));
+  assert.equal(isUploadableFile('a.xls'), false);
+  assert.equal(isUploadableFile('a.pdf'), false);
+});
+
+test('보기 이름에서는 엑셀·한글 확장자를 모두 뗀다', () => {
+  assert.equal(baseFileName('101. 검측요청서.hwp'), '101. 검측요청서');
+  assert.equal(baseFileName('101. 검측요청서.xlsm'), '101. 검측요청서');
+  assert.equal(baseFileName('101. 검측요청서'), '101. 검측요청서');
+});
+
+test('첨부 파일 크기 표기', () => {
+  assert.equal(fileSizeText(27), '27B');
+  assert.equal(fileSizeText(9876), '9.6KB');
+  assert.equal(fileSizeText(3 * 1024 * 1024), '3MB');
+  assert.equal(fileSizeText(0), '');
+  assert.equal(fileSizeText(undefined), '');
 });

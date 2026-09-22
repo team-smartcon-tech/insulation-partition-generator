@@ -41,6 +41,28 @@ export const EXCEL_FILE_RE = /\.xls[xm]$/i;
 export const isExcelFile = (fileName: string) => EXCEL_FILE_RE.test(fileName);
 
 /**
+ * **첨부로만** 받는 파일 — 한글(아래아한글) 서식.
+ *
+ * 현장 서류 중에는 한글로 만든 것이 섞여 있다(검측요청서 등). 한글 파일은 화면에 그려 칸을
+ * 채울 수 없으니 **보관하고 주고받기만** 한다: 배포 양식함에 올려 두면 현장이 내려받아 한글에서
+ * 작성하고, 작성한 파일을 제 칸에 다시 올린다. 결재·인쇄는 이 파일에는 걸 수 없다.
+ */
+export const ATTACHMENT_FILE_RE = /\.hwpx?$/i;
+export const isAttachmentFile = (fileName: string) => ATTACHMENT_FILE_RE.test(fileName);
+/** 올릴 수 있는 파일인가(엑셀이거나 첨부) */
+export const isUploadableFile = (fileName: string) => isExcelFile(fileName) || isAttachmentFile(fileName);
+/** 파일 크기 표기 — `9876` → `9.6KB` */
+export function fileSizeText(bytes: number | undefined): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${Math.round((bytes / 1024) * 10) / 10}KB`;
+  return `${Math.round((bytes / 1024 / 1024) * 10) / 10}MB`;
+}
+
+/** 확장자를 뗀 이름 */
+export const baseFileName = (fileName: string) => fileName.replace(EXCEL_FILE_RE, "").replace(ATTACHMENT_FILE_RE, "");
+
+/**
  * 판을 가리지 않는 서류 이름 — `(현장명) 인조강화석공사_현장설명서_Ver3_25.11` → `현장명인조강화석공사현장설명서`.
  *
  * 한 칸에 **서로 다른 서류**가 여럿 올라온다(공종별 현장설명서 9종). 같은 칸에 나중에 올라왔다고 모두

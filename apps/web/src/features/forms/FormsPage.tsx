@@ -25,6 +25,7 @@ import {
   Search,
   Download,
   FileSpreadsheet,
+  FileText,
   Minus,
   Pencil,
   Plus,
@@ -53,6 +54,7 @@ import FormTree from "./FormTree";
 import HomeDashboard, { SitesAudit } from "./HomeDashboard";
 import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
 import DropUploadDialog from "./DropUploadDialog";
+import AttachmentPanel from "./AttachmentPanel";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
 import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
@@ -78,6 +80,8 @@ import {
   isTemplate,
   editionName,
   EXCEL_FILE_RE,
+  baseFileName,
+  isAttachmentFile,
   latestTemplateIn,
   newerTemplateFor,
   staleAcrossDivisions,
@@ -103,6 +107,7 @@ import {
   copyTemplateToSite,
   copyTemplateToSlot,
   deleteForm,
+  replaceAttachment,
   findTemplateSheet,
   getForm,
   isTemplateSheet,
@@ -164,6 +169,11 @@ type LoadState =
       sheets: FormSheet[];
       /** 배포 양식(원본)이면 고칠 수 없다 */
       kind?: FormKind;
+      /** 엑셀이 아니라 파일째 보관하는 첨부(한글 등) — 시트가 없고 파일만 주고받는다 */
+      attachment?: boolean;
+      fileSize?: number;
+      /** 파일이 마지막으로 바뀐 시각(첨부 화면에 보여 준다) */
+      updatedAt?: number;
     };
 
 /** 홈 · 배포 양식함(원본) · 현장 서류함(작성본) */
@@ -259,7 +269,9 @@ export default function FormsPage() {
    * 파일 올리기 창(끌어다 놓기)이 떠 있나. [올리기]를 누르면 윈도우 선택창 대신 이것이 뜬다.
    * 어느 칸에 넣을지는 이미 `pendingPlaceRef`·`preferredTaxonomyRef` 에 담아 둔다.
    */
-  const [dropTarget, setDropTarget] = useState<{ title: string; hint: string; kind?: "taxonomy" } | null>(null);
+  const [dropTarget, setDropTarget] = useState<
+    { title: string; hint: string; kind?: "taxonomy" } | { title: string; hint: string; kind: "replace"; formId: string } | null
+  >(null);
   /** 내려받기 선택 메뉴가 열려 있나 */
   const [downloadOpen, setDownloadOpen] = useState(false);
   /** 고칠 수 있는 칸을 하늘색으로 칠할까. 인쇄하거나 원본 모양을 볼 때 끌 수 있다. */
@@ -381,6 +393,9 @@ export default function FormsPage() {
       title: form.title,
       sheets: form.sheets,
       kind: form.kind,
+      attachment: form.attachment,
+      fileSize: form.fileSize ?? form.bytes?.byteLength,
+      updatedAt: form.updatedAt,
     });
     writeLastOpenedId(form.id);
     // 저장본을 새 파서로 다시 읽지 못했으면 알린다. 조용히 넘기면 "기능이 안 되는" 걸로만 보인다.
@@ -532,7 +547,7 @@ export default function FormsPage() {
     setValues(emptyValues);
     pendingRef.current = null;
 
-    const opened: { id: string; fileName: string; sheets: FormSheet[] }[] = [];
+    const opened: { id: string; fileName: string; sheets: FormSheet[]; attachment?: boolean }[] = [];
     const failed: string[] = [];
     let placed = 0;
     let saveFailed = false;
@@ -547,6 +562,7 @@ export default function FormsPage() {
       targets: ReturnType<typeof sameNameSlots>;
       /** 이 파일을 여러 칸에 넣을 때 함께 달아 둘 묶음 번호 */
       batchId: string;
+      attachment: boolean;
     }[] = [];
 
     for (const file of files) {
@@ -556,11 +572,13 @@ export default function FormsPage() {
       }
       try {
         const bytes = await file.arrayBuffer();
-        const sheets = await parseFormWorkbook(bytes);
+        // 한글 파일은 화면에 그릴 수 없다 — 읽지 않고 **파일째** 담는다(내려받아 한글에서 작성).
+        const attachment = isAttachmentFile(file.name);
+        const sheets = attachment ? [] : await parseFormWorkbook(bytes);
         // 같은 파일을 여러 칸에 넣어도 **한 번의 배포**임을 나중에 알아보려고 번호를 하나 만든다.
         // 이게 없으면 칸마다 저장 시각이 몇 ms 달라, 서로를 "새 판"으로 오해한다.
         const batchId = crypto.randomUUID();
-        if (sheets.length === 0) {
+        if (!attachment && sheets.length === 0) {
           failed.push(`${file.name}: 시트가 없습니다`);
           continue;
         }
@@ -579,6 +597,7 @@ export default function FormsPage() {
             kind: uploadKind,
             siteId,
             batchId,
+            attachment,
           });
           id = saved.id;
         } catch (error) {
@@ -591,9 +610,9 @@ export default function FormsPage() {
         // 회사 코드표는 분류마다 따로라 같은 서류가 여러 칸에 있다(번호는 다르다). 한 번 올려 함께 배포한다.
         if (uploadKind === "template" && place) {
           const targets = sameNameSlots(taxonomies, place);
-          if (targets.length > 0) alsoFor.push({ fileName: file.name, bytes, sheets, targets, batchId });
+          if (targets.length > 0) alsoFor.push({ fileName: file.name, bytes, sheets, targets, batchId, attachment });
         }
-        opened.push({ id, fileName: file.name, sheets });
+        opened.push({ id, fileName: file.name, sheets, attachment });
       } catch (error) {
         failed.push(
           error instanceof Error ? `${file.name}: 엑셀을 읽지 못했습니다(${error.message})` : `${file.name}: 엑셀을 읽지 못했습니다`,
@@ -630,6 +649,7 @@ export default function FormsPage() {
                 taxonomyId: slot.taxonomyId,
                 kind: "template",
                 batchId: entry.batchId,
+                attachment: entry.attachment,
               });
               alsoPlaced += 1;
             } catch (error) {
@@ -657,9 +677,12 @@ export default function FormsPage() {
       status: "ready",
       id: first.id,
       fileName: first.fileName,
-      title: first.fileName.replace(EXCEL_FILE_RE, ""),
+      title: baseFileName(first.fileName),
       sheets: first.sheets,
       kind: uploadKind,
+      attachment: first.attachment,
+      fileSize: undefined,
+      updatedAt: Date.now(),
     });
 
     // 한 장이면 굳이 알리지 않는다(화면에 그 양식이 떠 있는 것이 곧 결과다).
@@ -1142,6 +1165,25 @@ export default function FormsPage() {
       window.removeEventListener("afterprint", done);
     };
   }, [printing]);
+
+  /**
+   * 첨부(한글 등)를 **현장에서 작성한 파일로 바꿔 넣는다.** 자리(칸·분류)는 그대로 두고 파일만 바꾼다.
+   */
+  async function handleReplaceAttachment(formId: string, files: File[]) {
+    const file = files[0];
+    if (!file) return;
+    setDropTarget(null);
+    try {
+      const next = await replaceAttachment(formId, file.name, await file.arrayBuffer());
+      await refreshList();
+      await openStored(next.id);
+      setStorageWarning(`“${next.fileName}”을(를) 올렸습니다. 이 자리의 파일이 바뀌었습니다.`);
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `파일을 올리지 못했습니다: ${error.message}` : "파일을 올리지 못했습니다.",
+      );
+    }
+  }
 
   /** 한 칸에 적은 값을 되돌리기 기록에 남긴다. */
   const handleCommitValue = useCallback(
@@ -1799,8 +1841,8 @@ export default function FormsPage() {
         <input
           ref={fileInputRef}
           type="file"
-          // 매크로가 든 엑셀(.xlsm)도 속은 같은 구조라 그대로 읽힌다.
-          accept=".xlsx,.xlsm"
+          // 매크로가 든 엑셀(.xlsm)도 속은 같은 구조라 그대로 읽힌다. 한글은 파일째 보관한다.
+          accept=".xlsx,.xlsm,.hwp,.hwpx"
           // 여러 개를 한 번에 고를 수 있다(파일 이름 앞 번호로 각자 제자리에 들어간다).
           multiple
           className="hidden"
@@ -1898,6 +1940,26 @@ export default function FormsPage() {
               uploadLabel={space === "library" ? "배포 양식 올리기" : null}
               toolbarExtra={space === "site" ? importButton : undefined}
               extraBadges={(form) => {
+                // 한글 등 파일째 보관하는 서류 — 화면에서 채울 수 없다는 것을 목록에서 바로 알린다.
+                if (form.attachment) {
+                  const stale = homeStale.find((entry) => entry.old.id === form.id);
+                  return [
+                    {
+                      label: "한글 파일",
+                      title: "화면에서 칸을 채울 수 없습니다. 내려받아 한글에서 작성하고 다시 올리세요.",
+                      tone: "blue" as const,
+                    },
+                    ...(stale
+                      ? [
+                          {
+                            label: "다른 분류에 새 판",
+                            title: `${stale.newerDivision} ${stale.newerCode} 칸에 더 새 판이 있습니다.`,
+                            tone: "amber" as const,
+                          },
+                        ]
+                      : []),
+                  ];
+                }
                 // 배포 양식함: 다른 분류에만 새 판이 올라와 이 칸이 옛 판으로 남은 경우.
                 if (staleIds.has(form.id)) {
                   const row = homeStale.find((entry) => entry.old.id === form.id);
@@ -2009,9 +2071,11 @@ export default function FormsPage() {
             busy={state.status === "loading"}
             // [파일에서 고르기]를 눌렀을 때만 윈도우 선택창을 연다.
             onPick={() => (dropTarget.kind === "taxonomy" ? taxonomyInputRef : fileInputRef).current?.click()}
-            onFiles={(files) =>
-              dropTarget.kind === "taxonomy" ? void ingestTaxonomyFile(files[0]) : void ingestFiles(files)
-            }
+            onFiles={(files) => {
+              if (dropTarget.kind === "taxonomy") void ingestTaxonomyFile(files[0]);
+              else if (dropTarget.kind === "replace") void handleReplaceAttachment(dropTarget.formId, files);
+              else void ingestFiles(files);
+            }}
             onCancel={() => {
               // 닫으면 "이 칸에 넣어라"도 함께 지운다 — 남겨 두면 다음에 올리는 파일이 엉뚱한 칸에 붙는다.
               pendingPlaceRef.current = undefined;
@@ -2050,6 +2114,35 @@ export default function FormsPage() {
             onCancel={() => setPasteTarget(null)}
             onApply={(lines) => void handlePasteApply(pasteTarget, lines)}
           />
+        )}
+
+        {/* 첨부(한글 등) — 시트가 없으니 격자 대신 파일을 주고받는 화면을 보인다. */}
+        {state.status === "ready" && state.attachment && (
+          <section id="form-viewer" className="scroll-mt-32 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <div className="mb-4 flex items-center gap-2">
+              <FileText size={18} className="text-slate-400" aria-hidden />
+              <h2 className="truncate text-lg font-bold text-slate-900">{state.title}</h2>
+            </div>
+            <AttachmentPanel
+              fileName={state.fileName}
+              fileSize={state.fileSize}
+              updatedAt={state.updatedAt ?? Date.now()}
+              readOnly={readOnly}
+              siteName={writeSite?.name}
+              // 올린 뒤 한 번이라도 파일을 바꿨으면 "작성한 파일이 올라와 있다"고 본다.
+              replaced={!readOnly && (state.updatedAt ?? 0) > 0 && forms.some((form) => form.id === state.id && form.updatedAt > form.uploadedAt + 1000)}
+              onDownload={() => void handleDownload(false)}
+              onWrite={() => void handleWrite(state.id, writeSite?.id)}
+              onReplace={() =>
+                setDropTarget({
+                  title: "작성한 파일 올리기",
+                  kind: "replace",
+                  formId: state.id,
+                  hint: "한글에서 작성한 파일을 놓으면 이 자리의 파일이 바뀝니다. 칸·분류는 그대로입니다.",
+                })
+              }
+            />
+          </section>
         )}
 
         {state.status === "ready" && sheet && openFormInSite && (

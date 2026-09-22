@@ -15,7 +15,7 @@
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
-import { EXCEL_FILE_RE, planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
+import { baseFileName, planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
 import { findApprovalBoxes } from "./approval.ts";
 import { changedAfterApproval, type Approval, type Assignee } from "./approvalLine.ts";
 import type { ApprovalSheetSummary } from "./homeStats.ts";
@@ -79,6 +79,15 @@ export interface StoredForm {
    * 비어 있고, 화면에 들어올 때 {@link migrateLegacyForms} 가 나눈다.
    */
   kind?: FormKind;
+  /**
+   * 엑셀이 아니라 **파일째 보관하는 첨부**(한글 서식 등)인가.
+   *
+   * 한글 파일은 화면에 그려 칸을 채울 수 없다. 대신 배포 양식함에 올려 두면 현장이 내려받아
+   * 한글에서 작성하고, 작성한 파일을 제 칸에 다시 올린다(`replaceAttachment`). `sheets` 는 비어 있다.
+   */
+  attachment?: boolean;
+  /** 첨부: 파일 크기(바이트). 목록에서 바로 보여 준다. */
+  fileSize?: number;
   /**
    * 배포 양식: **한 번의 배포로 함께 올라간 묶음 번호.**
    *
@@ -151,6 +160,10 @@ export interface FormSummary {
   kind?: FormKind;
   /** 배포 양식: 한 번의 배포로 함께 올라간 묶음 번호 */
   batchId?: string;
+  /** 파일째 보관하는 첨부(한글 등)인가 */
+  attachment?: boolean;
+  /** 첨부 파일 크기(바이트) */
+  fileSize?: number;
   templateId?: string;
   templateUploadedAt?: number;
   uploadedAt: number;
@@ -440,6 +453,8 @@ function summarize(form: StoredForm): FormSummary {
     siteId: form.siteId,
     kind: form.kind,
     batchId: form.batchId,
+    attachment: form.attachment,
+    fileSize: form.fileSize ?? form.bytes?.byteLength,
     templateId: form.templateId,
     templateUploadedAt: form.templateUploadedAt,
     uploadedAt: form.uploadedAt,
@@ -542,6 +557,8 @@ export async function getForm(id: string): Promise<LoadedForm | null> {
     sheets: withCustomSheets(f.sheets, f.customSheets),
   });
 
+  // 첨부(한글 등)는 엑셀이 아니라 다시 읽을 것이 없다.
+  if (form.attachment) return expand(form);
   if (form.parserVersion === PARSER_VERSION) return expand(form);
 
   // 원본 바이트가 비어 있으면 다시 읽을 방법이 없다. 여기서 걸러야 원인이 드러난다.
@@ -582,6 +599,8 @@ export async function saveForm(input: {
   kind: FormKind;
   /** 여러 칸에 함께 배포할 때 같은 번호를 넘긴다(같은 배포임을 나중에 알아보려고). */
   batchId?: string;
+  /** 엑셀이 아니라 파일째 보관하는 첨부(한글 등). 이때 `sheets` 는 빈 배열이다. */
+  attachment?: boolean;
 }): Promise<StoredForm> {
   const now = Date.now();
   const form: StoredForm = {
@@ -590,11 +609,14 @@ export async function saveForm(input: {
     // 원본은 **복사해서** 담는다. 파싱에 넘긴 버퍼를 그대로 저장하면, 라이브러리가
     // 그것을 소유·이관해 비워 버렸을 때 "원본이 빈" 양식이 저장된다.
     // 파일 이름에서 확장자만 뗀다. 보기 이름은 나중에 바꿀 수 있다.
-    title: input.fileName.replace(EXCEL_FILE_RE, ""),
+    // 보기 이름에서는 확장자를 뗀다 — 한글(.hwp)도 마찬가지다.
+    title: baseFileName(input.fileName),
     category: input.category || UNCATEGORIZED,
     code: input.code,
     taxonomyId: input.taxonomyId,
     batchId: input.kind === "template" ? input.batchId : undefined,
+    attachment: input.attachment || undefined,
+    fileSize: input.bytes.byteLength,
     // 배포 양식은 어느 현장 것도 아니다.
     siteId: input.kind === "site" ? input.siteId : undefined,
     kind: input.kind,
@@ -677,6 +699,31 @@ export async function copyTemplateToSite(templateId: string, siteId: string): Pr
   };
   await run("readwrite", (store) => store.put(copy));
   return copy;
+}
+
+/**
+ * 첨부(한글 등)를 **현장에서 작성한 파일로 바꿔 넣는다.**
+ *
+ * 한글 서식은 웹에서 채울 수 없으니, 내려받아 한글로 작성한 파일을 같은 자리에 다시 올린다.
+ * 새 기록을 만들지 않고 그 자리(칸·분류·결재 기록)를 지킨 채 **파일만** 바꾼다.
+ */
+export async function replaceAttachment(id: string, fileName: string, bytes: ArrayBuffer): Promise<StoredForm> {
+  const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
+  if (!raw) throw new Error("그 서류는 이미 지워졌습니다.");
+  const form = normalize(raw);
+  if (!form.attachment) throw new Error("첨부 파일이 아닙니다.");
+
+  const now = Date.now();
+  const next: StoredForm = {
+    ...form,
+    fileName,
+    bytes: bytes.slice(0),
+    fileSize: bytes.byteLength,
+    updatedAt: now,
+    openedAt: now,
+  };
+  await run("readwrite", (store) => store.put(next));
+  return next;
 }
 
 /**
