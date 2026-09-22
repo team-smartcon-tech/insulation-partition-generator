@@ -52,6 +52,7 @@ import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import HomeDashboard, { SitesAudit } from "./HomeDashboard";
 import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
+import DropUploadDialog from "./DropUploadDialog";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
 import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
@@ -253,6 +254,11 @@ export default function FormsPage() {
   const [lineDialogOpen, setLineDialogOpen] = useState(false);
   /** 인쇄용 화면을 띄워 두었나(복합기로 보내는 동안만) */
   const [printing, setPrinting] = useState(false);
+  /**
+   * 파일 올리기 창(끌어다 놓기)이 떠 있나. [올리기]를 누르면 윈도우 선택창 대신 이것이 뜬다.
+   * 어느 칸에 넣을지는 이미 `pendingPlaceRef`·`preferredTaxonomyRef` 에 담아 둔다.
+   */
+  const [dropTarget, setDropTarget] = useState<{ title: string; hint: string; kind?: "taxonomy" } | null>(null);
   /** 내려받기 선택 메뉴가 열려 있나 */
   const [downloadOpen, setDownloadOpen] = useState(false);
   /** 고칠 수 있는 칸을 하늘색으로 칠할까. 인쇄하거나 원본 모양을 볼 때 끌 수 있다. */
@@ -493,7 +499,16 @@ export default function FormsPage() {
     const files = Array.from(event.target.files ?? []);
     // 같은 파일을 다시 골라도 onChange 가 뜨도록 값을 비운다.
     event.target.value = "";
+    await ingestFiles(files);
+  }
+
+  /**
+   * 올릴 파일을 받아 읽고 저장한다. 파일 선택창으로 고르든, 창에 **끌어다 놓든** 여기로 온다.
+   */
+  async function ingestFiles(files: File[]) {
     if (files.length === 0) return;
+    // 끌어다 놓기 창은 닫는다 — 읽는 동안 진행 상황은 아래 목록 위에 뜬다.
+    setDropTarget(null);
 
     // 빈 칸의 "올리기"로 골랐으면 **고른 파일 전부**를 그 칸에 넣는다. 한 칸에 여러 장
     // (월별·차수별)이 들어가는 것이 정상이고, 그 칸을 눌러 고른 것이 곧 "여기에 넣어라"다.
@@ -695,7 +710,13 @@ export default function FormsPage() {
   async function handleTaxonomyFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
+    await ingestTaxonomyFile(file);
+  }
+
+  /** 코드표 파일 하나를 읽어 저장한다. 고르든 끌어다 놓든 여기로 온다. */
+  async function ingestTaxonomyFile(file: File | undefined) {
     if (!file) return;
+    setDropTarget(null);
 
     setStorageWarning(null);
     try {
@@ -1264,7 +1285,12 @@ export default function FormsPage() {
     }
     pendingPlaceRef.current = { taxonomyId, code: item.code };
     preferredTaxonomyRef.current = undefined;
-    fileInputRef.current?.click();
+    // 윈도우 선택창을 바로 열지 않는다 — 끌어다 놓기 창을 먼저 띄운다(사용자 요청).
+    const division = taxonomies.find((taxonomy) => taxonomy.id === taxonomyId)?.division ?? "";
+    setDropTarget({
+      title: `${division} ${item.code} ${item.name}`.trim(),
+      hint: "이 칸에 올립니다. 여러 장(월별·차수별)을 한 번에 놓아도 모두 이 칸에 들어갑니다.",
+    });
   }
 
   /**
@@ -1374,7 +1400,10 @@ export default function FormsPage() {
     // 빈 칸을 눌렀다가 파일 고르기를 취소하면 그 칸이 남아 다음 올리기에 엉뚱하게 붙는다.
     pendingPlaceRef.current = undefined;
     preferredTaxonomyRef.current = preferredTaxonomyId;
-    fileInputRef.current?.click();
+    setDropTarget({
+      title: space === "library" ? "배포 양식 올리기" : "서류 올리기",
+      hint: "파일 이름 앞 번호로 제자리를 찾아 들어갑니다. (예: 112. 문서 및 기록 목록표.xlsx → 112 칸)",
+    });
   }
 
   /** 1차 분류 이름을 바꾼다. 서류는 코드표 id 로 묶여 있어 이름을 바꿔도 떨어지지 않는다. */
@@ -1921,7 +1950,13 @@ export default function FormsPage() {
               }}
               onUploadFor={handleUploadFor}
               onUpload={handleUpload}
-              onUploadTaxonomy={() => taxonomyInputRef.current?.click()}
+              onUploadTaxonomy={() =>
+                setDropTarget({
+                  title: "코드표 올리기",
+                  kind: "taxonomy",
+                  hint: "`CODE`·`분류명` 머리글이 있는 분류표 엑셀입니다. 같은 이름의 1차 분류가 있으면 그 코드표만 바뀝니다.",
+                })
+              }
               onRenameDivision={(id) => void handleRenameDivision(id)}
               onRemoveTaxonomy={(id) => void handleRemoveTaxonomy(id)}
             />
@@ -1936,7 +1971,16 @@ export default function FormsPage() {
               onDelete={(form) => void handleDelete(form)}
               onUpload={space === "library" ? () => handleUpload() : undefined}
               // 카드 목록 아래 작은 글씨로 두었더니 찾지 못했다. 도구 줄 버튼으로 둔다.
-              onUploadTaxonomy={space === "library" ? () => taxonomyInputRef.current?.click() : undefined}
+              onUploadTaxonomy={
+                space === "library"
+                  ? () =>
+                      setDropTarget({
+                        title: "코드표 올리기",
+                        kind: "taxonomy",
+                        hint: "`CODE`·`분류명` 머리글이 있는 분류표 엑셀입니다.",
+                      })
+                  : undefined
+              }
               onCreateTaxonomy={
                 space === "library"
                   ? () => {
@@ -1955,6 +1999,25 @@ export default function FormsPage() {
             />
           )}
         </div>
+
+        {dropTarget && (
+          <DropUploadDialog
+            title={dropTarget.title}
+            hint={dropTarget.hint}
+            busy={state.status === "loading"}
+            // [파일에서 고르기]를 눌렀을 때만 윈도우 선택창을 연다.
+            onPick={() => (dropTarget.kind === "taxonomy" ? taxonomyInputRef : fileInputRef).current?.click()}
+            onFiles={(files) =>
+              dropTarget.kind === "taxonomy" ? void ingestTaxonomyFile(files[0]) : void ingestFiles(files)
+            }
+            onCancel={() => {
+              // 닫으면 "이 칸에 넣어라"도 함께 지운다 — 남겨 두면 다음에 올리는 파일이 엉뚱한 칸에 붙는다.
+              pendingPlaceRef.current = undefined;
+              preferredTaxonomyRef.current = undefined;
+              setDropTarget(null);
+            }}
+          />
+        )}
 
         {slotWrite && (
           <SlotWriteDialog
