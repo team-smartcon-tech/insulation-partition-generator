@@ -1,0 +1,440 @@
+/**
+ * 스마트폼(/tools/forms) 서버 API — 현장 서류를 서버에 두고 본사가 점검한다.
+ *
+ * 왜 서버인가: 지금까지 자료는 **각자 브라우저 안에만** 있었다. 옆자리 직원이 열면 비어 있고,
+ * 큰 파일 몇 개면 저장소가 찬다. 현장 공유폴더(`Z:\01. 공사`)를 이 앱으로 대신하려면
+ * 파일과 목록이 한곳에 있어야 한다.
+ *
+ * 테이블: public.form_sites / form_documents / form_taxonomy
+ *         (supabase/migrations/20260929024537_add_smart_forms_server_storage.sql)
+ * 파일:   Storage {FORM_FILES_BUCKET}/{kind}/{문서 id}/{파일명} (비공개 → 짧은 유효시간 주소)
+ *
+ * **파일 바이트는 이 Worker 를 지나가지 않는다.** 브라우저가 Supabase 로 바로 올리고 바로 받는다.
+ * Worker 요청 크기 제한(100MB)과 메모리에 걸리기 때문이다. Worker 는 "누가 어디에 올려도 되는지"를
+ * 판단하고 **짧은 유효시간의 주소만** 내어 준다.
+ *
+ * 인증: index.ts 에서 authMiddleware 뒤에 마운트되므로 모든 라우트가 로그인 필수.
+ *
+ * ※ 다른 앱(단열재 나누기도·공지사항·App Market)과 완전히 분리된 신규 라우트다.
+ */
+import { Hono } from "hono";
+import type { Env, SessionUser } from "./auth";
+import { supabaseRest, storageDelete, storageSignedUrl, errMsg } from "./supabaseClient";
+
+const forms = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>();
+
+/** 코드표를 바꾸거나 현장을 지울 수 있는 본사 관리자 */
+const ADMIN_ROLES = new Set(["super_admin", "system_admin"]);
+
+/**
+ * 파일을 담는 버킷. `Env` 에 칸을 더하지 않고 여기서 읽는다 — `auth.ts` 는 지금 사용자가
+ * 손보는 중인 파일이라 건드리지 않는다. 설정이 없으면 기본값을 쓴다.
+ */
+const bucket = (env: Env) => (env as { FORM_FILES_BUCKET?: string }).FORM_FILES_BUCKET || "form-files";
+
+/** 목록에서는 무거운 것(격자·적은 글자)을 빼고 꼬리표만 보낸다. 145종을 한 번에 읽기 때문이다. */
+const LIST_COLUMNS =
+  "id,kind,site_id,taxonomy_id,code,title,file_name,attachment,file_size,content_type," +
+  "parser_version,template_id,template_uploaded_at,batch_id,uploaded_by,uploader_name," +
+  "review_status,reviewer_name,reviewed_at,review_note,created_at,updated_at";
+
+const isAdmin = (user: SessionUser) => ADMIN_ROLES.has(user.role);
+
+/**
+ * 지금 누가 부르고 있나.
+ *
+ * `authMiddleware` 는 **로컬 개발(`COOKIE_SECURE=false`)에서 로그인 검사를 건너뛴다.** 그때는
+ * `c.get("user")` 가 비어 있어서, 그대로 쓰면 `user.id` 에서 터진다(운영에서는 늘 들어 있다).
+ * 로컬에서만 쓰는 자리 표시 사용자를 대신 쓴다 — 여기서 막으면 로컬 개발이 아예 안 된다.
+ */
+function currentUser(c: { get: (key: "user") => SessionUser | undefined }): SessionUser {
+  return (
+    c.get("user") ?? { id: "local-dev", name: "로컬 개발", email: "local@dev", role: "system_admin" }
+  );
+}
+
+/**
+ * 파일이 놓일 자리.
+ *
+ * **경로에는 한글·공백·괄호를 쓸 수 없다.** Supabase Storage 가 `InvalidKey` 로 거절한다
+ * (`600. 검측요청서(시험).txt` 로 시험하다 실제로 막혔다). 그래서 자리는 문서 id + 확장자로만
+ * 짓고, 사람이 볼 이름(`file_name`)은 장부에 적어 둔다 — 내려받을 때 그 이름으로 내려간다.
+ * 문서 id 로 폴더를 나누므로 이름이 같아도 서로 덮어쓰지 않는다.
+ */
+function objectPath(kind: string, id: string, fileName: string): string {
+  const match = fileName.match(/\.([A-Za-z0-9]{1,10})$/);
+  const extension = match ? `.${match[1].toLowerCase()}` : "";
+  return `${kind}/${id}/file${extension}`;
+}
+
+/**
+ * 올리기용 짧은 유효시간 주소. 브라우저가 이 주소로 파일을 **직접** 올린다.
+ * (Supabase: POST /storage/v1/object/upload/sign/{bucket}/{path} → token)
+ */
+async function signedUploadUrl(env: Env, path: string): Promise<{ url: string; token: string }> {
+  const apiKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  const res = await fetch(`${env.SUPABASE_URL}/storage/v1/object/upload/sign/${bucket(env)}/${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, apikey: apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`올리기 주소 발급 실패 (${res.status}): ${await res.text()}`);
+  const data = (await res.json()) as { url?: string; token?: string };
+  if (!data.token) throw new Error("올리기 주소에 token 이 없습니다.");
+  return { url: `${env.SUPABASE_URL}/storage/v1/object/upload/sign/${bucket(env)}/${path}`, token: data.token };
+}
+
+/** PostgREST 응답 하나를 꺼낸다. 없으면 null. */
+async function firstRow<T>(res: Response): Promise<T | null> {
+  const rows = (await res.json()) as T[];
+  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
+
+// ── 현장 ────────────────────────────────────────────────────────────────────
+
+/** GET /api/forms/sites — 현장 목록 */
+forms.get("/sites", async (c) => {
+  try {
+    const res = await supabaseRest(c.env, "GET", "/form_sites?select=*&order=sort_order.asc,name.asc");
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ sites: await res.json() });
+  } catch (err) {
+    console.error("[forms/sites GET]", errMsg(err));
+    return c.json({ error: "현장 목록을 읽지 못했습니다." }, 500);
+  }
+});
+
+/** POST /api/forms/sites — 현장 추가 */
+forms.post("/sites", async (c) => {
+  try {
+    const body = (await c.req.json()) as { name?: string; sortOrder?: number };
+    const name = String(body.name ?? "").trim();
+    if (!name) return c.json({ error: "현장 이름을 적어 주세요." }, 400);
+
+    const user = currentUser(c);
+    const res = await supabaseRest(c.env, "POST", "/form_sites", {
+      name,
+      sort_order: Number.isFinite(body.sortOrder) ? Number(body.sortOrder) : 0,
+      created_by: user.id,
+    });
+    // 같은 이름의 현장이 이미 있으면 그것을 돌려준다 — 두 개가 생기면 서류가 갈린다.
+    if (res.status === 409) {
+      const found = await supabaseRest(c.env, "GET", `/form_sites?name=eq.${encodeURIComponent(name)}&select=*`);
+      return c.json({ site: await firstRow(found), existed: true });
+    }
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ site: await firstRow(res) }, 201);
+  } catch (err) {
+    console.error("[forms/sites POST]", errMsg(err));
+    return c.json({ error: "현장을 만들지 못했습니다." }, 500);
+  }
+});
+
+// ── 코드표 ──────────────────────────────────────────────────────────────────
+
+/** GET /api/forms/taxonomy — 서류 분류 코드표(전 직원 공용) */
+forms.get("/taxonomy", async (c) => {
+  try {
+    const res = await supabaseRest(c.env, "GET", "/form_taxonomy?select=*&order=sort_order.asc,division.asc");
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ taxonomies: await res.json() });
+  } catch (err) {
+    console.error("[forms/taxonomy GET]", errMsg(err));
+    return c.json({ error: "코드표를 읽지 못했습니다." }, 500);
+  }
+});
+
+/**
+ * PUT /api/forms/taxonomy — 코드표 올리기(본사 관리자만).
+ * 바꾸기 전 것은 이력에 쌓아 둔다 — 잘못 올렸을 때 되돌릴 수 있어야 한다.
+ */
+forms.put("/taxonomy", async (c) => {
+  const user = currentUser(c);
+  if (!isAdmin(user)) return c.json({ error: "코드표는 본사 관리자만 바꿀 수 있습니다." }, 403);
+  try {
+    const body = (await c.req.json()) as {
+      id?: string;
+      division?: string;
+      fileName?: string;
+      groups?: unknown;
+      conflicts?: unknown;
+      sortOrder?: number;
+    };
+    const id = String(body.id ?? "").trim();
+    if (!id || !Array.isArray(body.groups)) return c.json({ error: "코드표 내용이 올바르지 않습니다." }, 400);
+
+    const before = await supabaseRest(c.env, "GET", `/form_taxonomy?id=eq.${encodeURIComponent(id)}&select=*`);
+    const previous = before.ok ? await firstRow<Record<string, unknown>>(before) : null;
+    if (previous) {
+      await supabaseRest(c.env, "POST", "/form_taxonomy_history", {
+        taxonomy_id: id,
+        division: previous.division ?? "",
+        file_name: previous.file_name ?? "",
+        groups: previous.groups ?? [],
+        conflicts: previous.conflicts ?? [],
+        replaced_by: user.id,
+      });
+    }
+
+    const res = await supabaseRest(
+      c.env,
+      "POST",
+      "/form_taxonomy",
+      {
+        id,
+        division: String(body.division ?? ""),
+        file_name: String(body.fileName ?? ""),
+        groups: body.groups,
+        conflicts: body.conflicts ?? [],
+        sort_order: Number.isFinite(body.sortOrder) ? Number(body.sortOrder) : 0,
+        updated_by: user.id,
+        updated_at: new Date().toISOString(),
+      },
+      "resolution=merge-duplicates,return=representation",
+    );
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ taxonomy: await firstRow(res) });
+  } catch (err) {
+    console.error("[forms/taxonomy PUT]", errMsg(err));
+    return c.json({ error: "코드표를 저장하지 못했습니다." }, 500);
+  }
+});
+
+// ── 서류 ────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/forms/docs — 목록(꼬리표만).
+ * `?kind=template` 배포 양식함 · `?siteId=...` 그 현장 서류함 · `?review=1` 본사 점검함
+ */
+forms.get("/docs", async (c) => {
+  try {
+    const kind = c.req.query("kind");
+    const siteId = c.req.query("siteId");
+    const review = c.req.query("review");
+
+    const where: string[] = [];
+    if (kind === "template" || kind === "site") where.push(`kind=eq.${kind}`);
+    if (siteId) where.push(`site_id=eq.${encodeURIComponent(siteId)}`);
+    if (review === "1") where.push("review_status=neq.none");
+
+    const path =
+      `/form_documents?select=${LIST_COLUMNS}` +
+      (where.length > 0 ? `&${where.join("&")}` : "") +
+      "&order=updated_at.desc";
+    const res = await supabaseRest(c.env, "GET", path);
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ docs: await res.json() });
+  } catch (err) {
+    console.error("[forms/docs GET]", errMsg(err));
+    return c.json({ error: "서류 목록을 읽지 못했습니다." }, 500);
+  }
+});
+
+/** GET /api/forms/docs/:id — 한 건 전부(격자·적은 글자·결재 포함) */
+forms.get("/docs/:id", async (c) => {
+  try {
+    const res = await supabaseRest(
+      c.env,
+      "GET",
+      `/form_documents?id=eq.${encodeURIComponent(c.req.param("id"))}&select=*`,
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const doc = await firstRow(res);
+    if (!doc) return c.json({ error: "그 서류를 찾지 못했습니다." }, 404);
+    return c.json({ doc });
+  } catch (err) {
+    console.error("[forms/docs/:id GET]", errMsg(err));
+    return c.json({ error: "서류를 읽지 못했습니다." }, 500);
+  }
+});
+
+/**
+ * POST /api/forms/docs — 서류 1건을 만들고 **올리기 주소**를 함께 내어 준다.
+ *
+ * 순서: ① 여기서 꼬리표를 만들고 주소를 받는다 → ② 브라우저가 그 주소로 파일을 직접 올린다
+ *       → ③ `/docs/:id/uploaded` 로 "다 올렸다"고 알린다.
+ * 2단계로 나누는 이유는 파일 바이트가 Worker 를 지나가지 않게 하기 위해서다.
+ */
+forms.post("/docs", async (c) => {
+  try {
+    const user = currentUser(c);
+    const body = (await c.req.json()) as {
+      kind?: string;
+      siteId?: string | null;
+      taxonomyId?: string | null;
+      code?: string | null;
+      title?: string;
+      fileName?: string;
+      attachment?: boolean;
+      contentType?: string | null;
+      sheets?: unknown;
+      parserVersion?: number;
+      templateId?: string | null;
+      templateUploadedAt?: string | null;
+      batchId?: string | null;
+    };
+
+    const kind = body.kind === "site" ? "site" : "template";
+    const fileName = String(body.fileName ?? "").trim();
+    if (!fileName) return c.json({ error: "파일 이름이 없습니다." }, 400);
+    if (kind === "site" && !body.siteId) return c.json({ error: "어느 현장의 서류인지 없습니다." }, 400);
+
+    const res = await supabaseRest(c.env, "POST", "/form_documents", {
+      kind,
+      site_id: kind === "site" ? body.siteId : null,
+      taxonomy_id: body.taxonomyId ?? null,
+      code: body.code ?? null,
+      title: String(body.title ?? fileName.replace(/\.[^.\\/]+$/, "")),
+      file_name: fileName,
+      attachment: body.attachment === true,
+      content_type: body.contentType ?? null,
+      sheets: body.sheets ?? null,
+      parser_version: Number.isFinite(body.parserVersion) ? Number(body.parserVersion) : null,
+      template_id: body.templateId ?? null,
+      template_uploaded_at: body.templateUploadedAt ?? null,
+      batch_id: body.batchId ?? null,
+      uploaded_by: user.id,
+      uploader_name: user.name,
+      file_bucket: bucket(c.env),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const doc = await firstRow<{ id: string }>(res);
+    if (!doc) throw new Error("서류를 만들었지만 결과가 비어 있습니다.");
+
+    const path = objectPath(kind, doc.id, fileName);
+    const upload = await signedUploadUrl(c.env, path);
+    await supabaseRest(c.env, "PATCH", `/form_documents?id=eq.${doc.id}`, { file_path: path }, "return=minimal");
+
+    return c.json({ doc: { ...doc, file_path: path }, upload }, 201);
+  } catch (err) {
+    console.error("[forms/docs POST]", errMsg(err));
+    return c.json({ error: "서류를 만들지 못했습니다." }, 500);
+  }
+});
+
+/** POST /api/forms/docs/:id/uploaded — 파일을 다 올렸다고 알린다(크기 기록) */
+forms.post("/docs/:id/uploaded", async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => ({}))) as { fileSize?: number };
+    const res = await supabaseRest(
+      c.env,
+      "PATCH",
+      `/form_documents?id=eq.${encodeURIComponent(c.req.param("id"))}`,
+      {
+        file_size: Number.isFinite(body.fileSize) ? Number(body.fileSize) : null,
+        updated_at: new Date().toISOString(),
+      },
+    );
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ doc: await firstRow(res) });
+  } catch (err) {
+    console.error("[forms/docs/uploaded]", errMsg(err));
+    return c.json({ error: "올린 파일을 기록하지 못했습니다." }, 500);
+  }
+});
+
+/**
+ * PATCH /api/forms/docs/:id — 적은 글자·결재·점검을 갱신한다.
+ * 보낸 것만 바꾼다 — 화면이 일부만 저장하는 일이 잦다(칸 하나 고치기 등).
+ */
+forms.patch("/docs/:id", async (c) => {
+  try {
+    const user = currentUser(c);
+    const body = (await c.req.json()) as Record<string, unknown>;
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+    if (body.title !== undefined) patch.title = String(body.title);
+    if (body.cellValues !== undefined) patch.cell_values = body.cellValues;
+    if (body.customSheets !== undefined) patch.custom_sheets = body.customSheets;
+    if (body.extraRows !== undefined) patch.extra_rows = body.extraRows;
+    if (body.approvalLines !== undefined) patch.approval_lines = body.approvalLines;
+    if (body.approvals !== undefined) patch.approvals = body.approvals;
+    if (body.sheets !== undefined) patch.sheets = body.sheets;
+    if (body.parserVersion !== undefined) patch.parser_version = Number(body.parserVersion);
+    if (body.taxonomyId !== undefined) patch.taxonomy_id = body.taxonomyId;
+    if (body.code !== undefined) patch.code = body.code;
+
+    // 본사 점검 — 누가 언제 보았는지는 **서버가** 적는다. 화면이 보내 주는 값을 믿지 않는다.
+    if (body.reviewStatus !== undefined) {
+      const status = String(body.reviewStatus);
+      if (!["none", "requested", "ok", "fix"].includes(status)) {
+        return c.json({ error: "점검 상태 값이 올바르지 않습니다." }, 400);
+      }
+      patch.review_status = status;
+      patch.review_note = body.reviewNote === undefined ? null : String(body.reviewNote ?? "");
+      if (status === "ok" || status === "fix") {
+        patch.reviewed_by = user.id;
+        patch.reviewer_name = user.name;
+        patch.reviewed_at = new Date().toISOString();
+      }
+    }
+
+    const res = await supabaseRest(
+      c.env,
+      "PATCH",
+      `/form_documents?id=eq.${encodeURIComponent(c.req.param("id"))}`,
+      patch,
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const doc = await firstRow(res);
+    if (!doc) return c.json({ error: "그 서류를 찾지 못했습니다." }, 404);
+    return c.json({ doc });
+  } catch (err) {
+    console.error("[forms/docs PATCH]", errMsg(err));
+    return c.json({ error: "서류를 저장하지 못했습니다." }, 500);
+  }
+});
+
+/** GET /api/forms/docs/:id/file — 내려받기용 짧은 유효시간 주소(기본 5분) */
+forms.get("/docs/:id/file", async (c) => {
+  try {
+    const res = await supabaseRest(
+      c.env,
+      "GET",
+      `/form_documents?id=eq.${encodeURIComponent(c.req.param("id"))}&select=file_bucket,file_path,file_name`,
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const doc = await firstRow<{ file_bucket?: string; file_path?: string; file_name: string }>(res);
+    if (!doc) return c.json({ error: "그 서류를 찾지 못했습니다." }, 404);
+    if (!doc.file_path) return c.json({ error: "아직 파일이 올라오지 않았습니다." }, 404);
+
+    // 주소는 **짧게** 살아 있어야 한다. 새어 나가도 오래 쓰이지 않게.
+    const signed = await storageSignedUrl(c.env, doc.file_bucket || bucket(c.env), doc.file_path, 300);
+    // 저장된 자리 이름은 `file.xlsx` 다. 내려받을 때는 사람이 아는 이름으로 내려가야 한다.
+    const url = `${signed}${signed.includes("?") ? "&" : "?"}download=${encodeURIComponent(doc.file_name)}`;
+    return c.json({ url, fileName: doc.file_name });
+  } catch (err) {
+    console.error("[forms/docs/file]", errMsg(err));
+    return c.json({ error: "내려받기 주소를 만들지 못했습니다." }, 500);
+  }
+});
+
+/** DELETE /api/forms/docs/:id — 서류와 그 파일을 지운다(올린 사람 또는 본사 관리자) */
+forms.delete("/docs/:id", async (c) => {
+  try {
+    const user = currentUser(c);
+    const id = encodeURIComponent(c.req.param("id"));
+    const found = await supabaseRest(c.env, "GET", `/form_documents?id=eq.${id}&select=uploaded_by,file_bucket,file_path`);
+    if (!found.ok) throw new Error(await found.text());
+    const doc = await firstRow<{ uploaded_by?: string; file_bucket?: string; file_path?: string }>(found);
+    if (!doc) return c.json({ error: "그 서류를 찾지 못했습니다." }, 404);
+    if (doc.uploaded_by !== user.id && !isAdmin(user)) {
+      return c.json({ error: "올린 사람 또는 본사 관리자만 지울 수 있습니다." }, 403);
+    }
+
+    const res = await supabaseRest(c.env, "DELETE", `/form_documents?id=eq.${id}`, undefined, "return=minimal");
+    if (!res.ok) throw new Error(await res.text());
+    // 표에서 지운 뒤 파일을 지운다. 순서가 반대면 파일만 사라지고 목록에 남는다.
+    if (doc.file_path) {
+      await storageDelete(c.env, doc.file_bucket || bucket(c.env), [doc.file_path]).catch((err) =>
+        console.error("[forms/docs DELETE] 파일 삭제 실패", errMsg(err)),
+      );
+    }
+    return c.json({ ok: true });
+  } catch (err) {
+    console.error("[forms/docs DELETE]", errMsg(err));
+    return c.json({ error: "서류를 지우지 못했습니다." }, 500);
+  }
+});
+
+export default forms;
