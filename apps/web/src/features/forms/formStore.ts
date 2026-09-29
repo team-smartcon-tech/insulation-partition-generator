@@ -16,6 +16,7 @@
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
 import { insertAt, removeInsertedAt, shiftCellKeys } from "./sheetRows.ts";
+import { addMerge, emptyMergeEdits, shiftMergeEdits, splitMerge, type CellRange, type MergeEdits } from "./sheetMerges.ts";
 import { baseFileName, planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
 import { syncDelete, syncPatch, syncSites, syncTaxonomies, syncUpload } from "./formSync.ts";
 import { findApprovalBoxes } from "./approval.ts";
@@ -136,6 +137,12 @@ export interface StoredForm {
    */
   rowInserts: Record<string, number[]>;
   /**
+   * 시트 이름 → 화면에서 합치거나 나눈 칸(`sheetMerges.ts`).
+   *
+   * 줄 끼워 넣기와 같은 방식으로 **기록만** 남긴다. 내려받을 때 엑셀의 `<mergeCells>` 를 고친다.
+   */
+  mergeEdits: Record<string, MergeEdits>;
+  /**
    * 시트 이름 → (결재 서명 자리 키 → 지정된 사람). 결재칸은 시트마다 따로 있다.
    * 칸 순서가 아니라 서명 자리 키로 담아, 양식을 다시 읽어도 같은 칸에 붙어 있다.
    */
@@ -219,6 +226,7 @@ function normalize(raw: StoredForm): StoredForm {
     customSheets: raw.customSheets ?? [],
     extraRows: raw.extraRows ?? {},
     rowInserts: raw.rowInserts ?? {},
+    mergeEdits: raw.mergeEdits ?? {},
     approvalLines: raw.approvalLines ?? {},
     approvals: raw.approvals ?? {},
     values: restoreBlankedTitles(
@@ -641,6 +649,7 @@ export async function saveForm(input: {
     customSheets: [],
     extraRows: {},
     rowInserts: {},
+    mergeEdits: {},
     approvalLines: {},
     approvals: {},
   };
@@ -1051,6 +1060,7 @@ export async function insertSheetRow(id: string, sheetName: string, displayRow: 
       values: { ...form.values, [sheetName]: shiftCellKeys(form.values[sheetName], displayRow, 1) },
       approvalLines: { ...form.approvalLines, [sheetName]: shiftCellKeys(form.approvalLines[sheetName], displayRow, 1) },
       approvals: { ...form.approvals, [sheetName]: shiftCellKeys(form.approvals[sheetName], displayRow, 1) },
+      mergeEdits: { ...form.mergeEdits, [sheetName]: shiftMergeEdits(form.mergeEdits[sheetName], displayRow, 1) },
       updatedAt: Date.now(),
     };
   });
@@ -1071,8 +1081,50 @@ export async function removeSheetRow(id: string, sheetName: string, displayRow: 
       values: { ...form.values, [sheetName]: shiftCellKeys(form.values[sheetName], displayRow + 1, -1) },
       approvalLines: { ...form.approvalLines, [sheetName]: shiftCellKeys(form.approvalLines[sheetName], displayRow + 1, -1) },
       approvals: { ...form.approvals, [sheetName]: shiftCellKeys(form.approvals[sheetName], displayRow + 1, -1) },
+      mergeEdits: { ...form.mergeEdits, [sheetName]: shiftMergeEdits(form.mergeEdits[sheetName], displayRow + 1, -1) },
       updatedAt: Date.now(),
     };
+  });
+}
+
+/**
+ * 고른 범위를 한 칸으로 합친다(화면 좌표).
+ *
+ * 엑셀과 같이 **왼쪽 위 글자만 남는다** — 가려지는 칸에 적어 둔 글자는 여기서 지운다.
+ * 화면에서는 이미 안 보이는데 저장된 글자만 남으면, 나중에 나눴을 때 되살아나 놀라게 된다.
+ */
+export async function mergeSheetCells(id: string, sheetName: string, range: CellRange): Promise<void> {
+  await patchForm(id, (form) => {
+    const sheet = form.sheets.find((item) => item.name === sheetName);
+    const source = sheet ?? form.sheets.find((item) => item.name === form.customSheets.find((c) => c.name === sheetName)?.source);
+    if (!source) return {};
+
+    const next = addMerge(source, form.mergeEdits[sheetName] ?? emptyMergeEdits(), range);
+    const values = { ...(form.values[sheetName] ?? {}) };
+    for (let row = range.top; row <= range.bottom; row++) {
+      for (let col = range.left; col <= range.right; col++) {
+        if (row === range.top && col === range.left) continue;
+        delete values[`${row}:${col}`];
+      }
+    }
+    return {
+      mergeEdits: { ...form.mergeEdits, [sheetName]: next },
+      values: { ...form.values, [sheetName]: values },
+      updatedAt: Date.now(),
+    };
+  });
+}
+
+/** 합쳐진 칸을 도로 나눈다. 원본 양식의 합치기도 나눌 수 있다(기록으로 남는다). */
+export async function splitSheetCells(id: string, sheetName: string, cellKey: string): Promise<void> {
+  await patchForm(id, (form) => {
+    const [row, col] = cellKey.split(":").map(Number);
+    if (!Number.isFinite(row) || !Number.isFinite(col)) return {};
+    const current = form.mergeEdits[sheetName] ?? emptyMergeEdits();
+    // 나눌 칸이 화면에서 어떤 범위를 차지하는지는 화면 쪽이 안다. 여기서는 키만 받아 기록한다.
+    const next = splitMerge(current, { key: cellKey, row, col });
+    if (next === current) return {};
+    return { mergeEdits: { ...form.mergeEdits, [sheetName]: next }, updatedAt: Date.now() };
   });
 }
 

@@ -33,6 +33,8 @@ import {
   Printer,
   RefreshCw,
   RotateCcw,
+  TableCellsMerge,
+  TableCellsSplit,
   Trash2,
   TriangleAlert,
   PenLine,
@@ -50,6 +52,13 @@ import {
 import { buildFilledWorkbook, downloadBytes, filledFileName } from "./formExport";
 import { parseFormWorkbook } from "./formParser";
 import { withExtraRows, withInsertedRows, rowOrigins } from "./sheetRows";
+import {
+  mergedCellsIn,
+  textCellsIn,
+  withMerges,
+  type CellRange,
+  type MergeEdits,
+} from "./sheetMerges";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import HomeDashboard, { SitesAudit } from "./HomeDashboard";
@@ -117,10 +126,12 @@ import {
   removeCustomSheet,
   renameCustomSheet,
   insertSheetRow,
+  mergeSheetCells,
   isStorageAvailable,
   IDS_CHANGED_EVENT,
   listForms,
   removeSheetRow,
+  splitSheetCells,
   readLastOpenedId,
   loadSites,
   loadTaxonomies,
@@ -265,6 +276,10 @@ export default function FormsPage() {
   const [rowInserts, setRowInsertsState] = useState<Record<string, number[]>>({});
   /** 수식 경고는 한 번만 — 줄을 넣을 때마다 물으면 성가시다. */
   const formulaWarnedRef = useRef(false);
+  /** 시트 이름 → 합치거나 나눈 칸 */
+  const [mergeEdits, setMergeEditsState] = useState<Record<string, MergeEdits>>({});
+  /** 지금 끌어서 고른 칸 범위(엑셀처럼 끌어서 고른다). 칸 합치기에 쓴다. */
+  const [selection, setSelection] = useState<CellRange | null>(null);
   /** 시트 이름 → (서명 자리 키 → 결재자) */
   const [approvalLines, setApprovalLinesState] = useState<Record<string, Record<string, Assignee>>>({});
   /** 시트 이름 → (서명 자리 키 → 결재 기록) */
@@ -399,6 +414,8 @@ export default function FormsPage() {
     setValues(form.values);
     setExtraRowsState(form.extraRows ?? {});
     setRowInsertsState(form.rowInserts ?? {});
+    setMergeEditsState(form.mergeEdits ?? {});
+    setSelection(null);
     setApprovalLinesState(form.approvalLines ?? {});
     setApprovalsState(form.approvals ?? {});
     // 홈에서 특정 시트(결재할 장)를 눌렀으면 그 시트를 편다.
@@ -1261,6 +1278,8 @@ export default function FormsPage() {
       const saved = await getForm(state.id);
       if (!saved) return;
       setRowInsertsState(saved.rowInserts ?? {});
+      setMergeEditsState(saved.mergeEdits ?? {});
+      setSelection(null);
       setValues(saved.values);
       setApprovalLinesState(saved.approvalLines ?? {});
       setApprovalsState(saved.approvals ?? {});
@@ -1271,6 +1290,79 @@ export default function FormsPage() {
     } catch (error) {
       setStorageWarning(
         error instanceof Error ? `줄을 바꾸지 못했습니다: ${error.message}` : "줄을 바꾸지 못했습니다.",
+      );
+    }
+  }
+
+  /**
+   * 고른 범위를 한 칸으로 합친다 / 합쳐진 칸을 도로 나눈다.
+   *
+   * 엑셀과 같은 규칙을 따른다 — 합치면 **왼쪽 위 글자만 남고**, 이미 합쳐진 칸에 겹쳐 합치면
+   * 그 합치기를 먼저 푼다. 다만 두 가지는 엑셀보다 조심한다:
+   *  - 지워질 글자가 있으면 먼저 묻는다(엑셀은 "선택 영역의 왼쪽 위 값만 유지합니다"를 띄운다).
+   *  - **결재칸은 건드리지 못하게 막는다.** 결재칸은 합친 모양으로 찾기 때문에(`approval.ts`),
+   *    그 안을 합치거나 나누면 서명 자리를 못 찾아 결재가 안 된다.
+   */
+  async function changeMerge(action: "merge" | "split") {
+    if (state.status !== "ready" || !baseSheet || !sheet || !selection) return;
+
+    const boxes = isTemplateSheet(sheet) ? [] : findApprovalBoxes(sheet);
+    const guarded = new Set(
+      boxes.flatMap((box) =>
+        box.slots.flatMap((slot) => [slot.labelKey, slot.signKey, ...(slot.dateKey ? [slot.dateKey] : [])]),
+      ),
+    );
+    const inSelection = (key: string) => {
+      const [row, col] = key.split(":").map(Number);
+      return row >= selection.top && row <= selection.bottom && col >= selection.left && col <= selection.right;
+    };
+    if ([...guarded].some(inSelection)) {
+      window.alert(
+        [
+          "결재칸이 들어 있어 여기서는 칸을 합치거나 나눌 수 없습니다.",
+          "결재칸은 합쳐진 모양으로 찾기 때문에, 모양이 바뀌면 서명 자리를 찾지 못합니다.",
+        ].join("\n"),
+      );
+      return;
+    }
+
+    try {
+      if (action === "merge") {
+        if (selection.top === selection.bottom && selection.left === selection.right) return;
+        // 이미 합쳐진 칸과 겹치면 엑셀처럼 그 합치기를 먼저 푼다. 소리 없이 풀면 놀라니 알린다.
+        const overlapping = mergedCellsIn(sheet, selection).filter(
+          (cell) => !(cell.row === selection.top && cell.col === selection.left),
+        );
+        const losing = textCellsIn(sheet, selection, sheetValues);
+        const warnings = [
+          ...(losing.length > 0
+            ? [`합치면 왼쪽 위 칸의 글자만 남습니다. 지워지는 글자: ${losing.slice(0, 3).join(", ")}${losing.length > 3 ? " …" : ""}`]
+            : []),
+          ...(overlapping.length > 0 ? [`이미 합쳐져 있는 칸 ${overlapping.length}개를 먼저 풉니다(엑셀과 같습니다).`] : []),
+        ];
+        if (warnings.length > 0 && !window.confirm([...warnings, "", "그래도 합칠까요?"].join("\n"))) return;
+        await mergeSheetCells(state.id, baseSheet.name, selection);
+      } else {
+        const target = sheet.cells.find((cell) => cell.row === selection.top && cell.col === selection.left);
+        if (!target || (target.rowSpan === 1 && target.colSpan === 1)) {
+          window.alert("합쳐진 칸을 고른 뒤 눌러 주세요.");
+          return;
+        }
+        await splitSheetCells(state.id, baseSheet.name, target.key);
+      }
+
+      const saved = await getForm(state.id);
+      if (!saved) return;
+      setMergeEditsState(saved.mergeEdits ?? {});
+      setValues(saved.values);
+      setSelection(null);
+      // 되돌리기 기록은 칸 하나하나에 기대고 있어, 칸 모양이 바뀌면 더는 맞지 않는다.
+      historyRef.current = { past: [], future: [] };
+      justLoadedRef.current = { id: saved.id, values: saved.values };
+      setSaveState("saved");
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `칸을 바꾸지 못했습니다: ${error.message}` : "칸을 바꾸지 못했습니다.",
       );
     }
   }
@@ -1355,6 +1447,7 @@ export default function FormsPage() {
         stamps,
         form.customSheets,
         form.rowInserts ?? {},
+        form.mergeEdits ?? {},
       );
       downloadBytes(bytes, filledFileName(form.fileName));
       setStorageWarning(
@@ -1815,7 +1908,25 @@ export default function FormsPage() {
     () => (baseSheet?.cells ?? []).some((cell) => cell.formula === true),
     [baseSheet],
   );
-  const sheet = baseSheet ? withExtraRows(withInsertedRows(baseSheet, sheetInserts), extraRowCount) : null;
+  /** 이 시트에서 합치거나 나눈 칸 */
+  const sheetMergeEdits = baseSheet ? mergeEdits[baseSheet.name] : undefined;
+  /*
+   * 순서가 있다. 끼운 줄을 먼저 넣고(합치기 좌표가 그 뒤 좌표다), 그다음 합치기를 입히고,
+   * 마지막에 아래로 더한 줄을 잇는다.
+   */
+  const sheet = baseSheet
+    ? withExtraRows(withMerges(withInsertedRows(baseSheet, sheetInserts), sheetMergeEdits), extraRowCount)
+    : null;
+  /** 고른 범위의 왼쪽 위가 **합쳐진 칸**인가 — 그때만 [병합 해제]를 누를 수 있다. */
+  const mergedAtSelection =
+    !!sheet &&
+    !!selection &&
+    sheet.cells.some(
+      (cell) =>
+        cell.row === selection.top &&
+        cell.col === selection.left &&
+        (cell.rowSpan > 1 || cell.colSpan > 1),
+    );
   /** 화면 줄이 어디서 왔는지(끼운 줄인지 원본인지) — 줄 빼기 단추를 보일지 정한다. */
   const rowOriginList = useMemo(
     () => (baseSheet ? rowOrigins(baseSheet.rowCount, sheetInserts) : []),
@@ -2737,10 +2848,44 @@ export default function FormsPage() {
 
             {printing && <SheetPrintView sheet={sheet} values={sheetValues} cellMarks={cellMarks} />}
 
+            {/*
+              칸 합치기 — 엑셀처럼 **끌어서 고른 뒤** 누른다. 늘 보이는 띠로 두고, 고른 게 없으면
+              "끌어서 고르세요"만 알린다. 메뉴 안에 숨기면 못 찾는다(줄 넣기 단추와 같은 판단).
+            */}
+            {canEdit && (
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <button
+                  type="button"
+                  disabled={!selection || (selection.top === selection.bottom && selection.left === selection.right)}
+                  onClick={() => void changeMerge("merge")}
+                  title="고른 칸들을 한 칸으로 합칩니다. 엑셀과 같이 왼쪽 위 글자만 남습니다."
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200 disabled:hover:bg-transparent"
+                >
+                  <TableCellsMerge size={14} /> 칸 합치기
+                </button>
+                <button
+                  type="button"
+                  disabled={!selection || !mergedAtSelection}
+                  onClick={() => void changeMerge("split")}
+                  title="합쳐진 칸을 원래 칸들로 나눕니다."
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200 disabled:hover:bg-transparent"
+                >
+                  <TableCellsSplit size={14} /> 병합 해제
+                </button>
+                <span>
+                  {selection
+                    ? `고른 범위 ${selection.bottom - selection.top + 1}줄 × ${selection.right - selection.left + 1}칸`
+                    : "칸을 마우스로 끌어 범위를 고르세요(엑셀과 같습니다)."}
+                </span>
+              </div>
+            )}
+
             <FormSheetView
               sheet={sheet}
               editable={canEdit}
               values={sheetValues}
+              selection={selection}
+              onSelect={canEdit ? setSelection : undefined}
               onCommitValue={handleCommitValue}
               tint={showEditableTint}
               signKeys={pendingSignKeys}

@@ -12,6 +12,8 @@
  */
 import { EXCEL_FILE_RE } from "./library.ts";
 import { insertRowsIntoSheetXml, shiftDrawingRows, shiftPrintArea } from "./sheetRowsExport.ts";
+import { applyMergesToSheetXml } from "./sheetMergesExport.ts";
+import type { MergeEdits } from "./sheetMerges.ts";
 import {
   DRAWING_CONTENT_TYPE,
   EMPTY_DRAWING,
@@ -245,6 +247,8 @@ export async function buildFilledWorkbook(
   customSheets: { name: string; source: string }[] = [],
   /** 시트 이름 → 표 중간에 끼워 넣은 줄 자리(원본 줄 번호). 엑셀에도 그대로 넣는다. */
   rowInserts: Record<string, number[]> = {},
+  /** 시트 이름 → 화면에서 합치거나 나눈 칸. 엑셀의 `<mergeCells>` 를 그대로 고친다. */
+  mergeEdits: Record<string, MergeEdits> = {},
 ): Promise<FilledWorkbook> {
   const index = readZipIndex(data);
   const paths = await sheetPaths(data, index);
@@ -402,6 +406,10 @@ export async function buildFilledWorkbook(
     ...Object.entries(stamps).filter(([, list]) => list.length > 0).map(([name]) => name),
     // 글자를 한 자도 안 적었어도 **줄을 끼운 시트는 손봐야 한다**(안 그러면 끼운 줄이 사라진다).
     ...Object.entries(rowInserts).filter(([, list]) => list.length > 0).map(([name]) => name),
+    // 칸을 합치거나 나눈 시트도 마찬가지다.
+    ...Object.entries(mergeEdits)
+      .filter(([, edits]) => edits.add.length > 0 || edits.remove.length > 0)
+      .map(([name]) => name),
   ]);
   for (const sheetName of sheetNames) {
     const cells = values[sheetName] ?? {};
@@ -438,6 +446,11 @@ export async function buildFilledWorkbook(
     }
 
     let patched = patchSheetXml(base, cells);
+    /*
+     * 칸 합치기는 값을 적은 **뒤** 반영한다. 합치면 왼쪽 위 글자만 남으므로, 가려지는 칸에
+     * 예전에 적어 둔 글자까지 여기서 함께 지워진다(엑셀에서 합칠 때와 같다).
+     */
+    patched = applyMergesToSheetXml(patched, mergeEdits[sheetName]);
     if (stamps[sheetName]?.length) patched = await attachStamps(path, patched, stamps[sheetName]);
     await putText(path, patched);
   }

@@ -8,6 +8,7 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import FormCellContent from "./FormCellContent";
 import FormShapeLayer from "./FormShapeLayer";
+import { cellRangeOf, type CellRange } from "./sheetMerges";
 import type { FormBorder, FormCell, FormCellStyle, FormCellValues, FormSheet } from "./types";
 
 /** 엑셀 테두리 굵기 → CSS. 굵기만 다르고 색은 셀에서 따로 온다. */
@@ -134,6 +135,30 @@ export interface RowActions {
   onRemove: (displayRow: number) => void;
 }
 
+/** 두 범위를 함께 감싸는 범위 — 합친 칸을 스치면 그 칸 전체가 들어와야 한다(엑셀과 같다). */
+const union = (a: CellRange, b: CellRange): CellRange => ({
+  top: Math.min(a.top, b.top),
+  left: Math.min(a.left, b.left),
+  bottom: Math.max(a.bottom, b.bottom),
+  right: Math.max(a.right, b.right),
+});
+
+/**
+ * 끌어서 범위를 고르는 동안 **글자 고치기를 접는다.**
+ *
+ * 칸을 누르면 그 칸이 입력 상자로 바뀐다(`FormCellContent`). 누른 채로 옆 칸까지 끌면
+ * 범위를 고르려는 뜻이므로, 열린 입력 상자에서 초점을 빼 원래 모습으로 돌린다.
+ * 초점을 빼면 그 칸의 `onBlur` 가 돌아 적던 글자도 제대로 저장된다.
+ */
+function dropEditing(): void {
+  const active = document.activeElement;
+  if (active instanceof HTMLTextAreaElement) active.blur();
+}
+
+/** 이 줄이 고른 범위에 드는가 */
+const inSelection = (range: CellRange | null | undefined, displayRow: number) =>
+  !!range && displayRow >= range.top && displayRow <= range.bottom;
+
 interface FormSheetViewProps {
   sheet: FormSheet;
   /** true 면 모든 칸의 글자를 고칠 수 있다. false 는 인쇄·검토용 보기. */
@@ -153,6 +178,9 @@ interface FormSheetViewProps {
   scale?: FormScale;
   /** 줄 넣기·빼기 단추(없으면 아예 안 그린다 — 인쇄·점검 화면에는 필요 없다) */
   rowActions?: RowActions;
+  /** 지금 고른 범위(칸 합치기용). `onSelect` 를 넘기면 끌어서 고를 수 있다. */
+  selection?: CellRange | null;
+  onSelect?: (range: CellRange | null) => void;
 }
 
 /**
@@ -240,8 +268,24 @@ const SheetRow = memo(function SheetRow({
   cellMarks,
   onChangeValue,
   onCommitValue,
+  selLeft,
+  selRight,
+  onPickCell,
+  onSweepCell,
 }: {
   cells: FormCell[];
+  /**
+   * 이 줄에서 고른 범위의 왼쪽·오른쪽 열(고른 게 없거나 이 줄이 아니면 -1).
+   *
+   * 범위 자체를 넘기면 끌 때마다 객체가 새로 생겨 **모든 줄이 다시 그려진다**(수천 줄에서
+   * 끌기가 눈에 띄게 뻑뻑해진다). 숫자로 넘기면 범위에 드나든 줄만 다시 그린다.
+   */
+  selLeft: number;
+  selRight: number;
+  /** 칸을 눌렀다(범위 고르기 시작, 또는 Shift 로 늘리기) */
+  onPickCell?: (cell: FormCell, shift: boolean) => void;
+  /** 누른 채로 이 칸을 스쳤다(범위 늘리기) */
+  onSweepCell?: (cell: FormCell) => void;
   /** 화면에서 몇 번째 줄인가(1부터) — 줄 넣기·빼기에 쓴다 */
   displayRow: number;
   rowActions?: RowActions;
@@ -266,11 +310,18 @@ const SheetRow = memo(function SheetRow({
       {cells.map((cell, index) => {
         const canEdit = editable && !cell.locked;
         const showActions = rowActions && index === 0;
+        const selected =
+          selLeft >= 0 && cell.col <= selRight && cell.col + cell.colSpan - 1 >= selLeft;
         return (
         <td
           key={cell.key}
           colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
           rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
+          onMouseDown={onPickCell ? (event) => {
+            if (event.button !== 0) return;
+            onPickCell(cell, event.shiftKey);
+          } : undefined}
+          onMouseEnter={onSweepCell ? () => onSweepCell(cell) : undefined}
           title={
             signKeys.has(cell.key)
               ? "결재 서명 자리로 인식한 칸입니다."
@@ -298,6 +349,15 @@ const SheetRow = memo(function SheetRow({
                   outlineOffset: "-4px",
                   backgroundColor: "rgba(219, 234, 254, 0.35)",
                   position: "relative",
+                }
+              : {}),
+            // 고른 범위 — 엑셀처럼 옅은 파란색으로 덮고 칸마다 안쪽 테두리를 준다.
+            // 배경색 대신 덧칠이라 원본 칸 색이 그대로 비쳐 보인다.
+            ...(selected
+              ? {
+                  backgroundImage:
+                    "linear-gradient(rgba(37, 99, 235, 0.16), rgba(37, 99, 235, 0.16))",
+                  boxShadow: "inset 0 0 0 1px rgba(37, 99, 235, 0.65)",
                 }
               : {}),
           }}
@@ -355,9 +415,55 @@ export default function FormSheetView({
   cellMarks = EMPTY_MARKS,
   scale = 1,
   rowActions,
+  selection = null,
+  onSelect,
 }: FormSheetViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+
+  /**
+   * 끌어서 범위 고르기 — 시작점(누른 칸이 차지하는 범위)과 "지금 끌고 있나".
+   *
+   * 상태(useState)로 두면 칸을 스칠 때마다 시트 전체가 다시 그려진다. 끌기는 그림에 쓰이지
+   * 않으니 ref 로 들고, 화면에 보이는 것은 고른 범위뿐이다.
+   */
+  const anchorRef = useRef<CellRange | null>(null);
+  const draggingRef = useRef(false);
+
+  const pickCell = useCallback(
+    (cell: FormCell, shift: boolean) => {
+      if (!onSelect) return;
+      const range = cellRangeOf(cell);
+      if (shift && anchorRef.current) {
+        onSelect(union(anchorRef.current, range));
+        return;
+      }
+      anchorRef.current = range;
+      draggingRef.current = true;
+      onSelect(range);
+      // 단추를 떼면 끌기가 끝난다. 표 밖에서 떼도 알아채야 하니 창에 붙인다.
+      window.addEventListener(
+        "mouseup",
+        () => {
+          draggingRef.current = false;
+        },
+        { once: true },
+      );
+    },
+    [onSelect],
+  );
+
+  const sweepCell = useCallback(
+    (cell: FormCell) => {
+      if (!onSelect || !draggingRef.current || !anchorRef.current) return;
+      const range = union(anchorRef.current, cellRangeOf(cell));
+      // 시작점 그대로면 아직 한 칸이다 — 글자 고치기를 접지 않는다(그냥 누른 것일 수 있다).
+      if (range.top === range.bottom && range.left === range.right) return;
+      dropEditing();
+      onSelect(range);
+    },
+    [onSelect],
+  );
 
   const totalWidth = sheet.colWidths.reduce((a, b) => a + b, 0);
   // 남은 폭(가로 맞춤 계산용)과 표의 실제 높이(배율 적용 후 자리 확보용).
@@ -463,6 +569,10 @@ export default function FormSheetView({
               cellMarks={cellMarks}
               onChangeValue={handleChange}
               onCommitValue={handleCommit}
+              selLeft={inSelection(selection, rowIndex + 1) ? selection!.left : -1}
+              selRight={inSelection(selection, rowIndex + 1) ? selection!.right : -1}
+              onPickCell={onSelect ? pickCell : undefined}
+              onSweepCell={onSelect ? sweepCell : undefined}
             />
           ))}
         </tbody>
