@@ -16,6 +16,7 @@
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
 import { baseFileName, planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
+import { syncDelete, syncPatch, syncSites, syncTaxonomies, syncUpload } from "./formSync.ts";
 import { findApprovalBoxes } from "./approval.ts";
 import { changedAfterApproval, type Approval, type Assignee } from "./approvalLine.ts";
 import type { ApprovalSheetSummary } from "./homeStats.ts";
@@ -634,6 +635,26 @@ export async function saveForm(input: {
     approvals: {},
   };
   await run("readwrite", (store) => store.put(form));
+  /*
+   * 서버에도 따라 올린다. **기다리지 않는다** — 42MB 짜리를 올리는 동안 화면이 멈추면 안 된다.
+   * 실패해도 브라우저에는 남아 있고, 띠의 [서버로 옮기기]로 나중에 올릴 수 있다.
+   */
+  void syncUpload(
+    {
+      id: form.id,
+      kind: form.kind === "site" ? "site" : "template",
+      siteId: form.kind === "site" ? (form.siteId ?? null) : null,
+      taxonomyId: form.taxonomyId ?? null,
+      code: form.code ?? null,
+      title: form.title,
+      fileName: form.fileName,
+      attachment: form.attachment === true,
+      sheets: form.attachment ? null : form.sheets,
+      parserVersion: form.parserVersion,
+      batchId: form.batchId ?? null,
+    },
+    form.bytes,
+  );
   return form;
 }
 
@@ -698,6 +719,24 @@ export async function copyTemplateToSite(templateId: string, siteId: string): Pr
     bytes: template.bytes.slice(0),
   };
   await run("readwrite", (store) => store.put(copy));
+  // 현장 사본 — 본사가 "이 현장이 무엇을 만들었나" 를 바로 볼 수 있어야 한다.
+  void syncUpload(
+    {
+      id: copy.id,
+      kind: "site",
+      siteId,
+      taxonomyId: copy.taxonomyId ?? null,
+      code: copy.code ?? null,
+      title: copy.title,
+      fileName: copy.fileName,
+      attachment: copy.attachment === true,
+      sheets: copy.attachment ? null : copy.sheets,
+      parserVersion: copy.parserVersion,
+      templateId: template.id,
+      templateUploadedAt: new Date(template.uploadedAt).toISOString(),
+    },
+    copy.bytes,
+  );
   return copy;
 }
 
@@ -758,6 +797,23 @@ export async function copyTemplateToSlot(
     bytes: template.bytes.slice(0),
   };
   await run("readwrite", (store) => store.put(copy));
+  // 다른 칸에 배포한 것도 **배포 양식**이다(현장 사본이 아니다).
+  void syncUpload(
+    {
+      id: copy.id,
+      kind: "template",
+      siteId: null,
+      taxonomyId: slot.taxonomyId,
+      code: slot.code,
+      title: copy.title,
+      fileName: copy.fileName,
+      attachment: copy.attachment === true,
+      sheets: copy.attachment ? null : copy.sheets,
+      parserVersion: copy.parserVersion,
+      batchId: copy.batchId ?? null,
+    },
+    copy.bytes,
+  );
   return copy;
 }
 
@@ -796,6 +852,7 @@ export async function migrateLegacyForms(firstSiteId: string | undefined): Promi
 /** 고친 글자만 갱신한다. */
 export async function updateFormValues(id: string, values: FormValues): Promise<void> {
   await patchForm(id, () => ({ values, updatedAt: Date.now() }));
+  void syncPatch(id, { cellValues: values });
 }
 
 /** meta 칸에서 값 하나를 읽는다. */
@@ -866,6 +923,8 @@ export async function loadSites(): Promise<FormSite[]> {
 /** 현장 목록을 통째로 저장한다(추가·이름 바꾸기). */
 export async function saveSites(list: FormSite[]): Promise<void> {
   await writeMeta({ [SITES_KEY]: list });
+  // 현장은 **서류보다 먼저** 서버에 있어야 한다 — 없으면 그 현장 서류를 서버가 받지 않는다.
+  void syncSites(list);
 }
 
 /** 서류를 다른 현장으로 옮긴다. */
@@ -876,6 +935,7 @@ export async function setFormSite(id: string, siteId: string): Promise<void> {
 /** 코드표 목록을 통째로 저장한다. 올리기·이름 바꾸기·지우기 모두 이걸로 끝난다. */
 export async function saveTaxonomies(list: Taxonomy[]): Promise<void> {
   await writeMeta({ [TAXONOMIES_KEY]: list });
+  void syncTaxonomies(list);
 }
 
 /** 서류를 코드표의 한 칸에 붙이거나(코드·코드표 id) 떼어 낸다(undefined). */
@@ -920,6 +980,11 @@ export async function setSheetApproval(
     ...(change.approvals ? { approvals: put(form.approvals, change.approvals) } : {}),
     updatedAt: Date.now(),
   }));
+  // 결재는 본사가 바로 봐야 하는 것이라 **통째로** 다시 보낸다(시트별로 쪼개 보내면 어긋난다).
+  const saved = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
+  if (saved) {
+    void syncPatch(id, { approvalLines: saved.approvalLines ?? {}, approvals: saved.approvals ?? {} });
+  }
 }
 
 /** 이 양식에서 이미 쓰이고 있는 시트 이름(원본 + 더한 것). */
@@ -1074,6 +1139,8 @@ export async function touchForm(id: string): Promise<void> {
 export async function deleteForm(id: string): Promise<void> {
   await run("readwrite", (store) => store.delete(id));
   if (readLastOpenedId() === id) writeLastOpenedId(null);
+  // 서버에 올라가 있던 것이면 거기서도 지운다. 없으면 서버가 404 를 주고 조용히 넘어간다.
+  void syncDelete(id);
 }
 
 /**
