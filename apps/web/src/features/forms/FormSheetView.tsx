@@ -351,14 +351,9 @@ const SheetRow = memo(function SheetRow({
                   position: "relative",
                 }
               : {}),
-            // 고른 범위 — 엑셀처럼 옅은 파란색으로 덮고 칸마다 안쪽 테두리를 준다.
-            // 배경색 대신 덧칠이라 원본 칸 색이 그대로 비쳐 보인다.
+            // 고른 범위 — 엑셀처럼 안쪽에 파란 테두리. 파란 덮개는 글자 위에 얹는다(아래 참조).
             ...(selected
-              ? {
-                  backgroundImage:
-                    "linear-gradient(rgba(37, 99, 235, 0.16), rgba(37, 99, 235, 0.16))",
-                  boxShadow: "inset 0 0 0 1px rgba(37, 99, 235, 0.65)",
-                }
+              ? { boxShadow: "inset 0 0 0 1px rgba(37, 99, 235, 0.65)", position: "relative" as const }
               : {}),
           }}
         >
@@ -386,6 +381,23 @@ const SheetRow = memo(function SheetRow({
                 </button>
               )}
             </span>
+          )}
+          {/*
+            고른 범위를 덮는 파란 막 — 칸 배경이 아니라 **글자 위에** 얹는다.
+            배경으로 칠하면, 마우스가 놓인 칸은 글자 상자의 옅은 hover 색이 그 위를 덮어
+            그 칸만 색이 달라 보인다(실제로 그렇게 보였다). 누르기는 통과시킨다.
+          */}
+          {selected && (
+            <span
+              aria-hidden
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 10,
+                pointerEvents: "none",
+                background: "rgba(37, 99, 235, 0.15)",
+              }}
+            />
           )}
           <CellMarkLayer mark={cellMarks.get(cell.key)} />
           <FormCellContent
