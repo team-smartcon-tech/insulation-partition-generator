@@ -102,6 +102,221 @@ async function firstRow<T>(res: Response): Promise<T | null> {
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 }
 
+// ── 나는 누구인가 · 본사 관리자 명단 ─────────────────────────────────────────
+
+/**
+ * 본사 관리자인가.
+ *
+ * 2026-09-11 에 정한 규칙(`20260911000001_form_taxonomy.sql`)을 그대로 따른다 —
+ * **로그인 등급이 최고·시스템 관리자이거나, 본사 관리자 명단에 이메일이 있으면** 본사다.
+ * 등급은 회사 공용 로그인 시스템(DCR)이 정하는 것이라 여기서 바꿀 수 없다. 그래서 명단이 있다.
+ */
+async function isHqAdmin(env: Env, user: SessionUser): Promise<boolean> {
+  if (isAdmin(user)) return true;
+  const email = String(user.email ?? "").trim().toLowerCase();
+  if (!email) return false;
+  try {
+    const res = await supabaseRest(
+      env,
+      "GET",
+      `/form_admins?select=email&email=eq.${encodeURIComponent(email)}&limit=1`,
+    );
+    if (!res.ok) return false;
+    return (await firstRow<{ email: string }>(res)) !== null;
+  } catch (err) {
+    // 명단을 못 읽었다고 등급까지 부정하지는 않는다. 다만 명단 덕에 얻는 권한은 주지 않는다.
+    console.error("[forms/admins 조회]", errMsg(err));
+    return false;
+  }
+}
+
+/**
+ * GET /api/forms/me — 지금 로그인한 사람과 **본사 관리자인지**.
+ * 화면은 이 답으로 [배포 양식함]·[본사 점검] 탭을 보일지 정한다.
+ */
+forms.get("/me", async (c) => {
+  const user = currentUser(c);
+  const admin = await isHqAdmin(c.env, user);
+  return c.json({
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    admin,
+    // 등급으로 얻은 권한인지(명단에서 뺄 수 없다), 명단으로 얻은 권한인지 구분해 보여 준다.
+    byRole: isAdmin(user),
+  });
+});
+
+/** GET /api/forms/admins — 본사 관리자 명단(본사만) */
+forms.get("/admins", async (c) => {
+  const user = currentUser(c);
+  if (!(await isHqAdmin(c.env, user))) return c.json({ error: "본사 관리자만 볼 수 있습니다." }, 403);
+  try {
+    const res = await supabaseRest(c.env, "GET", "/form_admins?select=*&order=added_at.asc");
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ admins: await res.json() });
+  } catch (err) {
+    console.error("[forms/admins GET]", errMsg(err));
+    return c.json({ error: "명단을 읽지 못했습니다." }, 500);
+  }
+});
+
+/** POST /api/forms/admins — 명단에 한 사람 더하기(본사만) */
+forms.post("/admins", async (c) => {
+  const user = currentUser(c);
+  if (!(await isHqAdmin(c.env, user))) return c.json({ error: "본사 관리자만 바꿀 수 있습니다." }, 403);
+  try {
+    const body = (await c.req.json()) as { email?: string; name?: string };
+    // 대소문자 차이로 명단에서 빠지지 않게 소문자로 맞춰 넣는다(표 주석의 약속).
+    const email = String(body.email ?? "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return c.json({ error: "이메일을 바르게 적어 주세요." }, 400);
+
+    const res = await supabaseRest(
+      c.env,
+      "POST",
+      "/form_admins",
+      { email, name: String(body.name ?? "").trim() || null, added_by: user.email },
+      "return=representation,resolution=merge-duplicates",
+    );
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ admin: await firstRow(res) });
+  } catch (err) {
+    console.error("[forms/admins POST]", errMsg(err));
+    return c.json({ error: "명단에 넣지 못했습니다." }, 500);
+  }
+});
+
+/** DELETE /api/forms/admins/:email — 명단에서 빼기(본사만) */
+forms.delete("/admins/:email", async (c) => {
+  const user = currentUser(c);
+  if (!(await isHqAdmin(c.env, user))) return c.json({ error: "본사 관리자만 바꿀 수 있습니다." }, 403);
+  const email = decodeURIComponent(c.req.param("email")).trim().toLowerCase();
+  // 자기 자신을 빼면 그 자리에서 권한을 잃는다. 실수로 아무도 못 들어가는 상태가 되지 않게 막는다.
+  if (email === String(user.email ?? "").toLowerCase() && !isAdmin(user)) {
+    return c.json({ error: "자기 자신은 뺄 수 없습니다. 다른 본사 관리자에게 부탁하세요." }, 400);
+  }
+  try {
+    const res = await supabaseRest(c.env, "DELETE", `/form_admins?email=eq.${encodeURIComponent(email)}`);
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ ok: true });
+  } catch (err) {
+    console.error("[forms/admins DELETE]", errMsg(err));
+    return c.json({ error: "명단에서 빼지 못했습니다." }, 500);
+  }
+});
+
+// ── 오류·개선 의견 ──────────────────────────────────────────────────────────
+
+/** GET /api/forms/feedback — 의견 목록. **모든 직원이 본다**(같은 불편을 따로 적지 않게). */
+forms.get("/feedback", async (c) => {
+  try {
+    const res = await supabaseRest(c.env, "GET", "/form_feedback?select=*&order=created_at.desc");
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ feedback: await res.json() });
+  } catch (err) {
+    console.error("[forms/feedback GET]", errMsg(err));
+    return c.json({ error: "의견을 읽지 못했습니다." }, 500);
+  }
+});
+
+/** POST /api/forms/feedback — 의견 올리기(누구나) */
+forms.post("/feedback", async (c) => {
+  try {
+    const body = (await c.req.json()) as { kind?: string; title?: string; body?: string; whereAt?: string };
+    const title = String(body.title ?? "").trim();
+    if (!title) return c.json({ error: "제목을 적어 주세요." }, 400);
+
+    const user = currentUser(c);
+    const res = await supabaseRest(c.env, "POST", "/form_feedback", {
+      kind: body.kind === "idea" ? "idea" : "bug",
+      title,
+      body: String(body.body ?? "").trim(),
+      where_at: String(body.whereAt ?? "").trim() || null,
+      // 올린 사람은 **로그인 정보로** 적는다. 화면이 보낸 이름을 믿으면 남의 이름으로 올릴 수 있다.
+      author_id: user.id,
+      author_name: user.name,
+      author_email: user.email,
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ item: await firstRow(res) }, 201);
+  } catch (err) {
+    console.error("[forms/feedback POST]", errMsg(err));
+    return c.json({ error: "의견을 올리지 못했습니다." }, 500);
+  }
+});
+
+/**
+ * PATCH /api/forms/feedback/:id — 고치기.
+ * 글쓴이는 **자기 글의 내용만**, 본사는 **상태와 답**을 적는다.
+ */
+forms.patch("/feedback/:id", async (c) => {
+  const id = c.req.param("id");
+  try {
+    const user = currentUser(c);
+    const admin = await isHqAdmin(c.env, user);
+    const found = await supabaseRest(c.env, "GET", `/form_feedback?select=*&id=eq.${id}&limit=1`);
+    const row = found.ok ? await firstRow<{ author_email?: string }>(found) : null;
+    if (!row) return c.json({ error: "그 의견을 찾지 못했습니다." }, 404);
+
+    const mine = String(row.author_email ?? "").toLowerCase() === String(user.email ?? "").toLowerCase();
+    const body = (await c.req.json()) as {
+      kind?: string;
+      title?: string;
+      body?: string;
+      whereAt?: string;
+      status?: string;
+      reply?: string;
+    };
+
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (mine) {
+      if (body.kind !== undefined) patch.kind = body.kind === "idea" ? "idea" : "bug";
+      if (body.title !== undefined) patch.title = String(body.title).trim();
+      if (body.body !== undefined) patch.body = String(body.body).trim();
+      if (body.whereAt !== undefined) patch.where_at = String(body.whereAt).trim() || null;
+    }
+    if (admin) {
+      if (body.status !== undefined && ["open", "doing", "done", "wont"].includes(body.status)) {
+        patch.status = body.status;
+      }
+      if (body.reply !== undefined) {
+        patch.reply = String(body.reply).trim() || null;
+        patch.replied_by = user.name || user.email;
+        patch.replied_at = new Date().toISOString();
+      }
+    }
+    if (Object.keys(patch).length === 1) {
+      return c.json({ error: "고칠 수 있는 것이 없습니다(내 글의 내용, 또는 본사의 상태·답)." }, 403);
+    }
+
+    const res = await supabaseRest(c.env, "PATCH", `/form_feedback?id=eq.${id}`, patch);
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ item: await firstRow(res) });
+  } catch (err) {
+    console.error("[forms/feedback PATCH]", errMsg(err));
+    return c.json({ error: "의견을 고치지 못했습니다." }, 500);
+  }
+});
+
+/** DELETE /api/forms/feedback/:id — 글쓴이 또는 본사만 지운다. */
+forms.delete("/feedback/:id", async (c) => {
+  const id = c.req.param("id");
+  try {
+    const user = currentUser(c);
+    const found = await supabaseRest(c.env, "GET", `/form_feedback?select=author_email&id=eq.${id}&limit=1`);
+    const row = found.ok ? await firstRow<{ author_email?: string }>(found) : null;
+    if (!row) return c.json({ ok: true }); // 이미 없다 — 지우려던 뜻은 이뤄졌다
+    const mine = String(row.author_email ?? "").toLowerCase() === String(user.email ?? "").toLowerCase();
+    if (!mine && !(await isHqAdmin(c.env, user))) {
+      return c.json({ error: "내가 올린 의견만 지울 수 있습니다." }, 403);
+    }
+    const res = await supabaseRest(c.env, "DELETE", `/form_feedback?id=eq.${id}`);
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ ok: true });
+  } catch (err) {
+    console.error("[forms/feedback DELETE]", errMsg(err));
+    return c.json({ error: "의견을 지우지 못했습니다." }, 500);
+  }
+});
+
 // ── 현장 ────────────────────────────────────────────────────────────────────
 
 /** GET /api/forms/sites — 현장 목록 */

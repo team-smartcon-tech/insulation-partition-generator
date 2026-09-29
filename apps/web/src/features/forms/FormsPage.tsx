@@ -27,6 +27,7 @@ import {
   ClipboardCheck,
   FileSpreadsheet,
   FileText,
+  MessageSquare,
   Minus,
   Pencil,
   Plus,
@@ -67,6 +68,8 @@ import DropUploadDialog from "./DropUploadDialog";
 import AttachmentPanel from "./AttachmentPanel";
 import ServerSyncBanner from "./ServerSyncBanner";
 import ReviewPage from "./ReviewPage";
+import FeedbackPage from "./FeedbackPage";
+import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
 import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
@@ -195,8 +198,40 @@ type LoadState =
       updatedAt?: number;
     };
 
-/** 홈 · 배포 양식함(원본) · 현장 서류함(작성본) · 본사 점검(서버에 올라온 현장 서류) */
-type Space = "home" | "library" | "site" | "review";
+/**
+ * 홈 · 배포 양식함(원본) · 현장 서류함(작성본) · 본사 점검(서버에 올라온 현장 서류) ·
+ * 오류·개선 의견(모든 직원).
+ *
+ * **배포 양식함과 본사 점검은 본사 관리자만 본다**(2026-09-30 사용자 결정). 현장 사람에게
+ * 회사 원본 양식함과 남의 현장 점검 화면까지 보이면, 자기 일과 상관없는 화면에서 헤맨다.
+ */
+type Space = "home" | "library" | "site" | "review" | "feedback";
+
+/** 본사 관리자만 들어갈 수 있는 곳 */
+const HQ_ONLY: ReadonlySet<Space> = new Set<Space>(["library", "review"]);
+
+/** 등급만으로 본사가 되는 사람. 명단(`form_admins`)으로도 될 수 있고, 그 판단은 서버가 한다. */
+const HQ_ROLES = new Set(["super_admin", "system_admin"]);
+
+/**
+ * 본사 관리자인지 서버에 묻는다.
+ *
+ * 답을 받기 전에는 **없는 것으로 친다** — 잠깐 보였다 사라지는 것보다 늦게 나타나는 쪽이 낫다.
+ * 서버에 못 닿으면(집에서 열었거나 서버가 내려갔을 때) 등급만 보고 정한다.
+ */
+function useHqAdmin(role: string | undefined): boolean {
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetchMe()
+      .then((me) => alive && setAdmin(me.admin))
+      .catch(() => alive && setAdmin(HQ_ROLES.has(role ?? "")));
+    return () => {
+      alive = false;
+    };
+  }, [role]);
+  return admin;
+}
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -289,6 +324,23 @@ export default function FormsPage() {
   /** 서명이 없어 등록 창을 띄웠을 때, 등록하면 이어서 결재할 칸 */
   const [signFor, setSignFor] = useState<number | null>(null);
   const { user } = useAuth();
+  /**
+   * 나는 본사 관리자인가 — [배포 양식함]·[본사 점검] 을 보일지 정한다.
+   *
+   * 등급(super_admin·system_admin)만으로는 모자란다. 등급은 회사 공용 로그인 시스템이 정하는
+   * 것이라 여기서 못 바꾸므로, **본사 관리자 명단**(`form_admins`)에 이메일을 넣어 권한을 준다.
+   * 그 판단은 서버가 한다(`GET /api/forms/me`). 서버에 못 닿으면 등급만 보고 판단한다.
+   */
+  const isHq = useHqAdmin(user?.role);
+  /**
+   * 본사가 아닌 것으로 밝혀지면 본사 전용 화면에서 빠져나온다.
+   *
+   * 답을 받기 전 잠깐은 본사가 아닌 것으로 치므로(`useHqAdmin`), 처음부터 그 화면일 수는 없다.
+   * 다만 본사였다가 명단에서 빠진 뒤 다시 열었을 때를 위해 둔다.
+   */
+  useEffect(() => {
+    setSpaceState((current) => (HQ_ONLY.has(current) && !isHq ? "site" : current));
+  }, [isHq]);
   const mySignature = useSignature(user?.id);
   /** 결재선 지정 창이 열려 있나 */
   const [lineDialogOpen, setLineDialogOpen] = useState(false);
@@ -343,6 +395,8 @@ export default function FormsPage() {
   }
 
   function setSpace(next: Space) {
+    // 본사 전용 화면은 본사만. 화면에서 단추를 감추지만, 다른 길로 들어오는 것도 여기서 막는다.
+    if (HQ_ONLY.has(next) && !isHq) return;
     setSpaceState(next);
     // 다른 곳으로 옮기면 코드표 편집은 끈다 — 편집 도구는 배포 양식함에만 있다.
     if (next === "site") setEditingTaxonomy(false);
@@ -2056,7 +2110,7 @@ export default function FormsPage() {
             </div>
           )
         }
-        subbar={<SpaceTabs space={space} onChange={setSpace} />}
+        subbar={<SpaceTabs space={space} onChange={setSpace} isHq={isHq} />}
       />
 
       {/* 넓은 양식(21열짜리 대장 등)이 있어 폭을 넉넉히 잡는다. 좁으면 "가로 맞춤"
@@ -2103,6 +2157,9 @@ export default function FormsPage() {
           {/* 본사 점검은 **서버를 직접 본다** — 다른 사람이 올린 것을 보는 일이라 브라우저 사본으로는 못 한다. */}
           {space === "review" ? (
             <ReviewPage />
+          ) : /* 의견은 **모든 직원**이 본다 — 본사 점검 옆에 둔다(2026-09-30 사용자 결정). */
+          space === "feedback" ? (
+            <FeedbackPage admin={isHq} myEmail={user?.email} />
           ) : /* 현장을 고르지 않았으면 현장별 현황부터 — 서류 점검은 여기서 시작한다. */
           space === "home" ? (
             siteId ? (
@@ -2952,18 +3009,41 @@ export default function FormsPage() {
  * 로고 옆에 끼우면 헤더가 좁아져 조잡해 보여서(사용자와 시안으로 비교) 아래 줄로 내렸다.
  * 밑줄 탭으로 둔 것은 목록 안의 1차 분류 탭(서류철 모양)과 겹쳐 보이지 않게 하려는 것이다.
  */
-function SpaceTabs({ space, onChange }: { space: Space; onChange: (space: Space) => void }) {
-  const tabs: { value: Space; label: string; icon: typeof BookOpen; title: string }[] = [
+function SpaceTabs({
+  space,
+  onChange,
+  isHq,
+}: {
+  space: Space;
+  onChange: (space: Space) => void;
+  /** 본사 관리자인가 — 아니면 본사 전용 탭은 아예 그리지 않는다. */
+  isHq: boolean;
+}) {
+  const all: { value: Space; label: string; icon: typeof BookOpen; title: string; hq?: boolean }[] = [
     { value: "home", label: "홈", icon: House, title: "내 결재함·서류 진척도·알림" },
-    { value: "library", label: "배포 양식함", icon: BookOpen, title: "회사가 배포한 원본 양식 — 고칠 수 없습니다" },
+    {
+      value: "library",
+      label: "배포 양식함",
+      icon: BookOpen,
+      title: "회사가 배포한 원본 양식 — 본사 관리자만 보입니다",
+      hq: true,
+    },
     { value: "site", label: "현장 서류함", icon: FolderOpen, title: "현장별로 작성하는 서류" },
     {
       value: "review",
       label: "본사 점검",
       icon: ClipboardCheck,
-      title: "현장이 올린 서류를 서버에서 바로 보고 확인·보완 요청",
+      title: "현장이 올린 서류를 서버에서 바로 보고 확인·보완 요청 — 본사 관리자만 보입니다",
+      hq: true,
+    },
+    {
+      value: "feedback",
+      label: "오류·개선 의견",
+      icon: MessageSquare,
+      title: "쓰다가 이상한 것·이랬으면 하는 것을 적는 곳 — 모든 직원이 함께 봅니다",
     },
   ];
+  const tabs = all.filter((tab) => !tab.hq || isHq);
   return (
     <nav className="flex h-11 items-stretch gap-6" aria-label="양식함 고르기">
       {tabs.map(({ value, label, icon: Icon, title }) => {

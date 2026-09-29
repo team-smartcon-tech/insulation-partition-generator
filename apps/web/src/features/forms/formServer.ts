@@ -92,6 +92,65 @@ const toSite = (row: SiteRow): FormSite => ({
       : undefined,
 });
 
+/** 본사 관리자 명단 한 줄 */
+export interface FormAdmin {
+  email: string;
+  name?: string | null;
+  added_by?: string | null;
+  added_at?: string;
+}
+
+/** 지금 로그인한 사람이 **본사 관리자인지** 서버에 묻는다. */
+export interface MeInfo {
+  user: { id: string; name: string; email: string; role: string };
+  /** 본사 관리자인가 — [배포 양식함]·[본사 점검] 탭을 보일지 정한다 */
+  admin: boolean;
+  /** 등급으로 얻은 권한인가(명단에서 뺄 수 없다) */
+  byRole: boolean;
+}
+
+export const fetchMe = () => api<MeInfo>("/me");
+
+export const fetchAdmins = async () => (await api<{ admins: FormAdmin[] }>("/admins")).admins;
+
+export const addAdmin = async (email: string, name?: string) =>
+  (await api<{ admin: FormAdmin }>("/admins", { method: "POST", body: JSON.stringify({ email, name }) })).admin;
+
+export const removeAdmin = async (email: string) =>
+  api<{ ok: true }>(`/admins/${encodeURIComponent(email)}`, { method: "DELETE" });
+
+/* ── 오류·개선 의견 ───────────────────────────────────────────────────────── */
+
+/** 의견 한 줄(서버 말 그대로 쓴다 — 화면에서만 쓰는 말이라 통역할 것이 없다) */
+export interface FeedbackRow {
+  id: string;
+  kind: "bug" | "idea";
+  title: string;
+  body: string;
+  where_at?: string | null;
+  status: "open" | "doing" | "done" | "wont";
+  reply?: string | null;
+  replied_by?: string | null;
+  replied_at?: string | null;
+  author_id?: string | null;
+  author_name?: string | null;
+  author_email?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export const fetchFeedback = async () => (await api<{ feedback: FeedbackRow[] }>("/feedback")).feedback;
+
+export const postFeedback = async (input: { kind: "bug" | "idea"; title: string; body: string; whereAt?: string }) =>
+  (await api<{ item: FeedbackRow }>("/feedback", { method: "POST", body: JSON.stringify(input) })).item;
+
+export const patchFeedback = async (
+  id: string,
+  patch: { kind?: "bug" | "idea"; title?: string; body?: string; whereAt?: string; status?: FeedbackRow["status"]; reply?: string },
+) => (await api<{ item: FeedbackRow }>(`/feedback/${id}`, { method: "PATCH", body: JSON.stringify(patch) })).item;
+
+export const deleteFeedback = (id: string) => api<{ ok: true }>(`/feedback/${id}`, { method: "DELETE" });
+
 export async function fetchSites(): Promise<FormSite[]> {
   const { sites } = await api<{ sites: SiteRow[] }>("/sites");
   return (sites ?? []).map(toSite);

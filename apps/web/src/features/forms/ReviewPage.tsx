@@ -27,14 +27,18 @@ import {
   Undo2,
 } from "lucide-react";
 import {
+  addAdmin,
+  fetchAdmins,
   fetchDoc,
   fetchDocs,
   fetchSites,
   fetchTaxonomies,
   fileUrl,
   patchDoc,
+  removeAdmin,
   ServerUnavailable,
   type DocRow,
+  type FormAdmin,
 } from "./formServer";
 import { fileKind, fileSizeText } from "./library";
 import FormSheetView from "./FormSheetView";
@@ -390,7 +394,119 @@ export default function ReviewPage() {
           </div>
         </div>
       )}
+
+      <AdminList />
     </section>
+  );
+}
+
+/**
+ * 본사 관리자 명단 — **누가 [배포 양식함]·[본사 점검]을 볼 수 있나.**
+ *
+ * 등급(최고·시스템 관리자)은 회사 공용 로그인 시스템이 정하는 것이라 여기서 못 바꾼다.
+ * 그래서 이 명단에 이메일을 넣어 **스마트폼 안에서만** 본사 권한을 준다(2026-09-11에 정한 규칙).
+ * 이 화면 자체가 본사만 들어오는 곳이라 여기에 둔다.
+ */
+function AdminList() {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<FormAdmin[] | null>(null);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await fetchAdmins());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "명단을 읽지 못했습니다.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open && rows === null) void load();
+  }, [open, rows, load]);
+
+  return (
+    <div className="mt-6 border-t border-dashed border-slate-200 pt-4">
+      <button
+        type="button"
+        onClick={() => setOpen((on) => !on)}
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
+      >
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} 본사 관리자 명단
+        {rows && <span className="font-normal text-slate-400">{rows.length}명</span>}
+      </button>
+
+      {open && (
+        <div className="mt-3 rounded-xl bg-slate-50 p-3">
+          <p className="mb-2 text-xs text-slate-500">
+            여기 있는 사람만 [배포 양식함]과 [본사 점검]을 볼 수 있습니다. 최고·시스템 관리자 등급은 명단에 없어도
+            볼 수 있습니다.
+          </p>
+          {error && <p className="mb-2 text-xs text-rose-600">{error}</p>}
+
+          <ul className="mb-3 space-y-1">
+            {(rows ?? []).map((row) => (
+              <li key={row.email} className="flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs">
+                <span className="font-medium text-slate-800">{row.name || row.email}</span>
+                <span className="text-slate-400">{row.email}</span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!window.confirm(`${row.name || row.email} 님을 본사 관리자에서 뺄까요?`)) return;
+                    try {
+                      await removeAdmin(row.email);
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "빼지 못했습니다.");
+                    }
+                    await load();
+                  }}
+                  className="ml-auto rounded px-2 py-0.5 font-medium text-rose-600 ring-1 ring-rose-200 transition hover:bg-rose-50"
+                >
+                  빼기
+                </button>
+              </li>
+            ))}
+            {rows !== null && rows.length === 0 && (
+              <li className="px-1 text-xs text-slate-400">명단이 비어 있습니다(등급으로만 들어오고 있습니다).</li>
+            )}
+          </ul>
+
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="이메일"
+              className="min-w-[14rem] flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500"
+            />
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="이름(선택)"
+              className="w-32 rounded-lg border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500"
+            />
+            <button
+              type="button"
+              disabled={email.trim() === ""}
+              onClick={async () => {
+                try {
+                  await addAdmin(email.trim(), name.trim() || undefined);
+                  setEmail("");
+                  setName("");
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "넣지 못했습니다.");
+                }
+                await load();
+              }}
+              className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-900 disabled:bg-slate-300"
+            >
+              본사 관리자로 넣기
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

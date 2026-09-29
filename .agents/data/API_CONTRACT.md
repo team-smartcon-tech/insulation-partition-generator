@@ -42,7 +42,7 @@ Notes:
 ### 스마트폼(/tools/forms) — 2026-09-29
 
 구현: `apps/worker/src/forms.ts` (index.ts 에서 `app.route("/api/forms", formsRoutes)` 로 마운트).
-테이블: `form_sites` · `form_documents` · `form_taxonomy(+history)` — `.agents/data/DB_SCHEMA.md` 5.1 참고.
+테이블: `form_sites` · `form_documents` · `form_taxonomy(+history)` · `form_admins` · `form_feedback` — `.agents/data/DB_SCHEMA.md` 5.1 참고.
 인증: 모든 경로 로그인 필수(authMiddleware 뒤에 마운트). 로컬 개발에서 `COOKIE_SECURE=false` 면
 미들웨어가 통과시키므로 `currentUser()` 가 자리 표시 사용자를 쓴다.
 
@@ -60,6 +60,14 @@ Notes:
 | PATCH | `/api/forms/sites/:id` | 현장 조직·기본 결재선·이름 | 로그인 |
 | GET | `/api/forms/docs/:id/file` | 내려받기 주소(5분) | 로그인 |
 | DELETE | `/api/forms/docs/:id` | 서류와 파일 삭제 | 올린 사람 또는 본사 관리자 |
+| GET | `/api/forms/me` | 나는 누구인가 + **본사 관리자인가** | 로그인 |
+| GET | `/api/forms/admins` | 본사 관리자 명단 | **본사 관리자** |
+| POST | `/api/forms/admins` | 명단에 넣기(이메일 소문자로 맞춤) | **본사 관리자** |
+| DELETE | `/api/forms/admins/:email` | 명단에서 빼기(자기 자신은 못 뺀다) | **본사 관리자** |
+| GET | `/api/forms/feedback` | 오류·개선 의견 목록 | 로그인 |
+| POST | `/api/forms/feedback` | 의견 올리기 | 로그인 |
+| PATCH | `/api/forms/feedback/:id` | 내 글 고치기 / **상태·답**(본사) | 글쓴이 또는 본사 관리자 |
+| DELETE | `/api/forms/feedback/:id` | 의견 지우기 | 글쓴이 또는 본사 관리자 |
 
 주요 결정:
 
@@ -73,3 +81,7 @@ Notes:
   서버는 먼저 있던 줄을 돌려주고(코드표는 내용만 갱신), 화면은 그 번호를 받아 자기 것을 맞춘다
   (`adoptSiteId`·`adoptTaxonomyId`). 안 그러면 "없는 현장/분류"를 가리켜 서류가 거절당한다.
 - 목록은 무거운 칸(`sheets`·`cell_values`)을 빼고 꼬리표만 보낸다 — 한 현장에 145종이 붙는다.
+- **본사 관리자 = 등급(super_admin·system_admin) 또는 `form_admins` 명단**(2026-09-11 규칙). 등급은 회사
+  공용 로그인 시스템(DCR)이 정하므로 이 프로젝트에서 바꿀 수 없다. 그래서 명단으로 권한을 준다.
+  화면은 `GET /me` 의 답으로 [배포 양식함]·[본사 점검] 탭을 보일지 정한다(서버도 따로 막는다).
+- **의견의 글쓴이·본사 답은 서버가 적는다.** 화면이 보낸 이름을 믿으면 남의 이름으로 올릴 수 있다.

@@ -230,6 +230,7 @@ Rollback impact:
 | `form_admins` | 코드표를 바꿀 수 있는 본사 관리자 명단 | 〃 |
 | `form_sites` | 현장. 현장 서류함 하나가 현장 하나에 딸린다 | `20260929024537_add_smart_forms_server_storage` |
 | `form_documents` | 서류 1건 = 파일 1개(+ 엑셀이면 격자·적은 글자·결재)와 본사 점검 | 〃 |
+| `form_feedback` | 오류 신고·개선 의견과 본사의 답(모든 직원이 쓰고 본다) | `20260929234733_add_form_feedback` |
 
 `form_documents` 주요 결정:
 
@@ -247,4 +248,15 @@ Rollback impact:
 
 Related frontend: `apps/web/src/features/forms/*` (지금은 아직 브라우저 IndexedDB 를 쓴다 — 서버 연결은 다음 단계).
 Related APIs: 아직 없음. Worker 에 올리기·목록·내려받기·점검 길을 낼 때 `.agents/data/API_CONTRACT.md` 를 함께 갱신한다.
-Rollback: `drop table public.form_documents, public.form_sites;` (그리고 필요하면 `form_taxonomy*`, `form_admins`).
+`form_feedback` 주요 결정(2026-09-30):
+
+- 누구나 올리고 **모두가 본다**. 같은 불편을 여러 사람이 따로 적으면 본사가 같은 이야기를 여러 번 읽는다.
+- `kind` = `bug`(오류) / `idea`(개선), `status` = `open`/`doing`/`done`/`wont` — 상태와 답은 **본사만** 적는다.
+- 글쓴이(`author_*`)는 로그인 정보로 서버가 적는다. 화면이 보낸 이름은 믿지 않는다.
+- 다른 표와 외래키가 없다 — 서류를 지워도 그 서류에 대한 의견은 남는다(고쳤는지 확인하려면 필요하다).
+
+`form_admins` 는 2026-09-30 부터 실제로 쓰인다 — 코드표뿐 아니라 **[배포 양식함]·[본사 점검] 탭을 볼 수
+있는 사람**을 이 명단으로 정한다. 명단 관리 화면은 [본사 점검] 아래에 있다.
+
+Rollback: `drop table public.form_feedback;` / `drop table public.form_documents, public.form_sites;`
+(그리고 필요하면 `form_taxonomy*`, `form_admins`).
