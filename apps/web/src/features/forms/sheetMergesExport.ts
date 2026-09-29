@@ -151,3 +151,85 @@ export function applyMergesToSheetXml(xml: string, edits: MergeEdits | undefined
   const out = writeMergeCells(xml, [...kept, ...edits.add.map(rangeRef)]);
   return clearCoveredCells(out, edits.add);
 }
+
+/* ── 병합하고 **가운데 맞춤** ────────────────────────────────────────────────
+ *
+ * 엑셀의 [병합하고 가운데 맞춤]은 두 가지를 한다 — 칸을 합치고, 글자를 가운데로 보낸다.
+ * 두 번째는 병합 목록이 아니라 **서식(styles.xml)** 에 들어 있다. 칸은 서식 번호(`s="12"`)만
+ * 들고 있으므로, 그 번호의 서식을 **가운데 맞춤만 더한 새 번호**로 바꿔 준다.
+ * 원래 서식을 고치면 그 서식을 쓰는 **다른 칸들까지 전부** 가운데로 가 버린다.
+ */
+
+/** `<xf …/>` 하나를 가운데 맞춤으로 바꾼 것. 나머지(글꼴·테두리·세로 맞춤)는 그대로 둔다. */
+function centeredXf(xf: string): string {
+  // 1) 여는 태그에 "맞춤을 적용한다"고 알린다. 없으면 엑셀이 맞춤을 무시한다.
+  let out = xf.replace(/^<xf\b([^>]*?)(\/?)>/, (whole, attrs: string, slash: string) => {
+    const next = /\bapplyAlignment=/.test(attrs) ? attrs.replace(/\bapplyAlignment="[^"]*"/, 'applyAlignment="1"') : `${attrs} applyAlignment="1"`;
+    return `<xf${next}${slash}>`;
+  });
+
+  if (/<alignment\b/.test(out)) {
+    return out.replace(/<alignment\b([^>]*?)(\/?)>/, (whole, attrs: string, slash: string) => {
+      const next = /\bhorizontal=/.test(attrs)
+        ? attrs.replace(/\bhorizontal="[^"]*"/, 'horizontal="center"')
+        : `${attrs} horizontal="center"`;
+      return `<alignment${next}${slash}>`;
+    });
+  }
+  // 맞춤이 없던 서식이면 새로 붙인다. 닫힌 형태(`<xf …/>`)는 내용을 담을 수 있게 편다.
+  if (out.endsWith("/>")) out = `${out.slice(0, -2)}></xf>`;
+  return out.replace("</xf>", '<alignment horizontal="center"/></xf>');
+}
+
+/** 시트 XML 에서 한 칸의 서식 번호를 읽는다(없으면 0). */
+const styleIdOf = (sheetXml: string, ref: string): number | null => {
+  // 글자열 안에서는 `\b` 가 정규식의 "낱말 경계"가 아니라 **백스페이스 문자**가 된다. `\\b` 로 적는다.
+  const cell = new RegExp(`<c\\b[^>]*?\\br="${ref}"[^>]*?(?:/>|>)`).exec(sheetXml);
+  if (!cell) return null;
+  return Number(/\bs="(\d+)"/.exec(cell[0])?.[1] ?? 0);
+};
+
+/** 한 칸의 서식 번호를 갈아 끼운다. */
+function setStyleId(sheetXml: string, ref: string, id: number): string {
+  return sheetXml.replace(new RegExp(`<c\\b[^>]*?\\br="${ref}"[^>]*?(?:/>|>)`), (tag) =>
+    /\bs="\d+"/.test(tag) ? tag.replace(/\bs="\d+"/, `s="${id}"`) : tag.replace(/^<c\b/, `<c s="${id}"`),
+  );
+}
+
+/**
+ * 합친 칸들을 가운데 맞춤으로 만든다. 고친 시트 XML 과 서식 XML 을 함께 돌려준다.
+ * 같은 모양의 서식이 이미 있으면 **그 번호를 다시 쓴다** — 합칠 때마다 서식이 불어나면 파일이 커진다.
+ */
+export function centerMergedAnchors(
+  sheetXml: string,
+  stylesXml: string,
+  ranges: CellRange[],
+): { sheet: string; styles: string } {
+  if (ranges.length === 0) return { sheet: sheetXml, styles: stylesXml };
+  const block = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml);
+  if (!block) return { sheet: sheetXml, styles: stylesXml };
+
+  const entries: string[] = block[1].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g) ?? [];
+  if (entries.length === 0) return { sheet: sheetXml, styles: stylesXml };
+
+  let sheet = sheetXml;
+  for (const range of ranges) {
+    const ref = `${columnName(range.left)}${range.top}`;
+    const current = styleIdOf(sheet, ref);
+    if (current === null) continue; // 칸 자체가 없으면 맞출 글자도 없다
+    const source = entries[current] ?? entries[0];
+    const centered = centeredXf(source);
+    let id = entries.indexOf(centered);
+    if (id < 0) {
+      entries.push(centered);
+      id = entries.length - 1;
+    }
+    sheet = setStyleId(sheet, ref, id);
+  }
+
+  const styles = stylesXml.replace(
+    block[0],
+    `<cellXfs count="${entries.length}">${entries.join("")}</cellXfs>`,
+  );
+  return { sheet, styles };
+}

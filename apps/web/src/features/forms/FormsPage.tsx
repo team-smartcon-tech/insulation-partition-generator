@@ -2860,16 +2860,16 @@ export default function FormsPage() {
                   type="button"
                   disabled={!selection || (selection.top === selection.bottom && selection.left === selection.right)}
                   onClick={() => void changeMerge("merge")}
-                  title="고른 칸들을 한 칸으로 합칩니다. 엑셀과 같이 왼쪽 위 글자만 남습니다."
+                  title="엑셀의 [병합하고 가운데 맞춤]과 같습니다. 고른 칸들을 한 칸으로 합치고 글자를 가운데로 보냅니다(왼쪽 위 글자만 남습니다)."
                   className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200 disabled:hover:bg-transparent"
                 >
-                  <TableCellsMerge size={14} /> 칸 합치기
+                  <TableCellsMerge size={14} /> 병합하고 가운데 맞춤
                 </button>
                 <button
                   type="button"
                   disabled={!selection || !mergedAtSelection}
                   onClick={() => void changeMerge("split")}
-                  title="합쳐진 칸을 원래 칸들로 나눕니다."
+                  title="합쳐진 칸을 원래 칸들로 나눕니다(엑셀의 [병합 해제]와 같습니다)."
                   className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-200 disabled:hover:bg-transparent"
                 >
                   <TableCellsSplit size={14} /> 병합 해제

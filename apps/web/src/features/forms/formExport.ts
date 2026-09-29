@@ -12,7 +12,7 @@
  */
 import { EXCEL_FILE_RE } from "./library.ts";
 import { insertRowsIntoSheetXml, shiftDrawingRows, shiftPrintArea } from "./sheetRowsExport.ts";
-import { applyMergesToSheetXml } from "./sheetMergesExport.ts";
+import { applyMergesToSheetXml, centerMergedAnchors } from "./sheetMergesExport.ts";
 import type { MergeEdits } from "./sheetMerges.ts";
 import {
   DRAWING_CONTENT_TYPE,
@@ -451,6 +451,16 @@ export async function buildFilledWorkbook(
      * 예전에 적어 둔 글자까지 여기서 함께 지워진다(엑셀에서 합칠 때와 같다).
      */
     patched = applyMergesToSheetXml(patched, mergeEdits[sheetName]);
+    // [병합하고 가운데 맞춤] — 합친 칸의 서식을 가운데 맞춤으로 바꾼다(서식 목록에 한 줄 더한다).
+    const merged = mergeEdits[sheetName]?.add ?? [];
+    if (merged.length > 0) {
+      const stylesXml = await readText("xl/styles.xml");
+      if (stylesXml) {
+        const centered = centerMergedAnchors(patched, stylesXml, merged);
+        patched = centered.sheet;
+        if (centered.styles !== stylesXml) await putText("xl/styles.xml", centered.styles);
+      }
+    }
     if (stamps[sheetName]?.length) patched = await attachStamps(path, patched, stamps[sheetName]);
     await putText(path, patched);
   }

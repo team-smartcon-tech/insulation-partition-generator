@@ -124,6 +124,9 @@ export function withMerges(sheet: FormSheet, edits: MergeEdits | undefined): For
       col: range.left,
       rowSpan: range.bottom - range.top + 1,
       colSpan: range.right - range.left + 1,
+      // 엑셀의 [병합하고 가운데 맞춤]과 같이 글자를 가운데로 보낸다.
+      // 내려받은 파일에서도 같게 보이도록 서식까지 바꾼다(`sheetMergesExport.ts`).
+      style: { ...anchor.style, align: "center" },
     });
   }
 

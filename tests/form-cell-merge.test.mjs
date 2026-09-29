@@ -15,6 +15,7 @@ import {
 import { withInsertedRows } from '../apps/web/src/features/forms/sheetRows.ts';
 import {
   applyMergesToSheetXml,
+  centerMergedAnchors,
   clearCoveredCells,
   parseRef,
   rangeRef,
@@ -211,4 +212,51 @@ test('손댄 것이 없으면 XML 을 그대로 둔다', () => {
   assert.equal(applyMergesToSheetXml(sheetXml, undefined), sheetXml);
   assert.equal(applyMergesToSheetXml(sheetXml, emptyMergeEdits()), sheetXml);
   assert.equal(withMerges(sheet, emptyMergeEdits()), sheet);
+});
+
+test('합치면 화면에서도 글자가 가운데로 간다 — 엑셀의 [병합하고 가운데 맞춤]', () => {
+  const edits = addMerge(sheet, emptyMergeEdits(), { top: 1, left: 1, bottom: 1, right: 3 });
+  assert.equal(at(withMerges(sheet, edits), 1, 1).style.align, 'center');
+  // 나눈 칸은 원래 서식 그대로다(엑셀도 가운데 맞춤을 되돌리지 않는다).
+  assert.equal(at(withMerges(sheet, splitMerge(emptyMergeEdits(), { key: '2:2', row: 2, col: 2 })), 2, 2).style.align, undefined);
+});
+
+test('내려받은 파일에서도 가운데 맞춤 — 서식을 새로 만들어 그 칸만 바꾼다', () => {
+  // 합칠 칸(A2)은 4번 서식을 쓴다. 그 서식을 본떠 "가운데 맞춤만 더한" 서식을 새로 만든다.
+  const styles =
+    '<styleSheet><cellXfs count="5">' +
+    '<xf numFmtId="0" fontId="0" xfId="0"><alignment vertical="center"/></xf>' +
+    '<xf numFmtId="0" fontId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="1" borderId="2" xfId="0" applyFont="1"/>' +
+    '</cellXfs></styleSheet>';
+  const out = centerMergedAnchors(sheetXml, styles, [{ top: 2, left: 1, bottom: 2, right: 3 }]);
+
+  assert.match(out.styles, /<cellXfs count="6">/, '서식이 하나 늘어난다');
+  assert.match(
+    out.styles,
+    /borderId="2" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center"\/><\/xf>/,
+    '원래 서식(글꼴·테두리)은 그대로 두고 가운데만 더한다',
+  );
+  assert.match(out.styles, /<xf numFmtId="0" fontId="1" borderId="2" xfId="0" applyFont="1"\/>/, '본뜬 서식 자체는 남는다');
+  assert.match(out.sheet, /<c r="A2" s="5"\/>/, '합친 칸이 새 서식을 가리킨다');
+  assert.match(out.sheet, /<c r="B2" s="4"/, '다른 칸은 건드리지 않는다');
+
+  // 같은 모양이 또 필요하면 **다시 쓴다** — 합칠 때마다 서식이 불어나면 파일이 커진다.
+  const again = centerMergedAnchors(out.sheet, out.styles, [{ top: 2, left: 1, bottom: 2, right: 3 }]);
+  assert.match(again.styles, /<cellXfs count="6">/, '서식이 더 늘지 않는다');
+});
+
+test('맞춤이 이미 있던 서식은 가로만 가운데로 바꾼다 — 세로 맞춤은 지키지 않으면 표가 달라진다', () => {
+  const styles = '<styleSheet><cellXfs count="1"><xf fontId="0"><alignment vertical="center" horizontal="left"/></xf></cellXfs></styleSheet>';
+  const xml = '<worksheet><sheetData><row r="1"><c r="A1" s="0"/></row></sheetData></worksheet>';
+  const out = centerMergedAnchors(xml, styles, [{ top: 1, left: 1, bottom: 1, right: 2 }]);
+
+  const added = out.styles.match(/<xf[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g).at(-1);
+  assert.match(added, /vertical="center"/, '세로 맞춤은 그대로 물려받는다');
+  assert.match(added, /horizontal="center"/, '가로만 가운데로 바뀐다');
+  assert.doesNotMatch(added, /horizontal="left"/);
+  // 원래 서식은 **손대지 않는다** — 그 서식을 쓰는 다른 칸들까지 가운데로 가 버린다.
+  assert.match(out.styles, /<xf fontId="0"><alignment vertical="center" horizontal="left"\/><\/xf>/);
 });
