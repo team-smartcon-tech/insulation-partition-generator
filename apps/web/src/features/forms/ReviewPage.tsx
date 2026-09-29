@@ -1,28 +1,47 @@
 /**
- * 본사 점검 — 현장에 가지 않고 **서버에 올라온 현장 서류를 보고 확인·보완 요청**을 남긴다.
+ * 본사 점검 — **현장 폴더를 탐색기처럼 훑어보며** 서류를 열어 보고 부적합을 지적한다.
  *
- * 현장 공유폴더를 이 앱으로 대신하려는 이유의 절반이 여기 있다. 지금까지 본사는 서류가
- * 올라왔는지 알 방법이 없어 전화로 묻거나 폴더를 뒤졌다.
+ * 사용자가 원한 모습(신고): "항목별 점검 목록이 아니라, 현장 전체 파일 트리를 보고 세부 파일을
+ * 눌러 보면서 부적합한 내용을 점검하는 형식". 지금 현장이 쓰는 공유폴더(`Z:\01. 공사`)를 그대로
+ * 옮겨 놓은 모양이어야 본사 사람이 익숙하게 쓴다.
  *
- * 이 화면만 **서버를 직접 본다.** 나머지 화면은 브라우저 저장소로 돌고 저장할 때 서버로
- * 따라 올린다(`formSync.ts`). 점검은 "다른 사람이 올린 것"을 보는 일이라 브라우저 사본으로는
- * 아예 할 수 없다.
+ * 왼쪽: 분류 트리(100 공통일반 / 300 공사일지 …). **파일이 없는 칸도 보여 준다** — 점검에서는
+ *       "안 올라온 서류"가 올라온 것만큼 중요하다.
+ * 가운데: 고른 칸의 파일들.
+ * 오른쪽(아래): 고른 파일의 **내용**. 엑셀은 격자를 그대로 그리고(내려받지 않아도 된다),
+ *       사진·PDF 는 바로 띄우고, 그 밖의 것은 내려받아 본다. 그 자리에서 [확인]·[보완 요청].
+ *
+ * 이 화면만 **서버를 직접 본다.** 남이 올린 것을 보는 일이라 브라우저 사본으로는 할 수 없다.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Check,
+  ChevronDown,
+  ChevronRight,
   Download,
   FileSpreadsheet,
   FileText,
+  FolderOpen,
   RefreshCw,
   TriangleAlert,
   Undo2,
 } from "lucide-react";
-import { fetchDocs, fetchSites, fileUrl, patchDoc, ServerUnavailable, type DocRow } from "./formServer";
+import {
+  fetchDoc,
+  fetchDocs,
+  fetchSites,
+  fetchTaxonomies,
+  fileUrl,
+  patchDoc,
+  ServerUnavailable,
+  type DocRow,
+} from "./formServer";
 import { fileKind, fileSizeText } from "./library";
+import FormSheetView from "./FormSheetView";
+import type { FormSheet } from "./types";
 import type { FormSite } from "./sites";
+import type { Taxonomy } from "./taxonomy";
 
-/** 점검 상태별 이름표 — 목록에서 한눈에 갈라 보이게 */
 const STATUS = {
   none: { label: "점검 전", tone: "bg-slate-100 text-slate-600" },
   requested: { label: "점검 요청", tone: "bg-amber-100 text-amber-800" },
@@ -30,25 +49,38 @@ const STATUS = {
   fix: { label: "보완 요청", tone: "bg-rose-100 text-rose-800" },
 } as const;
 
-type Filter = "all" | "todo" | "ok" | "fix";
+/** 트리에서 고른 자리. 코드가 없는 서류는 따로 모은다. */
+type Slot = { taxonomyId: string; code: string } | { taxonomyId: ""; code: "" };
+const slotKey = (taxonomyId: string, code: string) => `${taxonomyId}:${code}`;
 
 export default function ReviewPage() {
   const [sites, setSites] = useState<FormSite[]>([]);
+  const [taxonomies, setTaxonomies] = useState<Taxonomy[]>([]);
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "offline">("loading");
   const [message, setMessage] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
+
   const [siteId, setSiteId] = useState<string>("");
-  /** 지금 처리 중인 서류 id — 두 번 누르는 것을 막는다 */
-  const [busy, setBusy] = useState<string | null>(null);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const [slot, setSlot] = useState<Slot | null>(null);
+  /** 고른 파일(격자·적은 글자까지 받아 온 것) */
+  const [opened, setOpened] = useState<DocRow | null>(null);
+  const [openedBytes, setOpenedBytes] = useState<ArrayBuffer | null>(null);
+  const [sheetIndex, setSheetIndex] = useState(0);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (quiet = false) => {
-    // 30초마다 도는 자동 새로고침이 화면을 "읽는 중"으로 깜빡이게 하면 눈이 아프다.
     if (!quiet) setState("loading");
     try {
-      const [siteRows, docRows] = await Promise.all([fetchSites(), fetchDocs({ kind: "site" })]);
+      const [siteRows, taxonomyRows, docRows] = await Promise.all([
+        fetchSites(),
+        fetchTaxonomies(),
+        fetchDocs({ kind: "site" }),
+      ]);
       setSites(siteRows);
+      setTaxonomies(taxonomyRows);
       setDocs(docRows);
+      setSiteId((current) => current || siteRows[0]?.id || "");
       setState("ready");
       setMessage(null);
     } catch (error) {
@@ -63,69 +95,97 @@ export default function ReviewPage() {
 
   useEffect(() => {
     void load();
-    /*
-     * 점검하는 사람은 이 화면을 **열어 둔 채로** 기다린다(현장이 올릴 때까지). 새로고침을 눌러야만
-     * 보이면 "바로바로 안 뜬다"가 된다(사용자 신고). 30초마다 조용히 다시 읽는다.
-     * 화면이 안 보일 때(다른 탭)는 건너뛴다 — 안 보는 화면 때문에 서버를 두드릴 이유가 없다.
-     */
+    // 점검하는 사람은 화면을 열어 둔 채 기다린다. 30초마다 조용히 다시 읽는다.
     const timer = window.setInterval(() => {
       if (!document.hidden) void load(true);
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [load]);
 
-  const shown = docs.filter((doc) => {
-    if (siteId && doc.site_id !== siteId) return false;
-    if (filter === "todo") return doc.review_status === "requested" || doc.review_status === "none";
-    if (filter === "ok") return doc.review_status === "ok";
-    if (filter === "fix") return doc.review_status === "fix";
-    return true;
-  });
+  /** 이 현장의 서류만. 칸(분류+코드)별로 모아 둔다. */
+  const bySlot = useMemo(() => {
+    const map = new Map<string, DocRow[]>();
+    for (const doc of docs) {
+      if (siteId && doc.site_id !== siteId) continue;
+      const key = slotKey(doc.taxonomy_id ?? "", doc.code ?? "");
+      const list = map.get(key);
+      if (list) list.push(doc);
+      else map.set(key, [doc]);
+    }
+    return map;
+  }, [docs, siteId]);
 
-  const siteName = (id: string | null) => sites.find((site) => site.id === id)?.name ?? "(현장 없음)";
+  const inSlot = slot ? (bySlot.get(slotKey(slot.taxonomyId, slot.code)) ?? []) : [];
+  const unfiled = bySlot.get(slotKey("", "")) ?? [];
+  const siteDocs = useMemo(() => docs.filter((doc) => !siteId || doc.site_id === siteId), [docs, siteId]);
+  const needFix = siteDocs.filter((doc) => doc.review_status === "fix").length;
+  const notChecked = siteDocs.filter((doc) => doc.review_status === "none" || doc.review_status === "requested").length;
+
+  async function openFile(doc: DocRow) {
+    setBusy(true);
+    setOpenedBytes(null);
+    setSheetIndex(0);
+    try {
+      // 목록에는 무거운 칸(격자·적은 글자)이 빠져 있다. 열 때 한 건만 통째로 받아 온다.
+      const full = await fetchDoc(doc.id);
+      setOpened(full);
+      // 사진·PDF 는 그 자리에서 보여 준다. 엑셀은 격자가 이미 있어 파일을 받을 필요가 없다.
+      const kind = fileKind(full.file_name);
+      if (full.attachment && kind.preview) {
+        const { url } = await fileUrl(full.id);
+        const res = await fetch(url);
+        if (res.ok) setOpenedBytes(await res.arrayBuffer());
+      }
+    } catch (error) {
+      setMessage(`서류를 열지 못했습니다: ${(error as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function decide(doc: DocRow, status: "ok" | "fix") {
-    // 보완 요청은 **이유를 반드시 적는다.** 이유 없는 반려는 현장에서 또 묻게 된다.
     let note = doc.review_note ?? "";
     if (status === "fix") {
-      const typed = window.prompt(`“${doc.title}” 무엇을 보완해야 하는지 적어 주세요.`, note);
+      // 보완 요청은 **이유를 반드시 적는다.** 이유 없는 반려는 현장에서 또 묻게 된다.
+      const typed = window.prompt(`“${doc.title}” 무엇이 부적합한지 적어 주세요.`, note);
       if (typed === null) return;
       if (!typed.trim()) {
-        window.alert("보완할 내용을 적어 주세요.");
+        window.alert("부적합한 내용을 적어 주세요.");
         return;
       }
       note = typed.trim();
     }
-    setBusy(doc.id);
+    setBusy(true);
     try {
       const saved = await patchDoc(doc.id, { reviewStatus: status, reviewNote: status === "fix" ? note : "" });
-      setDocs((list) => list.map((item) => (item.id === doc.id ? saved : item)));
+      setDocs((list) => list.map((item) => (item.id === doc.id ? { ...item, ...saved } : item)));
+      setOpened((current) => (current && current.id === doc.id ? { ...current, ...saved } : current));
     } catch (error) {
       setMessage(`점검 결과를 저장하지 못했습니다: ${(error as Error).message}`);
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
   async function download(doc: DocRow) {
-    setBusy(doc.id);
+    setBusy(true);
     try {
       const { url } = await fileUrl(doc.id);
-      // 새 창으로 연다 — 서명 주소는 5분만 살아 있어 저장해 둘 수 없다.
       window.open(url, "_blank", "noopener");
     } catch (error) {
       setMessage(`파일을 열지 못했습니다: ${(error as Error).message}`);
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
-  const counts = {
-    all: docs.length,
-    todo: docs.filter((d) => d.review_status === "requested" || d.review_status === "none").length,
-    ok: docs.filter((d) => d.review_status === "ok").length,
-    fix: docs.filter((d) => d.review_status === "fix").length,
-  };
+  const toggleGroup = (key: string) =>
+    setOpenGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   return (
     <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -133,16 +193,29 @@ export default function ReviewPage() {
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-bold text-slate-900">본사 점검</h2>
           <p className="mt-0.5 text-xs text-slate-500">
-            현장이 올린 서류입니다. 열어 보고 <b>확인</b> 또는 <b>보완 요청</b>을 남기면 현장에서 바로 보입니다.
+            현장 서류함을 그대로 펼쳐 봅니다. 왼쪽에서 칸을 고르고, 파일을 눌러 <b>내용을 보면서</b> 확인하거나 보완을
+            요청하세요.
           </p>
         </div>
+        <span className="flex items-center gap-2 text-xs">
+          {notChecked > 0 && (
+            <span className="rounded-lg bg-amber-50 px-2 py-1 font-semibold text-amber-800">점검 전 {notChecked}</span>
+          )}
+          {needFix > 0 && (
+            <span className="rounded-lg bg-rose-50 px-2 py-1 font-semibold text-rose-700">보완 요청 {needFix}</span>
+          )}
+        </span>
         <select
           value={siteId}
-          onChange={(event) => setSiteId(event.target.value)}
+          onChange={(event) => {
+            setSiteId(event.target.value);
+            setSlot(null);
+            setOpened(null);
+          }}
           aria-label="현장 고르기"
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700"
         >
-          <option value="">현장 전체</option>
+          {sites.length === 0 && <option value="">현장 없음</option>}
           {sites.map((site) => (
             <option key={site.id} value={site.id}>
               {site.name}
@@ -158,130 +231,307 @@ export default function ReviewPage() {
         </button>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {([
-          ["all", `전체 ${counts.all}`],
-          ["todo", `볼 것 ${counts.todo}`],
-          ["fix", `보완 요청 ${counts.fix}`],
-          ["ok", `확인됨 ${counts.ok}`],
-        ] as [Filter, string][]).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setFilter(value)}
-            className={
-              "rounded-lg px-3 py-1.5 text-xs font-semibold transition " +
-              (filter === value ? "bg-slate-900 text-white" : "text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50")
-            }
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
       {message && (
         <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">{message}</p>
       )}
-
       {state === "loading" && <p className="py-10 text-center text-sm text-slate-500">서버에서 읽는 중입니다…</p>}
 
-      {state === "ready" && shown.length === 0 && (
-        <p className="py-10 text-center text-sm text-slate-500">
-          {docs.length === 0
-            ? "아직 현장에서 올라온 서류가 없습니다."
-            : "이 조건에 해당하는 서류가 없습니다."}
+      {state === "ready" && (
+        <div className="mt-4 grid gap-5 lg:grid-cols-4">
+          {/* ── 왼쪽: 현장 폴더 트리 ── */}
+          {/* 왼쪽 한 칸은 트리, 나머지 세 칸은 파일과 내용 — 흔한 탐색기 배치다. */}
+          <nav
+            className="max-h-[70vh] overflow-y-auto border-t border-slate-100 pt-3 lg:col-span-1"
+            aria-label="현장 폴더"
+          >
+            {taxonomies.length === 0 && (
+              <p className="px-2 py-6 text-center text-xs text-slate-400">
+                분류 코드표가 아직 서버에 없습니다. 현장에서 한 번 열면 올라갑니다.
+              </p>
+            )}
+            {taxonomies.map((taxonomy) => (
+              <div key={taxonomy.id} className="mb-3">
+                <p className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                  {taxonomy.division || "분류"}
+                </p>
+                {taxonomy.groups.map((group) => {
+                  const key = `${taxonomy.id}:${group.code}`;
+                  const open = openGroups.has(key);
+                  const count = group.items.reduce(
+                    (sum, item) => sum + (bySlot.get(slotKey(taxonomy.id, item.code))?.length ?? 0),
+                    0,
+                  );
+                  return (
+                    <div key={key}>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(key)}
+                        className="flex w-full items-center gap-1 rounded-lg px-1.5 py-1.5 text-left text-[13px] text-slate-700 hover:bg-slate-50"
+                      >
+                        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        <FolderOpen size={13} className="text-slate-400" />
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="tabular-nums text-slate-500">{group.code}</span> {group.name}
+                        </span>
+                        <span className={"shrink-0 text-[11px] " + (count > 0 ? "font-semibold text-blue-700" : "text-slate-300")}>
+                          {count}
+                        </span>
+                      </button>
+                      {open &&
+                        group.items.map((item) => {
+                          const files = bySlot.get(slotKey(taxonomy.id, item.code)) ?? [];
+                          const active = slot?.taxonomyId === taxonomy.id && slot?.code === item.code;
+                          return (
+                            <button
+                              key={`${key}:${item.code}`}
+                              type="button"
+                              onClick={() => {
+                                setSlot({ taxonomyId: taxonomy.id, code: item.code });
+                                setOpened(null);
+                              }}
+                              className={
+                                "flex w-full items-center gap-2 rounded-lg py-1 pl-8 pr-2 text-left text-[12.5px] transition " +
+                                (active ? "bg-blue-50 font-semibold text-blue-800" : "hover:bg-slate-50") +
+                                (files.length === 0 && !active ? " text-slate-400" : " text-slate-700")
+                              }
+                            >
+                              <span className="min-w-0 flex-1 truncate">
+                                <span className="tabular-nums">{item.code}</span> {item.name}
+                              </span>
+                              <span className="shrink-0 text-[11px] text-slate-400">
+                                {files.length > 0 ? files.length : "없음"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+
+            {unfiled.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSlot({ taxonomyId: "", code: "" });
+                  setOpened(null);
+                }}
+                className={
+                  "mt-2 flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-[13px] transition " +
+                  (slot?.taxonomyId === "" && slot?.code === ""
+                    ? "bg-blue-50 font-semibold text-blue-800"
+                    : "text-slate-700 hover:bg-slate-50")
+                }
+              >
+                <FolderOpen size={13} className="text-slate-400" />
+                <span className="min-w-0 flex-1 truncate">분류 없는 서류</span>
+                <span className="shrink-0 text-[11px] font-semibold text-blue-700">{unfiled.length}</span>
+              </button>
+            )}
+          </nav>
+
+          {/* ── 오른쪽: 파일 목록 + 내용 ── */}
+          <div className="min-w-0 lg:col-span-3">
+            {!slot && (
+              <p className="py-16 text-center text-sm text-slate-500">
+                왼쪽에서 볼 칸을 골라 주세요. 숫자는 그 칸에 올라온 파일 수입니다.
+              </p>
+            )}
+
+            {slot && (
+              <>
+                <ul className="divide-y divide-slate-100 border-y border-slate-100">
+                  {inSlot.length === 0 && (
+                    <li className="py-8 text-center text-sm text-slate-500">이 칸에는 아직 올라온 서류가 없습니다.</li>
+                  )}
+                  {inSlot.map((doc) => {
+                    const status = STATUS[doc.review_status] ?? STATUS.none;
+                    const active = opened?.id === doc.id;
+                    return (
+                      <li key={doc.id}>
+                        <button
+                          type="button"
+                          onClick={() => void openFile(doc)}
+                          className={
+                            "flex w-full items-center gap-3 px-2 py-2.5 text-left transition " +
+                            (active ? "bg-blue-50" : "hover:bg-slate-50")
+                          }
+                        >
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                            {doc.attachment ? <FileText size={15} /> : <FileSpreadsheet size={15} />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2">
+                              <b className="truncate text-sm font-semibold text-slate-900">{doc.title}</b>
+                              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${status.tone}`}>
+                                {status.label}
+                              </span>
+                            </span>
+                            <span className="mt-0.5 block text-[11.5px] text-slate-500">
+                              {[
+                                doc.uploader_name ? `올린이 ${doc.uploader_name}` : null,
+                                fileSizeText(doc.file_size ?? undefined),
+                                new Date(doc.updated_at).toLocaleDateString("ko-KR"),
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {opened && <FileReview doc={opened} bytes={openedBytes} busy={busy} sheetIndex={sheetIndex} onSheet={setSheetIndex} onDownload={() => void download(opened)} onDecide={(status) => void decide(opened, status)} />}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** 고른 파일 한 건의 내용과 점검 단추 */
+function FileReview({
+  doc,
+  bytes,
+  busy,
+  sheetIndex,
+  onSheet,
+  onDownload,
+  onDecide,
+}: {
+  doc: DocRow;
+  bytes: ArrayBuffer | null;
+  busy: boolean;
+  sheetIndex: number;
+  onSheet: (index: number) => void;
+  onDownload: () => void;
+  onDecide: (status: "ok" | "fix") => void;
+}) {
+  const kind = fileKind(doc.file_name);
+  const sheets = (Array.isArray(doc.sheets) ? doc.sheets : []) as FormSheet[];
+  const values = (doc.cell_values ?? {}) as Record<string, Record<string, string>>;
+  const sheet = sheets[Math.min(sheetIndex, sheets.length - 1)];
+
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bytes || !kind.preview) {
+      setPreview(null);
+      return;
+    }
+    const type = kind.preview === "pdf" ? "application/pdf" : "image/*";
+    const url = URL.createObjectURL(new Blob([bytes], { type }));
+    setPreview(url);
+    // 다 보고 나면 되돌려 놓는다 — 안 그러면 브라우저가 그 바이트를 계속 붙들고 있다.
+    return () => URL.revokeObjectURL(url);
+  }, [bytes, kind.preview]);
+
+  return (
+    <div className="mt-5 rounded-2xl ring-1 ring-slate-200">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
+        <b className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{doc.file_name}</b>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={busy}
+          className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          <Download size={13} /> 내려받기
+        </button>
+        {doc.review_status === "ok" ? (
+          <button
+            type="button"
+            onClick={() => onDecide("fix")}
+            disabled={busy}
+            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-50 disabled:opacity-50"
+          >
+            <Undo2 size={13} /> 보완 요청으로
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => onDecide("ok")}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:bg-slate-300"
+            >
+              <Check size={13} /> 확인
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecide("fix")}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-50 disabled:opacity-50"
+            >
+              <TriangleAlert size={13} /> 보완 요청
+            </button>
+          </>
+        )}
+      </div>
+
+      {doc.review_status === "fix" && doc.review_note && (
+        <p className="border-b border-rose-100 bg-rose-50 px-4 py-2.5 text-xs text-rose-800">
+          보완 요청: {doc.review_note}
+          {doc.reviewer_name ? ` (${doc.reviewer_name})` : ""}
         </p>
       )}
 
-      {state === "ready" && shown.length > 0 && (
-        <ul className="mt-4 divide-y divide-slate-100 border-t border-slate-100">
-          {shown.map((doc) => {
-            const kind = fileKind(doc.file_name);
-            const status = STATUS[doc.review_status] ?? STATUS.none;
-            return (
-              <li key={doc.id} className="flex flex-wrap items-center gap-3 py-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-                  {doc.attachment ? <FileText size={16} /> : <FileSpreadsheet size={16} />}
-                </span>
-
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <b className="truncate text-sm font-semibold text-slate-900">{doc.title}</b>
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${status.tone}`}>
-                      {status.label}
-                    </span>
-                    {doc.attachment && (
-                      <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700">
-                        {kind.label}
-                      </span>
-                    )}
-                  </span>
-                  <span className="mt-0.5 block text-[11.5px] text-slate-500">
-                    {[
-                      siteName(doc.site_id),
-                      doc.code ? `${doc.code} 칸` : null,
-                      doc.uploader_name ? `올린이 ${doc.uploader_name}` : null,
-                      fileSizeText(doc.file_size ?? undefined),
-                      new Date(doc.updated_at).toLocaleDateString("ko-KR"),
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                  {doc.review_status === "fix" && doc.review_note && (
-                    <span className="mt-1 block text-[11.5px] text-rose-700">보완 요청: {doc.review_note}</span>
-                  )}
-                  {doc.review_status === "ok" && doc.reviewer_name && (
-                    <span className="mt-1 block text-[11.5px] text-emerald-700">
-                      {doc.reviewer_name} 확인 ·{" "}
-                      {doc.reviewed_at ? new Date(doc.reviewed_at).toLocaleDateString("ko-KR") : ""}
-                    </span>
-                  )}
-                </span>
-
-                <span className="flex shrink-0 flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    disabled={busy === doc.id}
-                    onClick={() => void download(doc)}
-                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    <Download size={13} /> 열기
-                  </button>
-                  {doc.review_status === "ok" ? (
-                    <button
-                      type="button"
-                      disabled={busy === doc.id}
-                      onClick={() => void decide(doc, "fix")}
-                      className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-50 disabled:opacity-50"
-                    >
-                      <Undo2 size={13} /> 보완 요청으로
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        disabled={busy === doc.id}
-                        onClick={() => void decide(doc, "ok")}
-                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:bg-slate-300"
-                      >
-                        <Check size={13} /> 확인
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy === doc.id}
-                        onClick={() => void decide(doc, "fix")}
-                        className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-50 disabled:opacity-50"
-                      >
-                        <TriangleAlert size={13} /> 보완 요청
-                      </button>
-                    </>
-                  )}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+      {/* 엑셀 — 격자를 그대로 그린다. 내려받지 않아도 내용을 본다. */}
+      {!doc.attachment && sheets.length > 0 && (
+        <div className="p-4">
+          {sheets.length > 1 && (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {sheets.map((item, index) => (
+                <button
+                  key={item.name}
+                  type="button"
+                  onClick={() => onSheet(index)}
+                  className={
+                    "rounded-lg px-2.5 py-1 text-xs font-medium transition " +
+                    (index === sheetIndex ? "bg-blue-600 text-white" : "text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50")
+                  }
+                >
+                  {item.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {sheet && (
+            <div className="overflow-auto">
+              <FormSheetView sheet={sheet} editable={false} values={values[sheet.name] ?? {}} tint={false} scale="fit" />
+            </div>
+          )}
+        </div>
       )}
-    </section>
+
+      {/* 사진·PDF — 그 자리에서 보여 준다 */}
+      {doc.attachment && preview && (
+        <div className="p-4">
+          {kind.preview === "image" ? (
+            <img src={preview} alt={doc.file_name} className="max-h-[60vh] rounded-lg ring-1 ring-slate-200" />
+          ) : (
+            <object data={preview} type="application/pdf" className="h-[60vh] w-full rounded-lg ring-1 ring-slate-200">
+              <p className="p-4 text-sm text-slate-500">이 브라우저에서는 PDF 를 바로 볼 수 없습니다.</p>
+            </object>
+          )}
+        </div>
+      )}
+
+      {/* 화면에서 볼 수 없는 것(한글·도면·압축) — 내려받아 본다 */}
+      {doc.attachment && !kind.preview && (
+        <p className="px-4 py-8 text-center text-sm text-slate-500">
+          {kind.label} 파일은 화면에서 바로 볼 수 없습니다. [내려받기]로 확인해 주세요.
+        </p>
+      )}
+      {!doc.attachment && sheets.length === 0 && (
+        <p className="px-4 py-8 text-center text-sm text-slate-500">
+          이 서류에는 화면에 그릴 내용이 없습니다. [내려받기]로 확인해 주세요.
+        </p>
+      )}
+    </div>
   );
 }
