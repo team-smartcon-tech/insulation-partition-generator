@@ -364,13 +364,17 @@ export default function FormsPage() {
     }
   }
 
+  /** 목록을 다시 읽는다. 방금 읽은 목록을 돌려주어 부른 쪽이 곧바로 살펴볼 수 있게 한다. */
   const refreshList = useCallback(async () => {
     try {
-      setForms(await listForms());
+      const list = await listForms();
+      setForms(list);
+      return list;
     } catch (error) {
       setStorageWarning(
         error instanceof Error ? error.message : "저장된 양식 목록을 읽지 못했습니다.",
       );
+      return undefined;
     }
   }, []);
 
@@ -451,9 +455,15 @@ export default function FormsPage() {
       } catch {
         // 현장을 못 읽어도 서류는 보여야 한다.
       }
-      await refreshList();
+      const list = await refreshList();
       const lastId = readLastOpenedId();
       if (!lastId || cancelled) return;
+      /*
+       * **첨부(한글 등)는 자동으로 펼치지 않는다.** 화면에서 채울 수 있는 서류는 이어서 쓰라고
+       * 펴 주는 것이 맞지만, 첨부는 내려받기 단추 두 개뿐인 큰 칸이 화면 아래를 차지할 뿐이다
+       * (사용자: "메인 페이지에 이거 필요없잖아"). 카드를 누르면 그때 열린다.
+       */
+      if ((list ?? []).some((form) => form.id === lastId && form.attachment)) return;
       try {
         const opened = await openStored(lastId);
         if (!opened) writeLastOpenedId(null);
