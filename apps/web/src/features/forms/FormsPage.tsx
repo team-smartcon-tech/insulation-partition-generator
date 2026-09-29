@@ -55,6 +55,7 @@ import HomeDashboard, { SitesAudit } from "./HomeDashboard";
 import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
 import DropUploadDialog from "./DropUploadDialog";
 import AttachmentPanel from "./AttachmentPanel";
+import ServerSyncBanner from "./ServerSyncBanner";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
 import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
@@ -1869,6 +1870,12 @@ export default function FormsPage() {
           className="hidden"
           onChange={handleTaxonomyFile}
         />
+
+        {/*
+          이 브라우저에만 있는 자료를 서버로 옮기라고 알린다. 서버에 못 닿거나 옮길 것이 없으면
+          스스로 사라진다.
+        */}
+        <ServerSyncBanner localCount={forms.length} />
 
         {storageWarning && (
           <p className="mb-6 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
