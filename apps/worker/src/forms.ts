@@ -107,7 +107,12 @@ forms.get("/sites", async (c) => {
 /** POST /api/forms/sites — 현장 추가 */
 forms.post("/sites", async (c) => {
   try {
-    const body = (await c.req.json()) as { name?: string; sortOrder?: number };
+    const body = (await c.req.json()) as {
+      name?: string;
+      sortOrder?: number;
+      members?: unknown;
+      lineDefaults?: unknown;
+    };
     const name = String(body.name ?? "").trim();
     if (!name) return c.json({ error: "현장 이름을 적어 주세요." }, 400);
 
@@ -115,6 +120,8 @@ forms.post("/sites", async (c) => {
     const res = await supabaseRest(c.env, "POST", "/form_sites", {
       name,
       sort_order: Number.isFinite(body.sortOrder) ? Number(body.sortOrder) : 0,
+      members: Array.isArray(body.members) ? body.members : [],
+      line_defaults: body.lineDefaults && typeof body.lineDefaults === "object" ? body.lineDefaults : {},
       created_by: user.id,
     });
     // 같은 이름의 현장이 이미 있으면 그것을 돌려준다 — 두 개가 생기면 서류가 갈린다.
@@ -127,6 +134,37 @@ forms.post("/sites", async (c) => {
   } catch (err) {
     console.error("[forms/sites POST]", errMsg(err));
     return c.json({ error: "현장을 만들지 못했습니다." }, 500);
+  }
+});
+
+/**
+ * PATCH /api/forms/sites/:id — 현장 조직·기본 결재선·이름을 바꾼다.
+ *
+ * 조직(결재선에서 고를 사람 명단)은 현장에서 자주 손본다. 브라우저에만 있으면 다른 PC 에서
+ * 결재선을 지정할 때 명단이 비어 있다.
+ */
+forms.patch("/sites/:id", async (c) => {
+  try {
+    const body = (await c.req.json()) as { name?: string; members?: unknown; lineDefaults?: unknown; sortOrder?: number };
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (body.name !== undefined) patch.name = String(body.name).trim();
+    if (body.members !== undefined) patch.members = Array.isArray(body.members) ? body.members : [];
+    if (body.lineDefaults !== undefined) patch.line_defaults = body.lineDefaults ?? {};
+    if (body.sortOrder !== undefined) patch.sort_order = Number(body.sortOrder) || 0;
+
+    const res = await supabaseRest(
+      c.env,
+      "PATCH",
+      `/form_sites?id=eq.${encodeURIComponent(c.req.param("id"))}`,
+      patch,
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const site = await firstRow(res);
+    if (!site) return c.json({ error: "그 현장을 찾지 못했습니다." }, 404);
+    return c.json({ site });
+  } catch (err) {
+    console.error("[forms/sites PATCH]", errMsg(err));
+    return c.json({ error: "현장을 저장하지 못했습니다." }, 500);
   }
 });
 
