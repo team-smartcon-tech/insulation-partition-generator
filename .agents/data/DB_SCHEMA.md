@@ -215,4 +215,36 @@ Rollback impact:
 
 ## 5. Schema Notes
 
-아직 작성된 DB schema 기록이 없다. 실제 migration 또는 운영 DB 구조가 확정되면 이 섹션에 추가한다.
+### 5.1 스마트폼(/tools/forms) — 2026-09-29 적용
+
+현장이 올린 서류를 본사가 원격으로 점검한다. 목표는 현장 공유폴더(`Z:. 공사`)를 앱으로 대신하는 것.
+파일 원본은 Storage 버킷 `form-files`(비공개, 한 파일 50MB)에 두고, 표에는 꼬리표와 경로만 둔다.
+
+접근은 **service_role 전용**이다. 브라우저는 표에 직접 닿지 않고, Worker 가 로그인·권한을 검사한 뒤
+짧은 유효시간의 Storage 주소만 내어 준다.
+
+| Table | Purpose | Migration |
+|---|---|---|
+| `form_taxonomy` | 서류 분류 코드표. 1차 분류(공무관련·품질관련)마다 한 벌 | `20260911000001_form_taxonomy` |
+| `form_taxonomy_history` | 코드표를 바꿀 때마다 이전 것을 쌓는다(되돌리기) | 〃 |
+| `form_admins` | 코드표를 바꿀 수 있는 본사 관리자 명단 | 〃 |
+| `form_sites` | 현장. 현장 서류함 하나가 현장 하나에 딸린다 | `20260929024537_add_smart_forms_server_storage` |
+| `form_documents` | 서류 1건 = 파일 1개(+ 엑셀이면 격자·적은 글자·결재)와 본사 점검 | 〃 |
+
+`form_documents` 주요 결정:
+
+- `kind` = `template`(본사 배포 원본) / `site`(현장 작성본). **check constraint** 로 배포 양식은 `site_id` 가
+  없고 현장 서류는 반드시 있게 막는다 — 어긋나면 목록이 통째로 틀어진다.
+- `attachment` = 엑셀이 아니라 파일째 보관하는 것(한글·PDF·도면·사진·압축). 이때 `sheets` 는 null.
+- `sheets`/`cell_values`/`approvals` 를 jsonb 로 두는 이유: 엑셀 격자와 결재 기록은 **서류마다 모양이 다르고**
+  DB 가 그 안을 검색할 일이 없다. 화면이 통째로 읽고 통째로 쓴다.
+- `review_status` = `none`/`requested`/`ok`/`fix` — 본사 점검. 대부분 `none` 이라 부분 인덱스로 점검함만 모은다.
+- `template_id` 자기참조 + `template_uploaded_at` 으로 "새 판 있음"을 판단한다.
+- `batch_id`: 같은 파일을 여러 칸에 한 번에 배포하면 저장 시각이 ms 단위로 갈린다. 그 차이를 "새 판"으로
+  오해하지 않으려고 배포 묶음마다 같은 번호를 단다.
+- `on delete`: 현장을 지우면 그 현장 서류도 지운다(`cascade`). 코드표를 지워도 서류는 남긴다(`set null`) —
+  분류를 잃는 것과 서류를 잃는 것은 무게가 다르다.
+
+Related frontend: `apps/web/src/features/forms/*` (지금은 아직 브라우저 IndexedDB 를 쓴다 — 서버 연결은 다음 단계).
+Related APIs: 아직 없음. Worker 에 올리기·목록·내려받기·점검 길을 낼 때 `.agents/data/API_CONTRACT.md` 를 함께 갱신한다.
+Rollback: `drop table public.form_documents, public.form_sites;` (그리고 필요하면 `form_taxonomy*`, `form_admins`).
