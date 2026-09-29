@@ -57,6 +57,7 @@ Notes:
 | POST | `/api/forms/docs` | 서류 1건 등록 + **올리기 주소** 발급 | 로그인 |
 | POST | `/api/forms/docs/:id/uploaded` | 파일 다 올렸다고 알림(크기 기록) | 로그인 |
 | PATCH | `/api/forms/docs/:id` | 적은 글자·결재·**본사 점검** 갱신 | 로그인 |
+| PATCH | `/api/forms/sites/:id` | 현장 조직·기본 결재선·이름 | 로그인 |
 | GET | `/api/forms/docs/:id/file` | 내려받기 주소(5분) | 로그인 |
 | DELETE | `/api/forms/docs/:id` | 서류와 파일 삭제 | 올린 사람 또는 본사 관리자 |
 

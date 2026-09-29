@@ -24,6 +24,7 @@ import {
   ChevronDown,
   Search,
   Download,
+  ClipboardCheck,
   FileSpreadsheet,
   FileText,
   Minus,
@@ -56,6 +57,7 @@ import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
 import DropUploadDialog from "./DropUploadDialog";
 import AttachmentPanel from "./AttachmentPanel";
 import ServerSyncBanner from "./ServerSyncBanner";
+import ReviewPage from "./ReviewPage";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
 import { dataUrlBytes, type ApprovalStamp } from "./approvalExport";
@@ -179,8 +181,8 @@ type LoadState =
       updatedAt?: number;
     };
 
-/** 홈 · 배포 양식함(원본) · 현장 서류함(작성본) */
-type Space = "home" | "library" | "site";
+/** 홈 · 배포 양식함(원본) · 현장 서류함(작성본) · 본사 점검(서버에 올라온 현장 서류) */
+type Space = "home" | "library" | "site" | "review";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -1891,8 +1893,11 @@ export default function FormsPage() {
         )}
 
         <div className="mb-6">
-          {/* 현장을 고르지 않았으면 현장별 현황부터 — 서류 점검은 여기서 시작한다. */}
-          {space === "home" ? (
+          {/* 본사 점검은 **서버를 직접 본다** — 다른 사람이 올린 것을 보는 일이라 브라우저 사본으로는 못 한다. */}
+          {space === "review" ? (
+            <ReviewPage />
+          ) : /* 현장을 고르지 않았으면 현장별 현황부터 — 서류 점검은 여기서 시작한다. */
+          space === "home" ? (
             siteId ? (
               <HomeDashboard
                 userName={user?.name ?? "사용자"}
@@ -2141,7 +2146,7 @@ export default function FormsPage() {
         )}
 
         {/* 첨부(한글 등) — 시트가 없으니 격자 대신 파일을 주고받는 화면을 보인다. */}
-        {state.status === "ready" && state.attachment && (
+        {space !== "review" && state.status === "ready" && state.attachment && (
           <section id="form-viewer" className="scroll-mt-32 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
             <div className="mb-4 flex items-center gap-2">
               <FileText size={18} className="text-slate-400" aria-hidden />
@@ -2170,7 +2175,8 @@ export default function FormsPage() {
           </section>
         )}
 
-        {state.status === "ready" && sheet && openFormInSite && (
+        {/* 본사 점검 탭에서는 편집 화면을 접어 둔다 — 남의 서류를 보는 자리다. */}
+        {space !== "review" && state.status === "ready" && sheet && openFormInSite && (
           <section id="form-viewer" className="scroll-mt-32 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
             {/* 결재가 끝난 장 — 잠겼다는 것과 푸는 방법을 맨 위에 알린다. */}
             {!readOnly && approvalDone && (
@@ -2700,6 +2706,12 @@ function SpaceTabs({ space, onChange }: { space: Space; onChange: (space: Space)
     { value: "home", label: "홈", icon: House, title: "내 결재함·서류 진척도·알림" },
     { value: "library", label: "배포 양식함", icon: BookOpen, title: "회사가 배포한 원본 양식 — 고칠 수 없습니다" },
     { value: "site", label: "현장 서류함", icon: FolderOpen, title: "현장별로 작성하는 서류" },
+    {
+      value: "review",
+      label: "본사 점검",
+      icon: ClipboardCheck,
+      title: "현장이 올린 서류를 서버에서 바로 보고 확인·보완 요청",
+    },
   ];
   return (
     <nav className="flex h-11 items-stretch gap-6" aria-label="양식함 고르기">
