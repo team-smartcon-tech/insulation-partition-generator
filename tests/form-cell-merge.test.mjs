@@ -12,6 +12,7 @@ import {
   textCellsIn,
   withMerges,
 } from '../apps/web/src/features/forms/sheetMerges.ts';
+import { withInsertedRows } from '../apps/web/src/features/forms/sheetRows.ts';
 import {
   applyMergesToSheetXml,
   clearCoveredCells,
@@ -117,6 +118,31 @@ test('줄을 끼우면 합치기 기록도 따라 밀린다', () => {
   // 끼운 자리를 **걸치는** 합치기는 밀리지 않고 늘어난다 — 엑셀과 같다.
   const spanning = shiftMergeEdits({ add: [{ top: 2, left: 1, bottom: 5, right: 1 }], remove: [] }, 3, 1);
   assert.deepEqual(spanning.add[0], { top: 2, left: 1, bottom: 6, right: 1 });
+});
+
+test('끼워 넣은 줄 안에서만 합쳤다면 그 줄을 뺄 때 합치기도 없어진다', () => {
+  // 안 없애면, 빠진 자리로 올라온 **아랫줄**이 대신 합쳐진다.
+  const edits = { add: [{ top: 4, left: 1, bottom: 4, right: 3 }], remove: [] };
+  const out = shiftMergeEdits(edits, 5, -1); // 4번 줄을 뺀다(자리는 뒤 줄 기준으로 온다)
+  assert.deepEqual(out.add, [], '그 줄에만 있던 합치기는 함께 없어진다');
+
+  // 여러 줄에 걸친 합치기는 없애지 않고 줄인다.
+  const spanning = shiftMergeEdits({ add: [{ top: 3, left: 1, bottom: 5, right: 3 }], remove: [] }, 5, -1);
+  assert.deepEqual(spanning.add[0], { top: 3, left: 1, bottom: 4, right: 3 });
+});
+
+test('줄을 끼운 시트에서는 **화면 격자**로 겹침을 따진다 — 원본 격자로 보면 엉뚱한 자리를 푼다', () => {
+  // 2번 줄 앞에 한 줄 끼우면, 원본의 B2:C2 병합은 화면에서 3번 줄로 내려가 있다.
+  const shown = withMerges(withInsertedRows(sheet, [2]), emptyMergeEdits());
+  assert.equal(at(shown, 3, 2).colSpan, 2, '화면에서는 3번 줄에 있다');
+
+  // 화면 좌표(3번 줄)로 합치면, 푸는 자리도 화면 좌표여야 한다.
+  const edits = addMerge(shown, emptyMergeEdits(), { top: 3, left: 1, bottom: 3, right: 3 });
+  assert.deepEqual(edits.remove, ['3:2'], '화면 자리 그대로 적는다');
+
+  // 원본 격자로 따졌다면 겹치는 것을 못 찾아 **아무것도 풀지 않는다** — 그러면 엑셀이 파일을 거부한다.
+  const wrong = addMerge(sheet, emptyMergeEdits(), { top: 3, left: 1, bottom: 3, right: 3 });
+  assert.deepEqual(wrong.remove, [], '(잘못된 방식) 겹치는 병합을 놓친다');
 });
 
 /* ── 엑셀 XML 쪽 ── */

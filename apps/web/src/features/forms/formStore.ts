@@ -15,8 +15,16 @@
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
-import { insertAt, removeInsertedAt, shiftCellKeys } from "./sheetRows.ts";
-import { addMerge, emptyMergeEdits, shiftMergeEdits, splitMerge, type CellRange, type MergeEdits } from "./sheetMerges.ts";
+import { insertAt, removeInsertedAt, shiftCellKeys, withInsertedRows } from "./sheetRows.ts";
+import {
+  addMerge,
+  emptyMergeEdits,
+  shiftMergeEdits,
+  splitMerge,
+  withMerges,
+  type CellRange,
+  type MergeEdits,
+} from "./sheetMerges.ts";
 import { baseFileName, planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
 import { syncDelete, syncPatch, syncSites, syncTaxonomies, syncUpload } from "./formSync.ts";
 import { findApprovalBoxes } from "./approval.ts";
@@ -1099,7 +1107,13 @@ export async function mergeSheetCells(id: string, sheetName: string, range: Cell
     const source = sheet ?? form.sheets.find((item) => item.name === form.customSheets.find((c) => c.name === sheetName)?.source);
     if (!source) return {};
 
-    const next = addMerge(source, form.mergeEdits[sheetName] ?? emptyMergeEdits(), range);
+    /*
+     * 범위는 **화면 좌표**다. 줄을 끼운 시트에서는 원본 격자의 병합 자리가 그만큼 밀려 있어,
+     * 원본 격자에서 겹치는 병합을 찾으면 **엉뚱한 자리를 푼다.** 화면과 같은 격자를 만들어 견준다.
+     */
+    const current = form.mergeEdits[sheetName] ?? emptyMergeEdits();
+    const shown = withMerges(withInsertedRows(source, form.rowInserts[sheetName] ?? []), current);
+    const next = addMerge(shown, current, range);
     const values = { ...(form.values[sheetName] ?? {}) };
     for (let row = range.top; row <= range.bottom; row++) {
       for (let col = range.left; col <= range.right; col++) {

@@ -161,6 +161,8 @@ export function shiftMergeEdits(edits: MergeEdits | undefined, fromRow: number, 
   if (!edits) return emptyMergeEdits();
   const add: CellRange[] = [];
   for (const range of edits.add) {
+    // 빼는 줄 **안에만** 있던 합치기는 함께 없어진다. 안 없애면 그 자리에 올라온 아랫줄이 합쳐진다.
+    if (delta < 0 && range.top === fromRow - 1 && range.bottom === fromRow - 1) continue;
     if (range.top >= fromRow) add.push({ ...range, top: range.top + delta, bottom: range.bottom + delta });
     else if (range.bottom >= fromRow) add.push({ ...range, bottom: range.bottom + delta });
     else add.push(range);

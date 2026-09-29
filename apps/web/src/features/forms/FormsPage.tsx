@@ -248,6 +248,8 @@ export default function FormsPage() {
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [forms, setForms] = useState<FormSummary[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
+  // 다른 장으로 넘어가면 고른 범위를 놓는다 — 그 장에는 없는 자리라 엉뚱한 칸이 합쳐진다.
+  useEffect(() => setSelection(null), [activeSheet]);
   const [scale, setScale] = useState<FormScale>("fit");
   const [editable, setEditable] = useState(true);
   const [values, setValues] = useState<FormValues>({});
