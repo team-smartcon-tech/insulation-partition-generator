@@ -84,6 +84,18 @@ async function signedUploadUrl(env: Env, path: string): Promise<{ url: string; t
   return { url: `${env.SUPABASE_URL}/storage/v1/object/upload/sign/${bucket(env)}/${path}`, token: data.token };
 }
 
+/**
+ * 화면이 만든 id 를 **그대로** 쓸 수 있으면 쓴다.
+ *
+ * 브라우저에 쌓아 둔 자료를 서버로 옮길 때, 서버가 새 id 를 발급하면 "이 서류는 어느 현장 것"
+ * 같은 연결이 전부 끊어진다. 화면은 처음부터 표준 UUID(`crypto.randomUUID()`)를 쓰므로
+ * 그대로 받아 주면 연결이 살아 있다. 모양이 UUID 가 아니면 무시하고 DB 가 새로 만든다.
+ */
+const uuidOrNull = (value: unknown): string | undefined =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : undefined;
+
 /** PostgREST 응답 하나를 꺼낸다. 없으면 null. */
 async function firstRow<T>(res: Response): Promise<T | null> {
   const rows = (await res.json()) as T[];
@@ -108,6 +120,7 @@ forms.get("/sites", async (c) => {
 forms.post("/sites", async (c) => {
   try {
     const body = (await c.req.json()) as {
+      id?: string;
       name?: string;
       sortOrder?: number;
       members?: unknown;
@@ -118,6 +131,7 @@ forms.post("/sites", async (c) => {
 
     const user = currentUser(c);
     const res = await supabaseRest(c.env, "POST", "/form_sites", {
+      ...(uuidOrNull(body.id) ? { id: uuidOrNull(body.id) } : {}),
       name,
       sort_order: Number.isFinite(body.sortOrder) ? Number(body.sortOrder) : 0,
       members: Array.isArray(body.members) ? body.members : [],
@@ -297,6 +311,7 @@ forms.post("/docs", async (c) => {
   try {
     const user = currentUser(c);
     const body = (await c.req.json()) as {
+      id?: string;
       kind?: string;
       siteId?: string | null;
       taxonomyId?: string | null;
@@ -318,6 +333,7 @@ forms.post("/docs", async (c) => {
     if (kind === "site" && !body.siteId) return c.json({ error: "어느 현장의 서류인지 없습니다." }, 400);
 
     const res = await supabaseRest(c.env, "POST", "/form_documents", {
+      ...(uuidOrNull(body.id) ? { id: uuidOrNull(body.id) } : {}),
       kind,
       site_id: kind === "site" ? body.siteId : null,
       taxonomy_id: body.taxonomyId ?? null,

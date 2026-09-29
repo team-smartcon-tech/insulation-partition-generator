@@ -106,6 +106,8 @@ export async function pushSite(site: Pick<FormSite, "name"> & Partial<FormSite>)
   const { site: row } = await api<{ site: SiteRow }>("/sites", {
     method: "POST",
     body: JSON.stringify({
+      // 브라우저가 만든 id 를 그대로 가져간다 — 서류가 어느 현장 것인지 연결이 끊기지 않게.
+      id: site.id,
       name: site.name,
       members: site.members ?? [],
       lineDefaults: site.lineDefaults ?? {},
@@ -206,6 +208,8 @@ export async function fetchDoc(id: string): Promise<DocRow> {
 }
 
 export interface NewDoc {
+  /** 브라우저에 이미 있던 서류를 옮길 때, 그 id 를 그대로 가져간다 */
+  id?: string;
   kind: "template" | "site";
   siteId?: string | null;
   taxonomyId?: string | null;
