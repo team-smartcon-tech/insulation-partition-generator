@@ -42,8 +42,9 @@ export default function ReviewPage() {
   /** 지금 처리 중인 서류 id — 두 번 누르는 것을 막는다 */
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setState("loading");
+  const load = useCallback(async (quiet = false) => {
+    // 30초마다 도는 자동 새로고침이 화면을 "읽는 중"으로 깜빡이게 하면 눈이 아프다.
+    if (!quiet) setState("loading");
     try {
       const [siteRows, docRows] = await Promise.all([fetchSites(), fetchDocs({ kind: "site" })]);
       setSites(siteRows);
@@ -62,6 +63,15 @@ export default function ReviewPage() {
 
   useEffect(() => {
     void load();
+    /*
+     * 점검하는 사람은 이 화면을 **열어 둔 채로** 기다린다(현장이 올릴 때까지). 새로고침을 눌러야만
+     * 보이면 "바로바로 안 뜬다"가 된다(사용자 신고). 30초마다 조용히 다시 읽는다.
+     * 화면이 안 보일 때(다른 탭)는 건너뛴다 — 안 보는 화면 때문에 서버를 두드릴 이유가 없다.
+     */
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load(true);
+    }, 30_000);
+    return () => window.clearInterval(timer);
   }, [load]);
 
   const shown = docs.filter((doc) => {

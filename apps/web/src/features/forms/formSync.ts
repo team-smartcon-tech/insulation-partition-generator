@@ -16,6 +16,7 @@
 import { patchDoc, uploadDoc, deleteDoc, fetchDoc, pushSite, pushTaxonomy, type NewDoc } from "./formServer.ts";
 import type { FormSite } from "./sites.ts";
 import type { Taxonomy } from "./taxonomy.ts";
+import { adoptSiteId, adoptTaxonomyId } from "./formStore.ts";
 
 /** 서버에 못 보낸 것을 조용히 적어 둔다(개발 중 확인용 — 사용자 화면은 막지 않는다). */
 function quiet(what: string, error: unknown) {
@@ -48,7 +49,9 @@ export async function syncSites(sites: FormSite[]): Promise<void> {
   await enqueue(async () => {
     for (const site of sites) {
       try {
-        await pushSite(site);
+        const saved = await pushSite(site);
+        // 같은 이름의 현장이 서버에 다른 번호로 있으면 서버 번호를 쓴다 — 서류가 그 번호를 가리킨다.
+        if (saved.id !== site.id) await adoptSiteId(site.id, saved.id);
       } catch (error) {
         quiet(`현장 “${site.name}”을(를)`, error);
       }
@@ -61,7 +64,9 @@ export async function syncTaxonomies(taxonomies: Taxonomy[]): Promise<void> {
   await enqueue(async () => {
     for (const [index, taxonomy] of taxonomies.entries()) {
       try {
-        await pushTaxonomy(taxonomy, index);
+        const saved = await pushTaxonomy(taxonomy, index);
+        // 같은 이름의 코드표가 서버에 다른 번호로 있으면 서버 번호를 돌려준다. 내 쪽을 맞춘다.
+        if (saved.id !== taxonomy.id) await adoptTaxonomyId(taxonomy.id, saved.id);
       } catch (error) {
         quiet(`코드표 “${taxonomy.division || taxonomy.fileName}”을(를)`, error);
       }

@@ -117,6 +117,7 @@ import {
   removeCustomSheet,
   renameCustomSheet,
   isStorageAvailable,
+  IDS_CHANGED_EVENT,
   listForms,
   readLastOpenedId,
   loadSites,
@@ -482,6 +483,23 @@ export default function FormsPage() {
       cancelled = true;
     };
   }, [openStored, refreshList]);
+
+  /*
+   * 현장·코드표 번호가 서버 것으로 갈아끼워지면 다시 읽는다.
+   *
+   * 같은 이름의 현장·코드표를 두 사람이 각자 만들면 번호가 갈린다. 먼저 올린 쪽 번호가 서버의
+   * 것이 되고 저장소는 그에 맞춰 바뀌는데, **화면이 옛 번호를 들고 있으면** 그 번호로 서류를
+   * 만들어 서버가 거절한다(실제로 그랬다).
+   */
+  useEffect(() => {
+    const reload = () => {
+      void loadSites().then(setSites);
+      void loadTaxonomies().then(setTaxonomies);
+      void refreshList();
+    };
+    window.addEventListener(IDS_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(IDS_CHANGED_EVENT, reload);
+  }, [refreshList]);
 
   // 고친 글자를 자동 저장한다.
   useEffect(() => {

@@ -228,13 +228,43 @@ forms.put("/taxonomy", async (c) => {
       });
     }
 
+    /*
+     * 같은 1차 분류 이름이 **다른 번호로** 이미 있으면, 그 줄을 고친다.
+     *
+     * 코드표는 회사 공용이라 이름(공무관련·품질관련)이 곧 그 코드표다. 사람마다 브라우저에서
+     * 만든 번호가 달라, 그대로 넣으면 `uq_form_taxonomy_division` 에 걸려 거절당한다(실제로 그랬다).
+     * 이때는 **서버에 있던 번호를 그대로 두고 내용만 갱신**한 뒤, 그 줄을 돌려준다 — 화면이
+     * 그 번호를 받아 자기 것을 맞춘다(`adoptTaxonomyId`).
+     */
+    const division = String(body.division ?? "");
+    if (division) {
+      const sameName = await supabaseRest(
+        c.env,
+        "GET",
+        `/form_taxonomy?division=eq.${encodeURIComponent(division)}&scope=eq.company&select=id`,
+      );
+      const found = sameName.ok ? await firstRow<{ id: string }>(sameName) : null;
+      if (found && found.id !== id) {
+        const updated = await supabaseRest(c.env, "PATCH", `/form_taxonomy?id=eq.${encodeURIComponent(found.id)}`, {
+          file_name: String(body.fileName ?? ""),
+          groups: body.groups,
+          conflicts: body.conflicts ?? [],
+          sort_order: Number.isFinite(body.sortOrder) ? Number(body.sortOrder) : 0,
+          updated_by: user.id,
+          updated_at: new Date().toISOString(),
+        });
+        if (!updated.ok) throw new Error(await updated.text());
+        return c.json({ taxonomy: await firstRow(updated), adopted: true });
+      }
+    }
+
     const res = await supabaseRest(
       c.env,
       "POST",
       "/form_taxonomy",
       {
         id,
-        division: String(body.division ?? ""),
+        division,
         file_name: String(body.fileName ?? ""),
         groups: body.groups,
         conflicts: body.conflicts ?? [],

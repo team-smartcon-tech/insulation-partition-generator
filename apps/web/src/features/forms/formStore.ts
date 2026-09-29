@@ -932,6 +932,67 @@ export async function setFormSite(id: string, siteId: string): Promise<void> {
   await patchForm(id, () => ({ siteId, updatedAt: Date.now() }));
 }
 
+/**
+ * 번호가 갈아끼워졌다고 화면에 알리는 신호.
+ *
+ * 저장소만 고치면 **화면은 옛 번호를 들고 있다.** 그 상태로 서류를 만들면 "없는 현장"을 가리켜
+ * 서버가 거절한다(실제로 그랬다). 화면은 이 신호를 받으면 현장·목록을 다시 읽는다.
+ */
+export const IDS_CHANGED_EVENT = "ipg-forms:ids-changed";
+const announceIdsChanged = () => {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(IDS_CHANGED_EVENT));
+};
+
+/**
+ * 현장 번호를 서버가 쓰는 번호로 **갈아끼운다.**
+ *
+ * 현장은 이름으로 가린다(부산장안(B1)). 두 사람이 각자 만들면 이름은 같고 번호는 다르다.
+ * 먼저 올린 사람의 번호가 서버의 것이 되므로, 내 번호가 다르면 내 쪽을 맞춰야 한다 —
+ * 안 그러면 내 현장 서류가 "없는 현장"을 가리켜 서버가 받아 주지 않는다(실제로 그랬다).
+ *
+ * 그 현장에 속한 **서류의 현장 번호도 함께** 바꾼다.
+ */
+export async function adoptSiteId(oldId: string, newId: string): Promise<void> {
+  if (!oldId || !newId || oldId === newId) return;
+
+  const sites = (await readMeta<FormSite[]>(SITES_KEY)) ?? [];
+  if (sites.some((site) => site.id === oldId)) {
+    await writeMeta({ [SITES_KEY]: sites.map((site) => (site.id === oldId ? { ...site, id: newId } : site)) });
+  }
+
+  const forms = await run<StoredForm[]>("readonly", (store) => store.getAll());
+  for (const form of forms) {
+    if (form.siteId === oldId) await patchForm(form.id, () => ({ siteId: newId }));
+  }
+  announceIdsChanged();
+}
+
+/**
+ * 코드표 번호를 서버가 쓰는 번호로 **갈아끼운다.**
+ *
+ * 코드표는 회사 공용이라 이름(공무관련)이 곧 그 코드표다. 사람마다 브라우저에서 만든 번호가
+ * 달라, 먼저 올린 사람의 번호가 서버의 것이 된다. 내 번호가 다르면 내 쪽을 맞춰야 한다 —
+ * 안 그러면 내 서류가 "없는 분류"를 가리켜 서버가 받아 주지 않는다.
+ *
+ * 그 코드표를 가리키던 **서류의 분류 번호도 함께** 바꾼다. 이게 빠지면 서류가 분류에서 떨어진다.
+ */
+export async function adoptTaxonomyId(oldId: string, newId: string): Promise<void> {
+  if (!oldId || !newId || oldId === newId) return;
+
+  const list = (await readMeta<Taxonomy[]>(TAXONOMIES_KEY)) ?? [];
+  if (list.some((taxonomy) => taxonomy.id === oldId)) {
+    await writeMeta({
+      [TAXONOMIES_KEY]: list.map((taxonomy) => (taxonomy.id === oldId ? { ...taxonomy, id: newId } : taxonomy)),
+    });
+  }
+
+  const forms = await run<StoredForm[]>("readonly", (store) => store.getAll());
+  for (const form of forms) {
+    if (form.taxonomyId === oldId) await patchForm(form.id, () => ({ taxonomyId: newId }));
+  }
+  announceIdsChanged();
+}
+
 /** 코드표 목록을 통째로 저장한다. 올리기·이름 바꾸기·지우기 모두 이걸로 끝난다. */
 export async function saveTaxonomies(list: Taxonomy[]): Promise<void> {
   await writeMeta({ [TAXONOMIES_KEY]: list });

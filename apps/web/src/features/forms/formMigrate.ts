@@ -10,7 +10,7 @@
  * id 는 **그대로 가져간다.** 화면이 처음부터 표준 UUID 를 쓰고 서버도 그 id 를 받아 주므로,
  * "이 서류는 어느 현장·어느 칸" 같은 연결이 끊기지 않는다. 이게 이관에서 가장 위험한 부분이었다.
  */
-import { listForms, getForm, loadSites, loadTaxonomies } from "./formStore.ts";
+import { adoptSiteId, adoptTaxonomyId, listForms, getForm, loadSites, loadTaxonomies } from "./formStore.ts";
 import {
   fetchDocs,
   fetchSites,
@@ -38,10 +38,16 @@ export interface MigrateResult {
   failed: string[];
 }
 
-/** 브라우저에 옮길 것이 남아 있는가(화면에서 안내를 띄울지 판단) */
-export async function hasLocalData(): Promise<boolean> {
-  const [sites, forms] = await Promise.all([loadSites(), listForms()]);
-  return sites.length > 0 || forms.length > 0;
+/**
+ * 아직 서버에 없는 서류가 몇 건인가.
+ *
+ * **건수가 아니라 id 를 견준다.** 건수로 보면 "서버에 다른 PC 가 올린 5건, 내 브라우저에 다른 3건"
+ * 같은 경우를 놓친다(3 > 5 가 아니니 없는 것으로 친다). 실제로 쓰다 보면 늘 이런 모양이 된다.
+ */
+export async function pendingUploads(): Promise<string[]> {
+  const [local, onServer] = await Promise.all([listForms(), fetchDocs()]);
+  const have = new Set(onServer.map((doc) => doc.id));
+  return local.filter((form) => !have.has(form.id)).map((form) => form.id);
 }
 
 /**
@@ -70,7 +76,9 @@ export async function migrateLocalToServer(
   report("현장", 0, sites.length);
   for (const [index, site] of sites.entries()) {
     try {
-      await pushSite(site);
+      const saved = await pushSite(site);
+      // 같은 이름의 현장이 서버에 다른 번호로 있으면 서버 번호를 쓴다(서류가 그 번호를 가리킨다).
+      if (saved.id !== site.id) await adoptSiteId(site.id, saved.id);
       result.sites += 1;
     } catch (error) {
       result.failed.push(`현장 “${site.name}”: ${(error as Error).message}`);
@@ -83,7 +91,9 @@ export async function migrateLocalToServer(
   report("분류 코드표", 0, taxonomies.length);
   for (const [index, taxonomy] of taxonomies.entries()) {
     try {
-      await pushTaxonomy(taxonomy, index);
+      const saved = await pushTaxonomy(taxonomy, index);
+      // 같은 이름의 코드표가 서버에 다른 번호로 있으면 서버 번호를 쓴다 — 서류가 그 번호를 가리킨다.
+      if (saved.id !== taxonomy.id) await adoptTaxonomyId(taxonomy.id, saved.id);
       result.taxonomies += 1;
     } catch (error) {
       result.failed.push(`코드표 “${taxonomy.division || taxonomy.fileName}”: ${(error as Error).message}`);
