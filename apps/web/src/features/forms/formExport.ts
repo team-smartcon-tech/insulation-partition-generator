@@ -11,6 +11,7 @@
  * (차트·SmartArt·수식·인쇄 설정)은 손대지 않으니 그대로 남는다.
  */
 import { EXCEL_FILE_RE } from "./library.ts";
+import { insertRowsIntoSheetXml, shiftDrawingRows, shiftPrintArea } from "./sheetRowsExport.ts";
 import {
   DRAWING_CONTENT_TYPE,
   EMPTY_DRAWING,
@@ -242,6 +243,8 @@ export async function buildFilledWorkbook(
   stamps: Record<string, ApprovalStamp[]> = {},
   /** 앱에서 더한 장(월별 시트) — 원본 시트를 복사해 진짜 시트로 만들어 넣는다. */
   customSheets: { name: string; source: string }[] = [],
+  /** 시트 이름 → 표 중간에 끼워 넣은 줄 자리(원본 줄 번호). 엑셀에도 그대로 넣는다. */
+  rowInserts: Record<string, number[]> = {},
 ): Promise<FilledWorkbook> {
   const index = readZipIndex(data);
   const paths = await sheetPaths(data, index);
@@ -271,6 +274,19 @@ export async function buildFilledWorkbook(
   };
   const newOverrides: { part: string; type: string }[] = [];
   let addedImages = false;
+
+  /** 이 시트에 붙은 그림 판(drawing) 파일 경로. 없으면 undefined. */
+  async function drawingPathOf(sheetPath: string, sheetXml: string): Promise<string | undefined> {
+    const id = /<drawing[^>]*r:id="([^"]+)"/.exec(sheetXml)?.[1];
+    if (!id) return undefined;
+    const relsPath = sheetPath.replace(/([^/]+)$/, "_rels/$1.rels");
+    const rels = await readText(relsPath);
+    if (!rels) return undefined;
+    const target =
+      new RegExp(`<Relationship\b[^>]*\bId="${id}"[^>]*\bTarget="([^"]+)"`).exec(rels)?.[1] ??
+      new RegExp(`<Relationship\b[^>]*\bTarget="([^"]+)"[^>]*\bId="${id}"`).exec(rels)?.[1];
+    return target ? resolvePath(sheetPath, target) : undefined;
+  }
 
   /** 시트에 결재 도장을 얹는다. 시트에 그림 판(drawing)이 없으면 만들어 붙인다. 고친 시트 XML 을 돌려준다. */
   async function attachStamps(sheetPath: string, sheetXml: string, list: ApprovalStamp[]): Promise<string> {
@@ -384,6 +400,8 @@ export async function buildFilledWorkbook(
   const sheetNames = new Set([
     ...Object.entries(values).filter(([, cells]) => Object.keys(cells).length > 0).map(([name]) => name),
     ...Object.entries(stamps).filter(([, list]) => list.length > 0).map(([name]) => name),
+    // 글자를 한 자도 안 적었어도 **줄을 끼운 시트는 손봐야 한다**(안 그러면 끼운 줄이 사라진다).
+    ...Object.entries(rowInserts).filter(([, list]) => list.length > 0).map(([name]) => name),
   ]);
   for (const sheetName of sheetNames) {
     const cells = values[sheetName] ?? {};
@@ -403,7 +421,23 @@ export async function buildFilledWorkbook(
       if (sheetIndex >= 0 && Number.isFinite(lastRow)) lastRowBySheetIndex.set(sheetIndex, lastRow);
     }
 
-    let patched = patchSheetXml(xml, cells);
+    /*
+     * 표 중간에 끼운 줄을 **먼저** 넣는다. 값은 이미 "끼운 뒤" 좌표로 적혀 있으므로
+     * 순서가 반대면 글자가 한 줄씩 어긋난다.
+     */
+    let base = xml;
+    const inserts = rowInserts[sheetName] ?? [];
+    if (inserts.length > 0) {
+      base = insertRowsIntoSheetXml(base, inserts);
+      // 그림(로고·순서도)도 칸에 붙어 있다. 같이 밀지 않으면 표와 따로 논다.
+      const drawingPath = await drawingPathOf(path, base);
+      if (drawingPath) {
+        const drawingXml = await readText(drawingPath);
+        if (drawingXml) await putText(drawingPath, shiftDrawingRows(drawingXml, inserts));
+      }
+    }
+
+    let patched = patchSheetXml(base, cells);
     if (stamps[sheetName]?.length) patched = await attachStamps(path, patched, stamps[sheetName]);
     await putText(path, patched);
   }
@@ -420,11 +454,18 @@ export async function buildFilledWorkbook(
     await putText("[Content_Types].xml", types);
   }
 
-  // 인쇄 영역도 함께 늘린다(줄을 더해 적은 경우).
-  const latestWorkbook = (await readText("xl/workbook.xml")) ?? "";
-  if (latestWorkbook && lastRowBySheetIndex.size > 0) {
-    const nextWorkbook = extendPrintArea(latestWorkbook, lastRowBySheetIndex);
-    if (nextWorkbook !== latestWorkbook) await putText("xl/workbook.xml", nextWorkbook);
+  // 인쇄 영역도 함께 늘린다(줄을 더해 적은 경우, 그리고 표 중간에 끼워 넣은 경우).
+  let latestWorkbook = (await readText("xl/workbook.xml")) ?? "";
+  if (latestWorkbook) {
+    const before = latestWorkbook;
+    for (const [sheetName, inserts] of Object.entries(rowInserts)) {
+      const sheetIndex = order.indexOf(sheetName);
+      if (inserts.length > 0 && sheetIndex >= 0) {
+        latestWorkbook = shiftPrintArea(latestWorkbook, sheetIndex, inserts);
+      }
+    }
+    if (lastRowBySheetIndex.size > 0) latestWorkbook = extendPrintArea(latestWorkbook, lastRowBySheetIndex);
+    if (latestWorkbook !== before) await putText("xl/workbook.xml", latestWorkbook);
   }
 
   return { bytes: writeZip(items), skippedSheets };

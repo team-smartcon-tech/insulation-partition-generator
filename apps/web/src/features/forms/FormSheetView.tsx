@@ -120,6 +120,20 @@ function effectiveAlign(cell: FormCell): FormCellStyle["align"] {
 /** 화면 배율. "fit" 이면 표 전체가 가로로 들어가도록 자동 계산한다. */
 export type FormScale = number | "fit";
 
+/**
+ * 줄 왼쪽 끝에 붙는 단추 — 마우스를 올린 줄에만 나타난다.
+ *
+ * 표 중간에 줄이 한 줄 더 필요할 때 쓴다. 단추를 늘 보이게 두면 표가 어수선해지고, 메뉴에 넣으면
+ * 못 찾는다(사용자와 정한 방식).
+ */
+export interface RowActions {
+  /** 이 줄 **앞에** 빈 줄을 넣는다 */
+  onInsert: (displayRow: number) => void;
+  /** 끼워 넣은 줄인가 — 그때만 뺄 수 있다(원본 줄은 못 뺀다) */
+  isInserted: (displayRow: number) => boolean;
+  onRemove: (displayRow: number) => void;
+}
+
 interface FormSheetViewProps {
   sheet: FormSheet;
   /** true 면 모든 칸의 글자를 고칠 수 있다. false 는 인쇄·검토용 보기. */
@@ -137,6 +151,8 @@ interface FormSheetViewProps {
   cellMarks?: Map<string, CellMark>;
   /** 화면 배율. 엑셀과 브라우저의 글자 폭이 달라 한 배율로는 안 맞을 수 있다. */
   scale?: FormScale;
+  /** 줄 넣기·빼기 단추(없으면 아예 안 그린다 — 인쇄·점검 화면에는 필요 없다) */
+  rowActions?: RowActions;
 }
 
 /**
@@ -213,6 +229,8 @@ function CellMarkLayer({ mark }: { mark: CellMark | undefined }) {
 const SheetRow = memo(function SheetRow({
   cells,
   height,
+  displayRow,
+  rowActions,
   editable,
   sheetLocked,
   tint,
@@ -224,6 +242,9 @@ const SheetRow = memo(function SheetRow({
   onCommitValue,
 }: {
   cells: FormCell[];
+  /** 화면에서 몇 번째 줄인가(1부터) — 줄 넣기·빼기에 쓴다 */
+  displayRow: number;
+  rowActions?: RowActions;
   cellMarks: Map<string, CellMark>;
   /** 결재 서명 자리 */
   signKeys: Set<string>;
@@ -241,9 +262,10 @@ const SheetRow = memo(function SheetRow({
   onCommitValue: (cellKey: string, before: string | undefined, after: string) => void;
 }) {
   return (
-    <tr style={{ height }}>
-      {cells.map((cell) => {
+    <tr style={{ height }} className={rowActions ? "group/row" : undefined}>
+      {cells.map((cell, index) => {
         const canEdit = editable && !cell.locked;
+        const showActions = rowActions && index === 0;
         return (
         <td
           key={cell.key}
@@ -269,7 +291,7 @@ const SheetRow = memo(function SheetRow({
               ? { backgroundImage: "linear-gradient(rgba(125, 211, 252, 0.38), rgba(125, 211, 252, 0.38))" }
               : {}),
             // 결재 서명 자리 — 엑셀 테두리를 가리지 않게 안쪽에 점선을 그린다.
-            ...(cellMarks.has(cell.key) ? { position: "relative" as const } : {}),
+            ...(cellMarks.has(cell.key) || showActions ? { position: "relative" as const } : {}),
             ...(signKeys.has(cell.key)
               ? {
                   outline: "2px dashed rgba(37, 99, 235, 0.55)",
@@ -280,6 +302,31 @@ const SheetRow = memo(function SheetRow({
               : {}),
           }}
         >
+          {/* 줄 단추는 첫 칸에 붙여 표 왼쪽 바깥에 띄운다. 줄에 마우스를 올려야 보인다. */}
+          {showActions && (
+            <span className="pointer-events-none absolute left-0 top-0 z-20 flex h-full -translate-x-full items-center gap-0.5 pr-1 opacity-0 transition group-hover/row:pointer-events-auto group-hover/row:opacity-100">
+              <button
+                type="button"
+                title="이 줄 위에 빈 줄 넣기"
+                aria-label={`${displayRow}번째 줄 위에 빈 줄 넣기`}
+                onClick={() => rowActions?.onInsert(displayRow)}
+                className="flex h-4 w-4 items-center justify-center rounded bg-blue-600 text-[11px] font-bold leading-none text-white shadow hover:bg-blue-700"
+              >
+                +
+              </button>
+              {rowActions?.isInserted(displayRow) && (
+                <button
+                  type="button"
+                  title="끼워 넣은 이 줄 빼기"
+                  aria-label={`${displayRow}번째 줄 빼기`}
+                  onClick={() => rowActions?.onRemove(displayRow)}
+                  className="flex h-4 w-4 items-center justify-center rounded bg-rose-600 text-[11px] font-bold leading-none text-white shadow hover:bg-rose-700"
+                >
+                  −
+                </button>
+              )}
+            </span>
+          )}
           <CellMarkLayer mark={cellMarks.get(cell.key)} />
           <FormCellContent
             cell={cell}
@@ -307,6 +354,7 @@ export default function FormSheetView({
   signKeys = EMPTY_KEYS,
   cellMarks = EMPTY_MARKS,
   scale = 1,
+  rowActions,
 }: FormSheetViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -365,7 +413,8 @@ export default function FormSheetView({
 
   return (
     // 가로 스크롤 영역이 표의 바깥 테두리를 1px 잘라먹어, 그만큼 안쪽 여백을 준다.
-    <div ref={boxRef} className="overflow-x-auto p-0.5">
+    // 줄 단추는 표 **왼쪽 바깥**에 뜬다. 가로 스크롤 상자가 잘라내지 않게 그만큼 자리를 준다.
+    <div ref={boxRef} className={"overflow-x-auto p-0.5" + (rowActions ? " pl-7" : "")}>
       {/*
         transform 은 레이아웃 크기를 바꾸지 않는다 — 줄여도 원래 폭만큼 자리를
         차지해 빈 공간이 남고, 키우면 아래 내용을 덮는다. 그래서 바깥 상자에
@@ -402,6 +451,8 @@ export default function FormSheetView({
             <SheetRow
               key={rowIndex}
               cells={cells}
+              displayRow={rowIndex + 1}
+              rowActions={rowActions}
               height={sheet.rowHeights[rowIndex]}
               editable={editable}
               sheetLocked={sheet.locked === true}

@@ -49,7 +49,7 @@ import {
 } from "./contacts";
 import { buildFilledWorkbook, downloadBytes, filledFileName } from "./formExport";
 import { parseFormWorkbook } from "./formParser";
-import { withExtraRows } from "./sheetRows";
+import { withExtraRows, withInsertedRows, rowOrigins } from "./sheetRows";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import HomeDashboard, { SitesAudit } from "./HomeDashboard";
@@ -116,9 +116,11 @@ import {
   isTemplateSheet,
   removeCustomSheet,
   renameCustomSheet,
+  insertSheetRow,
   isStorageAvailable,
   IDS_CHANGED_EVENT,
   listForms,
+  removeSheetRow,
   readLastOpenedId,
   loadSites,
   loadTaxonomies,
@@ -259,6 +261,10 @@ export default function FormsPage() {
   const [homeSignOpen, setHomeSignOpen] = useState(false);
   /** 시트 이름 → 아래에 더한 빈 줄 수 */
   const [extraRows, setExtraRowsState] = useState<Record<string, number>>({});
+  /** 표 중간에 끼워 넣은 줄 자리(시트 이름 → 원본 줄 번호 목록) */
+  const [rowInserts, setRowInsertsState] = useState<Record<string, number[]>>({});
+  /** 수식 경고는 한 번만 — 줄을 넣을 때마다 물으면 성가시다. */
+  const formulaWarnedRef = useRef(false);
   /** 시트 이름 → (서명 자리 키 → 결재자) */
   const [approvalLines, setApprovalLinesState] = useState<Record<string, Record<string, Assignee>>>({});
   /** 시트 이름 → (서명 자리 키 → 결재 기록) */
@@ -392,6 +398,7 @@ export default function FormsPage() {
     justLoadedRef.current = { id: form.id, values: form.values };
     setValues(form.values);
     setExtraRowsState(form.extraRows ?? {});
+    setRowInsertsState(form.rowInserts ?? {});
     setApprovalLinesState(form.approvalLines ?? {});
     setApprovalsState(form.approvals ?? {});
     // 홈에서 특정 시트(결재할 장)를 눌렀으면 그 시트를 편다.
@@ -1221,6 +1228,53 @@ export default function FormsPage() {
     }
   }
 
+  /**
+   * 표 중간에 빈 줄을 넣는다 / 끼워 넣었던 줄을 뺀다.
+   *
+   * 적어 둔 글자와 결재 기록도 함께 밀려야 하므로 저장소가 한 번에 처리한다. 여기서는 그 결과를
+   * 화면에 도로 읽어 온다 — 화면 상태만 따로 고치면 저장된 것과 어긋난다.
+   */
+  async function changeRows(action: "insert" | "remove", displayRow: number) {
+    if (state.status !== "ready" || !baseSheet) return;
+    /*
+     * 수식이 있는 양식은 줄을 끼우면 수식이 가리키는 범위가 어긋날 수 있다(견본 190장 중 6개 파일).
+     * 막지는 않고 한 번 알린다 — 대부분의 양식에는 수식이 없다.
+     */
+    if (action === "insert" && sheetHasFormula && !formulaWarnedRef.current) {
+      formulaWarnedRef.current = true;
+      if (
+        !window.confirm(
+          [
+            "이 양식에는 수식이 들어 있습니다.",
+            "줄을 끼우면 수식이 가리키는 범위가 어긋날 수 있습니다.",
+            "그래도 넣을까요?",
+          ].join("\n"),
+        )
+      ) {
+        return;
+      }
+    }
+    try {
+      if (action === "insert") await insertSheetRow(state.id, baseSheet.name, displayRow);
+      else await removeSheetRow(state.id, baseSheet.name, displayRow);
+
+      const saved = await getForm(state.id);
+      if (!saved) return;
+      setRowInsertsState(saved.rowInserts ?? {});
+      setValues(saved.values);
+      setApprovalLinesState(saved.approvalLines ?? {});
+      setApprovalsState(saved.approvals ?? {});
+      // 되돌리기 기록은 줄 번호에 기대고 있어, 줄이 움직이면 더는 맞지 않는다.
+      historyRef.current = { past: [], future: [] };
+      justLoadedRef.current = { id: saved.id, values: saved.values };
+      setSaveState("saved");
+    } catch (error) {
+      setStorageWarning(
+        error instanceof Error ? `줄을 바꾸지 못했습니다: ${error.message}` : "줄을 바꾸지 못했습니다.",
+      );
+    }
+  }
+
   /** 한 칸에 적은 값을 되돌리기 기록에 남긴다. */
   const handleCommitValue = useCallback(
     (cellKey: string, before: string | undefined, after: string) => {
@@ -1295,7 +1349,13 @@ export default function FormsPage() {
           }
         }
       }
-      const { bytes, skippedSheets } = await buildFilledWorkbook(form.bytes, exportValues, stamps, form.customSheets);
+      const { bytes, skippedSheets } = await buildFilledWorkbook(
+        form.bytes,
+        exportValues,
+        stamps,
+        form.customSheets,
+        form.rowInserts ?? {},
+      );
       downloadBytes(bytes, filledFileName(form.fileName));
       setStorageWarning(
         skippedSheets.length > 0
@@ -1745,7 +1805,23 @@ export default function FormsPage() {
   const baseSheet = state.status === "ready" ? state.sheets[activeSheet] : null;
   // 시트 아래에 더한 빈 줄. 원본 격자는 그대로 두고 그릴 때만 이어 붙인다.
   const extraRowCount = baseSheet ? (extraRows[baseSheet.name] ?? 0) : 0;
-  const sheet = baseSheet ? withExtraRows(baseSheet, extraRowCount) : null;
+  /*
+   * 표 중간에 끼운 줄을 **먼저** 넣고, 그 아래에 더한 줄을 잇는다. 순서가 반대면 끼운 자리가
+   * 밀려 더한 줄 사이에 끼게 된다.
+   */
+  const sheetInserts = baseSheet ? (rowInserts[baseSheet.name] ?? []) : [];
+  /** 이 시트에 수식이 있나 — 줄을 끼울 때 한 번 알린다(수식 범위가 어긋날 수 있다). */
+  const sheetHasFormula = useMemo(
+    () => (baseSheet?.cells ?? []).some((cell) => cell.formula === true),
+    [baseSheet],
+  );
+  const sheet = baseSheet ? withExtraRows(withInsertedRows(baseSheet, sheetInserts), extraRowCount) : null;
+  /** 화면 줄이 어디서 왔는지(끼운 줄인지 원본인지) — 줄 빼기 단추를 보일지 정한다. */
+  const rowOriginList = useMemo(
+    () => (baseSheet ? rowOrigins(baseSheet.rowCount, sheetInserts) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [baseSheet, JSON.stringify(sheetInserts)],
+  );
   // 결재칸(작성·검토·승인). 원본 시트 격자에서 찾는다 — 더한 줄과는 상관없다.
   // 견본 시트는 결재할 문서가 아니라 작성 예시라 찾지 않는다(사용자 판단). 견본을 복사해
   // 더한 장은 실제 문서라 찾는다.
@@ -2669,6 +2745,16 @@ export default function FormsPage() {
               tint={showEditableTint}
               signKeys={pendingSignKeys}
               cellMarks={cellMarks}
+              rowActions={
+                canEdit
+                  ? {
+                      onInsert: (row) => void changeRows("insert", row),
+                      onRemove: (row) => void changeRows("remove", row),
+                      // 원본 줄은 뺄 수 없다. 더한 줄(맨 아래)은 [줄 추가] 쪽에서 줄인다.
+                      isInserted: (row) => rowOriginList[row - 1]?.base === null,
+                    }
+                  : undefined
+              }
               onChangeValue={(cellKey, value) =>
                 setValues((prev) => ({
                   ...prev,

@@ -25,7 +25,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 13;
+export const PARSER_VERSION = 14;
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -470,6 +470,8 @@ export function parseFormSheet(
         text: cellText(cell.value),
         // 보호가 안 걸린 시트에서는 잠금 표시를 달지 않는다(전부 고칠 수 있다).
         ...(sheetLocked && !unlocked ? { locked: true } : {}),
+        // 수식이 있는 칸 — 줄을 끼울 때 범위가 어긋날 수 있다고 알리는 데 쓴다.
+        ...(cell.formula || cell.sharedFormula ? { formula: true } : {}),
         style,
       });
     }

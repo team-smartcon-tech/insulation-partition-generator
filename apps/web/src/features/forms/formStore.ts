@@ -15,6 +15,7 @@
 // Node 테스트가 이 파일을 직접 부르므로 확장자를 적는다(Node ESM 은 생략을 허용하지 않는다).
 import { PARSER_VERSION, parseFormWorkbook } from "./formParser.ts";
 import { isRemovedOnCopy } from "./formShapes.ts";
+import { insertAt, removeInsertedAt, shiftCellKeys } from "./sheetRows.ts";
 import { baseFileName, planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
 import { syncDelete, syncPatch, syncSites, syncTaxonomies, syncUpload } from "./formSync.ts";
 import { findApprovalBoxes } from "./approval.ts";
@@ -128,6 +129,13 @@ export interface StoredForm {
    */
   extraRows: Record<string, number>;
   /**
+   * 표 **중간에** 끼워 넣은 줄 자리(시트 이름 → 원본 줄 번호 목록, 같은 자리 여러 줄이면 여러 번).
+   *
+   * 원본 엑셀은 건드리지 않고 자리만 적어 둔다 — 파서가 좋아지면 끼운 줄도 새 모양을 따라간다.
+   * 내려받을 때 그 자리에 진짜 줄을 넣는다(`sheetRowsExport.ts`).
+   */
+  rowInserts: Record<string, number[]>;
+  /**
    * 시트 이름 → (결재 서명 자리 키 → 지정된 사람). 결재칸은 시트마다 따로 있다.
    * 칸 순서가 아니라 서명 자리 키로 담아, 양식을 다시 읽어도 같은 칸에 붙어 있다.
    */
@@ -210,6 +218,7 @@ function normalize(raw: StoredForm): StoredForm {
     openedAt: raw.openedAt ?? raw.updatedAt,
     customSheets: raw.customSheets ?? [],
     extraRows: raw.extraRows ?? {},
+    rowInserts: raw.rowInserts ?? {},
     approvalLines: raw.approvalLines ?? {},
     approvals: raw.approvals ?? {},
     values: restoreBlankedTitles(
@@ -631,6 +640,7 @@ export async function saveForm(input: {
     values: {},
     customSheets: [],
     extraRows: {},
+    rowInserts: {},
     approvalLines: {},
     approvals: {},
   };
@@ -1018,6 +1028,51 @@ export async function setExtraRows(id: string, sheetName: string, count: number)
     if (count > 0) next[sheetName] = count;
     else delete next[sheetName];
     return { extraRows: next, updatedAt: Date.now() };
+  });
+}
+
+/**
+ * 표 중간에 빈 줄을 하나 끼운다(화면 줄 번호 기준).
+ *
+ * **적어 둔 글자와 결재 기록도 함께 밀어야** 한 줄씩 어긋나지 않는다. 그래서 한 번에 처리한다 —
+ * 따로 저장하면 사이에 저장이 끊겼을 때 글자만 밀린 상태로 남는다.
+ */
+export async function insertSheetRow(id: string, sheetName: string, displayRow: number): Promise<void> {
+  await patchForm(id, (form) => {
+    const sheet = form.sheets.find((item) => item.name === sheetName);
+    const custom = form.customSheets.find((item) => item.name === sheetName);
+    const baseRowCount = sheet?.rowCount ?? form.sheets.find((item) => item.name === custom?.source)?.rowCount ?? 0;
+    if (baseRowCount === 0) return {};
+
+    const current = form.rowInserts[sheetName] ?? [];
+    const next = insertAt(baseRowCount, current, displayRow);
+    return {
+      rowInserts: { ...form.rowInserts, [sheetName]: next },
+      values: { ...form.values, [sheetName]: shiftCellKeys(form.values[sheetName], displayRow, 1) },
+      approvalLines: { ...form.approvalLines, [sheetName]: shiftCellKeys(form.approvalLines[sheetName], displayRow, 1) },
+      approvals: { ...form.approvals, [sheetName]: shiftCellKeys(form.approvals[sheetName], displayRow, 1) },
+      updatedAt: Date.now(),
+    };
+  });
+}
+
+/** 끼워 넣었던 줄을 뺀다. **원본 줄은 빼지 않는다**(양식 뼈대는 본사가 관리한다). */
+export async function removeSheetRow(id: string, sheetName: string, displayRow: number): Promise<void> {
+  await patchForm(id, (form) => {
+    const sheet = form.sheets.find((item) => item.name === sheetName);
+    const custom = form.customSheets.find((item) => item.name === sheetName);
+    const baseRowCount = sheet?.rowCount ?? form.sheets.find((item) => item.name === custom?.source)?.rowCount ?? 0;
+    const current = form.rowInserts[sheetName] ?? [];
+    const next = removeInsertedAt(baseRowCount, current, displayRow);
+    if (next.length === current.length) return {}; // 원본 줄이라 뺄 수 없다
+
+    return {
+      rowInserts: { ...form.rowInserts, [sheetName]: next },
+      values: { ...form.values, [sheetName]: shiftCellKeys(form.values[sheetName], displayRow + 1, -1) },
+      approvalLines: { ...form.approvalLines, [sheetName]: shiftCellKeys(form.approvalLines[sheetName], displayRow + 1, -1) },
+      approvals: { ...form.approvals, [sheetName]: shiftCellKeys(form.approvals[sheetName], displayRow + 1, -1) },
+      updatedAt: Date.now(),
+    };
   });
 }
 

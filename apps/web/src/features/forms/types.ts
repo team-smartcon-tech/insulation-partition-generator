@@ -59,6 +59,11 @@ export interface FormCell {
    * 양식을 만든 사람이 "여기는 건드리지 말라"고 정해 둔 자리라 화면에서도 고칠 수 없게 한다.
    */
   locked?: boolean;
+  /**
+   * 엑셀 수식이 든 칸인가. 표 중간에 줄을 끼울 때 **수식 범위가 어긋날 수 있어** 알리는 데 쓴다
+   * (견본 190장 중 6개 파일에만 수식이 있다).
+   */
+  formula?: boolean;
   style: FormCellStyle;
 }
 
