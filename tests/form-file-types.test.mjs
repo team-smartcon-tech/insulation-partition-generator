@@ -11,6 +11,7 @@ import {
   isAttachmentFile,
   isExcelFile,
   isUploadableFile,
+  fileKind,
   fileSizeText,
 } from '../apps/web/src/features/forms/library.ts';
 import { filledFileName } from '../apps/web/src/features/forms/formExport.ts';
@@ -21,7 +22,6 @@ test('받는 파일 가리기', () => {
   assert.ok(isExcelFile('6.2 품질목표관리.xlsm'), '매크로가 든 엑셀도 받는다');
   assert.equal(isExcelFile('검측요청서.xls'), false, '옛 형식은 못 읽는다');
   assert.equal(isExcelFile('검측요청서.hwp'), false);
-  assert.equal(isExcelFile('검측요청서.hwpx'), false);
   assert.equal(isExcelFile('공지사항.pdf'), false);
   assert.equal(isExcelFile('xlsx'), false, '확장자가 아니라 이름에만 들어간 경우');
 });
@@ -45,22 +45,31 @@ test('판 이름 비교에서도 .xlsm 을 확장자로 뗀다', () => {
   assert.equal(editionName('품질목표관리.xlsm'), editionName('품질목표관리.xlsx'));
 });
 
-test('한글 파일은 첨부로 받는다 — 엑셀과는 다른 길', () => {
-  assert.ok(isAttachmentFile('601. 검측요청서.hwp'));
-  assert.ok(isAttachmentFile('601. 검측요청서.HWPX'));
-  assert.equal(isAttachmentFile('601. 검측요청서.xlsx'), false, '엑셀은 첨부가 아니라 열어서 채운다');
+test('엑셀이 아닌 파일은 모두 첨부로 받는다 — 현장 공유폴더를 대신하려면 아무 파일이나 들어와야 한다', () => {
+  assert.equal(isAttachmentFile('601. 검측요청서.hwp'), true);
+  assert.equal(isAttachmentFile('01. 공사현황보고.pptx'), true);
+  assert.equal(isAttachmentFile('구조도면.dwg'), true);
+  assert.equal(isAttachmentFile('현장사진.jpg'), true);
+  assert.equal(isAttachmentFile('112. 목록표.xlsx'), false, '엑셀은 열어서 채운다');
+  assert.equal(isAttachmentFile('6.2 품질목표.xlsm'), false);
 
-  // 올릴 수 있는 것 = 엑셀 + 한글
-  assert.ok(isUploadableFile('a.xlsx') && isUploadableFile('a.xlsm'));
-  assert.ok(isUploadableFile('a.hwp') && isUploadableFile('a.hwpx'));
-  assert.equal(isUploadableFile('a.xls'), false);
-  assert.equal(isUploadableFile('a.pdf'), false);
+  // 무엇이든 받는다(빈 이름만 뺀다)
+  for (const name of ['a.xlsx', 'a.hwp', 'a.pdf', 'a.zip', 'a.dwg', 'a.png', '이름만있는파일']) {
+    assert.equal(isUploadableFile(name), true, name);
+  }
+  assert.equal(isUploadableFile('   '), false);
 });
 
-test('보기 이름에서는 엑셀·한글 확장자를 모두 뗀다', () => {
-  assert.equal(baseFileName('101. 검측요청서.hwp'), '101. 검측요청서');
-  assert.equal(baseFileName('101. 검측요청서.xlsm'), '101. 검측요청서');
-  assert.equal(baseFileName('101. 검측요청서'), '101. 검측요청서');
+test('파일 종류를 가려 이름표와 안내문에 쓴다', () => {
+  assert.deepEqual(fileKind('검측요청서.hwp'), { label: '한글', fillable: true });
+  assert.deepEqual(fileKind('보고서.DOCX'), { label: '워드', fillable: true });
+  assert.deepEqual(fileKind('공사현황.pptx'), { label: 'PPT', fillable: true });
+  assert.deepEqual(fileKind('도면.dwg'), { label: '도면', fillable: false });
+  assert.deepEqual(fileKind('자료.zip'), { label: '압축', fillable: false });
+  assert.deepEqual(fileKind('공지.pdf'), { label: 'PDF', fillable: false, preview: 'pdf' });
+  assert.deepEqual(fileKind('현장사진.JPG'), { label: '사진', fillable: false, preview: 'image' });
+  assert.equal(fileKind('처음보는것.abc').label, 'ABC', '모르는 확장자는 그대로 보여 준다');
+  assert.equal(fileKind('확장자없음').label, '파일');
 });
 
 test('첨부 파일 크기 표기', () => {

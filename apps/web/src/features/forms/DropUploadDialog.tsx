@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { FolderOpen, Upload, X } from "lucide-react";
-import { isUploadableFile } from "./library";
+import { BIG_FILE_BYTES, fileSizeText, isUploadableFile } from "./library";
 
 export default function DropUploadDialog({
   title,
@@ -47,26 +47,30 @@ export default function DropUploadDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  /**
-   * 못 받는 파일에는 **왜 안 되는지**를 알려 준다. 그냥 "엑셀만 됩니다"라고만 하면, 엑셀을 올린
-   * 사람은(옛 `.xls`) 무엇이 잘못됐는지 모른다.
-   */
-  const why = (name: string) => {
-    const lower = name.toLowerCase();
-    if (lower.endsWith(".xls")) {
-      return `“${name}”은(는) 옛 엑셀 형식(.xls)입니다.
-엑셀에서 열어 [다른 이름으로 저장] → .xlsx 로 바꾼 뒤 올려 주세요.`;
-    }
-    return `“${name}”은(는) 받을 수 없는 파일입니다.
-엑셀(.xlsx, .xlsm) 또는 한글(.hwp, .hwpx)만 올릴 수 있습니다.`;
-  };
-
   const take = (list: FileList | null) => {
-    // 엑셀과 한글만 받는다 — 폴더를 통째로 끌어다 놓거나 PDF 를 놓는 일이 흔하다.
     const all = Array.from(list ?? []);
     const files = all.filter((file) => isUploadableFile(file.name));
-    if (files.length > 0) onFiles(files);
-    else if (all.length > 0) window.alert(why(all[0].name));
+    if (files.length === 0) return 0;
+
+    /*
+     * 큰 파일은 한 번 묻는다. 지금 자료는 **이 브라우저 안에만** 있어서, 40MB 짜리 보고서를
+     * 몇 개만 넣어도 저장소가 차고 다른 사람 PC 에서는 보이지도 않는다.
+     */
+    const big = files.filter((file) => file.size > BIG_FILE_BYTES);
+    if (
+      big.length > 0 &&
+      !window.confirm(
+        [
+          `큰 파일이 ${big.length}개 있습니다(${big.map((file) => fileSizeText(file.size)).join(", ")}).`,
+          "",
+          "지금은 올린 파일이 이 브라우저에만 저장됩니다. 다른 사람 PC 에서는 보이지 않고, 저장 공간도 넉넉하지 않습니다.",
+          "그래도 올릴까요?",
+        ].join("\n"),
+      )
+    ) {
+      return 0;
+    }
+    onFiles(files);
     return files.length;
   };
 
@@ -126,7 +130,8 @@ export default function DropUploadDialog({
               {busy ? "읽는 중입니다…" : "여기에 파일을 끌어다 놓으세요"}
             </p>
             <p className="text-xs text-slate-500">
-              여러 개를 한 번에 놓아도 됩니다 · 엑셀 .xlsx · .xlsm · 한글 .hwp · .hwpx
+              여러 개를 한 번에 놓아도 됩니다 · 엑셀은 화면에서 바로 작성 · 그 밖의 파일(한글·PDF·도면·사진·PPT)은
+              보관하고 주고받습니다
             </p>
           </div>
 

@@ -79,8 +79,8 @@ import {
   isSiteDoc,
   isTemplate,
   editionName,
-  EXCEL_FILE_RE,
   baseFileName,
+  fileKind,
   isAttachmentFile,
   latestTemplateIn,
   newerTemplateFor,
@@ -169,9 +169,11 @@ type LoadState =
       sheets: FormSheet[];
       /** 배포 양식(원본)이면 고칠 수 없다 */
       kind?: FormKind;
-      /** 엑셀이 아니라 파일째 보관하는 첨부(한글 등) — 시트가 없고 파일만 주고받는다 */
+      /** 엑셀이 아니라 파일째 보관하는 첨부(한글·PDF·사진 등) — 시트가 없고 파일만 주고받는다 */
       attachment?: boolean;
       fileSize?: number;
+      /** 첨부 원본 바이트 — 사진·PDF 를 화면에서 바로 보여 주는 데 쓴다 */
+      bytes?: ArrayBuffer;
       /** 파일이 마지막으로 바뀐 시각(첨부 화면에 보여 준다) */
       updatedAt?: number;
     };
@@ -400,6 +402,8 @@ export default function FormsPage() {
       attachment: form.attachment,
       fileSize: form.fileSize ?? form.bytes?.byteLength,
       updatedAt: form.updatedAt,
+      // 격자가 있는 엑셀은 화면에서 그리므로 원본 바이트를 들고 있을 이유가 없다(크다).
+      bytes: form.attachment ? form.bytes : undefined,
     });
     writeLastOpenedId(form.id);
     // 저장본을 새 파서로 다시 읽지 못했으면 알린다. 조용히 넘기면 "기능이 안 되는" 걸로만 보인다.
@@ -557,7 +561,7 @@ export default function FormsPage() {
     setValues(emptyValues);
     pendingRef.current = null;
 
-    const opened: { id: string; fileName: string; sheets: FormSheet[]; attachment?: boolean }[] = [];
+    const opened: { id: string; fileName: string; sheets: FormSheet[]; attachment?: boolean; bytes?: ArrayBuffer }[] = [];
     const failed: string[] = [];
     let placed = 0;
     let saveFailed = false;
@@ -622,7 +626,7 @@ export default function FormsPage() {
           const targets = sameNameSlots(taxonomies, place);
           if (targets.length > 0) alsoFor.push({ fileName: file.name, bytes, sheets, targets, batchId, attachment });
         }
-        opened.push({ id, fileName: file.name, sheets, attachment });
+        opened.push({ id, fileName: file.name, sheets, attachment, bytes: attachment ? bytes : undefined });
       } catch (error) {
         failed.push(
           error instanceof Error ? `${file.name}: 엑셀을 읽지 못했습니다(${error.message})` : `${file.name}: 엑셀을 읽지 못했습니다`,
@@ -691,8 +695,9 @@ export default function FormsPage() {
       sheets: first.sheets,
       kind: uploadKind,
       attachment: first.attachment,
-      fileSize: undefined,
+      fileSize: first.bytes?.byteLength,
       updatedAt: Date.now(),
+      bytes: first.attachment ? first.bytes : undefined,
     });
 
     // 한 장이면 굳이 알리지 않는다(화면에 그 양식이 떠 있는 것이 곧 결과다).
@@ -1851,8 +1856,7 @@ export default function FormsPage() {
         <input
           ref={fileInputRef}
           type="file"
-          // 매크로가 든 엑셀(.xlsm)도 속은 같은 구조라 그대로 읽힌다. 한글은 파일째 보관한다.
-          accept=".xlsx,.xlsm,.hwp,.hwpx"
+          // 확장자를 제한하지 않는다 — 엑셀은 열어서 채우고, 나머지는 파일째 보관한다.
           // 여러 개를 한 번에 고를 수 있다(파일 이름 앞 번호로 각자 제자리에 들어간다).
           multiple
           className="hidden"
@@ -1953,10 +1957,13 @@ export default function FormsPage() {
                 // 한글 등 파일째 보관하는 서류 — 화면에서 채울 수 없다는 것을 목록에서 바로 알린다.
                 if (form.attachment) {
                   const stale = homeStale.find((entry) => entry.old.id === form.id);
+                  const kind = fileKind(form.fileName);
                   return [
                     {
-                      label: "한글 파일",
-                      title: "화면에서 칸을 채울 수 없습니다. 내려받아 한글에서 작성하고 다시 올리세요.",
+                      label: kind.label,
+                      title: kind.fillable
+                        ? `화면에서 칸을 채울 수 없습니다. 내려받아 ${kind.label}에서 작성하고 다시 올리세요.`
+                        : "화면에서 고칠 수 없는 자료입니다. 내려받아 보세요.",
                       tone: "blue" as const,
                     },
                     ...(stale
@@ -2136,6 +2143,7 @@ export default function FormsPage() {
             <AttachmentPanel
               fileName={state.fileName}
               fileSize={state.fileSize}
+              bytes={state.bytes}
               updatedAt={state.updatedAt ?? Date.now()}
               readOnly={readOnly}
               siteName={writeSite?.name}

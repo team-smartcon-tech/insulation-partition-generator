@@ -41,16 +41,41 @@ export const EXCEL_FILE_RE = /\.xls[xm]$/i;
 export const isExcelFile = (fileName: string) => EXCEL_FILE_RE.test(fileName);
 
 /**
- * **첨부로만** 받는 파일 — 한글(아래아한글) 서식.
+ * 엑셀이 아닌 파일은 **첨부**로 받는다 — 파일째 보관하고 주고받기만 한다.
  *
- * 현장 서류 중에는 한글로 만든 것이 섞여 있다(검측요청서 등). 한글 파일은 화면에 그려 칸을
- * 채울 수 없으니 **보관하고 주고받기만** 한다: 배포 양식함에 올려 두면 현장이 내려받아 한글에서
- * 작성하고, 작성한 파일을 제 칸에 다시 올린다. 결재·인쇄는 이 파일에는 걸 수 없다.
+ * 현장 서류함은 현장 공유폴더를 대신하는 자리다. 거기에는 한글 서식·도면·사진·보고서(PPT)·
+ * 압축파일이 섞여 있다. 엑셀만 받으면 "폴더 대신 쓴다"는 말이 성립하지 않는다.
+ * 첨부는 화면에서 칸을 채울 수 없고, 내려받아 원래 프로그램에서 작성한 뒤 다시 올린다.
  */
-export const ATTACHMENT_FILE_RE = /\.hwpx?$/i;
-export const isAttachmentFile = (fileName: string) => ATTACHMENT_FILE_RE.test(fileName);
-/** 올릴 수 있는 파일인가(엑셀이거나 첨부) */
-export const isUploadableFile = (fileName: string) => isExcelFile(fileName) || isAttachmentFile(fileName);
+export const isAttachmentFile = (fileName: string) => !isExcelFile(fileName);
+/** 올릴 수 있는 파일인가 — 이제 **아무 파일이나** 받는다(엑셀은 열어서 채우고, 나머지는 보관). */
+export const isUploadableFile = (fileName: string) => fileName.trim() !== "";
+
+/** 확장자(점 없이, 소문자) — `보고서.PPTX` → `pptx` */
+export const fileExtension = (fileName: string) => (fileName.match(/\.([^.\/]+)$/)?.[1] ?? "").toLowerCase();
+
+/**
+ * 파일 종류 — 목록 표시와 첨부 화면의 안내문에 쓴다.
+ *
+ * `fillable` 은 "원래 프로그램에서 작성하는 서식"인가다. 도면·사진·압축처럼 채우는 것이 아닌
+ * 자료에는 "내려받아 작성하세요"라고 하면 어색하다.
+ */
+export function fileKind(fileName: string): { label: string; fillable: boolean; preview?: "image" | "pdf" } {
+  const extension = fileExtension(fileName);
+  if (extension === "hwp" || extension === "hwpx") return { label: "한글", fillable: true };
+  if (extension === "doc" || extension === "docx") return { label: "워드", fillable: true };
+  if (extension === "xls") return { label: "옛 엑셀", fillable: true };
+  if (extension === "ppt" || extension === "pptx") return { label: "PPT", fillable: true };
+  if (extension === "pdf") return { label: "PDF", fillable: false, preview: "pdf" };
+  if (["png", "jpg", "jpeg", "gif", "webp", "bmp"].includes(extension)) {
+    return { label: "사진", fillable: false, preview: "image" };
+  }
+  if (["zip", "7z", "rar"].includes(extension)) return { label: "압축", fillable: false };
+  if (["dwg", "dxf"].includes(extension)) return { label: "도면", fillable: false };
+  if (extension === "txt" || extension === "csv") return { label: "글", fillable: false };
+  return { label: extension ? extension.toUpperCase() : "파일", fillable: false };
+}
+
 /** 파일 크기 표기 — `9876` → `9.6KB` */
 export function fileSizeText(bytes: number | undefined): string {
   if (!bytes || bytes <= 0) return "";
@@ -59,8 +84,16 @@ export function fileSizeText(bytes: number | undefined): string {
   return `${Math.round((bytes / 1024 / 1024) * 10) / 10}MB`;
 }
 
-/** 확장자를 뗀 이름 */
-export const baseFileName = (fileName: string) => fileName.replace(EXCEL_FILE_RE, "").replace(ATTACHMENT_FILE_RE, "");
+/**
+ * 이보다 큰 파일은 올리기 전에 한 번 묻는다.
+ *
+ * 지금 자료는 **이 브라우저 안에만** 있다. 40MB 짜리 보고서를 몇 개만 넣어도 저장소가 차고,
+ * 다른 사람 PC 에서는 보이지도 않는다. 서버 저장이 붙기 전까지는 알고 넣어야 한다.
+ */
+export const BIG_FILE_BYTES = 20 * 1024 * 1024;
+
+/** 확장자를 뗀 이름 — `112. 목록표.xlsx` → `112. 목록표` */
+export const baseFileName = (fileName: string) => fileName.replace(/\.[^.\/]+$/, "");
 
 /**
  * 판을 가리지 않는 서류 이름 — `(현장명) 인조강화석공사_현장설명서_Ver3_25.11` → `현장명인조강화석공사현장설명서`.
