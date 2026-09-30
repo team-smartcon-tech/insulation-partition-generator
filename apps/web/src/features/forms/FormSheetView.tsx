@@ -168,6 +168,14 @@ interface FormSheetViewProps {
   onChangeValue?: (cellKey: string, value: string) => void;
   /** 한 칸 고치기를 끝냈을 때. 되돌리기(Ctrl+Z)를 이 단위로 쌓는다. */
   onCommitValue?: (cellKey: string, before: string | undefined, after: string) => void;
+  /**
+   * 칸에 글을 치는 중에 Ctrl+Z 를 눌렀을 때 — 그 칸에 적던 것을 **들어올 때 값으로** 되돌린다.
+   * 입력 상자의 글자를 우리가 들고 있어서 브라우저의 되돌리기가 듣지 않는다(사용자 신고).
+   */
+  onRevertValue?: (cellKey: string, to: string | undefined) => void;
+  /** 그 칸에서 되돌릴 것이 없을 때 서류 전체의 되돌리기·다시하기 */
+  onUndo?: () => void;
+  onRedo?: () => void;
   /** 고칠 수 있는 칸에 하늘색을 칠할까. 잠긴 시트에서만 뜻이 있다. */
   tint?: boolean;
   /** 결재 서명 자리 — 파란 점선 테두리로 알린다(`approval.ts` 가 찾는다). */
@@ -268,6 +276,9 @@ const SheetRow = memo(function SheetRow({
   cellMarks,
   onChangeValue,
   onCommitValue,
+  onRevertValue,
+  onUndo,
+  onRedo,
   selLeft,
   selRight,
   onPickCell,
@@ -304,6 +315,11 @@ const SheetRow = memo(function SheetRow({
   values: FormCellValues;
   onChangeValue: (cellKey: string, value: string) => void;
   onCommitValue: (cellKey: string, before: string | undefined, after: string) => void;
+  /** 칸에 적던 것을 들어올 때 값으로 되돌린다(Ctrl+Z) */
+  onRevertValue?: (cellKey: string, to: string | undefined) => void;
+  /** 그 칸에서 되돌릴 것이 없으면 서류 전체 되돌리기로 */
+  onUndo?: () => void;
+  onRedo?: () => void;
 }) {
   return (
     <tr style={{ height }} className={rowActions ? "group/row" : undefined}>
@@ -408,6 +424,9 @@ const SheetRow = memo(function SheetRow({
             spill={spillable.has(cell.key)}
             onChange={onChangeValue}
             onCommit={onCommitValue}
+            onRevert={onRevertValue}
+            onUndo={onUndo}
+            onRedo={onRedo}
           />
         </td>
         );
@@ -422,6 +441,9 @@ export default function FormSheetView({
   values = {},
   onChangeValue,
   onCommitValue,
+  onRevertValue,
+  onUndo,
+  onRedo,
   tint = true,
   signKeys = EMPTY_KEYS,
   cellMarks = EMPTY_MARKS,
@@ -581,6 +603,9 @@ export default function FormSheetView({
               cellMarks={cellMarks}
               onChangeValue={handleChange}
               onCommitValue={handleCommit}
+              onRevertValue={onRevertValue}
+              onUndo={onUndo}
+              onRedo={onRedo}
               selLeft={inSelection(selection, rowIndex + 1) ? selection!.left : -1}
               selRight={inSelection(selection, rowIndex + 1) ? selection!.right : -1}
               onPickCell={onSelect ? pickCell : undefined}

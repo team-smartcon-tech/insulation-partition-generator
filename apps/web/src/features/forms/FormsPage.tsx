@@ -1443,6 +1443,22 @@ export default function FormsPage() {
     [],
   );
 
+  /**
+   * 칸에 적던 것을 **들어올 때 값으로** 되돌린다(칸 안에서 누른 Ctrl+Z).
+   *
+   * 고친 적이 없던 칸이면 기록에서 아예 뺀다 — 원본과 같은 글자를 적어 두면 "고친 칸"으로 세어진다.
+   */
+  const revertCell = useCallback((cellKey: string, to: string | undefined) => {
+    const sheetName = sheetNameRef.current;
+    if (!sheetName) return;
+    setValues((prev) => {
+      const sheetValues = { ...(prev[sheetName] ?? {}) };
+      if (to === undefined) delete sheetValues[cellKey];
+      else sheetValues[cellKey] = to;
+      return { ...prev, [sheetName]: sheetValues };
+    });
+  }, []);
+
   /** 되돌리기·다시하기 공통 — 한 걸음을 꺼내 그 칸의 값을 되돌려 놓는다. */
   const stepHistory = useCallback((direction: "undo" | "redo") => {
     const history = historyRef.current;
@@ -1460,6 +1476,13 @@ export default function FormsPage() {
       return { ...prev, [step.sheet]: sheetValues };
     });
   }, []);
+
+  /**
+   * 되돌리기·다시하기를 칸에 넘길 때 쓰는 **고정된** 함수.
+   * 칸은 메모해 두었다(수천 개). 매번 새 함수를 넘기면 글자를 한 자 칠 때마다 전부 다시 그려진다.
+   */
+  const undo = useCallback(() => stepHistory("undo"), [stepHistory]);
+  const redo = useCallback(() => stepHistory("redo"), [stepHistory]);
 
   /**
    * 지금 보고 있는 양식을 엑셀 파일로 내려받는다.
@@ -2954,6 +2977,9 @@ export default function FormsPage() {
               selection={selection}
               onSelect={canEdit ? setSelection : undefined}
               onCommitValue={handleCommitValue}
+              onRevertValue={revertCell}
+              onUndo={undo}
+              onRedo={redo}
               tint={showEditableTint}
               signKeys={pendingSignKeys}
               cellMarks={cellMarks}

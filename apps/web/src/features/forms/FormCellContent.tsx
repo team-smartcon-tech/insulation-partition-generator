@@ -70,9 +70,24 @@ interface FormCellContentProps {
    * 되돌리기(Ctrl+Z)는 글자 한 자씩이 아니라 이 단위로 되돌린다.
    */
   onCommit?: (cellKey: string, before: string | undefined, after: string) => void;
+  /** 이 칸에 적던 것을 **들어올 때 값으로** 되돌린다(Ctrl+Z 첫 번째). `undefined` 면 고친 적 없음으로. */
+  onRevert?: (cellKey: string, to: string | undefined) => void;
+  /** 이 칸에서 되돌릴 것이 없으면 **서류 전체**의 되돌리기·다시하기로 넘긴다. */
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
-function FormCellContent({ cell, editable, value, spill = false, onChange, onCommit }: FormCellContentProps) {
+function FormCellContent({
+  cell,
+  editable,
+  value,
+  spill = false,
+  onChange,
+  onCommit,
+  onRevert,
+  onUndo,
+  onRedo,
+}: FormCellContentProps) {
   /** 지금 이 칸을 고치고 있나. 이때만 입력 상자를 만든다. */
   const [editing, setEditing] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -120,6 +135,29 @@ function FormCellContent({ cell, editable, value, spill = false, onChange, onCom
           if (event.target.value !== (startRef.current ?? displayText(cell.text))) {
             onCommit?.(cell.key, startRef.current, event.target.value);
           }
+        }}
+        /*
+         * 칸에 글을 치는 중의 Ctrl+Z.
+         *
+         * 브라우저에 맡기면 **아무 일도 일어나지 않는다.** 입력 상자의 글자를 우리가 들고
+         * 있어서(React), 브라우저가 기억하는 되돌리기 기록과 어긋나기 때문이다(사용자 신고).
+         * 엑셀처럼 **먼저 이 칸에 적던 것을 통째로 되돌리고**, 더 되돌릴 것이 없으면 서류 전체의
+         * 되돌리기로 넘어간다.
+         */
+        onKeyDown={(event) => {
+          if (!(event.ctrlKey || event.metaKey)) return;
+          const key = event.key.toLowerCase();
+          if (key !== "z" && key !== "y") return;
+          const redo = key === "y" || event.shiftKey;
+          event.preventDefault();
+
+          if (!redo && event.currentTarget.value !== (startRef.current ?? displayText(cell.text))) {
+            onRevert?.(cell.key, startRef.current);
+            return;
+          }
+          // 이 칸에서 되돌릴 것이 없다 — 입력 상자를 닫고 앞 칸들의 기록으로 넘어간다.
+          setEditing(false);
+          (redo ? onRedo : onUndo)?.();
         }}
         rows={1}
         spellCheck={false}

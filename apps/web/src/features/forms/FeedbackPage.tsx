@@ -315,7 +315,8 @@ function FeedbackCard({
               {item.reply ? "답 고치기" : "답 달기"}
             </button>
           )}
-          {mine && (
+          {/* 지우기는 **내 글**, 그리고 본사 관리자. 서버가 허용하는 것과 화면을 맞춘다. */}
+          {(mine || admin) && (
             <button
               type="button"
               onClick={() => void onRemove(item.id)}
