@@ -210,6 +210,14 @@ type Space = "home" | "library" | "site" | "review" | "feedback";
 /** 본사 관리자만 들어갈 수 있는 곳 */
 const HQ_ONLY: ReadonlySet<Space> = new Set<Space>(["library", "review"]);
 
+/**
+ * 열어 둔 서류를 **아래에 펼쳐 보여 주는** 곳.
+ *
+ * 본사 점검과 오류·개선 의견은 그 화면만 보는 자리다. 서류를 열어 둔 채 탭을 옮기면 의견 목록
+ * 아래에 남의 서류 격자가 딸려 나왔다(사용자 신고) — 그 화면과 상관없는 것은 그리지 않는다.
+ */
+const DOC_SPACES: ReadonlySet<Space> = new Set<Space>(["home", "library", "site"]);
+
 /** 등급만으로 본사가 되는 사람. 명단(`form_admins`)으로도 될 수 있고, 그 판단은 서버가 한다. */
 const HQ_ROLES = new Set(["super_admin", "system_admin"]);
 
@@ -2410,7 +2418,7 @@ export default function FormsPage() {
         )}
 
         {/* 첨부(한글 등) — 시트가 없으니 격자 대신 파일을 주고받는 화면을 보인다. */}
-        {space !== "review" && state.status === "ready" && state.attachment && (
+        {DOC_SPACES.has(space) && state.status === "ready" && state.attachment && (
           <section id="form-viewer" className="scroll-mt-32 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
             <div className="mb-4 flex items-center gap-2">
               <FileText size={18} className="text-slate-400" aria-hidden />
@@ -2440,7 +2448,7 @@ export default function FormsPage() {
         )}
 
         {/* 본사 점검 탭에서는 편집 화면을 접어 둔다 — 남의 서류를 보는 자리다. */}
-        {space !== "review" && state.status === "ready" && sheet && openFormInSite && (
+        {DOC_SPACES.has(space) && state.status === "ready" && sheet && openFormInSite && (
           <section id="form-viewer" className="scroll-mt-32 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
             {/* 결재가 끝난 장 — 잠겼다는 것과 푸는 방법을 맨 위에 알린다. */}
             {!readOnly && approvalDone && (
