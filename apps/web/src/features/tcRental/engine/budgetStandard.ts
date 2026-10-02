@@ -11,6 +11,7 @@
  *
  * ── 타워크레인 (TC 시트) ──
  *   골조공기(일) = 기초30 + 지하35×지하층수 + 1층25 + 기준10×(1F제외−1) + 최상15 + 옥탑15×옥탑수
+ *                 (옥탑수는 회사 기준 2가 기본 — budgetRoofFloors)
  *                 (1F제외 = 지상층수 − 1 이므로 기준층 항은 10×(지상−2))
  *   임대개월     = ROUNDUP( MAX(호기 담당 동들의 골조공기) / 365 × 12 ) + 1
  *                 → 호기가 여러 동을 맡아도 **가장 긴 동 하나**로 본다
@@ -31,6 +32,13 @@ export interface BudgetCycle {
   typical: number; // 기준 10/층
   top: number; // 최상 15
   roof: number; // 옥탑 15/층
+  /**
+   * 실행기준이 세는 옥탑 층수 — 회사 기준은 **2개 층(15일×2)**.
+   * 공정표(표준 WBS)는 옥탑을 30일짜리 행 하나(phFloors=1)로 만들기 때문에
+   * 동의 phFloors 를 그대로 쓰면 실행기준이 15일 짧게 나온다. 동의 층 구성은 건드리지 않고
+   * 실행기준·발주의뢰서 계산에서만 이 값으로 끌어올린다.
+   */
+  roofFloors: number;
   /** T/C 임대개월에 더하는 개월 (해체시기 = 골조완료 + 1개월) */
   tcAddMonths: number;
   /** 호이스트 임대기간에 더하는 개월 (해체시기 = 동별 골조완료 + 4개월) */
@@ -46,6 +54,7 @@ export const DEFAULT_BUDGET_CYCLE: BudgetCycle = {
   typical: 10,
   top: 15,
   roof: 15,
+  roofFloors: 2,
   tcAddMonths: 1,
   hoistAddMonths: 4,
   hoistSkipFloors: 5,
@@ -59,6 +68,15 @@ export function daysToMonths(days: number): number {
   return (days / 365) * 12;
 }
 
+/**
+ * 실행기준에서 세는 옥탑 층수 — 옥탑이 있는 동은 최소 roofFloors(기본 2)개 층으로 본다.
+ * 옥탑이 없는 동(phFloors 0)은 0 그대로 둔다.
+ */
+export function budgetRoofFloors(b: BuildingFrameProfile, c: BudgetCycle): number {
+  const ph = Math.max(0, b.phFloors);
+  return ph > 0 ? Math.max(ph, c.roofFloors) : 0;
+}
+
 /** 타워크레인 기준 — 동 하나의 골조공기(일) */
 export function budgetFrameDays(b: BuildingFrameProfile, c: BudgetCycle): number {
   const above = Math.max(0, b.aboveFloors);
@@ -70,14 +88,14 @@ export function budgetFrameDays(b: BuildingFrameProfile, c: BudgetCycle): number
     c.floor1 +
     c.typical * typicalCount +
     c.top +
-    c.roof * Math.max(0, b.phFloors)
+    c.roof * budgetRoofFloors(b, c)
   );
 }
 
 /** 건설용리프트 기준 — 동 하나의 공기(일). 1~4F·최상층은 세지 않는다 */
 export function budgetHoistDays(b: BuildingFrameProfile, c: BudgetCycle): number {
   const counted = Math.max(0, b.aboveFloors - c.hoistSkipFloors);
-  return c.typical * counted + c.top + c.roof * Math.max(0, b.phFloors);
+  return c.typical * counted + c.top + c.roof * budgetRoofFloors(b, c);
 }
 
 export interface BudgetTcRow {
