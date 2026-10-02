@@ -26,6 +26,7 @@ import type ExcelJS from "exceljs";
 import type { BuildingFrameProfile, RentalSpan, TcRentalPlan } from "./types";
 import { parseYmd } from "./engine/dates";
 import { resolveHoistHeight, resolveOperation } from "./engine/profile";
+import { budgetCycleOf, budgetRoofFloors } from "./engine/budgetStandard";
 import {
   cloneRows,
   insertRows,
@@ -768,7 +769,7 @@ function fillCalc(
     ws.getCell(`C${r}`).value = b.aboveFloors;
     ws.getCell(`D${r}`).value = { formula: `+C${r}-5` };
     ws.getCell(`E${r}`).value = 1;
-    ws.getCell(`F${r}`).value = Math.max(0, b.phFloors);
+    ws.getCell(`F${r}`).value = budgetRoofFloors(b, budgetCycleOf(plan.params));
     ws.getCell(`G${r}`).value = { formula: `+D${r}*$E$6+E${r}*$G$6+$I$6*F${r}` };
     ws.getCell(`H${r}`).value = { formula: `G${r}/365*12` };
     ws.getCell(`I${r}`).value = { formula: `+MAX($H${r}:$H${r})+4` };
@@ -784,7 +785,7 @@ function fillCalc(
     ws.getCell(`C${e}`).value = b.aboveFloors;
     ws.getCell(`D${e}`).value = { formula: `+C${e}-5` };
     ws.getCell(`E${e}`).value = 1;
-    ws.getCell(`F${e}`).value = Math.max(0, b.phFloors);
+    ws.getCell(`F${e}`).value = budgetRoofFloors(b, budgetCycleOf(plan.params));
     ws.getCell(`G${e}`).value = ln.operation;
     ws.getCell(`H${e}`).value = { formula: `M${r}` };
     ws.getCell(`I${e}`).value = { formula: `VLOOKUP($G${e},$V$11:$W$14,2,0)*H${e}` };

@@ -69,7 +69,12 @@ import {
   saveDraft,
 } from "./io";
 import { buildSamplePlan } from "./sample";
-import { budgetCycleOf, budgetHoistRow, budgetTcRow } from "./engine/budgetStandard";
+import {
+  budgetCycleOf,
+  budgetHoistRow,
+  budgetRoofFloors,
+  budgetTcRow,
+} from "./engine/budgetStandard";
 import { generateTcOrderForm } from "./tcOrderForm";
 import { generateHcOrderForm } from "./hcOrderForm";
 
@@ -531,7 +536,7 @@ export default function TcRentalPage() {
       ],
       [
         `※ 실행기준: 기초 ${cycle.foundation} · 지하 ${cycle.basement} · 1층 ${cycle.floor1}` +
-          ` · 기준 ${cycle.typical} · 최상 ${cycle.top} · 옥탑 ${cycle.roof}일` +
+          ` · 기준 ${cycle.typical} · 최상 ${cycle.top} · 옥탑 ${cycle.roof}일×${cycle.roofFloors}` +
           ` → ROUNDUP(최장 동 공기/365×12) + ${cycle.tcAddMonths}개월`,
       ],
       [],
@@ -576,7 +581,7 @@ export default function TcRentalPage() {
           b.belowFloors,
           b.aboveFloors,
           Math.max(0, b.aboveFloors - 1),
-          b.phFloors,
+          budgetRoofFloors(b, cycle),
           days,
           toMonths(days),
           idx === 0 ? sp.rentalMonths : "",
@@ -611,7 +616,7 @@ export default function TcRentalPage() {
       ],
       [
         `※ 실행기준: 기준 ${cycle.typical} × (지상 − ${cycle.hoistSkipFloors}) + 최상 ${cycle.top}` +
-          ` + 옥탑 ${cycle.roof} → ROUNDUP(공기/365×12 + ${cycle.hoistAddMonths})`,
+          ` + 옥탑 ${cycle.roof}×${cycle.roofFloors} → ROUNDUP(공기/365×12 + ${cycle.hoistAddMonths})`,
       ],
       [],
       [
@@ -658,7 +663,7 @@ export default function TcRentalPage() {
           b.aboveFloors,
           Math.max(0, b.aboveFloors - plan.params.hc.anchorFloor - 1),
           1,
-          b.phFloors,
+          budgetRoofFloors(b, cycle),
           days,
           toMonths(days),
           round1(toMonths(days) + post),

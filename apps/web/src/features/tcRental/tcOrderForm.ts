@@ -16,6 +16,7 @@
 import type ExcelJS from "exceljs";
 import type { RentalSpan, TcRentalPlan } from "./types";
 import { parseYmd } from "./engine/dates";
+import { budgetCycleOf, budgetRoofFloors } from "./engine/budgetStandard";
 import { addReviewSheet } from "./tcReviewSheet";
 import {
   insertRows,
@@ -496,7 +497,8 @@ function fillRental(
       ws.getCell(`D${row}`).value = b ? b.belowFloors : null;
       ws.getCell(`E${row}`).value = b ? b.aboveFloors : null;
       ws.getCell(`F${row}`).value = b ? Math.max(0, b.aboveFloors - 1) : null;
-      ws.getCell(`G${row}`).value = b ? b.phFloors : null;
+      // 옥탑수는 실행기준 층수(회사 기준 2)로 — 상단 '옥탑 15일' × 이 값이 골조공기에 들어간다
+      ws.getCell(`G${row}`).value = b ? budgetRoofFloors(b, budgetCycleOf(plan.params)) : null;
       // 골조공기 — 템플릿과 같은 수식(상단 기준값 참조)
       ws.getCell(`H${row}`).value = {
         formula: `$C$6+$E$6*D${row}+$C$7+$E$7*(F${row}-1)+$G$7+$I$7*G${row}`,

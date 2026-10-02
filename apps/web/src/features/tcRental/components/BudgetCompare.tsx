@@ -18,6 +18,7 @@ import {
   budgetFrameDays,
   budgetHoistDays,
   budgetHoistRow,
+  budgetRoofFloors,
   budgetTcRow,
   daysToMonths,
   type BudgetCycle,
@@ -36,12 +37,13 @@ export interface CompareRow {
   site: number;
 }
 
-/** 동 한 채의 규모 표기 — "201동(B2·25F·옥1)" */
-function scaleOf(b: BuildingFrameProfile): string {
+/** 동 한 채의 규모 표기 — "201동(B2·25F·옥2)". 옥탑은 실행기준이 세는 층수로 적는다 */
+function scaleOf(b: BuildingFrameProfile, c: BudgetCycle): string {
+  const roof = budgetRoofFloors(b, c);
   const parts = [
     b.belowFloors > 0 ? `B${b.belowFloors}` : null,
     `${b.aboveFloors}F`,
-    b.phFloors > 0 ? `옥${b.phFloors}` : null,
+    roof > 0 ? `옥${roof}` : null,
   ].filter(Boolean);
   return `${b.name}(${parts.join("·")})`;
 }
@@ -66,7 +68,7 @@ export function buildCompareRows(
     if (s.kind === "tc") {
       const r = budgetTcRow(s.no, targets, cycle);
       const each = targets
-        .map((b) => `${scaleOf(b)} ${budgetFrameDays(b, cycle)}일`)
+        .map((b) => `${scaleOf(b, cycle)} ${budgetFrameDays(b, cycle)}일`)
         .join(" · ");
       rows.push({
         kind: "tc",
@@ -88,7 +90,7 @@ export function buildCompareRows(
         unitNo: s.no,
         label: `H/C ${s.no}`,
         basis:
-          `${scaleOf(best.b)} 계상 ${counted}개층` +
+          `${scaleOf(best.b, cycle)} 계상 ${counted}개층` +
           ` → ${budgetHoistDays(best.b, cycle)}일 ≒ ${best.r.frameMonths}월` +
           ` + ${cycle.hoistAddMonths} = ${best.r.spanMonths}월 → 올림 ${best.r.rentalMonths}개월`,
         budget: best.r.rentalMonths,
@@ -133,7 +135,7 @@ export default function BudgetCompare({
         </div>
         <span className="text-[12px] text-slate-400">
           기초 {cycle.foundation} · 지하 {cycle.basement} · 1층 {cycle.floor1} · 기준 {cycle.typical} ·
-          최상 {cycle.top} · 옥탑 {cycle.roof}일
+          최상 {cycle.top} · 옥탑 {cycle.roof}일×{cycle.roofFloors}
         </span>
       </header>
 
