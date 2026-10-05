@@ -38,3 +38,16 @@ test('다시 보낼 오류와 아닌 오류를 가른다', () => {
   assert.equal(shouldRetry(new Error('본사 관리자만 바꿀 수 있습니다.')), false, '권한 문제는 몇 번을 보내도 같다');
   assert.equal(shouldRetry(undefined), false);
 });
+
+/* 서버가 "그런 서류 없다"고 답한 것을 알아보나 — 그때 다시 올려야 한다. */
+import { isMissing } from '../apps/web/src/features/forms/formSync.ts';
+
+test('서버에 줄이 없다는 답을 알아본다', () => {
+  // 실제 서버가 주는 말(확인함): {"error":"그 서류를 찾지 못했습니다."}
+  assert.equal(isMissing(new Error('그 서류를 찾지 못했습니다.')), true);
+  assert.equal(isMissing(new Error('서버가 거절했습니다(404).')), true);
+
+  assert.equal(isMissing(new Error('서버가 거절했습니다(500).')), false, '서버 탈은 다시 올릴 일이 아니다');
+  assert.equal(isMissing(new Error('본사 관리자만 바꿀 수 있습니다.')), false);
+  assert.equal(isMissing(undefined), false);
+});

@@ -99,6 +99,34 @@ export async function syncUpload(doc: NewDoc & { id: string }, bytes: ArrayBuffe
 }
 
 /** 적어 둔 글자·결재·시트 변경을 서버에도 반영한다. */
+/** 서버가 "그런 서류 없다"고 답한 것인가 */
+export const isMissing = (error: unknown) =>
+  /찾지 못했|\b404\b/.test(error instanceof Error ? error.message : String(error ?? ""));
+
+/**
+ * 서버에 그 줄이 없으면 **다시 올린다.**
+ *
+ * 고친 내용을 보냈는데 서버가 "그런 서류 없다"고 하면, 지금까지는 조용히 포기했다. 그러면
+ * 브라우저에서 아무리 고쳐도 본사 점검에는 **영영 옛 모양**이 보인다(실제로 그렇게 됐다 —
+ * 서버 줄이 지워진 서류를 계속 고치고 있었다).
+ *
+ * 다시 올리는 일은 이관(`formMigrate`)이 이미 한다 — 서버에 없는 서류를 찾아 통째로 올린다.
+ * 그것을 빌려 쓴다. **늦게 불러온다**(`import()`) — 서로 부르는 관계가 되면 모듈이 꼬인다.
+ */
+let healing = false;
+async function healMissingDocs(): Promise<void> {
+  if (healing) return;
+  healing = true;
+  try {
+    const { migrateLocalToServer } = await import("./formMigrate.ts");
+    await migrateLocalToServer();
+  } catch (error) {
+    quiet("빠진 서류를 다시", error);
+  } finally {
+    healing = false;
+  }
+}
+
 export async function syncPatch(
   id: string,
   patch: Parameters<typeof patchDoc>[1],
@@ -108,6 +136,7 @@ export async function syncPatch(
       await patchDoc(id, patch);
     } catch (error) {
       quiet("수정 내용을", error);
+      if (isMissing(error)) void healMissingDocs();
     }
   });
 }

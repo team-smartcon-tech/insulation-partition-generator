@@ -876,6 +876,28 @@ export async function migrateLegacyForms(firstSiteId: string | undefined): Promi
   return moved;
 }
 
+/**
+ * 장·줄·칸 **모양**이 바뀐 것을 서버에도 보낸다.
+ *
+ * 글자(`updateFormValues`)만 보내고 있었다. 그래서 장을 더하거나(`시트 추가`) 줄을 더해도
+ * 서버에는 옛 모양이 남아, **본사 점검에 다른 서류처럼 보였다**(사용자 신고: 더한 장 "123" 이
+ * 서버에 없었다). 값·장·줄·결재를 함께 보낸다 — 이것들은 서로 붙어 움직인다.
+ *
+ * 표 중간에 끼운 줄과 합친 칸(`rowInserts`·`mergeEdits`)은 **아직 서버 표에 칸이 없다.**
+ * 그래서 못 보낸다(운영 DB 에 칸을 더해야 한다 — 승인 뒤에 할 일).
+ */
+async function syncShape(id: string): Promise<void> {
+  const saved = await getForm(id);
+  if (!saved) return;
+  void syncPatch(id, {
+    cellValues: saved.values,
+    customSheets: saved.customSheets ?? [],
+    extraRows: saved.extraRows ?? {},
+    approvalLines: saved.approvalLines ?? {},
+    approvals: saved.approvals ?? {},
+  });
+}
+
 /** 고친 글자만 갱신한다. */
 export async function updateFormValues(id: string, values: FormValues): Promise<void> {
   await patchForm(id, () => ({ values, updatedAt: Date.now() }));
@@ -1046,6 +1068,7 @@ export async function setExtraRows(id: string, sheetName: string, count: number)
     else delete next[sheetName];
     return { extraRows: next, updatedAt: Date.now() };
   });
+  await syncShape(id);
 }
 
 /**
@@ -1071,7 +1094,7 @@ export async function insertSheetRow(id: string, sheetName: string, displayRow: 
       mergeEdits: { ...form.mergeEdits, [sheetName]: shiftMergeEdits(form.mergeEdits[sheetName], displayRow, 1) },
       updatedAt: Date.now(),
     };
-  });
+  });  await syncShape(id);
 }
 
 /** 끼워 넣었던 줄을 뺀다. **원본 줄은 빼지 않는다**(양식 뼈대는 본사가 관리한다). */
@@ -1092,7 +1115,7 @@ export async function removeSheetRow(id: string, sheetName: string, displayRow: 
       mergeEdits: { ...form.mergeEdits, [sheetName]: shiftMergeEdits(form.mergeEdits[sheetName], displayRow + 1, -1) },
       updatedAt: Date.now(),
     };
-  });
+  });  await syncShape(id);
 }
 
 /**
@@ -1126,7 +1149,7 @@ export async function mergeSheetCells(id: string, sheetName: string, range: Cell
       values: { ...form.values, [sheetName]: values },
       updatedAt: Date.now(),
     };
-  });
+  });  await syncShape(id);
 }
 
 /** 합쳐진 칸을 도로 나눈다. 원본 양식의 합치기도 나눌 수 있다(기록으로 남는다). */
@@ -1139,7 +1162,7 @@ export async function splitSheetCells(id: string, sheetName: string, cellKey: st
     const next = splitMerge(current, { key: cellKey, row, col });
     if (next === current) return {};
     return { mergeEdits: { ...form.mergeEdits, [sheetName]: next }, updatedAt: Date.now() };
-  });
+  });  await syncShape(id);
 }
 
 /**
@@ -1203,6 +1226,7 @@ export async function addCustomSheet(id: string, sheet: CustomSheet): Promise<vo
       updatedAt: Date.now(),
     };
   });
+  await syncShape(id);
 }
 
 /**
@@ -1251,6 +1275,7 @@ export async function renameCustomSheet(
       updatedAt: Date.now(),
     };
   });
+  await syncShape(id);
 }
 
 /** 더한 시트를 지운다. 그 장에 적어 둔 글자도 함께 사라진다. */
@@ -1273,6 +1298,7 @@ export async function removeCustomSheet(id: string, name: string): Promise<void>
       updatedAt: Date.now(),
     };
   });
+  await syncShape(id);
 }
 
 /**
