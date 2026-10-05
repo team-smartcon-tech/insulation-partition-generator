@@ -25,17 +25,18 @@ test('실제 코드표: 번호가 달라도 이름이 같으면 찾는다', asyn
   const taxonomies = await taxonomiesOf(['서류 분류 코드표.xlsx', '품질관련 코드표.xlsx']);
   // 공무관련 104 품질환경방침 및 목표관리 = 품질관련 103
   const found = sameNameSlots(taxonomies, { taxonomyId: '공무관련', code: '104' });
-  assert.deepEqual(found.map((slot) => `${slot.division} ${slot.code}`), ['품질관련 103']);
+  // 돌려주는 분류 이름은 **화면에 그대로 나오는 값**이라 "관련"을 뗀 것이다(저장된 이름은 그대로).
+  assert.deepEqual(found.map((slot) => `${slot.division} ${slot.code}`), ['품질 103']);
 
   // 띄어쓰기만 다른 것도 같은 서류(공무 106 개인업무분장표 = 품질 106 개인 업무 분장표)
   assert.deepEqual(
     sameNameSlots(taxonomies, { taxonomyId: '공무관련', code: '106' }).map((s) => `${s.division} ${s.code}`),
-    ['품질관련 106'],
+    ['품질 106'],
   );
   // 반대 방향도 같다
   assert.deepEqual(
     sameNameSlots(taxonomies, { taxonomyId: '품질관련', code: '103' }).map((s) => `${s.division} ${s.code}`),
-    ['공무관련 104'],
+    ['공무 104'],
   );
 });
 
@@ -88,7 +89,7 @@ test('한쪽 분류에만 새 판을 올리면 다른 쪽이 옛 판으로 잡�
   assert.equal(rows[0].code, '103');
   assert.equal(rows[0].old.id, 'b');
   assert.equal(rows[0].newer.id, 'c');
-  assert.equal(rows[0].newerDivision, '공무관련');
+  assert.equal(rows[0].newerDivision, '공무');
   assert.equal(rows[0].newerCode, '104');
 });
 

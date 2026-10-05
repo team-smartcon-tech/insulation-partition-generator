@@ -580,7 +580,8 @@ export function sameNameSlots(
         if (key(entry.name) === wanted) {
           found.push({
             taxonomyId: taxonomy.id,
-            division: taxonomy.division || "이름 없음",
+            // 화면에 그대로 나오는 자리라 짧은 이름으로 담는다(공무관련 → 공무).
+            division: divisionLabel(taxonomy.division) || "이름 없음",
             code: entry.code,
             name: entry.name,
           });
