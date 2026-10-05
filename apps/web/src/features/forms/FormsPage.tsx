@@ -162,6 +162,7 @@ import {
   editItem,
   findItem,
   parsePastedTaxonomy,
+  divisionLabel,
   parseTaxonomySheet,
   placeByFileName,
   moveGroup,
@@ -894,7 +895,7 @@ export default function FormsPage() {
       }
       await refreshList();
 
-      const nameOf = (taxonomy: Taxonomy) => taxonomy.division || "이름 없음";
+      const nameOf = (taxonomy: Taxonomy) => divisionLabel(taxonomy.division) || "이름 없음";
       const conflicts = parsed.flatMap((taxonomy) =>
         taxonomy.conflicts.map((code) => `${nameOf(taxonomy)} ${code}`),
       );
@@ -1605,7 +1606,7 @@ export default function FormsPage() {
     pendingPlaceRef.current = { taxonomyId, code: item.code };
     preferredTaxonomyRef.current = undefined;
     // 윈도우 선택창을 바로 열지 않는다 — 끌어다 놓기 창을 먼저 띄운다(사용자 요청).
-    const division = taxonomies.find((taxonomy) => taxonomy.id === taxonomyId)?.division ?? "";
+    const division = divisionLabel(taxonomies.find((taxonomy) => taxonomy.id === taxonomyId)?.division);
     setDropTarget({
       title: `${division} ${item.code} ${item.name}`.trim(),
       hint: "이 칸에 올립니다. 여러 장(월별·차수별)을 한 번에 놓아도 모두 이 칸에 들어갑니다.",
@@ -1730,7 +1731,7 @@ export default function FormsPage() {
     const target = taxonomies.find((taxonomy) => taxonomy.id === taxonomyId);
     if (!target) return;
     const name = window
-      .prompt("1차 분류 이름을 적어 주세요. (예: 공무관련, 품질관련)", target.division)
+      .prompt("1차 분류 이름을 적어 주세요. (예: 공무, 공사, 품질, 환경)", target.division)
       ?.trim();
     if (name === undefined || name === target.division) return;
     // 같은 이름이 둘이면 코드표를 다시 올릴 때 어느 쪽을 바꿀지 알 수 없다.
@@ -1756,7 +1757,7 @@ export default function FormsPage() {
     const target = taxonomies.find((taxonomy) => taxonomy.id === taxonomyId);
     if (!target) return;
     const ok = window.confirm(
-      `“${target.division || target.fileName}” 코드표를 지웁니다.\n이 분류로 올린 양식은 지워지지 않고 "코드 없는 서류"로 옮겨집니다. 계속할까요?`,
+      `“${divisionLabel(target.division) || target.fileName}” 코드표를 지웁니다.\n이 분류로 올린 양식은 지워지지 않고 "코드 없는 서류"로 옮겨집니다. 계속할까요?`,
     );
     if (!ok) return;
     const next = taxonomies.filter((taxonomy) => taxonomy.id !== taxonomyId);

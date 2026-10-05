@@ -12,7 +12,7 @@ import {
   type LineSlot,
 } from "./approvalLine.ts";
 import { isSiteDoc, isTemplate, type FormKind } from "./library.ts";
-import { taxonomyIdOf, type Taxonomy } from "./taxonomy.ts";
+import { divisionLabel, taxonomyIdOf, type Taxonomy } from "./taxonomy.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -241,7 +241,7 @@ export function documentProgress(
   const divisions: DivisionProgress[] = [];
   const groups: GroupProgress[] = [];
   for (const taxonomy of taxonomies) {
-    const division: DivisionProgress = { taxonomyId: taxonomy.id, name: taxonomy.division || "이름 없음", deployed: 0, made: 0, undeployed: 0 };
+    const division: DivisionProgress = { taxonomyId: taxonomy.id, name: divisionLabel(taxonomy.division) || "이름 없음", deployed: 0, made: 0, undeployed: 0 };
     for (const group of taxonomy.groups) {
       const entry: GroupProgress = { taxonomyId: taxonomy.id, code: group.code, name: group.name, deployed: 0, made: 0 };
       for (const item of group.items) {

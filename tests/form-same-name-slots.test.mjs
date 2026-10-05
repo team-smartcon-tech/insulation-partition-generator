@@ -84,7 +84,7 @@ test('한쪽 분류에만 새 판을 올리면 다른 쪽이 옛 판으로 잡�
   const 한쪽만 = [...함께, 양식('c', '공무관련', '104', '품질환경방침 및 목표관리.xlsx', 오늘)];
   const rows = staleAcrossDivisions(한쪽만, taxonomies);
   assert.equal(rows.length, 1, '한 칸만 잡혀야 한다');
-  assert.equal(rows[0].division, '품질관련');
+  assert.equal(rows[0].division, '품질', '화면에 보이는 이름은 "관련"을 뗀 것');
   assert.equal(rows[0].code, '103');
   assert.equal(rows[0].old.id, 'b');
   assert.equal(rows[0].newer.id, 'c');
@@ -153,7 +153,7 @@ test('배포 묶음 번호가 있으면 시간 차이가 짧아도 제대로 가
     taxonomies,
   );
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].division, '품질관련');
+  assert.equal(rows[0].division, '품질');
   assert.equal(rows[0].newer.id, 'b');
 });
 

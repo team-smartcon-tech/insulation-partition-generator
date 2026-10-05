@@ -44,7 +44,7 @@ import { fileKind, fileSizeText } from "./library";
 import FormSheetView from "./FormSheetView";
 import type { FormSheet } from "./types";
 import type { FormSite } from "./sites";
-import type { Taxonomy } from "./taxonomy";
+import { divisionLabel, type Taxonomy } from "./taxonomy";
 
 const STATUS = {
   none: { label: "점검 전", tone: "bg-slate-100 text-slate-600" },
@@ -256,7 +256,7 @@ export default function ReviewPage() {
             {taxonomies.map((taxonomy) => (
               <div key={taxonomy.id} className="mb-3">
                 <p className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                  {taxonomy.division || "분류"}
+                  {divisionLabel(taxonomy.division) || "분류"}
                 </p>
                 {taxonomy.groups.map((group) => {
                   const key = `${taxonomy.id}:${group.code}`;

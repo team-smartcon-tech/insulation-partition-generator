@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { contactFor, formatContact, isEmptyContact } from "./contacts";
 import type { FormSummary } from "./formStore";
-import { fileNameCodes, taxonomyIdOf, type Taxonomy, type TaxonomyGroup, type TaxonomyItem } from "./taxonomy";
+import { divisionLabel, fileNameCodes, taxonomyIdOf, type Taxonomy, type TaxonomyGroup, type TaxonomyItem } from "./taxonomy";
 
 /** 왼쪽 트리 선택값. 코드표 id·코드와 겹치지 않게 앞에 표시를 붙인다. */
 const ALL = " all";
@@ -884,7 +884,7 @@ export default function FormTree({
             { key: ALL, label: "전체", filled: totalFilled, total: totalItems, tone: "normal" as const },
             ...taxonomies.map((taxonomy) => ({
               key: divisionKey(taxonomy.id),
-              label: taxonomy.division || "이름 없음",
+              label: divisionLabel(taxonomy.division) || "이름 없음",
               filled: filledOf(taxonomy),
               total: totalOf(taxonomy),
               tone: "normal" as const,
@@ -954,7 +954,7 @@ export default function FormTree({
                       })
                     }
                     aria-expanded={!folded}
-                    aria-label={`${taxonomy.division || "1차 분류"} ${folded ? "펼치기" : "접기"}`}
+                    aria-label={`${divisionLabel(taxonomy.division) || "1차 분류"} ${folded ? "펼치기" : "접기"}`}
                     title={folded ? "펼치기" : "접기"}
                     className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700"
                   >
@@ -978,7 +978,7 @@ export default function FormTree({
                           : "min-w-0 truncate text-sm italic text-slate-400"
                       }
                     >
-                      {taxonomy.division || "1차 분류 이름 없음"}
+                      {divisionLabel(taxonomy.division) || "1차 분류 이름 없음"}
                     </span>
                     <span className="ml-2 text-sm tabular-nums text-slate-500">
                       {filledOf(taxonomy)}/{totalOf(taxonomy)}
@@ -989,7 +989,7 @@ export default function FormTree({
                     type="button"
                     onClick={() => onRenameDivision(taxonomy.id)}
                     title="1차 분류 이름 바꾸기"
-                    aria-label={`${taxonomy.division || "1차 분류"} 이름 바꾸기`}
+                    aria-label={`${divisionLabel(taxonomy.division) || "1차 분류"} 이름 바꾸기`}
                     className="shrink-0 rounded p-1.5 text-slate-300 transition hover:text-slate-600 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
                   >
                     <Pencil size={12} />
@@ -1044,13 +1044,13 @@ export default function FormTree({
               {taxonomies.map((taxonomy) => (
                 <li key={taxonomy.id} className="flex items-center gap-1">
                   <span className="min-w-0 flex-1 truncate" title={taxonomy.fileName}>
-                    {taxonomy.division || "이름 없음"} · {taxonomy.fileName}
+                    {divisionLabel(taxonomy.division) || "이름 없음"} · {taxonomy.fileName}
                   </span>
                   <button
                     type="button"
                     onClick={() => onRemoveTaxonomy(taxonomy.id)}
                     title="이 코드표 지우기(서류는 남습니다)"
-                    aria-label={`${taxonomy.division || "코드표"} 지우기`}
+                    aria-label={`${divisionLabel(taxonomy.division) || "코드표"} 지우기`}
                     className="shrink-0 rounded p-0.5 text-slate-300 transition hover:bg-red-50 hover:text-red-600"
                   >
                     <Trash2 size={11} />
@@ -1114,7 +1114,7 @@ export default function FormTree({
                   {(taxonomies.length > 1 || editing) && (
                     <h2 className="mb-3 flex flex-wrap items-baseline gap-2 border-b border-slate-200 pb-2">
                       <span className="text-base font-semibold text-slate-900">
-                        {taxonomy.division || "1차 분류 이름 없음"}
+                        {divisionLabel(taxonomy.division) || "1차 분류 이름 없음"}
                       </span>
                       <span className="text-sm tabular-nums text-slate-500">
                         {filledOf(taxonomy)}/{totalOf(taxonomy)}

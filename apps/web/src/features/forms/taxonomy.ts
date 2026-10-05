@@ -75,6 +75,21 @@ export function divisionFromSheetName(name: string): string {
   return trimmed;
 }
 
+/**
+ * 화면에 보일 1차 분류 이름 — 끝의 **"관련"을 뗀다**(사용자 요청: 공무 · 공사 · 품질 · 환경).
+ *
+ * 코드표 엑셀의 시트 이름이 `공무관련`·`품질관련` 이라 그대로 보이고 있었다. **저장된 이름은
+ * 건드리지 않는다** — 코드표를 올릴 때마다 또 그렇게 들어오고, 같은 이름인지 견주는 곳
+ * (중복 막기·서버 맞추기)이 저장된 이름을 쓰기 때문이다. 보이는 자리에서만 뗀다.
+ *
+ * `관련` 만으로 된 이름은 그대로 둔다 — 떼면 이름이 없어진다.
+ */
+export function divisionLabel(division: string | undefined): string {
+  const trimmed = (division ?? "").trim();
+  const short = trimmed.replace(/\s*관련$/, "");
+  return short || trimmed;
+}
+
 /** 코드로 보이는 값인가. 숫자 3자리 이상(100, 101, 1010 …). */
 /** 코드 — `101` 처럼 세 자리 이상 숫자, 또는 한 칸을 더 쪼갠 `802-1`(802 보고서 중 1번). */
 const isCode = (text: string) => /^\d{3,}(-\d+)?$/.test(text.trim());

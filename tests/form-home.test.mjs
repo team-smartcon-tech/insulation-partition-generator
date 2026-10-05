@@ -72,7 +72,8 @@ test('서류 진척도: 분모는 배포 양식이 있는 종류, 월별 여러 
   const docs = [tpl('101'), tpl('102'), tpl('201'), made('101'), made('101'), made('201'), made('102', 's2')];
   const progress = documentProgress([taxonomy], docs, 's1');
   assert.deepEqual([progress.made, progress.deployed, progress.undeployed], [2, 3, 2], '103·202 는 배포 안 됨');
-  assert.deepEqual(progress.divisions.map((d) => [d.name, d.made, d.deployed]), [['품질관련', 2, 3]]);
+  // 화면에 보이는 이름은 "관련"을 뗀 것이다(저장된 이름은 `품질관련` 그대로).
+  assert.deepEqual(progress.divisions.map((d) => [d.name, d.made, d.deployed]), [['품질', 2, 3]]);
   assert.deepEqual(progress.lowGroups.map((g) => [g.code, g.made, g.deployed]), [['100', 1, 2]], '다 만든 중분류는 빠진다');
 });
 

@@ -8,7 +8,7 @@
  * 원본이 새 판으로 바뀌어도 현장 사본은 그대로 둔다 — 이미 적어 둔 내용을 조용히 바꾸면
  * 안 된다. 대신 "새 판 있음"을 띄워 현장이 알고 옮겨 가게 한다.
  */
-import { sameNameSlots, taxonomyIdOf, type Taxonomy } from "./taxonomy.ts";
+import { divisionLabel, sameNameSlots, taxonomyIdOf, type Taxonomy } from "./taxonomy.ts";
 
 /** template = 배포 양식(원본, 읽기 전용) · site = 현장 서류(사본, 작성용) */
 export type FormKind = "template" | "site";
@@ -316,7 +316,7 @@ export function staleAcrossDivisions<T extends LibraryEntry>(
           if (!best) continue;
           rows.push({
             taxonomyId: taxonomy.id,
-            division: taxonomy.division || "이름 없음",
+            division: divisionLabel(taxonomy.division) || "이름 없음",
             code: item.code,
             name: item.name,
             old,
