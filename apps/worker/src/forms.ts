@@ -596,8 +596,23 @@ forms.post("/docs", async (c) => {
       uploader_name: user.name,
       file_bucket: bucket(c.env),
     });
-    if (!res.ok) throw new Error(await res.text());
-    const doc = await firstRow<{ id: string }>(res);
+    /*
+     * **같은 번호로 두 번 와도 받아 준다.**
+     *
+     * 화면은 저장하면서 서버에 따라 올리고(`syncUpload`), 빠진 것을 찾아 다시 올리는 길도 있다
+     * (`formMigrate`). 두 길이 같은 서류를 거의 동시에 올리면 뒤엣것이 `duplicate key` 로 터졌고,
+     * 화면에는 "올리지 못했습니다"로 보였다(실제로 운영 기록에 500 이 남았다).
+     * 이미 있는 것은 **있는 그대로 돌려준다** — 올리려던 뜻은 이미 이뤄졌다.
+     */
+    let doc = await firstRow<{ id: string }>(res.ok ? res : new Response("[]"));
+    if (!res.ok) {
+      const text = await res.text();
+      const already = /23505|duplicate key/.test(text) && uuidOrNull(body.id);
+      if (!already) throw new Error(text);
+      const found = await supabaseRest(c.env, "GET", `/form_documents?select=*&id=eq.${uuidOrNull(body.id)}&limit=1`);
+      doc = found.ok ? await firstRow<{ id: string }>(found) : null;
+      if (!doc) throw new Error(text);
+    }
     if (!doc) throw new Error("서류를 만들었지만 결과가 비어 있습니다.");
 
     const path = objectPath(kind, doc.id, fileName);
