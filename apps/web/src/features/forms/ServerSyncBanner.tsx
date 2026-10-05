@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CloudUpload, Check, TriangleAlert, X } from "lucide-react";
 import { ServerUnavailable } from "./formServer";
 import { migrateLocalToServer, pendingUploads, type MigrateProgress, type MigrateResult } from "./formMigrate";
+import { flushPendingDeletes } from "./formSync";
 
 type Phase =
   | { kind: "checking" }
@@ -49,6 +50,20 @@ export default function ServerSyncBanner({ localCount }: { localCount: number })
         result: { sites: 0, taxonomies: 0, docs: 0, skipped: 0, failed: [(error as Error).message] },
       });
     }
+  }, []);
+
+  /**
+   * 서버가 꺼져 있을 때 지운 서류를 **다시 지우라고 보낸다.**
+   *
+   * 안 보내면 브라우저에서만 사라지고 서버에는 남아, 본사 점검에 유령 서류가 보인다
+   * (사용자 신고로 실제 13건+1건이 남아 있었다). 화면을 열 때와 인터넷이 돌아올 때 보낸다.
+   * 조용히 한다 — 성공하든 실패하든 사용자가 할 일이 없다.
+   */
+  useEffect(() => {
+    const flush = () => void flushPendingDeletes().catch(() => undefined);
+    flush();
+    window.addEventListener("online", flush);
+    return () => window.removeEventListener("online", flush);
   }, []);
 
   useEffect(() => {

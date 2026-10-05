@@ -17,6 +17,13 @@ import { patchDoc, uploadDoc, deleteDoc, fetchDoc, pushSite, pushTaxonomy, type 
 import type { FormSite } from "./sites.ts";
 import type { Taxonomy } from "./taxonomy.ts";
 import { adoptSiteId, adoptTaxonomyId } from "./formStore.ts";
+import {
+  addPending,
+  readPendingDeletes,
+  removePending,
+  shouldRetry,
+  writePendingDeletes,
+} from "./pendingDeletes.ts";
 
 /** 서버에 못 보낸 것을 조용히 적어 둔다(개발 중 확인용 — 사용자 화면은 막지 않는다). */
 function quiet(what: string, error: unknown) {
@@ -110,8 +117,38 @@ export async function syncDelete(id: string): Promise<void> {
   await enqueue(async () => {
     try {
       await deleteDoc(id);
+      // 예전에 못 보낸 것으로 적혀 있었다면 지운다.
+      writePendingDeletes(removePending(readPendingDeletes(), id));
     } catch (error) {
       quiet("삭제를", error);
+      /*
+       * **서버에 못 닿아서** 실패한 것이면 적어 둔다. 안 적어 두면 브라우저에서만 사라지고
+       * 서버에는 영영 남아, 본사 점검에 유령 서류가 보인다(실제로 그렇게 됐다).
+       */
+      if (shouldRetry(error)) writePendingDeletes(addPending(readPendingDeletes(), id));
     }
   });
+}
+
+/**
+ * 적어 둔 "못 지운 것"을 다시 보낸다. 서버가 돌아왔을 때 부른다.
+ * 또 실패하면 그대로 남겨 두고 다음 기회에 다시 보낸다.
+ */
+export async function flushPendingDeletes(): Promise<{ sent: number; left: number }> {
+  const ids = readPendingDeletes();
+  if (ids.length === 0) return { sent: 0, left: 0 };
+
+  let sent = 0;
+  for (const id of ids) {
+    try {
+      await deleteDoc(id);
+      sent += 1;
+      writePendingDeletes(removePending(readPendingDeletes(), id));
+    } catch (error) {
+      quiet("밀린 삭제를", error);
+      // 서버에 닿았는데 거절당한 것(이미 없음·권한 없음)이면 더 보내 봐야 소용없다.
+      if (!shouldRetry(error)) writePendingDeletes(removePending(readPendingDeletes(), id));
+    }
+  }
+  return { sent, left: readPendingDeletes().length };
 }
