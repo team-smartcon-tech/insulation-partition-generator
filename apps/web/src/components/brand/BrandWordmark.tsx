@@ -123,7 +123,18 @@ export default function BrandWordmark({
           </span>
         </span>
         {showCaption && (
-          <span className="mt-[5px] text-[8.5px] font-bold uppercase tracking-[0.26em] text-slate-400">
+          /*
+           * 한글 부제는 라틴 글자용 설정(8.5px · 자간 0.26em)으로 두면 너무 작고 자간이 벌어져
+           * 읽기 힘들다. 한글이 섞이면 조금 키우고 자간을 좁힌다.
+           */
+          <span
+            className={
+              "mt-[5px] font-bold text-slate-400 " +
+              (/[가-힣]/.test(caption)
+                ? "text-[10px] tracking-[0.06em]"
+                : "text-[8.5px] uppercase tracking-[0.26em]")
+            }
+          >
             {caption}
           </span>
         )}

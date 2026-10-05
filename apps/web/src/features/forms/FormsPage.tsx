@@ -2121,7 +2121,7 @@ export default function FormsPage() {
       <SmartHeader
         brand={
           <Link href="/" title="스마트덱 도구 목록으로">
-            <BrandWordmark letters="SF" name="FORMS" caption="Company Form Library" />
+            <BrandWordmark letters="SF" name="FORMS" caption="건설 공무관리 시스템" />
           </Link>
         }
         center={
