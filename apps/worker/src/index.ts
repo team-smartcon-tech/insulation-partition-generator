@@ -22,7 +22,6 @@ import {
   checkLoginRateLimit,
   parseCookie,
 } from "./auth";
-import { makeStorageObjectPath } from "./storagePath";
 // 스마트폼(/tools/forms) 전용 라우트 — 파일은 apps/worker/src/forms.ts 한 곳에 모아 두었다.
 import formsRoutes from "./forms";
 
@@ -31,7 +30,6 @@ export type { Env };
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>();
 
 const dxfBucket = (env: Env) => env.ELEV_DXF_BUCKET || "elev-dxf";
-const announcementBucket = (env: Env) => env.ANNOUNCEMENTS_PDF_BUCKET || "announcement-pdfs";
 
 // ─── Supabase REST / Storage 헬퍼 ───────────────────────────
 
@@ -59,37 +57,6 @@ async function supabaseRest(
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-}
-
-async function storageEnsureBucket(env: Env, bucket: string): Promise<void> {
-  const apiKey = env.SUPABASE_SERVICE_ROLE_KEY;
-  const res = await fetch(`${env.SUPABASE_URL}/storage/v1/bucket`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      apikey: apiKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ name: bucket, public: false }),
-  });
-
-  if (res.ok) return;
-  const text = await res.text();
-  let body: unknown = null;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = text;
-  }
-  const isDuplicate =
-    res.status === 409 ||
-    (typeof body === "object" && body !== null &&
-      ((body as any).statusCode === 409 || (body as any).error === "Duplicate" ||
-        (typeof (body as any).message === "string" && (body as any).message.includes("Duplicate")))) ||
-    (typeof body === "string" && body.includes("Duplicate"));
-  if (isDuplicate) return;
-
-  throw new Error(`Storage 버킷 생성 실패 (${res.status}): ${text}`);
 }
 
 async function storageUpload(
@@ -150,25 +117,6 @@ async function storageSignedUrl(
 }
 
 const errMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
-const isAnnouncementsTableMissingError = (text: string) =>
-  text.includes("PGRST205") ||
-  text.includes("Could not find the table 'public.announcements'") ||
-  text.includes("table 'public.announcements' in the schema cache");
-
-const isPdfFile = (fileName: string, mimeType?: string) => {
-  const type = (mimeType || "").toLowerCase();
-  const name = (fileName || "").toLowerCase();
-  return type === "application/pdf" || name.endsWith(".pdf");
-};
-
-const ensureAnnouncementUploadConfig = (env: Env) => {
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error(
-      "Supabase 설정이 비어 있습니다. apps/worker/.dev.vars 또는 Cloudflare Secret에 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY를 입력하세요.",
-    );
-  }
-};
 
 // ─── 라우트 ─────────────────────────────────────────────────
 
@@ -239,224 +187,6 @@ app.use("/api/*", authMiddleware());
 
 // 스마트폼 — 현장 서류를 서버에 두고 본사가 점검한다(로그인 필수, 위 미들웨어 뒤).
 app.route("/api/forms", formsRoutes);
-
-/** GET /api/announcements — 업로드된 공지사항 목록 조회 (검색 가능) */
-app.get("/api/announcements", async (c) => {
-  try {
-    const search = String(c.req.query("search") ?? "").trim();
-    let path = "/announcements?select=*&order=published_at.desc";
-    if (search) {
-      const term = encodeURIComponent(search);
-      path = `/announcements?or=(title.ilike.*${term}*,description.ilike.*${term}*,search_text.ilike.*${term}*)&order=published_at.desc`;
-    }
-    const res = await supabaseRest(c.env, "GET", path);
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error("[announcements/GET]", errText);
-      if (isAnnouncementsTableMissingError(errText)) {
-        return c.json(
-          { error: "공지사항 테이블이 존재하지 않습니다. supabase/migrations/20260729000001_announcements.sql를 적용하세요." },
-          500,
-        );
-      }
-      return c.json({ error: `조회 실패: ${errText}` }, res.status as 500);
-    }
-    return c.json({ announcements: await res.json() });
-  } catch (err) {
-    console.error("[announcements/GET]", errMsg(err));
-    return c.json({ error: `조회 실패: ${errMsg(err)}` }, 500);
-  }
-});
-
-/** GET /api/announcements/:announcementId — 공지사항 상세 */
-app.get("/api/announcements/:announcementId", async (c) => {
-  const announcementId = c.req.param("announcementId");
-  try {
-    const res = await supabaseRest(
-      c.env,
-      "GET",
-      `/announcements?id=eq.${encodeURIComponent(announcementId)}&select=*&limit=1`,
-    );
-    if (!res.ok) return c.json({ error: "조회 실패" }, res.status as 500);
-    const announcement = ((await res.json()) as unknown[])[0] ?? null;
-    if (!announcement) return c.json({ error: "공지사항을 찾을 수 없습니다." }, 404);
-    return c.json({ announcement });
-  } catch (err) {
-    console.error("[announcement/GET]", errMsg(err));
-    return c.json({ error: `조회 실패: ${errMsg(err)}` }, 500);
-  }
-});
-
-function isFileLike(value: unknown): value is File {
-  return !!value && typeof value === "object" && typeof (value as File).arrayBuffer === "function" && typeof (value as File).name === "string";
-}
-
-async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function normalizeAnnouncementContentKey(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .replace(/\r/g, " ")
-    .replace(/[\t\n\s]+/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildAnnouncementContentKey({
-  title,
-  description,
-  metadata,
-  fileName,
-  text,
-}: {
-  title?: string | null;
-  description?: string | null;
-  metadata?: unknown;
-  fileName?: string;
-  text?: string | null;
-} = {}): string {
-  const semanticSource = [
-    description ?? "",
-    text ?? "",
-    typeof metadata === "string" ? metadata : metadata ? JSON.stringify(metadata) : "",
-  ].join("\n");
-
-  const fingerprint = normalizeAnnouncementContentKey(semanticSource);
-  if (fingerprint) return fingerprint;
-
-  return normalizeAnnouncementContentKey(title ?? fileName ?? "공지사항");
-}
-
-/** POST /api/announcements — 공지사항 PDF 업로드 */
-app.post("/api/announcements", async (c) => {
-  try {
-    const form = await c.req.formData();
-    const file = form.get("file");
-    if (!isFileLike(file)) return c.json({ error: "PDF 파일을 업로드하세요." }, 400);
-    if (!isPdfFile(file.name, file.type)) return c.json({ error: "PDF 파일만 업로드할 수 있습니다." }, 400);
-    if (file.size > 50 * 1024 * 1024) return c.json({ error: "PDF 파일은 50MB 이하여야 합니다." }, 413);
-
-    ensureAnnouncementUploadConfig(c.env);
-
-    const title = typeof form.get("title") === "string" ? String(form.get("title")).trim() : "";
-    const description = typeof form.get("description") === "string" ? String(form.get("description")).trim() : null;
-    const published_at = typeof form.get("published_at") === "string" && String(form.get("published_at")).trim()
-      ? new Date(String(form.get("published_at")).trim()).toISOString()
-      : new Date().toISOString();
-
-    let metadata: Record<string, unknown> | null = null;
-    const rawMeta = form.get("metadata");
-    if (typeof rawMeta === "string" && rawMeta.trim()) {
-      try {
-        metadata = JSON.parse(rawMeta);
-      } catch {
-        metadata = null;
-      }
-    }
-
-    const buffer = await file.arrayBuffer();
-    const contentHashSource = buildAnnouncementContentKey({
-      description,
-      metadata,
-      fileName: file.name,
-      text: [description || "", metadata ? JSON.stringify(metadata) : ""].join("\n"),
-    });
-    const contentHash = await sha256Hex(new TextEncoder().encode(contentHashSource || ""));
-
-    try {
-      const existingRes = await supabaseRest(
-        c.env,
-        "GET",
-        `/announcements?content_hash=eq.${encodeURIComponent(contentHash)}&select=*&limit=1`,
-      );
-      if (existingRes.ok) {
-        const existing = ((await existingRes.json()) as unknown[])[0] as Record<string, unknown> | undefined;
-        if (existing) {
-          return c.json({ announcement: existing, duplicate: true, message: "이미 동일한 공지사항이 존재합니다." });
-        }
-      }
-    } catch {
-      // 스키마가 아직 반영되지 않은 환경에서는 중복 체크를 우회한다.
-    }
-
-    const id = crypto.randomUUID();
-    const bucket = announcementBucket(c.env);
-    const objectPath = makeStorageObjectPath(id, file.name);
-    await storageEnsureBucket(c.env, bucket);
-    await storageUpload(c.env, bucket, objectPath, buffer, file.type || "application/pdf");
-
-    const searchText = [title || file.name, description || "", metadata ? JSON.stringify(metadata) : ""].join(" ");
-    const row = {
-      id,
-      title: title || file.name,
-      description,
-      file_bucket: bucket,
-      file_path: objectPath,
-      file_name: file.name,
-      file_size: file.size,
-      published_at,
-      metadata,
-      search_text: searchText,
-      content_hash: contentHash,
-      uploaded_by: c.get("user")?.id ?? null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const res = await supabaseRest(c.env, "POST", "/announcements", row);
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error("[announcements/POST]", errText);
-      if (isAnnouncementsTableMissingError(errText)) {
-        return c.json(
-          { error: "공지사항 테이블이 존재하지 않습니다. supabase/migrations/20260729000001_announcements.sql를 적용하세요." },
-          500,
-        );
-      }
-      return c.json({ error: `저장 실패: ${errText}` }, res.status as 500);
-    }
-    const inserted = (await res.json()) as unknown[];
-    return c.json({ announcement: inserted[0] ?? null });
-  } catch (err) {
-    console.error("[announcements/POST]", errMsg(err));
-    return c.json({ error: `저장 실패: ${errMsg(err)}` }, 500);
-  }
-});
-
-/** GET /api/announcements/:announcementId/download — PDF 다운로드 URL */
-app.get("/api/announcements/:announcementId/download", async (c) => {
-  const announcementId = c.req.param("announcementId");
-  try {
-    const res = await supabaseRest(
-      c.env,
-      "GET",
-      `/announcements?id=eq.${encodeURIComponent(announcementId)}&select=file_bucket,file_path&limit=1`,
-    );
-    if (!res.ok) {
-      const errText = await res.text();
-      if (isAnnouncementsTableMissingError(errText)) {
-        return c.json(
-          { error: "공지사항 테이블이 존재하지 않습니다. supabase/migrations/20260729000001_announcements.sql를 적용하세요." },
-          500,
-        );
-      }
-      return c.json({ error: "다운로드 정보 조회 실패" }, res.status as 500);
-    }
-    const row = ((await res.json()) as unknown[])[0] as { file_bucket?: string; file_path?: string } | undefined;
-    if (!row?.file_bucket || !row?.file_path) return c.json({ error: "파일 정보가 없습니다." }, 404);
-    const signedUrl = await storageSignedUrl(c.env, row.file_bucket, row.file_path);
-    return c.json({ downloadUrl: signedUrl });
-  } catch (err) {
-    console.error("[announcement/download]", errMsg(err));
-    return c.json({ error: `다운로드 실패: ${errMsg(err)}` }, 500);
-  }
-});
 
 /** GET /api/elevation-projects — 프로젝트 목록 */
 app.get("/api/elevation-projects", async (c) => {

@@ -1,6 +1,5 @@
 import { Redirect, Route, Switch } from "wouter";
 import { Toaster } from "sonner";
-import AnnouncementsPage from "@/features/announcements/AnnouncementsPage";
 import ElevationGeneratorPage from "@/features/elevation/ElevationGeneratorPage";
 import LoginPage from "@/features/auth/LoginPage";
 import AuthGate from "@/features/auth/AuthGate";
@@ -22,11 +21,6 @@ export default function App() {
         <Route path="/tools/insulation">
           <AuthGate>
             <ElevationGeneratorPage />
-          </AuthGate>
-        </Route>
-        <Route path="/tools/announcements">
-          <AuthGate>
-            <AnnouncementsPage />
           </AuthGate>
         </Route>
         {/* 옛 "새 아이템" 자리 — 우미 양식 모음집이 대체했다.

@@ -52,15 +52,6 @@ export const TOOLS: ToolDef[] = [
     tags: ["타일", "컷팅"],
   },
   {
-    id: "announcements",
-    name: "공지사항 업로드",
-    description: "PDF 공지를 업로드하고 텍스트 기반 검색으로 공지 목록을 관리합니다.",
-    path: "/tools/announcements",
-    icon: Plus,
-    status: "available",
-    tags: ["PDF", "공지", "검색"],
-  },
-  {
     id: "forms",
     name: "스마트폼(Smart Forms)",
     description: "우미건설 사내 서식을 한곳에. 필요한 양식을 찾고, 그 자리에서 채우세요.",
