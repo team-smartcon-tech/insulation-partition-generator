@@ -497,6 +497,40 @@ forms.put("/taxonomy", async (c) => {
   }
 });
 
+/**
+ * DELETE /api/forms/taxonomy/:id — 코드표 지우기(본사 관리자만).
+ *
+ * 화면이 서버 코드표를 받아 오므로, 서버에서 지우지 않으면 다음에 열 때 되살아난다.
+ * 지우기 전 것은 이력에 쌓는다. 그 코드표의 서류는 지우지 않는다 — 외래키가 코드표 번호만
+ * 비워(`on delete set null`) "코드 없는 서류"가 된다.
+ */
+forms.delete("/taxonomy/:id", async (c) => {
+  const user = currentUser(c);
+  if (!isAdmin(user)) return c.json({ error: "코드표는 본사 관리자만 지울 수 있습니다." }, 403);
+  const id = c.req.param("id");
+  try {
+    const before = await supabaseRest(c.env, "GET", `/form_taxonomy?id=eq.${encodeURIComponent(id)}&select=*`);
+    const previous = before.ok ? await firstRow<Record<string, unknown>>(before) : null;
+    if (!previous) return c.json({ ok: true });
+    const history = await supabaseRest(c.env, "POST", "/form_taxonomy_history", {
+      taxonomy_id: id,
+      division: previous.division ?? "",
+      file_name: previous.file_name ?? "",
+      groups: previous.groups ?? [],
+      conflicts: previous.conflicts ?? [],
+      replaced_by: user.id,
+    });
+    // 이력을 못 남기면 지우지 않는다 — 되돌릴 길이 없어진다.
+    if (!history.ok) throw new Error(await history.text());
+    const res = await supabaseRest(c.env, "DELETE", `/form_taxonomy?id=eq.${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(await res.text());
+    return c.json({ ok: true });
+  } catch (err) {
+    console.error("[forms/taxonomy DELETE]", errMsg(err));
+    return c.json({ error: "코드표를 지우지 못했습니다." }, 500);
+  }
+});
+
 // ── 서류 ────────────────────────────────────────────────────────────────────
 
 /**

@@ -1044,8 +1044,13 @@ export async function adoptTaxonomyId(oldId: string, newId: string): Promise<voi
 
 /** 코드표 목록을 통째로 저장한다. 올리기·이름 바꾸기·지우기 모두 이걸로 끝난다. */
 export async function saveTaxonomies(list: Taxonomy[]): Promise<void> {
-  await writeMeta({ [TAXONOMIES_KEY]: list });
+  await storeTaxonomies(list);
   void syncTaxonomies(list);
+}
+
+/** 코드표 목록을 브라우저에만 저장한다 — 서버에서 받아 온 것을 다시 올리지 않을 때. */
+export async function storeTaxonomies(list: Taxonomy[]): Promise<void> {
+  await writeMeta({ [TAXONOMIES_KEY]: list });
 }
 
 /** 서류를 코드표의 한 칸에 붙이거나(코드·코드표 id) 떼어 낸다(undefined). */

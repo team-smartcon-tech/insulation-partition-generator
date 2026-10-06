@@ -152,6 +152,7 @@ import {
   writeLastOpenedId,
   type FormSummary,
 } from "./formStore";
+import { pullTaxonomies, syncTaxonomyDelete } from "./formSync";
 import type { FormSheet, FormValues } from "./types";
 import {
   addGroup,
@@ -523,6 +524,12 @@ export default function FormsPage() {
       } catch {
         // 코드표를 못 읽어도 양식 목록은 보여야 한다.
       }
+      // 브라우저 것을 먼저 보여 주고, 서버의 회사 공용 코드표가 오면 갈아 끼운다(기다리지 않는다).
+      void pullTaxonomies()
+        .then((pulled) => {
+          if (pulled && !cancelled) setTaxonomies(pulled);
+        })
+        .catch(() => {});
 
       // 현장 목록. 한 번도 만든 적이 없으면 첫 현장을 만들어 준다 — 빈 선택 상태를
       // 보여 주면 "어디에 올라가는지" 모른 채 올리게 된다.
@@ -1764,6 +1771,8 @@ export default function FormsPage() {
     try {
       await saveTaxonomies(next);
       setTaxonomies(next);
+      // 서버에서도 지운다 — 안 그러면 다음에 열 때 서버에서 다시 받아 와 되살아난다.
+      void syncTaxonomyDelete(taxonomyId);
       setStorageWarning(null);
     } catch (error) {
       setStorageWarning(

@@ -63,6 +63,13 @@ export interface Taxonomy {
    * 적어 둔 경우), 이름까지 다르면 표의 실수일 수 있어 지우지 않고 알린다.
    */
   conflicts: string[];
+  /**
+   * 서버에서 받아 온 적이 있는 코드표인가.
+   *
+   * 서버 목록에서 사라진 코드표를 내 쪽에서도 치울지 가르는 데 쓴다 — 받아 온 적이 있는데 지금
+   * 서버에 없으면 누가 지운 것이고, 받아 온 적이 없으면 아직 못 보낸 내 것이다.
+   */
+  fromServer?: boolean;
 }
 
 /**
@@ -258,6 +265,53 @@ export function upsertTaxonomies(
     else result.push({ ...next, id: makeId() });
   }
   return result;
+}
+
+export interface ServerMerge {
+  /** 화면과 브라우저에 둘 코드표 목록 */
+  list: Taxonomy[];
+  /** 같은 이름인데 번호가 달랐던 것 — [내 번호, 서버 번호]. 서류도 서버 번호로 옮겨야 한다. */
+  adopted: Array<[string, string]>;
+  /** 서버보다 내가 나중에 고친 것 — 서버에 못 보낸 수정이라 다시 보낸다. */
+  newerLocal: Taxonomy[];
+}
+
+/**
+ * 서버 코드표를 내 목록에 들인다. **코드표는 회사 공용이라 서버 것이 원본이다.**
+ *
+ * 전에는 브라우저마다 코드표를 따로 들고 있어, 본사가 고쳐도 다른 사람 화면은 그대로였고
+ * 옛 판을 든 사람이 고치면 서버의 새 판을 덮어썼다.
+ *
+ * - 같은 번호, 없으면 같은 1차 분류 이름끼리 짝짓는다. 번호가 다르면 서버 번호를 쓴다.
+ * - 짝이 있으면 서버 것으로 바꾼다. 다만 **내가 더 나중에 고쳤으면** 내 것을 남긴다
+ *   (서버가 꺼져 있을 때 고친 것이 사라지지 않게).
+ * - 서버에 없는 내 코드표: 받아 온 적이 있으면 누가 지운 것이라 치우고, 없으면 남긴다.
+ * - 서버가 빈 목록을 주면 아무것도 바꾸지 않는다 — 서버 쪽 사고로 내 코드표가 다 사라지면 안 된다.
+ */
+export function mergeServerTaxonomies(local: Taxonomy[], server: Taxonomy[]): ServerMerge {
+  if (server.length === 0) return { list: local, adopted: [], newerLocal: [] };
+
+  const used = new Set<string>();
+  const adopted: Array<[string, string]> = [];
+  const newerLocal: Taxonomy[] = [];
+  const list = server.map((remote): Taxonomy => {
+    const mine =
+      local.find((taxonomy) => !used.has(taxonomy.id) && taxonomy.id === remote.id) ??
+      local.find((taxonomy) => !used.has(taxonomy.id) && taxonomy.division !== "" && taxonomy.division === remote.division);
+    if (!mine) return { ...remote, fromServer: true };
+    used.add(mine.id);
+    if (mine.id !== remote.id) adopted.push([mine.id, remote.id]);
+    if (mine.updatedAt > remote.updatedAt) {
+      const kept = { ...mine, id: remote.id, fromServer: true };
+      newerLocal.push(kept);
+      return kept;
+    }
+    return { ...remote, fromServer: true };
+  });
+  for (const taxonomy of local) {
+    if (!used.has(taxonomy.id) && !taxonomy.fromServer) list.push(taxonomy);
+  }
+  return { list, adopted, newerLocal };
 }
 
 /**

@@ -13,10 +13,20 @@
  *   [서버로 옮기기]로 나중에 올리면 된다.
  * - id 는 브라우저가 만든 것을 그대로 쓴다 — 연결이 끊기지 않게.
  */
-import { patchDoc, uploadDoc, deleteDoc, fetchDoc, pushSite, pushTaxonomy, type NewDoc } from "./formServer.ts";
+import {
+  patchDoc,
+  uploadDoc,
+  deleteDoc,
+  deleteTaxonomy,
+  fetchDoc,
+  fetchTaxonomies,
+  pushSite,
+  pushTaxonomy,
+  type NewDoc,
+} from "./formServer.ts";
 import type { FormSite } from "./sites.ts";
-import type { Taxonomy } from "./taxonomy.ts";
-import { adoptSiteId, adoptTaxonomyId } from "./formStore.ts";
+import { mergeServerTaxonomies, type Taxonomy } from "./taxonomy.ts";
+import { adoptSiteId, adoptTaxonomyId, loadTaxonomies, storeTaxonomies } from "./formStore.ts";
 import {
   addPending,
   readPendingDeletes,
@@ -77,6 +87,51 @@ export async function syncTaxonomies(taxonomies: Taxonomy[]): Promise<void> {
       } catch (error) {
         quiet(`코드표 “${taxonomy.division || taxonomy.fileName}”을(를)`, error);
       }
+    }
+  });
+}
+
+/**
+ * 서버 코드표를 받아 와 브라우저에 들인다. 받은 목록을 돌려준다(서버에 못 닿으면 null).
+ *
+ * 코드표는 회사 공용이라 서버 것이 원본이다. 본사가 한 번 올리거나 고치면 다른 사람은 사이트를
+ * 다시 열기만 하면 된다 — 전에는 각자 엑셀을 올려야 했다. 규칙은 {@link mergeServerTaxonomies}.
+ *
+ * 따라 올리기와 **같은 줄**에 세운다. 막 고친 코드표가 서버로 가는 사이에 받아 오면 옛 판으로
+ * 되돌아간다.
+ */
+export async function pullTaxonomies(): Promise<Taxonomy[] | null> {
+  const result = await enqueue(async () => {
+    let server: Taxonomy[];
+    try {
+      server = await fetchTaxonomies();
+    } catch (error) {
+      console.warn("[스마트폼] 서버 코드표를 받아 오지 못했습니다(브라우저에 있는 것을 씁니다):", error);
+      return null;
+    }
+    const { list, adopted, newerLocal } = mergeServerTaxonomies(await loadTaxonomies(), server);
+    // 목록을 먼저 서버 번호로 저장한 뒤 서류를 옮긴다 — 옮기기가 알리는 "다시 읽기"가 새 목록을 읽게.
+    await storeTaxonomies(list);
+    for (const [oldId, newId] of adopted) await adoptTaxonomyId(oldId, newId);
+    for (const taxonomy of newerLocal) {
+      try {
+        await pushTaxonomy(taxonomy, list.indexOf(taxonomy));
+      } catch (error) {
+        quiet(`코드표 “${taxonomy.division || taxonomy.fileName}”을(를)`, error);
+      }
+    }
+    return list;
+  });
+  return result ?? null;
+}
+
+/** 지운 코드표를 서버에서도 지운다(본사 관리자가 아니면 서버가 거절하고, 다음에 열 때 되돌아온다). */
+export async function syncTaxonomyDelete(id: string): Promise<void> {
+  await enqueue(async () => {
+    try {
+      await deleteTaxonomy(id);
+    } catch (error) {
+      quiet("코드표 지우기를", error);
     }
   });
 }

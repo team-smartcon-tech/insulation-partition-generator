@@ -52,6 +52,7 @@ Notes:
 | POST | `/api/forms/sites` | 현장 추가(같은 이름이면 기존 것을 돌려줌) | 로그인 |
 | GET | `/api/forms/taxonomy` | 분류 코드표 | 로그인 |
 | PUT | `/api/forms/taxonomy` | 코드표 올리기(이전 판은 이력에 쌓음) | **본사 관리자** |
+| DELETE | `/api/forms/taxonomy/:id` | 코드표 지우기(이전 판은 이력에 쌓음, 그 코드표 서류는 코드 없는 서류로) | **본사 관리자** |
 | GET | `/api/forms/docs?kind=&siteId=&review=1` | 서류 목록(꼬리표만) | 로그인 |
 | GET | `/api/forms/docs/:id` | 한 건 전부(격자·적은 글자·결재) | 로그인 |
 | POST | `/api/forms/docs` | 서류 1건 등록 + **올리기 주소** 발급 | 로그인 |

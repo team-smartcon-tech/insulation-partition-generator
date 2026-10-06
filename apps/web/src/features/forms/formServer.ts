@@ -210,6 +210,10 @@ export async function pushTaxonomy(taxonomy: Taxonomy, sortOrder = 0): Promise<T
   return toTaxonomy(row);
 }
 
+/** 코드표 한 벌을 서버에서 지운다. **본사 관리자만** 된다. 그 코드표의 서류는 "코드 없는 서류"가 된다. */
+export const deleteTaxonomy = (id: string) =>
+  api<{ ok: true }>(`/taxonomy/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 // ── 서류 ────────────────────────────────────────────────────────────────────
 
 /** 서버가 돌려주는 서류 한 줄(목록에서는 무거운 칸이 빠져 있다) */
