@@ -8,12 +8,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { Check, ClipboardPaste, ImagePlus, LayoutGrid, Loader2, Star, X } from "lucide-react";
+import { Check, ClipboardPaste, ImagePlus, Loader2, Star, X } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
 import { cn } from "@/lib/utils";
 import MarketShell from "./MarketShell";
 import { useMarketApp, usePublishMarketApp, useUpdateMarketApp } from "./hooks";
-import { CATEGORIES, LOCATIONS, PLATFORM_TYPES, type MarketAppInput } from "./types";
+import {
+  CATEGORIES,
+  DISTRIBUTIONS,
+  LOCATIONS,
+  PLATFORM_TYPES,
+  SECTIONS,
+  type DistributionId,
+  type MarketAppInput,
+} from "./types";
 
 const ADMIN_ROLES = new Set(["super_admin", "system_admin"]);
 const MAX_SHOTS = 8;
@@ -40,6 +48,8 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
     platformType: PLATFORM_TYPES[0],
     location: LOCATIONS[0],
     category: CATEGORIES[0],
+    section: SECTIONS[0].id,
+    distribution: DISTRIBUTIONS[0].id,
     version: "",
     team: "",
     description: "",
@@ -65,11 +75,14 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
     prefilledFor.current = appId;
     setForm({
       title: app.title,
-      deployUrl: app.deploy_url,
+      // 설치형 URL 은 관리자에게만 내려온다(수정 화면은 관리자 전용).
+      deployUrl: app.deploy_url ?? "",
       repoUrl: app.repo_url ?? "",
       platformType: app.platform_type,
       location: app.location,
       category: app.category,
+      section: app.section ?? SECTIONS[0].id,
+      distribution: app.distribution ?? DISTRIBUTIONS[0].id,
       version: app.version ?? "",
       team: app.team ?? "",
       description: app.description ?? "",
@@ -89,6 +102,17 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
 
   const set = <K extends keyof MarketAppInput>(key: K, value: MarketAppInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  const isDownload = form.distribution === "download";
+
+  /** 설치 프로그램으로 바꾸면 플랫폼 타입이 아직 기본값(웹앱)일 때만 데스크톱으로 맞춰 준다. */
+  const setDistribution = (value: DistributionId) =>
+    setForm((prev) => ({
+      ...prev,
+      distribution: value,
+      platformType:
+        value === "download" && prev.platformType === PLATFORM_TYPES[0] ? "데스크톱" : prev.platformType,
+    }));
 
   const addFiles = useCallback((files: File[]) => {
     const images = files.filter((f) => f.type.startsWith("image/"));
@@ -148,16 +172,24 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
 
   const invalidReason = useMemo(() => {
     if (!form.title.trim()) return "제목을 입력하세요.";
-    if (!form.deployUrl.trim()) return "배포 URL을 입력하세요.";
-    if (!/^https?:\/\/.+/i.test(form.deployUrl.trim())) {
-      return "배포 URL은 http:// 또는 https:// 로 시작해야 합니다.";
+    if (isDownload) {
+      if (!form.deployUrl.trim()) return "설치파일 URL을 입력하세요.";
+      // http 설치파일은 브라우저가 "안전하지 않은 다운로드"로 막는다.
+      if (!/^https:\/\/.+/i.test(form.deployUrl.trim())) {
+        return "설치파일 URL은 https:// 로 시작해야 합니다.";
+      }
+    } else {
+      if (!form.deployUrl.trim()) return "배포 URL을 입력하세요.";
+      if (!/^https?:\/\/.+/i.test(form.deployUrl.trim())) {
+        return "배포 URL은 http:// 또는 https:// 로 시작해야 합니다.";
+      }
     }
     if (form.repoUrl.trim() && !/^https?:\/\/.+/i.test(form.repoUrl.trim())) {
       return "레포 URL은 http:// 또는 https:// 로 시작해야 합니다.";
     }
     if (shots.length === 0) return "실제 실행 화면 스크린샷을 1장 이상 올려 주세요.";
     return null;
-  }, [form, shots]);
+  }, [form, shots, isDownload]);
 
   const submit = async () => {
     if (invalidReason) {
@@ -266,14 +298,28 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
           : "사내에서 만든 앱·도구를 홈에 등록합니다. 등록하면 바로 카드로 노출됩니다."}
       </p>
 
-      <div className="mt-6 flex items-center gap-2.5 rounded-xl border-2 border-[#0a63b8] bg-[#f4f8fd] px-4 py-3">
-        <LayoutGrid className="h-[18px] w-[18px] text-[#0a63b8]" />
-        <span className="text-[13.5px] font-semibold text-slate-800">
-          앱·플랫폼 · 사내에서 만든 웹앱·플랫폼을 공유하고 바로 실행
-        </span>
-      </div>
-
       <div className="mt-6 space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="구분" required hint="홈에서 이 섹션 아래에 카드로 노출됩니다.">
+            <ChoiceButtons
+              options={SECTIONS}
+              value={form.section}
+              onChange={(v) => set("section", v)}
+            />
+          </Field>
+          <Field
+            label="제공 방식"
+            required
+            hint={
+              isDownload
+                ? "상세의 '다운로드' 버튼으로 설치파일을 받습니다."
+                : "상세의 '바로가기' 버튼으로 웹앱을 엽니다."
+            }
+          >
+            <ChoiceButtons options={DISTRIBUTIONS} value={form.distribution} onChange={setDistribution} />
+          </Field>
+        </div>
+
         <Field label="제목" required>
           <input
             className={inputCls}
@@ -284,14 +330,29 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
         </Field>
 
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="배포 URL" required hint="카드·상세의 '바로가기'가 이 주소로 연결됩니다.">
-            <input
-              className={inputCls}
-              value={form.deployUrl}
-              onChange={(e) => set("deployUrl", e.target.value)}
-              placeholder="https://"
-            />
-          </Field>
+          {isDownload ? (
+            <Field
+              label="설치파일 URL"
+              required
+              hint="https 직링크. 같은 링크의 파일을 바꾸면 다음 다운로드부터 새 파일이 나갑니다. 이 주소는 관리자에게만 보입니다."
+            >
+              <input
+                className={inputCls}
+                value={form.deployUrl}
+                onChange={(e) => set("deployUrl", e.target.value)}
+                placeholder="https://…/setup.exe"
+              />
+            </Field>
+          ) : (
+            <Field label="배포 URL" required hint="카드·상세의 '바로가기'가 이 주소로 연결됩니다.">
+              <input
+                className={inputCls}
+                value={form.deployUrl}
+                onChange={(e) => set("deployUrl", e.target.value)}
+                placeholder="https://"
+              />
+            </Field>
+          )}
           <Field label="레포 URL">
             <input
               className={inputCls}
@@ -317,23 +378,11 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
             </select>
           </Field>
           <Field label="위치">
-            <div className="flex gap-2">
-              {LOCATIONS.map((loc) => (
-                <button
-                  key={loc}
-                  type="button"
-                  onClick={() => set("location", loc)}
-                  className={cn(
-                    "h-11 flex-1 rounded-lg border text-[14px] font-semibold transition-colors",
-                    form.location === loc
-                      ? "border-[#0a63b8] bg-[#0a63b8] text-white"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-                  )}
-                >
-                  {loc}
-                </button>
-              ))}
-            </div>
+            <ChoiceButtons
+              options={LOCATIONS.map((loc) => ({ id: loc, label: loc }))}
+              value={form.location}
+              onChange={(v) => set("location", v)}
+            />
           </Field>
         </div>
 
@@ -418,7 +467,7 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
         </Field>
 
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="카테고리" required>
+          <Field label="세부 분류" required>
             <select
               className={inputCls}
               value={form.category}
@@ -527,6 +576,37 @@ function Field({
       </label>
       {children}
       {hint && <p className="mt-1.5 text-[12px] text-slate-400">{hint}</p>}
+    </div>
+  );
+}
+
+/** 버튼형 단일 선택 (구분·제공 방식·위치 공용) */
+function ChoiceButtons<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly { id: T; label: string }[];
+  value: string;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex gap-2">
+      {options.map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          onClick={() => onChange(opt.id)}
+          className={cn(
+            "h-11 flex-1 rounded-lg border text-[14px] font-semibold transition-colors",
+            value === opt.id
+              ? "border-[#0a63b8] bg-[#0a63b8] text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }

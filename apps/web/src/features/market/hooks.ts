@@ -41,6 +41,17 @@ export function useMarketApp(appId: string | null) {
   });
 }
 
+/**
+ * 다운로드 직후 다운로드 수를 다시 받는다 — 다운로드는 <a href> 로 열려 react-query 를 거치지 않으므로,
+ * Worker 가 수를 올릴 시간을 조금 두고 목록·상세를 새로 받는다.
+ */
+export function useRefreshAfterDownload() {
+  const qc = useQueryClient();
+  return () => {
+    window.setTimeout(() => qc.invalidateQueries({ queryKey: keys.all }), 1500);
+  };
+}
+
 export function usePublishMarketApp() {
   const qc = useQueryClient();
   return useMutation({

@@ -8,6 +8,7 @@
  * → 홈(HomePage)은 이 배열을 읽어 카드를 자동으로 그린다.
  */
 import { Square, TowerControl, type LucideIcon } from "lucide-react";
+import type { SectionId } from "@/features/market/types";
 
 export type ToolStatus = "available" | "comingSoon";
 
@@ -32,6 +33,8 @@ export interface ToolDef {
   logo?: string;
   /** 게시(App Market) 도구들보다 뒤에 놓는다. 기본은 내장 도구가 앞 */
   sortLast?: boolean;
+  /** 홈 섹션 (market/types.ts SECTIONS). 없으면 시공 도구 */
+  section?: SectionId;
 }
 
 export const TOOLS: ToolDef[] = [

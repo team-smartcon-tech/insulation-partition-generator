@@ -8,11 +8,17 @@ export interface MarketAppSummary {
   id: string;
   title: string;
   description: string | null;
-  deploy_url: string;
+  /**
+   * 웹앱: 바로가기 주소. 설치형: 설치파일 직링크 — 관리자에게만 내려오고 일반 사용자는 null
+   * (다운로드는 marketDownloadUrl() 중계 경로로만 받는다).
+   */
+  deploy_url: string | null;
   repo_url: string | null;
   platform_type: string;
   location: string;
   category: string;
+  section: SectionId;
+  distribution: DistributionId;
   version: string | null;
   team: string | null;
   owners: string[];
@@ -20,6 +26,7 @@ export interface MarketAppSummary {
   status: string;
   view_count: number;
   like_count: number;
+  download_count: number;
   author_id: string | null;
   author_name: string | null;
   created_at: string;
@@ -60,12 +67,36 @@ export interface MarketAppInput {
   platformType: string;
   location: string;
   category: string;
+  section: SectionId;
+  distribution: DistributionId;
   version: string;
   team: string;
   description: string;
   owners: string[];
   tags: string[];
 }
+
+/**
+ * 홈 섹션 — 이 순서대로 홈에 그려지고, 카드가 없는 섹션은 통째로 숨는다.
+ * 서버 허용 값(worker/src/market.ts SECTIONS)과 맞춰 둔다.
+ */
+export const SECTIONS = [
+  { id: "construction", label: "시공 도구" },
+  { id: "cad", label: "CAD 도구" },
+] as const;
+
+export type SectionId = (typeof SECTIONS)[number]["id"];
+
+export const sectionLabel = (id: string) =>
+  SECTIONS.find((s) => s.id === id)?.label ?? SECTIONS[0].label;
+
+/** 배포 방식 — 웹앱은 바로가기, 설치 프로그램은 Worker 중계 다운로드 */
+export const DISTRIBUTIONS = [
+  { id: "web", label: "웹앱" },
+  { id: "download", label: "설치 프로그램" },
+] as const;
+
+export type DistributionId = (typeof DISTRIBUTIONS)[number]["id"];
 
 /** 폼 select 선택지 — 화면과 서버 기본값이 어긋나지 않도록 여기서 한 번만 정의 */
 export const PLATFORM_TYPES = ["웹앱", "모바일", "데스크톱", "스크립트·CLI", "플러그인"] as const;
