@@ -17,7 +17,7 @@
 ```bash
 pnpm install
 cp apps/worker/.dev.vars.example apps/worker/.dev.vars   # 로컬 시크릿(로그인/저장) — 값 채우기
-pnpm dev                     # worker(8787)+web(5173) 동시 기동. http://localhost:5173
+pnpm dev                     # worker(9887)+web(5173) 동시 기동. http://localhost:5173
 pnpm dev:web / pnpm dev:worker   # 개별 실행
 pnpm --filter web build      # 프로덕션 빌드(타입체크 포함)
 pnpm -r typecheck
@@ -32,6 +32,8 @@ pnpm -r typecheck
 - 홈(런처): `apps/web/src/features/home/HomePage.tsx` + 내장 도구 목록 `features/home/tools.ts`
 - App Market(홈 게시 도구): `apps/web/src/features/market/*`(게시 폼·상세) + `apps/worker/src/market.ts`(`/api/market/*`).
   테이블 `market_apps`/`market_app_versions`/`market_app_likes`, 버킷 `market-shots`(비공개). 게시·삭제는 관리자(super_admin·system_admin)만.
+  홈 섹션은 `market_apps.section`(시공 도구·CAD 도구 — `features/market/types.ts` `SECTIONS`), 카드 없는 섹션은 숨김.
+  설치형(`distribution=download`)은 `deploy_url` 의 https 설치파일을 Worker `/api/market/apps/:id/download` 가 중계(원 URL 은 관리자에게만 응답).
 - 공용 타입: `packages/shared/src/index.ts`(`ElevState` 등) — web의 `features/elevation/types.ts`가 재수출
 
 **인프라**

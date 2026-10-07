@@ -1,6 +1,7 @@
 /**
- * 게시 도구 상세 — 메타 + 바로가기 + 설명 + 화면(스크린샷) + 버전 이력.
+ * 게시 도구 상세 — 메타 + 바로가기(웹앱)/다운로드(설치형) + 설명 + 화면(스크린샷) + 버전 이력.
  * 진입 시 조회수 1회 증가, 좋아요 토글 지원. 관리자는 버전 추가·수정(/market/:appId/edit)·삭제 가능.
+ * 설치형 다운로드는 Worker 중계 경로로만 받는다(원 설치파일 URL 은 일반 사용자에게 내려오지 않음).
  */
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -8,10 +9,12 @@ import { toast } from "sonner";
 import {
   Building2,
   CalendarDays,
+  Download,
   Eye,
   ExternalLink,
   Github,
   Heart,
+  LayoutGrid,
   Loader2,
   MapPin,
   Pencil,
@@ -23,13 +26,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import MarketShell from "./MarketShell";
-import { bumpMarketAppView } from "./api";
+import { bumpMarketAppView, marketDownloadUrl } from "./api";
 import {
   useAddMarketAppVersion,
   useDeleteMarketApp,
   useMarketApp,
+  useRefreshAfterDownload,
   useToggleMarketAppLike,
 } from "./hooks";
+import { sectionLabel } from "./types";
 
 /** 2026-06-17T… → 2026.06.17 */
 const formatDate = (iso: string) => {
@@ -48,6 +53,7 @@ export default function MarketAppDetailPage() {
   const like = useToggleMarketAppLike(appId ?? "");
   const addVersion = useAddMarketAppVersion(appId ?? "");
   const removeApp = useDeleteMarketApp();
+  const refreshAfterDownload = useRefreshAfterDownload();
 
   // 조회수는 마운트당 1회만 (react-query refetch 로 부풀지 않도록 ref 로 잠근다)
   const viewedRef = useRef<string | null>(null);
@@ -95,6 +101,7 @@ export default function MarketAppDetailPage() {
   }
 
   const { app, versions, canManage } = data;
+  const isDownload = app.distribution === "download";
 
   const onDelete = async () => {
     if (!appId) return;
@@ -167,9 +174,11 @@ export default function MarketAppDetailPage() {
         <Meta icon={MapPin}>
           {app.platform_type} · {app.location}
         </Meta>
+        <Meta icon={LayoutGrid}>{sectionLabel(app.section)}</Meta>
         <Meta icon={Tag}>{app.category}</Meta>
         <Meta icon={CalendarDays}>{formatDate(app.created_at)}</Meta>
         <Meta icon={Eye}>조회 {app.view_count}</Meta>
+        {isDownload && <Meta icon={Download}>다운로드 {app.download_count ?? 0}</Meta>}
         <button
           type="button"
           onClick={() => like.mutate()}
@@ -185,17 +194,32 @@ export default function MarketAppDetailPage() {
         </button>
       </div>
 
-      {/* 바로가기 */}
+      {/* 바로가기(웹앱) / 다운로드(설치형) */}
       <div className="mt-5 flex flex-wrap items-center gap-2.5">
-        <a
-          href={app.deploy_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#0a63b8] px-5 text-[14px] font-bold text-white shadow-[0_10px_24px_-12px_rgba(10,99,184,0.9)] transition-colors hover:bg-[#004791]"
-        >
-          <ExternalLink className="h-4 w-4" />
-          바로가기
-        </a>
+        {isDownload ? (
+          // 같은 출처 Worker 경로 — 세션 쿠키가 붙고, 응답의 Content-Disposition 으로 브라우저가 내려받는다.
+          <a
+            href={marketDownloadUrl(app.id)}
+            onClick={refreshAfterDownload}
+            className={primaryActionCls}
+          >
+            <Download className="h-4 w-4" />
+            다운로드
+            {app.version && <span className="font-semibold text-white/75">{app.version}</span>}
+          </a>
+        ) : (
+          app.deploy_url && (
+            <a
+              href={app.deploy_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={primaryActionCls}
+            >
+              <ExternalLink className="h-4 w-4" />
+              바로가기
+            </a>
+          )
+        )}
         {app.repo_url && (
           <a
             href={app.repo_url}
@@ -208,6 +232,11 @@ export default function MarketAppDetailPage() {
           </a>
         )}
       </div>
+      {isDownload && (
+        <p className="mt-2 text-[12px] text-slate-400">
+          설치 시 Windows SmartScreen 경고가 뜨면 '추가 정보 → 실행'을 눌러 진행하세요.
+        </p>
+      )}
 
       {app.description && (
         <p className="mt-5 whitespace-pre-wrap text-[15px] leading-relaxed text-[#0a63b8]">
@@ -312,6 +341,9 @@ export default function MarketAppDetailPage() {
     </MarketShell>
   );
 }
+
+const primaryActionCls =
+  "inline-flex h-11 items-center gap-2 rounded-lg bg-[#0a63b8] px-5 text-[14px] font-bold text-white shadow-[0_10px_24px_-12px_rgba(10,99,184,0.9)] transition-colors hover:bg-[#004791]";
 
 function Meta({
   icon: Icon,

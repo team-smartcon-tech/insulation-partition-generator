@@ -2,8 +2,12 @@
  * App Market — 홈(런처)에 게시되는 외부 도구 카탈로그 API
  *
  * 테이블: public.market_apps / market_app_versions / market_app_likes
- *         (supabase/migrations/20260811000001_market_apps.sql)
+ *         (supabase/migrations/20260811000001_market_apps.sql, 20261007061356_market_apps_section_distribution.sql)
  * 스크린샷: Storage {MARKET_SHOT_BUCKET}/market/{appId}/{uuid}.{ext} (비공개 → signed URL)
+ *
+ * 설치형(distribution=download): deploy_url 은 공개 https 설치파일 직링크다.
+ *   일반 사용자 응답에는 이 URL 을 내려주지 않고, GET /apps/:appId/download 에서 Worker 가 받아 흘려보낸다.
+ *   (같은 링크의 파일을 교체하면 다음 다운로드부터 자동으로 새 파일이 나간다)
  *
  * 인증: index.ts 에서 authMiddleware 뒤에 마운트되므로 모든 라우트가 로그인 필수.
  *       게시/수정/삭제는 관리자(super_admin·system_admin)만.
@@ -33,10 +37,14 @@ const MAX_SHOT_BYTES = 10 * 1024 * 1024;
 const MAX_SHOT_COUNT = 8;
 const ALLOWED_SHOT_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
+/** 홈 섹션 · 배포 방식 허용 값 (화면 쪽 정의: web/src/features/market/types.ts SECTIONS · DISTRIBUTIONS) */
+const SECTIONS = new Set(["construction", "cad"]);
+const DISTRIBUTIONS = new Set(["web", "download"]);
+
 const APP_COLUMNS =
   "id,title,description,deploy_url,repo_url,platform_type,location,category,version," +
-  "team,owners,tags,screenshots,status,view_count,like_count,author_id,author_name," +
-  "created_at,updated_at";
+  "team,owners,tags,screenshots,status,view_count,like_count,download_count,section,distribution," +
+  "author_id,author_name,created_at,updated_at";
 
 interface ShotRef {
   bucket: string;
@@ -49,6 +57,8 @@ interface ShotRef {
 interface AppRow {
   id: string;
   screenshots: ShotRef[] | null;
+  deploy_url?: string | null;
+  distribution?: string | null;
   [key: string]: unknown;
 }
 
@@ -94,6 +104,84 @@ function formStringArray(form: FormData, key: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * 게시·수정 공통 본문 필드 검증 → market_apps 컬럼 값.
+ * section · distribution 은 값이 없으면 undefined 로 둔다: JSON 직렬화에서 빠지므로
+ * 게시(POST)는 DB 기본값(시공 도구 · 웹앱)이, 수정(PATCH)은 기존 값이 유지된다
+ * (배포 직후 캐시된 구 화면이 보낸 수정이 CAD 도구를 시공 도구로 되돌리지 않도록).
+ */
+function parseAppFields(form: FormData) {
+  const title = formText(form, "title");
+  if (!title) return { error: "제목을 입력하세요." } as const;
+
+  const section = formText(form, "section") ?? undefined;
+  if (section && !SECTIONS.has(section)) {
+    return { error: `알 수 없는 섹션입니다: ${section}` } as const;
+  }
+  const distribution = formText(form, "distribution") ?? undefined;
+  if (distribution && !DISTRIBUTIONS.has(distribution)) {
+    return { error: `알 수 없는 배포 방식입니다: ${distribution}` } as const;
+  }
+
+  const deployUrl = normalizeUrl(form.get("deployUrl"));
+  if (distribution === "download") {
+    // 사이트가 https 라 http 설치파일은 브라우저가 "안전하지 않은 다운로드"로 막는다.
+    if (!deployUrl || !deployUrl.startsWith("https://")) {
+      return { error: "설치파일 URL 은 https 주소여야 합니다." } as const;
+    }
+  } else if (!deployUrl) {
+    return { error: "배포 URL 은 http(s) 주소여야 합니다." } as const;
+  }
+  const repoUrlRaw = formText(form, "repoUrl");
+  if (repoUrlRaw && !normalizeUrl(repoUrlRaw)) {
+    return { error: "레포 URL 은 http(s) 주소여야 합니다." } as const;
+  }
+
+  return {
+    fields: {
+      title,
+      description: formText(form, "description"),
+      deploy_url: deployUrl,
+      repo_url: repoUrlRaw ? normalizeUrl(repoUrlRaw) : null,
+      platform_type: formText(form, "platformType") ?? "웹앱",
+      location: formText(form, "location") === "현장" ? "현장" : "본사",
+      category: formText(form, "category") ?? "웹앱",
+      version: formText(form, "version"),
+      team: formText(form, "team"),
+      owners: formStringArray(form, "owners"),
+      tags: formStringArray(form, "tags"),
+      section,
+      distribution,
+    },
+  } as const;
+}
+
+/** 설치형의 실제 설치파일 URL 은 관리자(수정 화면)에게만 내려준다 — 일반 사용자는 /download 중계로만 받는다. */
+function hideInstallUrl<T extends AppRow>(row: T, admin: boolean): T {
+  if (admin || row.distribution !== "download") return row;
+  return { ...row, deploy_url: null };
+}
+
+/** 다운로드 파일명 — 원 서버 Content-Disposition → 최종 URL 마지막 경로 → 게시물 제목 순 */
+function downloadFileName(upstream: Response, fallback: string): string {
+  const cd = upstream.headers.get("content-disposition") ?? "";
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd)?.[1];
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(cd)?.[1];
+  let name = "";
+  try {
+    name = star ? decodeURIComponent(star) : plain ?? "";
+    if (!name) {
+      const last = new URL(upstream.url).pathname.split("/").filter(Boolean).pop() ?? "";
+      name = decodeURIComponent(last);
+    }
+  } catch {
+    name = "";
+  }
+  // 경로 구분자·제어문자·따옴표 제거 (헤더 주입 방지)
+  name = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim();
+  return name || fallback.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_") || "download";
 }
 
 /** 파일명에서 확장자만 안전하게 추출 */
@@ -196,16 +284,17 @@ market.get("/apps", async (c) => {
     }
     const rows = (await res.json()) as AppRow[];
     const user = c.get("user");
+    const admin = isAdmin(user);
     const liked = await likedIdsFor(c.env, user?.id ?? "", rows.map((r) => r.id));
 
     const apps = await Promise.all(
       rows.map(async (row) => {
         const [thumb] = await signShots(c.env, row.screenshots, 1);
-        const { screenshots: _drop, ...rest } = row;
+        const { screenshots: _drop, ...rest } = hideInstallUrl(row, admin);
         return { ...rest, thumbnail_url: thumb?.url ?? null, liked: liked.has(row.id) };
       }),
     );
-    return c.json({ apps, canPublish: isAdmin(user) });
+    return c.json({ apps, canPublish: admin });
   } catch (err) {
     console.error("[market/apps GET]", errMsg(err));
     return c.json({ error: `조회 실패: ${errMsg(err)}` }, 500);
@@ -216,8 +305,9 @@ market.get("/apps", async (c) => {
 
 /**
  * POST /api/market/apps — 새 도구 게시 (관리자 전용, multipart/form-data)
- * 필드: title, deployUrl (필수) / repoUrl, platformType, location, category, version,
- *       team, description, owners(JSON), tags(JSON) / shots (File, 복수)
+ * 필드: title, deployUrl (필수 — 설치형이면 https 설치파일 직링크) / repoUrl, platformType, location,
+ *       category, section, distribution, version, team, description, owners(JSON), tags(JSON)
+ *       / shots (File, 복수)
  */
 market.post("/apps", async (c) => {
   if (!adminOnly(c)) return c.json({ error: "게시 권한이 없습니다." }, 403);
@@ -227,17 +317,8 @@ market.post("/apps", async (c) => {
   try {
     const form = await c.req.raw.formData();
 
-    const title = formText(form, "title");
-    if (!title) return c.json({ error: "제목을 입력하세요." }, 400);
-
-    const deployUrl = normalizeUrl(form.get("deployUrl"));
-    if (!deployUrl) {
-      return c.json({ error: "배포 URL 은 http(s) 주소여야 합니다." }, 400);
-    }
-    const repoUrlRaw = formText(form, "repoUrl");
-    if (repoUrlRaw && !normalizeUrl(repoUrlRaw)) {
-      return c.json({ error: "레포 URL 은 http(s) 주소여야 합니다." }, 400);
-    }
+    const parsed = parseAppFields(form);
+    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
 
     const appId = crypto.randomUUID();
 
@@ -253,20 +334,10 @@ market.post("/apps", async (c) => {
     }
 
     const user = c.get("user");
-    const version = formText(form, "version");
+    const version = parsed.fields.version;
     const row = {
       id: appId,
-      title,
-      description: formText(form, "description"),
-      deploy_url: deployUrl,
-      repo_url: repoUrlRaw ? normalizeUrl(repoUrlRaw) : null,
-      platform_type: formText(form, "platformType") ?? "웹앱",
-      location: formText(form, "location") === "현장" ? "현장" : "본사",
-      category: formText(form, "category") ?? "웹앱",
-      version,
-      team: formText(form, "team"),
-      owners: formStringArray(form, "owners"),
-      tags: formStringArray(form, "tags"),
+      ...parsed.fields,
       screenshots: shots,
       status: "published",
       author_id: user?.id ?? null,
@@ -325,6 +396,7 @@ market.get("/apps/:appId", async (c) => {
     if (!row) return c.json({ error: "게시물을 찾을 수 없습니다." }, 404);
 
     const user = c.get("user");
+    const admin = isAdmin(user);
     const [screenshots, versionsRes, liked] = await Promise.all([
       signShots(c.env, row.screenshots),
       supabaseRest(
@@ -336,11 +408,11 @@ market.get("/apps/:appId", async (c) => {
     ]);
     const versions = versionsRes.ok ? await versionsRes.json() : [];
 
-    const { screenshots: _drop, ...rest } = row;
+    const { screenshots: _drop, ...rest } = hideInstallUrl(row, admin);
     return c.json({
       app: { ...rest, screenshots, liked: liked.has(appId) },
       versions,
-      canManage: isAdmin(user),
+      canManage: admin,
     });
   } catch (err) {
     console.error("[market/app GET]", errMsg(err));
@@ -358,6 +430,75 @@ market.post("/apps/:appId/view", async (c) => {
     // 조회수는 부가 정보 — 실패해도 화면을 막지 않는다.
     console.error("[market/view]", errMsg(err));
     return c.json({ ok: false });
+  }
+});
+
+/**
+ * GET /api/market/apps/:appId/download — 설치형 설치파일 중계 (로그인 사용자)
+ *
+ * 원 URL(deploy_url)로 리다이렉트하지 않고 Worker 가 받아 그대로 흘려보낸다
+ * → 브라우저(개발자도구·다운로드 기록)에 원 URL 이 남지 않는다. 캐시하지 않으므로
+ *   같은 링크의 파일이 교체되면 다음 다운로드부터 새 파일이 나간다.
+ * Range(이어받기)는 원 서버가 지원하면 그대로 전달한다.
+ */
+market.get("/apps/:appId/download", async (c) => {
+  const appId = c.req.param("appId");
+  try {
+    const res = await supabaseRest(
+      c.env,
+      "GET",
+      `/market_apps?id=eq.${encodeURIComponent(appId)}&status=eq.published&select=title,deploy_url,distribution&limit=1`,
+    );
+    const row = res.ok
+      ? (((await res.json()) as { title: string; deploy_url: string; distribution: string }[])[0] ??
+        null)
+      : null;
+    if (!row || row.distribution !== "download") {
+      return c.json({ error: "다운로드할 수 있는 게시물이 아닙니다." }, 404);
+    }
+
+    const range = c.req.header("Range");
+    const upstream = await fetch(row.deploy_url, {
+      headers: range ? { Range: range } : undefined,
+      redirect: "follow",
+    });
+    if (upstream.status !== 200 && upstream.status !== 206) {
+      console.error("[market/download upstream]", appId, upstream.status);
+      return c.json({ error: `설치파일을 가져오지 못했습니다 (${upstream.status}).` }, 502);
+    }
+
+    // 다운로드 수 — 처음부터 받는 요청만 센다(이어받기·분할 요청으로 부풀지 않도록).
+    // 실패해도 다운로드는 막지 않는다.
+    if (!range || /^bytes=0-/i.test(range.trim())) {
+      c.executionCtx.waitUntil(
+        supabaseRpc(c.env, "market_app_bump_download", { p_app_id: appId }).catch((err) =>
+          console.error("[market/download count]", errMsg(err)),
+        ),
+      );
+    }
+
+    const fileName = downloadFileName(upstream, row.title);
+    const asciiName = fileName.replace(/[^\x20-\x7e]/g, "_");
+    // RFC 5987 — encodeURIComponent 가 남기는 '()*! 도 인코딩해야 filename* 파싱이 깨지지 않는다.
+    const utf8Name = encodeURIComponent(fileName).replace(
+      /['()*!]/g,
+      (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
+    const headers = new Headers({
+      "Content-Type": "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    // 원 서버 헤더는 크기·구간·갱신 정보만 옮긴다(원 URL 이 드러날 수 있는 헤더는 버린다).
+    for (const key of ["Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"]) {
+      const value = upstream.headers.get(key);
+      if (value) headers.set(key, value);
+    }
+    return new Response(upstream.body, { status: upstream.status, headers });
+  } catch (err) {
+    console.error("[market/download]", errMsg(err));
+    return c.json({ error: `다운로드 실패: ${errMsg(err)}` }, 502);
   }
 });
 
@@ -471,17 +612,8 @@ market.patch("/apps/:appId", async (c) => {
 
     const form = await c.req.raw.formData();
 
-    const title = formText(form, "title");
-    if (!title) return c.json({ error: "제목을 입력하세요." }, 400);
-
-    const deployUrl = normalizeUrl(form.get("deployUrl"));
-    if (!deployUrl) {
-      return c.json({ error: "배포 URL 은 http(s) 주소여야 합니다." }, 400);
-    }
-    const repoUrlRaw = formText(form, "repoUrl");
-    if (repoUrlRaw && !normalizeUrl(repoUrlRaw)) {
-      return c.json({ error: "레포 URL 은 http(s) 주소여야 합니다." }, 400);
-    }
+    const parsed = parseAppFields(form);
+    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
 
     const upload = await uploadShotFiles(c.env, bucket, appId, form, uploaded);
     if ("error" in upload) {
@@ -518,17 +650,7 @@ market.patch("/apps/:appId", async (c) => {
     }
 
     const patch = {
-      title,
-      description: formText(form, "description"),
-      deploy_url: deployUrl,
-      repo_url: repoUrlRaw ? normalizeUrl(repoUrlRaw) : null,
-      platform_type: formText(form, "platformType") ?? "웹앱",
-      location: formText(form, "location") === "현장" ? "현장" : "본사",
-      category: formText(form, "category") ?? "웹앱",
-      version: formText(form, "version"),
-      team: formText(form, "team"),
-      owners: formStringArray(form, "owners"),
-      tags: formStringArray(form, "tags"),
+      ...parsed.fields,
       screenshots: shots,
       updated_at: new Date().toISOString(),
     };

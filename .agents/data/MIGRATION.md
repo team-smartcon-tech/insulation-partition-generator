@@ -223,9 +223,12 @@ Approval:
 | 날짜 | 파일/버전 | 변경 요약 | 영향 범위 | 롤백 |
 |---|---|---|---|---|
 | YYYY-MM-DD | `<migration-file>` | `<summary>` | `<tables/apis>` | `<rollback>` |
+| 2026-10-07 | `20261007061356_market_apps_section_distribution.sql` | `market_apps` 에 `section`(construction/cad) · `distribution`(web/download) · `download_count` 추가, `market_app_bump_download` RPC 신설 | `market_apps` / `/api/market/apps*`, 신규 `/api/market/apps/:appId/download` | 이전 Worker 로 되돌린 뒤 RPC·컬럼 3개 drop (CAD 분류·다운로드 수 소실) |
 
 ---
 
 ## 8. Notes
 
-아직 프로젝트별 migration 기록이 없다. 실제 DB 변경이 생기면 이 문서의 checklist와 log를 함께 갱신한다.
+- 운영 DB(`yzercziwazfrjsjnmbhr`)는 공지사항(`announcements`)·스마트폼(`form_*`) 등 **다른 저장소의 앱과 공유**한다. 이 저장소 마이그레이션은 자기 테이블만 건드린다.
+- `20260910000001_elev_sites`, `20260918000001_tc_rental_projects` 는 DB 마이그레이션 기록에 없다(직접 SQL 로 적용된 것으로 보임). 새 마이그레이션은 Supabase MCP `apply_migration` 으로 적용해 기록을 남긴다.
+- 컬럼을 새로 조회하는 Worker 변경이 함께 있으면 **마이그레이션 적용 → Worker 배포** 순서를 지킨다(반대 순서면 PostgREST 가 없는 컬럼 조회로 실패).

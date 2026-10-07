@@ -3,6 +3,7 @@
  * 로그인 후 "/" 에서 도구 목록을 카드로 보여주고, 카드를 누르면 각 도구로 이동한다.
  * 디자인: 프리미엄 다크 네이비 + 중앙 방사형 글로우 (우미 표지 톤) + 다크 글래스 카드.
  * 도구 목록은 features/home/tools.ts(TOOLS)를 원천으로 한다.
+ * 카드는 섹션(시공 도구 · CAD 도구 …)별로 묶고, 카드가 없는 섹션은 제목까지 숨긴다.
  */
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
@@ -14,11 +15,13 @@ import {
   LayoutGrid,
   Eye,
   Heart,
+  Download,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
 import BrandWordmark from "@/components/brand/BrandWordmark";
 import { useMarketApps } from "@/features/market/hooks";
+import { SECTIONS, type SectionId } from "@/features/market/types";
 import { TOOLS, type ToolDef } from "./tools";
 
 /** 게시 권한 role — 최종 판정은 서버(market.ts)가 하고, 여기선 버튼 노출 여부만 본다. */
@@ -51,11 +54,21 @@ interface HomeCard {
   meta: string;
   /** 클릭 시 이동할 내부 경로 (없으면 클릭 불가) */
   href?: string;
-  stats?: { views: number; likes: number };
+  /** 홈 섹션 */
+  section: SectionId;
+  /** 설치형(다운로드) 도구 — 카드 하단 표기가 "다운로드"가 된다 */
+  download?: boolean;
+  /** downloads 는 설치형에만 */
+  stats?: { views: number; likes: number; downloads?: number };
 }
+
+/** DB 값이 모르는 섹션이면(구버전·오타) 첫 섹션으로 — 카드가 홈에서 사라지지 않게 한다 */
+const toSection = (value: string | null | undefined): SectionId =>
+  SECTIONS.find((s) => s.id === value)?.id ?? SECTIONS[0].id;
 
 const toolToCard = (tool: ToolDef): HomeCard => ({
   key: `tool:${tool.id}`,
+  section: toSection(tool.section),
   name: tool.name,
   description: tool.description,
   tags: tool.tags ?? [],
@@ -81,18 +94,28 @@ export default function HomePage() {
   const [query, setQuery] = useState("");
 
   const cards = useMemo(() => {
-    const published = marketApps.map<HomeCard>((app) => ({
-      key: `market:${app.id}`,
-      name: app.title,
-      description: app.description ?? "",
-      tags: app.tags ?? [],
-      icon: LayoutGrid,
-      available: true,
-      thumbnail: app.thumbnail_url,
-      meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 스마트덱",
-      href: `/market/${app.id}`,
-      stats: { views: app.view_count, likes: app.like_count },
-    }));
+    const published = marketApps.map<HomeCard>((app) => {
+      const download = app.distribution === "download";
+      return {
+        key: `market:${app.id}`,
+        name: app.title,
+        description: app.description ?? "",
+        tags: app.tags ?? [],
+        icon: LayoutGrid,
+        available: true,
+        thumbnail: app.thumbnail_url,
+        meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 스마트덱",
+        // 설치형도 카드는 상세로 보낸다(설명·화면을 보고 받도록).
+        href: `/market/${app.id}`,
+        section: toSection(app.section),
+        download,
+        stats: {
+          views: app.view_count,
+          likes: app.like_count,
+          downloads: download ? app.download_count ?? 0 : undefined,
+        },
+      };
+    });
 
     // 같은 이름으로 실제 게시되면 "준비 중" 자리표시자는 감춘다 (줄눈컷팅 등 중복 방지).
     const publishedNames = new Set(published.map((c) => c.name.replace(/\s+/g, "")));
@@ -123,6 +146,15 @@ export default function HomePage() {
         c.tags.some((tag) => tag.toLowerCase().includes(q))
     );
   }, [cards, query]);
+
+  // 섹션별로 묶는다(섹션 안 순서는 위 cards 정렬 그대로). 카드가 없는 섹션은 제목까지 숨긴다.
+  const sections = useMemo(
+    () =>
+      SECTIONS.map((sec) => ({ ...sec, cards: filtered.filter((c) => c.section === sec.id) })).filter(
+        (sec) => sec.cards.length > 0,
+      ),
+    [filtered],
+  );
 
   const availableCount = useMemo(() => cards.filter((c) => c.available).length, [cards]);
 
@@ -302,21 +334,25 @@ export default function HomePage() {
 
       {/* ── 본문 (App Market) ── */}
       <main className="relative mx-auto w-full max-w-[2100px] px-8 pb-14 pt-9">
-        {/* 카테고리 헤더 */}
-        <SectionHeading title="시공 도구" count={filtered.length} />
+        {sections.map((sec, idx) => (
+          <section key={sec.id} className={idx > 0 ? "mt-12" : undefined}>
+            {/* 섹션 헤더 */}
+            <SectionHeading title={sec.label} count={sec.cards.length} />
 
-        {/* 카드 그리드 — 준비 중 도구도 같은 크기 카드로 이어 붙인다 */}
-        <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((card) => (
-            <AppCard
-              key={card.key}
-              card={card}
-              onOpen={() => card.href && navigate(card.href)}
-            />
-          ))}
-        </div>
+            {/* 카드 그리드 — 준비 중 도구도 같은 크기 카드로 이어 붙인다 */}
+            <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {sec.cards.map((card) => (
+                <AppCard
+                  key={card.key}
+                  card={card}
+                  onOpen={() => card.href && navigate(card.href)}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
 
-        {filtered.length === 0 && (
+        {sections.length === 0 && (
           <div className="mt-16 text-center text-[14px] text-slate-400">
             검색 결과가 없습니다.
           </div>
@@ -453,6 +489,12 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
             <Eye className="h-3.5 w-3.5" />
             {card.stats.views}
           </span>
+          {card.stats.downloads !== undefined && (
+            <span className="inline-flex items-center gap-1">
+              <Download className="h-3.5 w-3.5" />
+              {card.stats.downloads}
+            </span>
+          )}
           <span className="inline-flex items-center gap-1">
             <Heart className="h-3.5 w-3.5" />
             {card.stats.likes}
@@ -490,8 +532,12 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
         <span className="truncate text-[12px] font-medium text-slate-400">{card.meta}</span>
         {available ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-bold text-[#0a63b8]">
-            열기
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+            {card.download ? "다운로드" : "열기"}
+            {card.download ? (
+              <Download className="h-4 w-4 transition-transform group-hover:translate-y-0.5" />
+            ) : (
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+            )}
           </span>
         ) : (
           <span className="shrink-0 text-[12px] font-medium text-slate-300">준비 중</span>

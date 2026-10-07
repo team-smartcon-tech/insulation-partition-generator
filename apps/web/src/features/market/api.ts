@@ -67,6 +67,8 @@ function appendAppFields(form: FormData, input: MarketAppInput) {
   form.append("platformType", input.platformType);
   form.append("location", input.location);
   form.append("category", input.category);
+  form.append("section", input.section);
+  form.append("distribution", input.distribution);
   form.append("version", input.version);
   form.append("team", input.team);
   form.append("description", input.description);
@@ -108,6 +110,14 @@ export function updateMarketApp(
     { method: "PATCH", body: form },
     true,
   );
+}
+
+/**
+ * 설치형 다운로드 주소 — Worker 가 설치파일을 받아 흘려보내는 같은 출처 경로.
+ * fetch 가 아니라 <a href> 로 열어 브라우저 다운로드 관리자가 받게 한다(세션 쿠키는 자동 첨부).
+ */
+export function marketDownloadUrl(appId: string) {
+  return `${BASE}/apps/${encodeURIComponent(appId)}/download`;
 }
 
 /** 조회수 +1 (상세 진입 시 1회) */
