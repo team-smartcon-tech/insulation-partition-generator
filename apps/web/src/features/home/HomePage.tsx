@@ -340,7 +340,7 @@ export default function HomePage() {
             <SectionHeading title={sec.label} count={sec.cards.length} />
 
             {/* 카드 그리드 — 준비 중 도구도 같은 크기 카드로 이어 붙인다 */}
-            <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {sec.cards.map((card) => (
                 <AppCard
                   key={card.key}

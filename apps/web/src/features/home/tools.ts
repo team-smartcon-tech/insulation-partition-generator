@@ -70,6 +70,8 @@ export const TOOLS: ToolDef[] = [
     icon: FileSpreadsheet,
     status: "available",
     tags: ["엑셀", "양식", "문서"],
+    // 맨 뒤 — sortLast 도구끼리는 TOOLS 순서를 따르므로 TC/HOIST 다음에 온다
+    sortLast: true,
   },
   // 빈 자리표시자 카드는 두지 않는다 — 홈은 "준비 중" 섹션에 컴팩트 타일로만 노출한다.
 ];
