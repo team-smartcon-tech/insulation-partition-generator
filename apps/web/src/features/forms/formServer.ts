@@ -192,7 +192,7 @@ export async function fetchTaxonomies(): Promise<Taxonomy[]> {
 }
 
 /**
- * 코드표 한 벌을 서버에 올린다. **본사 관리자만** 된다(서버가 거절한다).
+ * 코드표 한 벌을 서버에 올린다. 로그인한 누구나 된다(2026-10-13 제약을 없앴다).
  * 바뀌기 전 것은 서버가 이력에 쌓아 두므로, 잘못 올려도 되돌릴 수 있다.
  */
 export async function pushTaxonomy(taxonomy: Taxonomy, sortOrder = 0): Promise<Taxonomy> {
@@ -210,7 +210,7 @@ export async function pushTaxonomy(taxonomy: Taxonomy, sortOrder = 0): Promise<T
   return toTaxonomy(row);
 }
 
-/** 코드표 한 벌을 서버에서 지운다. **본사 관리자만** 된다. 그 코드표의 서류는 "코드 없는 서류"가 된다. */
+/** 코드표 한 벌을 서버에서 지운다. 로그인한 누구나 된다. 그 코드표의 서류는 "코드 없는 서류"가 된다. */
 export const deleteTaxonomy = (id: string) =>
   api<{ ok: true }>(`/taxonomy/${encodeURIComponent(id)}`, { method: "DELETE" });
 

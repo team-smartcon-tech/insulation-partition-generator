@@ -422,12 +422,14 @@ forms.get("/taxonomy", async (c) => {
 });
 
 /**
- * PUT /api/forms/taxonomy — 코드표 올리기(본사 관리자만).
+ * PUT /api/forms/taxonomy — 코드표 올리기(로그인한 누구나).
  * 바꾸기 전 것은 이력에 쌓아 둔다 — 잘못 올렸을 때 되돌릴 수 있어야 한다.
+ *
+ * 예전에는 등급(최고·시스템 관리자)만 됐다. 본사 관리자 명단에 든 사람도 막혀 불편하다고
+ * 사용자가 제약을 없앴다(2026-10-13). 누가 바꿨는지는 이력의 `replaced_by` 에 남는다.
  */
 forms.put("/taxonomy", async (c) => {
   const user = currentUser(c);
-  if (!isAdmin(user)) return c.json({ error: "코드표는 본사 관리자만 바꿀 수 있습니다." }, 403);
   try {
     const body = (await c.req.json()) as {
       id?: string;
@@ -508,7 +510,7 @@ forms.put("/taxonomy", async (c) => {
 });
 
 /**
- * DELETE /api/forms/taxonomy/:id — 코드표 지우기(본사 관리자만).
+ * DELETE /api/forms/taxonomy/:id — 코드표 지우기(로그인한 누구나 — 위 PUT 과 같은 이유).
  *
  * 화면이 서버 코드표를 받아 오므로, 서버에서 지우지 않으면 다음에 열 때 되살아난다.
  * 지우기 전 것은 이력에 쌓는다. 그 코드표의 서류는 지우지 않는다 — 외래키가 코드표 번호만
@@ -516,7 +518,6 @@ forms.put("/taxonomy", async (c) => {
  */
 forms.delete("/taxonomy/:id", async (c) => {
   const user = currentUser(c);
-  if (!isAdmin(user)) return c.json({ error: "코드표는 본사 관리자만 지울 수 있습니다." }, 403);
   const id = c.req.param("id");
   try {
     const before = await supabaseRest(c.env, "GET", `/form_taxonomy?id=eq.${encodeURIComponent(id)}&select=*`);
