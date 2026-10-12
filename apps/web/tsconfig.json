@@ -2,6 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
+    // tests/*.test.mjs 는 Node 의 TypeScript 지원으로 .ts 를 직접 부른다. Node 의 ESM
+    // 해석은 확장자를 생략할 수 없어, 그 경로에 걸리는 모듈은 "./x.ts" 로 적어야 한다.
+    // Vite 도 그대로 해석하므로 화면 쪽에는 영향이 없다.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "baseUrl": ".",

@@ -7,7 +7,7 @@
  *   3) App.tsx 에 <Route path="/tools/xxx"> 연결
  * → 홈(HomePage)은 이 배열을 읽어 카드를 자동으로 그린다.
  */
-import { Square, TowerControl, type LucideIcon } from "lucide-react";
+import { Square, TowerControl, FileSpreadsheet, type LucideIcon } from "lucide-react";
 import type { SectionId } from "@/features/market/types";
 
 export type ToolStatus = "available" | "comingSoon";
@@ -60,6 +60,17 @@ export const TOOLS: ToolDef[] = [
     tags: ["타워크레인", "호이스트", "발주의뢰서"],
     thumbnail: "/brand/logo-tc-rental.svg",
     logo: "/brand/mark-tc-rental.svg",
+    sortLast: true,
+  },
+  {
+    id: "forms",
+    name: "스마트폼(Smart Forms)",
+    description: "우미건설 사내 서식을 한곳에. 필요한 양식을 찾고, 그 자리에서 채우세요.",
+    path: "/tools/forms",
+    icon: FileSpreadsheet,
+    status: "available",
+    tags: ["엑셀", "양식", "문서"],
+    // 맨 뒤 — sortLast 도구끼리는 TOOLS 순서를 따르므로 TC/HOIST 다음에 온다
     sortLast: true,
   },
   // 빈 자리표시자 카드는 두지 않는다 — 홈은 "준비 중" 섹션에 컴팩트 타일로만 노출한다.
