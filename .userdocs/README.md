@@ -12,5 +12,6 @@
 | `bim-ux-rules.md` | BIM/desktop/canvas 앱에서 가져온 UX 규칙 원본. 공통 표준은 `.agents/ui/UX_RULES.md`를 우선 |
 | `harness-engineering/` | Commands, Skills, Rules, Hooks 기반 에이전트 하네스 설계 참고 자료 |
 | `spicy-hatching-axolotl.md` | 작업 과정에서 생성된 참고 메모. 템플릿 핵심 규칙은 아님 |
+| `우미건설 코딩 에이전트 템플릿 컨텍스트 엔지니어링 평가 보고서.md` | 템플릿을 Claude 5 세대 컨텍스트 엔지니어링 기준으로 평가한 참고 보고서(2026-07-30, 구조 기반 추정). 규칙 아님 |
 
 핵심 규칙은 항상 `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `.agents/` 문서를 우선한다.

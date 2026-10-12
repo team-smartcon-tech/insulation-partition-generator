@@ -36,3 +36,6 @@ tmp-preview.html
 
 # 엑셀이 파일을 열어둘 때 만드는 잠금 파일
 ~$*
+
+# Supabase CLI 가 연결한 프로젝트 정보를 적어 두는 곳(로컬 전용)
+supabase/.temp/
