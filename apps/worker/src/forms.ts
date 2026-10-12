@@ -73,10 +73,20 @@ function objectPath(kind: string, id: string, fileName: string): string {
  */
 async function signedUploadUrl(env: Env, path: string): Promise<{ url: string; token: string }> {
   const apiKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  /*
+   * **덮어쓰기를 켠다.** 같은 서류를 다시 올릴 때(따라 올리기와 "빠진 것 다시 올리기"가 겹칠 때)
+   * 파일 자리가 이미 있으면 `KeyAlreadyExists(409)` 로 거절당해 올리기가 통째로 실패했다.
+   * 같은 서류의 같은 자리이므로 덮어쓰는 것이 맞다.
+   */
   const res = await fetch(`${env.SUPABASE_URL}/storage/v1/object/upload/sign/${bucket(env)}/${path}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, apikey: apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      apikey: apiKey,
+      "Content-Type": "application/json",
+      "x-upsert": "true",
+    },
+    body: JSON.stringify({ upsert: true }),
   });
   if (!res.ok) throw new Error(`올리기 주소 발급 실패 (${res.status}): ${await res.text()}`);
   const data = (await res.json()) as { url?: string; token?: string };
