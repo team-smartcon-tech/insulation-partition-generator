@@ -69,6 +69,9 @@ import AttachmentPanel from "./AttachmentPanel";
 import ServerSyncBanner from "./ServerSyncBanner";
 import ReviewPage from "./ReviewPage";
 import FeedbackPage from "./FeedbackPage";
+import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
+import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
+import ScrollTopButton from "./ScrollTopButton";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -207,10 +210,7 @@ type LoadState =
  * **배포 양식함과 본사 점검은 본사 관리자만 본다**(2026-09-30 사용자 결정). 현장 사람에게
  * 회사 원본 양식함과 남의 현장 점검 화면까지 보이면, 자기 일과 상관없는 화면에서 헤맨다.
  */
-type Space = "home" | "library" | "site" | "review" | "feedback";
-
-/** 본사 관리자만 들어갈 수 있는 곳 */
-const HQ_ONLY: ReadonlySet<Space> = new Set<Space>(["library", "review"]);
+// 메뉴 항목·권한·모양은 `SpaceNav.tsx` 한곳에 둔다(왼쪽 메뉴와 좁은 화면 탭이 같은 목록을 쓴다).
 
 /**
  * 열어 둔 서류를 **아래에 펼쳐 보여 주는** 곳.
@@ -268,6 +268,10 @@ const SCALES: { value: FormScale; label: string }[] = [
 const LAST_SITE_KEY = "ipg-forms:last-site";
 /** 마지막으로 보던 곳(배포 양식함 / 현장 서류함) */
 const SPACE_KEY = "ipg-forms:space";
+/** 왼쪽 메뉴를 접어 두었나 */
+const NAV_COLLAPSED_KEY = "ipg-forms:nav-collapsed";
+/** 열어 둔 서류 탭 */
+const OPEN_DOCS_KEY = "ipg-forms:open-docs";
 const SPARSE_TEXT_CELLS = 3;
 const SPARSE_MIN_AREA = 50;
 /** 글자를 칠 때마다 저장하면 과하다. 손을 멈춘 뒤 이만큼 있다가 저장한다. */
@@ -312,6 +316,27 @@ export default function FormsPage() {
   /** 지금 보는 곳. 원본(배포 양식함)과 작성본(현장 서류함)을 섞어 보여 주지 않는다. */
   // 들어오면 홈에서 시작한다 — 오늘 내 차례인 결재와 알림을 먼저 본다(사용자와 정한 흐름).
   const [space, setSpaceState] = useState<Space>("home");
+  /** 왼쪽 메뉴를 접었나(이 브라우저에만 기억) — 넓은 양식을 볼 때 가로를 벌기 위한 것. */
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(NAV_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  /**
+   * 열어 둔 서류 탭(아크로뱃처럼). 사람마다 다른 것이라 **이 브라우저에만** 남긴다.
+   * 지워진 서류는 목록을 다시 읽을 때 조용히 떨어져 나간다.
+   */
+  const [openDocs, setOpenDocs] = useState<OpenDoc[]>(() => {
+    try {
+      const raw = localStorage.getItem(OPEN_DOCS_KEY);
+      const parsed = raw ? (JSON.parse(raw) as OpenDoc[]) : [];
+      return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item.id === "string") : [];
+    } catch {
+      return [];
+    }
+  });
   /** 한 칸에 배포 양식이 여럿일 때 고르는 창 */
   const [slotWrite, setSlotWrite] = useState<{ slotLabel: string; choices: SlotWriteChoice[] } | null>(null);
   const [slotWriting, setSlotWriting] = useState(false);
@@ -404,6 +429,60 @@ export default function FormsPage() {
     }
   }
 
+  /** 탭 목록이 바뀌면 이 브라우저에 적어 둔다. */
+  const rememberOpenDocs = useCallback((list: OpenDoc[]) => {
+    setOpenDocs(list);
+    try {
+      if (list.length === 0) localStorage.removeItem(OPEN_DOCS_KEY);
+      else localStorage.setItem(OPEN_DOCS_KEY, JSON.stringify(list));
+    } catch {
+      // 저장이 막힌 브라우저 — 이번 화면에서만 남는다.
+    }
+  }, []);
+
+  /**
+   * 탭을 닫는다. 지금 보던 것을 닫으면 **옆 탭을 대신 연다**(아크로뱃과 같다).
+   * 남은 탭이 없으면 서류를 닫고 목록만 남긴다.
+   */
+  async function closeDocTab(id: string) {
+    const { list, next } = closeOpenDoc(openDocs, id);
+    rememberOpenDocs(list);
+    if (state.status !== "ready" || state.id !== id) return;
+    if (next) await openStored(next.id);
+    else setState({ status: "idle" });
+  }
+
+  /*
+   * 서류가 열리면 탭에 남긴다 — **어느 길로 열렸든**(목록에서 누르기, 올리자마자 열기, 홈에서
+   * 결재할 장으로 가기). 여는 곳이 여럿이라 한 군데에서만 챙기면 빠진다(실제로 빠졌다).
+   */
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    const doc = { id: state.id, title: state.title || state.fileName };
+    setOpenDocs((list) => {
+      const next = addOpenDoc(list, doc);
+      if (next === list) return list;
+      try {
+        localStorage.setItem(OPEN_DOCS_KEY, JSON.stringify(next));
+      } catch {
+        // 저장이 막힌 브라우저 — 이번 화면에서만 남는다.
+      }
+      return next;
+    });
+  }, [state]);
+
+  function toggleNav() {
+    setNavCollapsed((on) => {
+      const next = !on;
+      try {
+        localStorage.setItem(NAV_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // 저장이 막힌 브라우저 — 이번 화면에서만 유지된다.
+      }
+      return next;
+    });
+  }
+
   function setSpace(next: Space) {
     // 본사 전용 화면은 본사만. 화면에서 단추를 감추지만, 다른 길로 들어오는 것도 여기서 막는다.
     if (HQ_ONLY.has(next) && !isHq) return;
@@ -462,6 +541,28 @@ export default function FormsPage() {
     try {
       const list = await listForms();
       setForms(list);
+      /*
+       * 지워진 서류의 탭은 조용히 떨어뜨린다. 남겨 두면 눌렀을 때 "이미 지워졌습니다"만 뜬다.
+       * 이름이 바뀐 것도 여기서 맞춘다.
+       */
+      setOpenDocs((tabs) => {
+        const alive = tabs
+          .map((tab) => {
+            const found = list.find((form) => form.id === tab.id);
+            return found ? { id: tab.id, title: found.title || found.fileName } : null;
+          })
+          .filter((tab): tab is OpenDoc => tab !== null);
+        const same =
+          alive.length === tabs.length && alive.every((tab, at) => tab.id === tabs[at].id && tab.title === tabs[at].title);
+        if (same) return tabs;
+        try {
+          if (alive.length === 0) localStorage.removeItem(OPEN_DOCS_KEY);
+          else localStorage.setItem(OPEN_DOCS_KEY, JSON.stringify(alive));
+        } catch {
+          // 저장이 막힌 브라우저 — 이번 화면에서만 남는다.
+        }
+        return alive;
+      });
       return list;
     } catch (error) {
       setStorageWarning(
@@ -2151,12 +2252,22 @@ export default function FormsPage() {
             </div>
           )
         }
+        /* 넓은 화면에서는 왼쪽 메뉴가 있으니 위 탭은 좁은 화면에서만 보인다. */
         subbar={<SpaceTabs space={space} onChange={setSpace} isHq={isHq} />}
       />
 
+      <div className="flex w-full items-start">
+        <SpaceSidebar
+          space={space}
+          onChange={setSpace}
+          isHq={isHq}
+          collapsed={navCollapsed}
+          onToggleCollapsed={toggleNav}
+        />
+
       {/* 넓은 양식(21열짜리 대장 등)이 있어 폭을 넉넉히 잡는다. 좁으면 "가로 맞춤"
           배율이 그만큼 더 줄여 버려 글자가 작아진다. */}
-      <main className="relative mx-auto w-full max-w-[2100px] px-8 pb-14 pt-9">
+      <main className="relative mx-auto w-full min-w-0 max-w-[2100px] px-8 pb-14 pt-9">
         {/* 파일 고르기 상자는 보이지 않는다. 목록의 "양식 올리기"가 이걸 누른다. */}
         <input
           ref={fileInputRef}
@@ -2179,6 +2290,22 @@ export default function FormsPage() {
           이 브라우저에만 있는 자료를 서버로 옮기라고 알린다. 서버에 못 닿거나 옮길 것이 없으면
           스스로 사라진다.
         */}
+        {/*
+          열어 둔 서류 탭(아크로뱃처럼) — 서류함 두 곳에서만. 홈은 현황을 보는 자리라 띄우지 않는다
+          (사용자 요청, 2026-10-06). 탭 목록은 지우지 않는다 — 서류함으로 가면 그대로 다시 보인다.
+        */}
+        {(space === "library" || space === "site") && (
+          <OpenDocTabs
+            docs={openDocs}
+            activeId={state.status === "ready" ? state.id : null}
+            onOpen={(id) => void handleOpen(id)}
+            onClose={(id) => void closeDocTab(id)}
+          />
+        )}
+
+        {/* 서류는 목록 아래에 펼쳐진다 — 목록으로 돌아갈 길. */}
+        <ScrollTopButton />
+
         <ServerSyncBanner localCount={forms.length} />
 
         {storageWarning && (
@@ -3043,76 +3170,11 @@ export default function FormsPage() {
           </section>
         )}
       </main>
+      </div>
     </SmartBackground>
   );
 }
 
-/**
- * 헤더 아래 얇은 줄의 [배포 양식함 | 현장 서류함] 탭.
- *
- * 로고 옆에 끼우면 헤더가 좁아져 조잡해 보여서(사용자와 시안으로 비교) 아래 줄로 내렸다.
- * 밑줄 탭으로 둔 것은 목록 안의 1차 분류 탭(서류철 모양)과 겹쳐 보이지 않게 하려는 것이다.
- */
-function SpaceTabs({
-  space,
-  onChange,
-  isHq,
-}: {
-  space: Space;
-  onChange: (space: Space) => void;
-  /** 본사 관리자인가 — 아니면 본사 전용 탭은 아예 그리지 않는다. */
-  isHq: boolean;
-}) {
-  const all: { value: Space; label: string; icon: typeof BookOpen; title: string; hq?: boolean }[] = [
-    { value: "home", label: "홈", icon: House, title: "내 결재함·서류 진척도·알림" },
-    {
-      value: "library",
-      label: "배포 양식함",
-      icon: BookOpen,
-      title: "회사가 배포한 원본 양식 — 본사 관리자만 보입니다",
-      hq: true,
-    },
-    { value: "site", label: "현장 서류함", icon: FolderOpen, title: "현장별로 작성하는 서류" },
-    {
-      value: "review",
-      label: "본사 점검",
-      icon: ClipboardCheck,
-      title: "현장이 올린 서류를 서버에서 바로 보고 확인·보완 요청 — 본사 관리자만 보입니다",
-      hq: true,
-    },
-    {
-      value: "feedback",
-      label: "오류·개선 의견",
-      icon: MessageSquare,
-      title: "쓰다가 이상한 것·이랬으면 하는 것을 적는 곳 — 모든 직원이 함께 봅니다",
-    },
-  ];
-  const tabs = all.filter((tab) => !tab.hq || isHq);
-  return (
-    <nav className="flex h-11 items-stretch gap-6" aria-label="양식함 고르기">
-      {tabs.map(({ value, label, icon: Icon, title }) => {
-        const active = space === value;
-        return (
-          <button
-            key={value}
-            type="button"
-            onClick={() => onChange(value)}
-            aria-current={active ? "page" : undefined}
-            title={title}
-            className={
-              "-mb-px inline-flex items-center gap-1.5 border-b-2 text-sm font-semibold transition " +
-              (active
-                ? "border-blue-600 text-blue-700"
-                : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800")
-            }
-          >
-            <Icon size={15} aria-hidden /> {label}
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
 
 /**
  * 폴더 이름 목록을 붙여넣어 코드표를 한 번에 채우는 상자.
