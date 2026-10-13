@@ -8,6 +8,7 @@ import { DEFAULT_THEME, excelColor, parseThemeXml } from "./colors.ts";
 import type { ThemeColors } from "./colors.ts";
 import { parseWorkbookShapes } from "./formShapes.ts";
 import { readZipIndex, readZipText } from "./zip.ts";
+import { formatValue } from "./numberFormat.ts";
 import type {
   FormBorder,
   FormBorderStyle,
@@ -25,7 +26,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 15; // 15: 칸 들여쓰기(indent)·세로 글자(textRotation)
+export const PARSER_VERSION = 16; // 16: 숫자·날짜 표시 형식, 오류값 글자
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -103,6 +104,34 @@ function cellText(value: unknown): string {
     if ("error" in record) return "";
   }
   return "";
+}
+
+/**
+ * 칸에 **보이는** 글자 — 숫자·날짜에는 엑셀 표시 형식을 입힌다(100%, 58,607,000, 22년 4월).
+ * 수식은 계산해 둔 결과를, 오류 결과(#DIV/0! 등)는 그 글자를 보여 준다 — 엑셀도 그렇게 보인다.
+ */
+function displayText(value: unknown, numFmt: string | undefined): string {
+  if (typeof value === "number" || value instanceof Date) return formatValue(value, numFmt);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.error === "string") return record.error;
+    if ("result" in record) {
+      const result = record.result;
+      if (result && typeof result === "object" && typeof (result as { error?: unknown }).error === "string") {
+        return (result as { error: string }).error;
+      }
+      return displayText(result, numFmt);
+    }
+  }
+  return cellText(value);
+}
+
+/** 결과가 빠진 수식 값에 원본의 결과를 붙인다. */
+function withSavedResult(value: unknown, saved: unknown): unknown {
+  if (saved === undefined || !value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (!("formula" in record || "sharedFormula" in record) || record.result !== undefined) return value;
+  return { ...record, result: saved };
 }
 
 function readBorder(side: unknown, theme: ThemeColors): FormBorder | undefined {
@@ -377,6 +406,8 @@ export function parseFormSheet(
   worksheet: any,
   workbook?: any,
   theme: ThemeColors = DEFAULT_THEME,
+  /** 칸 주소 → 원본에 저장된 수식 결과(exceljs 가 버린 0 을 채운다) */
+  formulaResults?: Map<string, unknown>,
 ): FormSheet {
   // 1) 실제로 내용이 있는 범위를 먼저 구한다.
   let maxRow = 0;
@@ -472,7 +503,10 @@ export function parseFormSheet(
         col,
         rowSpan,
         colSpan,
-        text: cellText(cell.value),
+        text: displayText(
+          withSavedResult(cell.value, formulaResults?.get(cell.address)),
+          typeof cell.numFmt === "string" ? cell.numFmt : undefined,
+        ),
         // 보호가 안 걸린 시트에서는 잠금 표시를 달지 않는다(전부 고칠 수 있다).
         ...(sheetLocked && !unlocked ? { locked: true } : {}),
         // 수식이 있는 칸 — 줄을 끼울 때 범위가 어긋날 수 있다고 알리는 데 쓴다.
@@ -564,6 +598,51 @@ async function readTheme(data: ArrayBuffer): Promise<ThemeColors> {
   }
 }
 
+/**
+ * 수식 칸의 저장된 결과를 원본 압축에서 직접 읽는다(시트 이름 → 칸 주소 → 결과).
+ *
+ * exceljs 는 결과가 **0** 인 수식(`<v>0</v>`)의 결과를 버린다 — 0 이 거짓으로 걸러진다. 그래서 소계·합계의
+ * 0, 0.00 %, 회계 형식의 "-" 가 모두 빈칸으로 보였다(QA-8.6-1 등). 결과가 빠진 칸만 이것으로 채운다.
+ */
+async function readFormulaResults(data: ArrayBuffer): Promise<Map<string, Map<string, unknown>>> {
+  const result = new Map<string, Map<string, unknown>>();
+  const index = readZipIndex(data);
+  const workbookXml = await readZipText(data, index, "xl/workbook.xml");
+  const relsXml = await readZipText(data, index, "xl/_rels/workbook.xml.rels");
+  if (!workbookXml || !relsXml) return result;
+  const targets = new Map<string, string>();
+  for (const rel of relsXml.match(/<Relationship\b[^>]*\/?>/g) ?? []) {
+    const id = /\bId="([^"]+)"/.exec(rel)?.[1];
+    const target = /\bTarget="([^"]+)"/.exec(rel)?.[1];
+    if (id && target) targets.set(id, target);
+  }
+  const unescape = (text: string) =>
+    text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+  for (const sheetTag of workbookXml.match(/<sheet\b[^>]*\/?>/g) ?? []) {
+    const name = /\bname="([^"]*)"/.exec(sheetTag)?.[1];
+    const target = targets.get(/\br:id="([^"]+)"/.exec(sheetTag)?.[1] ?? "");
+    if (!name || !target) continue;
+    const path = target.startsWith("/") ? target.slice(1) : `xl/${target.replace(/^\.\//, "")}`;
+    const xml = await readZipText(data, index, path);
+    if (!xml) continue;
+    const cells = new Map<string, unknown>();
+    for (const match of xml.matchAll(/<c\b([^>]*[^/>])>([\s\S]*?)<\/c>/g)) {
+      const body = match[2];
+      if (!body.includes("<f")) continue;
+      const v = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+      const address = /\br="([A-Z]+\d+)"/.exec(match[1])?.[1];
+      if (v === undefined || !address) continue;
+      const type = /\bt="([^"]+)"/.exec(match[1])?.[1] ?? "n";
+      cells.set(
+        address,
+        type === "e" ? { error: v } : type === "str" ? unescape(v) : type === "b" ? v === "1" : Number(v),
+      );
+    }
+    if (cells.size > 0) result.set(unescape(name), cells);
+  }
+  return result;
+}
+
 /** .xlsx 파일 내용을 시트 목록으로 바꾼다. 시트가 여러 개면 전부 돌려준다. */
 export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]> {
   // 브라우저용 exceljs 는 UMD 번들이라 default 로 감싸질 때와 아닐 때가 갈린다.
@@ -573,8 +652,11 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
   // exceljs 가 버퍼를 소유·이관해 비워 버려도 도형을 읽을 수 있게 복사본을 넘긴다.
   await workbook.xlsx.load(data.slice(0));
   const theme = await readTheme(data);
+  // 결과를 잃은 수식 칸(결과가 0 인 것)은 원본의 결과로 채운다. exceljs 에 되돌려 넣어도 0 은 또 버려져
+  // 따로 넘긴다. 못 읽으면 빈칸으로 둔다 — 양식을 못 여는 것보다 가볍다.
+  const saved = await readFormulaResults(data).catch(() => new Map<string, Map<string, unknown>>());
   const sheets: FormSheet[] = workbook.worksheets.map((worksheet: any) =>
-    parseFormSheet(worksheet, workbook, theme),
+    parseFormSheet(worksheet, workbook, theme, saved.get(worksheet.name)),
   );
 
   // 도형은 exceljs 가 내주지 않으므로 원본 압축을 직접 열어 읽는다.
