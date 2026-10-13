@@ -12,7 +12,7 @@
  * 부서 탭은 **주관** 부서로 거른다. 협조까지 불을 켜면 서식 한 장에 불이 셋 붙어 흐려진다.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, FileSpreadsheet, Search, Upload } from "lucide-react";
+import { ChevronDown, Download, FileSpreadsheet, Search, Upload } from "lucide-react";
 import {
   QMP_CHAPTERS,
   QMP_DEPTS,
@@ -40,6 +40,10 @@ interface Props {
   canWrite?: (code: string) => boolean;
   /** 배포 양식함: 양식 올리기 */
   onUpload?: () => void;
+  /** 현장 서류함: 아직 없는 서식의 배포 양식을 한 번에 가져올 수(양식 수) */
+  importCount?: number;
+  /** 현장 서류함: [전체 가져오기] */
+  onImportAll?: () => void;
   busy?: boolean;
   /** 도구 줄 오른쪽에 더 붙일 것(현장 서류함의 "배포 양식에서 가져오기" 등) */
   toolbarExtra?: ReactNode;
@@ -77,6 +81,8 @@ export default function QmpBoard({
   onWrite,
   canWrite,
   onUpload,
+  importCount = 0,
+  onImportAll,
   busy,
   toolbarExtra,
 }: Props) {
@@ -159,6 +165,21 @@ export default function QmpBoard({
             {library ? "빠진 양식만" : "아직 안 끝난 것만"}
           </button>
           {toolbarExtra}
+          {onImportAll && (
+            <button
+              type="button"
+              onClick={onImportAll}
+              disabled={busy || importCount === 0}
+              title={
+                importCount === 0
+                  ? "가져올 양식이 없습니다 — 배포 양식이 있는 서식은 이미 이 현장 서류함에 있습니다"
+                  : `아직 이 현장에 없는 서식의 배포 양식 ${importCount}종을 한 번에 만듭니다`
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              <Download size={13} /> {busy ? "만드는 중..." : `전체 가져오기${importCount > 0 ? ` (${importCount}종)` : ""}`}
+            </button>
+          )}
           {onUpload && (
             <button
               type="button"

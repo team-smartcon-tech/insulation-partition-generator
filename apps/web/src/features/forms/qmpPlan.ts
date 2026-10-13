@@ -391,3 +391,34 @@ export function qmpLibraryStates<T extends { id: string; sheetNames: string[]; u
   }
   return result;
 }
+
+/**
+ * [전체 가져오기]로 만들 배포 양식들 — 이 현장에 아직 없는 서식이 든 양식만, 계획서 순서대로.
+ *
+ * - 현장이 쓸 서식(기준 문서 제외)이 하나라도 빠진 양식만 고른다. PROCESS 흐름도만 든 양식까지
+ *   가져오면 현장 서류함이 쓸 일 없는 사본으로 찬다.
+ * - 이미 그 양식으로 만든 서류가 있으면 건너뛴다(같은 사본이 둘 생기지 않게).
+ * - 서식마다 가장 최근 양식을 쓴다(`qmpLibraryStates` 와 같은 기준).
+ */
+export function templatesToImport<T extends { id: string; sheetNames: string[]; uploadedAt: number }>(
+  templates: T[],
+  siteDocs: { sheetNames: string[]; templateId?: string }[],
+): string[] {
+  const library = qmpLibraryStates(templates);
+  const have = new Set<string>();
+  for (const doc of siteDocs) for (const name of doc.sheetNames) {
+    const code = qaCodeOf(name);
+    if (code) have.add(code);
+  }
+  const copied = new Set(siteDocs.map((doc) => doc.templateId).filter(Boolean));
+  const picked: string[] = [];
+  for (const sec of QMP_SECTIONS) {
+    for (const form of sec.forms) {
+      if (form.reference || have.has(form.code)) continue;
+      const templateId = library.get(form.code)?.docId;
+      if (!templateId || copied.has(templateId) || picked.includes(templateId)) continue;
+      picked.push(templateId);
+    }
+  }
+  return picked;
+}

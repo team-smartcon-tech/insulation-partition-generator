@@ -118,3 +118,19 @@ test('배포 양식함 — 서식마다 그 시트가 든 가장 최근 양식, 
   assert.equal(hasQmpSheet({ sheetNames: ['작업일보'] }), false);
   assert.equal(hasQmpSheet({ sheetNames: ['표지', 'QA-8.6-1'] }), true);
 });
+
+test('[전체 가져오기] — 빠진 서식이 든 양식만, 이미 만든 양식·기준 문서만 든 양식은 빼고, 계획서 순서로', async () => {
+  const { templatesToImport } = await import('../apps/web/src/features/forms/qmpPlan.ts');
+  const templates = [
+    { id: 't86', sheetNames: ['QA-8.6-1', 'QA-8.6-2'], uploadedAt: 1 },
+    { id: 't42', sheetNames: ['QA-4.2-1', 'QA-4.2-2'], uploadedAt: 1 },
+    { id: 't52', sheetNames: ['QA-5.2-1', 'QA-5.2-2'], uploadedAt: 1 },
+    { id: 'tproc', sheetNames: ['QA-9.3-1'], uploadedAt: 1 },
+    { id: 't72', sheetNames: ['QA-7.2-2'], uploadedAt: 1 },
+  ];
+  const siteDocs = [
+    { sheetNames: ['QA-5.2-1', 'QA-5.2-2'], templateId: 'other' },
+    { sheetNames: ['작업일보'], templateId: 't72' },
+  ];
+  assert.deepEqual(templatesToImport(templates, siteDocs), ['t42', 't86']);
+});

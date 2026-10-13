@@ -73,7 +73,7 @@ import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
-import { hasQmpSheet, qmpLibraryStates, qmpStates, templateForCode } from "./qmpPlan";
+import { hasQmpSheet, qmpLibraryStates, qmpStates, templateForCode, templatesToImport } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -2396,6 +2396,22 @@ export default function FormsPage() {
                 if (template) void handleWrite(template.id, siteId);
               }}
               toolbarExtra={importButton}
+              importCount={templatesToImport(templates, siteForms).length}
+              busy={slotWriting}
+              onImportAll={() => {
+                const ids = templatesToImport(templates, siteForms);
+                if (ids.length === 0) return;
+                if (
+                  !window.confirm(
+                    `“${writeSite?.name ?? "현장"}” 서류함에 아직 없는 서식의 배포 양식 ${ids.length}종을 한 번에 만듭니다.
+` +
+                      "이미 만든 서류는 그대로 둡니다. 진행할까요?",
+                  )
+                ) {
+                  return;
+                }
+                void handleWriteMany(ids);
+              }}
             />
           ) : taxonomies.length > 0 ? (
             <FormTree
