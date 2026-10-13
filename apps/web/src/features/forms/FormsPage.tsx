@@ -2403,8 +2403,7 @@ export default function FormsPage() {
                 if (ids.length === 0) return;
                 if (
                   !window.confirm(
-                    `“${writeSite?.name ?? "현장"}” 서류함에 아직 없는 서식의 배포 양식 ${ids.length}종을 한 번에 만듭니다.
-` +
+                    `“${writeSite?.name ?? "현장"}” 서류함에 아직 없는 서식의 배포 양식 ${ids.length}종을 한 번에 만듭니다.\n` +
                       "이미 만든 서류는 그대로 둡니다. 진행할까요?",
                   )
                 ) {
