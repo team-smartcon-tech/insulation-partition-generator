@@ -12,7 +12,7 @@
  */
 import { hexToRgb, hslToRgb, rgbToHex, rgbToHsl, schemeColor, DEFAULT_THEME } from "./colors.ts";
 import type { ThemeColors } from "./colors.ts";
-import type { FormShape, FormShapeKind, FormShapePath } from "./types";
+import type { FormShape, FormShapeKind, FormShapePath, FormTextRun } from "./types";
 import { readZipIndex, readZipText } from "./zip.ts";
 
 /** 엑셀 도면 좌표 단위(EMU) → px. 914400 EMU = 1인치, 화면은 96dpi. */
@@ -256,6 +256,44 @@ function readText(txBody: string | undefined): string {
   // 보이지 않는 공백(줄바꿈 없는 공백   등)만 든 도형은 글자 없는 도형이다. 그대로 두면
   // 합치기 규칙이 "글자가 있다"로 보고 건너뛰어, 마름모 위에 글자 상자가 겹쳐 그려진다.
   return text.trim() === "" ? "" : text;
+}
+
+/**
+ * 도형 글자의 부분 서식 조각. 마름모 안 "검토 및 승인" 아래 작은 "(현장소장/건설사업관리)" 처럼
+ * 줄마다 크기·굵기가 다르면, 첫 조각 서식 하나로 그려서는 작은 줄이 커져 도형 밖으로 넘친다(8.7·8.8).
+ */
+function readTextRuns(txBody: string | undefined, ctx: Context): FormTextRun[] | undefined {
+  if (!txBody) return undefined;
+  const runs: FormTextRun[] = [];
+  const paragraphs = findBlocks(txBody, "p");
+  paragraphs.forEach((paragraph, index) => {
+    for (const piece of childElements(paragraph)) {
+      if (piece.name === "br") {
+        runs.push({ text: "\n" });
+        continue;
+      }
+      if (piece.name !== "r" && piece.name !== "fld") continue;
+      const t = findBlocks(piece.xml, "t")[0] ?? "";
+      const rPr = findBlocks(piece.xml, "rPr")[0] ?? "";
+      const size = Number(ownAttr(rPr, "sz") ?? 0);
+      const color = rPr ? readColor(rPr, ctx) : undefined;
+      const underline = ownAttr(rPr, "u");
+      runs.push({
+        text: unescapeXml(t.replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "")),
+        ...(ownAttr(rPr, "b") === "1" ? { bold: true } : {}),
+        ...(ownAttr(rPr, "i") === "1" ? { italic: true } : {}),
+        ...(underline && underline !== "none" ? { underline: true } : {}),
+        ...(size > 0 ? { fontSize: size / 100 } : {}),
+        ...(color ? { color } : {}),
+      });
+    }
+    if (index < paragraphs.length - 1) runs.push({ text: "\n" });
+  });
+  while (runs.length > 0 && /^\n*$/.test(runs[runs.length - 1].text)) runs.pop();
+  const styled = runs.filter((run) => run.text.trim() !== "");
+  if (styled.length < 2) return undefined;
+  const signature = (run: FormTextRun) => `${run.bold}|${run.italic}|${run.underline}|${run.fontSize}|${run.color}`;
+  return styled.every((run) => signature(run) === signature(styled[0])) ? undefined : runs;
 }
 
 /** 60000분의 1도 → 도. -180~180 으로 좁혀 CSS 회전에 그대로 쓴다. */
@@ -596,6 +634,10 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     ...capOf("startCap", attrOf(lineBlock, "headEnd", "type")),
     ...capOf("endCap", attrOf(lineBlock, "tailEnd", "type")),
     text: readText(txBody),
+    ...(() => {
+      const textRuns = readTextRuns(txBody, ctx);
+      return textRuns ? { textRuns } : {};
+    })(),
     fill: readFill(spPr, style, ctx),
     line: readLine(style, lineBlock, ctx),
     lineWidth: (lineWidthEmu > 0 ? lineWidthEmu / EMU_PER_PT : DEFAULT_LINE_PT) * PT_TO_PX,
@@ -802,6 +844,8 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     const { shape: inner, index } = insiders[0];
     absorbed.add(index);
     outer.text = inner.text;
+    // 부분 서식도 함께 옮긴다 — 빠뜨리면 마름모 안 작은 둘째 줄이 첫 줄 크기로 커져 넘친다(8.7·8.8).
+    outer.textRuns = inner.textRuns;
     outer.fontSize = inner.fontSize;
     outer.fontFamily = inner.fontFamily;
     outer.bold = inner.bold;

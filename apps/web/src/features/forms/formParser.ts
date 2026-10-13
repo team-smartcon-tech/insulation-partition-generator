@@ -16,6 +16,7 @@ import type {
   FormCellBorders,
   FormCellStyle,
   FormImage,
+  FormTextRun,
   FormSheet,
 } from "./types";
 
@@ -26,7 +27,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 17; // 17: 대각선 테두리·선 끝 원형·다이아몬드
+export const PARSER_VERSION = 18; // 18: 칸·도형 글자의 부분 서식
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -124,6 +125,31 @@ function displayText(value: unknown, numFmt: string | undefined): string {
     }
   }
   return cellText(value);
+}
+
+/**
+ * 부분 서식 조각을 읽는다. 조각이 하나뿐이거나 모두 같은 서식이면 칸 서식으로 충분해 없다고 본다.
+ * 조각의 빈 항목은 칸 서식을 따른다(엑셀도 그렇다).
+ */
+function readRuns(value: unknown, theme: ThemeColors): FormTextRun[] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const richText = (value as { richText?: unknown }).richText;
+  if (!Array.isArray(richText) || richText.length < 2) return undefined;
+  const runs: FormTextRun[] = richText.map((raw) => {
+    const run = raw as { text?: unknown; font?: Record<string, unknown> };
+    const font = run.font ?? {};
+    const color = excelColor(font.color, theme);
+    return {
+      text: typeof run.text === "string" ? run.text : String(run.text ?? ""),
+      ...(font.bold === true ? { bold: true } : {}),
+      ...(font.italic === true ? { italic: true } : {}),
+      ...(font.underline ? { underline: true } : {}),
+      ...(typeof font.size === "number" ? { fontSize: font.size } : {}),
+      ...(color ? { color } : {}),
+    };
+  });
+  const signature = (run: FormTextRun) => `${run.bold}|${run.italic}|${run.underline}|${run.fontSize}|${run.color}`;
+  return runs.every((run) => signature(run) === signature(runs[0])) ? undefined : runs;
 }
 
 /** 결과가 빠진 수식 값에 원본의 결과를 붙인다. */
@@ -526,6 +552,10 @@ export function parseFormSheet(
         ...(sheetLocked && !unlocked ? { locked: true } : {}),
         // 수식이 있는 칸 — 줄을 끼울 때 범위가 어긋날 수 있다고 알리는 데 쓴다.
         ...(cell.formula || cell.sharedFormula ? { formula: true } : {}),
+        ...(() => {
+          const runs = readRuns(cell.value, theme);
+          return runs ? { runs } : {};
+        })(),
         style,
       });
     }

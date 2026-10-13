@@ -10,7 +10,39 @@
  * 누르거나 Tab 으로 들어온 칸만 입력 상자로 바꾼다 — 보이는 모습은 같다.
  */
 import { memo, useLayoutEffect, useRef, useState } from "react";
-import type { FormCell } from "./types";
+import type { FormCell, FormTextRun } from "./types";
+
+/** 엑셀이 칸 글자 크기를 적지 않았을 때의 크기(pt) — 부분 서식 크기를 칸 크기에 대한 비율로 바꿀 때 쓴다. */
+const DEFAULT_FONT_PT = 11;
+
+/**
+ * 부분 서식 조각들을 그린다. 크기는 칸 글자 크기에 대한 **비율(em)** 로 준다 — 칸이 넘쳐 글자를
+ * 줄일 때(fitToCell) 조각들도 함께 줄어야 한다. 줄 끝 공백은 `displayText` 처럼 걷는다.
+ */
+function RichRuns({ runs, basePt }: { runs: FormTextRun[]; basePt: number }) {
+  return (
+    <>
+      {runs.map((run, index) => {
+        let text = run.text.replace(/[ \t]+\n/g, "\n");
+        if (index === runs.length - 1) text = text.replace(/\s+$/, "");
+        return (
+          <span
+            key={index}
+            style={{
+              fontWeight: run.bold ? 700 : undefined,
+              fontStyle: run.italic ? "italic" : undefined,
+              textDecoration: run.underline ? "underline" : undefined,
+              fontSize: run.fontSize ? `${run.fontSize / basePt}em` : undefined,
+              color: run.color,
+            }}
+          >
+            {text}
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 /** 글자를 줄여 맞출 때의 하한. 이보다 작아지면 읽을 수 없어 그냥 넘치게 둔다. */
 const MIN_FONT_PX = 7;
@@ -242,7 +274,10 @@ function FormCellContent({
       }
     >
       {/* 빈 칸도 누를 수 있어야 한다 — 글자가 없으면 높이가 0 이 되어 누를 데가 없다. */}
-      {text === "" ? " " : text}
+      {value === undefined && cell.runs ? (
+        <RichRuns runs={cell.runs} basePt={cell.style.fontSize ?? DEFAULT_FONT_PT} />
+      ) : null}
+      {value === undefined && cell.runs ? null : text === "" ? " " : text}
     </span>
   );
 }

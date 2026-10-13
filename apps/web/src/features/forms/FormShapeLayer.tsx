@@ -153,6 +153,9 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
   };
 }
 
+/** 도형 글자 크기를 엑셀이 적지 않았을 때(pt) */
+const DEFAULT_SHAPE_FONT_PT = 11;
+
 function textCss(shape: FormShape): CSSProperties {
   const vertical = shape.vertical;
   return {
@@ -160,7 +163,9 @@ function textCss(shape: FormShape): CSSProperties {
     width: vertical ? undefined : shape.noWrap ? "max-content" : "100%",
     height: vertical ? "100%" : undefined,
     flexShrink: 0,
-    textAlign: shape.align ?? "center",
+    // DrawingML 의 기본 정렬은 왼쪽이다(가운데는 엑셀이 algn="ctr" 로 적는다). 가운데로 두면
+    // [비고]·[작성방법] 같은 설명 상자가 가운데로 몰렸다(7.6-5·6.3-2).
+    textAlign: shape.align ?? "left",
     fontSize: shape.fontSize ? `${shape.fontSize}pt` : undefined,
     fontFamily: shape.fontFamily ? `"${shape.fontFamily}", "맑은 고딕", sans-serif` : undefined,
     fontWeight: shape.bold ? 700 : undefined,
@@ -204,7 +209,25 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
   const text = (shape: FormShape, outlined: boolean) =>
     shape.text ? (
       <div style={boxCss(shape, outlined)}>
-        <span style={textCss(shape)}>{shape.text}</span>
+        <span style={textCss(shape)}>
+          {shape.textRuns
+            ? shape.textRuns.map((run, index) => (
+                <span
+                  key={index}
+                  style={{
+                    // 도형 글자 크기에 대한 비율 — 도형마다 기준 크기가 달라도 조각 사이 비율이 맞는다.
+                    fontSize: run.fontSize ? `${run.fontSize / (shape.fontSize ?? DEFAULT_SHAPE_FONT_PT)}em` : undefined,
+                    fontWeight: run.bold ? 700 : shape.bold ? 400 : undefined,
+                    fontStyle: run.italic ? "italic" : undefined,
+                    textDecoration: run.underline ? "underline" : undefined,
+                    color: run.color,
+                  }}
+                >
+                  {run.text}
+                </span>
+              ))
+            : shape.text}
+        </span>
       </div>
     ) : null;
 

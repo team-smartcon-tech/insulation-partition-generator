@@ -78,7 +78,25 @@ export interface FormCell {
    * (견본 190장 중 6개 파일에만 수식이 있다).
    */
   formula?: boolean;
+  /**
+   * 한 칸 안에서 글자마다 서식이 다를 때(엑셀 "부분 서식")의 조각들. 이어 붙이면 `text` 와 같다.
+   * 빠뜨리면 큰 제목 아래 작은 영어 줄이 제목 크기로 커져 줄이 넘치고, 일부만 빨갛던 글이
+   * 검게 보였다(10.1·8.12 등). 서식이 칸 전체에 같으면 없다.
+   */
+  runs?: FormTextRun[];
   style: FormCellStyle;
+}
+
+/** 부분 서식 조각. 비어 있는 항목은 칸 서식을 따른다. */
+export interface FormTextRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  /** pt */
+  fontSize?: number;
+  /** #RRGGBB */
+  color?: string;
 }
 
 /**
@@ -144,6 +162,8 @@ export interface FormShape {
   endCap?: "oval" | "diamond";
   /** 도형 안 글자. 줄바꿈은 \n */
   text: string;
+  /** 도형 안 글자의 부분 서식 조각(이어 붙이면 `text`). 조각마다 서식이 같으면 없다. */
+  textRuns?: FormTextRun[];
   /** 채움색 #RRGGBB. 없으면 투명 */
   fill?: string;
   /** 선·테두리 색 */
