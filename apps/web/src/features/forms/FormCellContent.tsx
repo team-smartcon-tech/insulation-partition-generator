@@ -59,6 +59,16 @@ interface FormCellContentProps {
   /** 고친 값. 없으면 엑셀 원본 글자를 쓴다. */
   value: string | undefined;
   /**
+   * 글자가 이 높이(px)를 넘어도 줄을 늘리지 않는다 — 넘친 만큼은 엑셀처럼 잘린다.
+   *
+   * 엑셀은 글자가 넘쳐도 줄 높이를 그대로 두는데, 표는 내용에 맞춰 줄을 늘린다. 그러면
+   * 칸 테두리로 그린 상자가 아래로 밀리고, 줄 높이로 자리를 잡는 도형(화살표·연결선)과
+   * 어긋난다(QA-4.3-2 에서 125px, 사용자 신고). 빈 칸의 자리 잡기용 공백 한 칸도 한 줄
+   * 높이(약 22px)를 차지해, 엑셀의 얇은 간격 줄(6~11px)을 모두 22px 로 키웠다.
+   * 비어 있으면 줄을 늘려도 된다(사용자가 적은 글은 잘리면 안 된다).
+   */
+  maxHeight?: number;
+  /**
    * 옆 칸이 비어 있어 글자를 넘겨도 되는 칸인가(엑셀과 같은 규칙).
    * 넘길 수 있으면 글자를 줄이지 않는다 — 줄이면 원본보다 훨씬 작아져 읽기 어렵다.
    */
@@ -82,6 +92,7 @@ function FormCellContent({
   editable,
   value,
   spill = false,
+  maxHeight,
   onChange,
   onCommit,
   onRevert,
@@ -190,6 +201,7 @@ function FormCellContent({
         // 누를 수 있는 자리를 칸 전체로 넓힌다. 글자 높이만큼만 잡으면 줄 높이가 큰 칸에서
         // 아래쪽 빈 곳을 눌러도 아무 일이 없어 "편집이 안 된다"로 보인다.
         ...(editable ? { minHeight: "100%" } : {}),
+        ...(maxHeight !== undefined ? { maxHeight } : {}),
       }}
       className={
         (spill ? "block" : "block overflow-hidden") +

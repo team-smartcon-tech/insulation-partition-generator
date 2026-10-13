@@ -25,7 +25,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 14;
+export const PARSER_VERSION = 15; // 15: 칸 들여쓰기(indent)·세로 글자(textRotation)
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -175,6 +175,11 @@ function readStyle(
   const valign = readValign(alignment.vertical);
   if (valign) style.valign = valign;
   if (alignment.wrapText === true) style.wrap = true;
+  if (typeof alignment.indent === "number" && alignment.indent > 0) style.indent = alignment.indent;
+  // 옆 띠에 세로로 적은 제목(QA-4.3-2 "고객 요구사항") — 빠뜨리면 한 글자씩 접혀 내려간다.
+  const rotation = alignment.textRotation;
+  if (rotation === "vertical") style.textDirection = "stacked";
+  else if (typeof rotation === "number" && Math.abs(rotation) >= 45) style.textDirection = rotation > 0 ? "up" : "down";
 
   return style;
 }

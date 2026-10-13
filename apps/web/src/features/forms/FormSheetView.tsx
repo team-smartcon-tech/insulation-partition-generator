@@ -80,7 +80,14 @@ function borderCss(border: FormBorder | undefined): string | undefined {
   return `${BORDER_WIDTH[border.style]} ${border.color ?? DEFAULT_BORDER_COLOR}`;
 }
 
+/**
+ * 들여쓰기 한 단계의 폭(px). 엑셀이 PDF 로 뽑은 QA-4.3-4 와 견줘 잰 값이다(4단계 ≈ 68px —
+ * 글자 앞이 아래 표의 왼쪽 선과 맞는다). 명세는 "한 단계 = 공백 3칸"이라 글꼴마다 다르다.
+ */
+const INDENT_STEP_PX = 17;
+
 function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProperties {
+  const indent = (style.indent ?? 0) * INDENT_STEP_PX;
   return {
     borderTop: borderCss(style.borders.top),
     borderRight: borderCss(style.borders.right),
@@ -105,6 +112,20 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     overflowWrap: "break-word",
     // 칸이 좁아 글자가 접히는 것을 막으려고 여백을 최소로 둔다.
     padding: "1px 2px",
+    // 세로 글자. 표 칸에는 회전(transform)이 듣지 않아 쓰기 방향으로 돌린다.
+    ...(style.textDirection === "up"
+      ? { writingMode: "sideways-lr" as const }
+      : style.textDirection === "down"
+        ? { writingMode: "sideways-rl" as const }
+        : style.textDirection === "stacked"
+          ? { writingMode: "vertical-rl" as const, textOrientation: "upright" as const }
+          : {}),
+    // 들여쓰기는 정렬한 쪽에 준다(가운데 정렬에는 엑셀도 쓰지 않는다).
+    ...(indent > 0 && align !== "center"
+      ? align === "right"
+        ? { paddingRight: 2 + indent }
+        : { paddingLeft: 2 + indent }
+      : {}),
   };
 }
 
@@ -262,9 +283,24 @@ function CellMarkLayer({ mark }: { mark: CellMark | undefined }) {
  * 한 줄. **줄 단위로 메모**해 둔다 — 한 칸에 글자를 치면 시트 전체가 다시 그려지는데,
  * 큰 시트(수천 칸)에서는 그것만으로 타자가 눈에 띄게 밀린다. 값이 바뀐 줄만 다시 그린다.
  */
+/** 칸 위아래 여백(1px + 1px)과 테두리 몫 — 글자 상자는 줄 높이에서 이만큼 뺀 높이까지만 쓴다. */
+const CELL_CHROME_PX = 3;
+
+/** 칸이 차지하는 줄들의 높이 합에서 여백을 뺀 값. 줄 높이를 모르면 제한하지 않는다. */
+function spanHeight(rowHeights: number[], firstRow: number, rowSpan: number): number | undefined {
+  let total = 0;
+  for (let row = firstRow; row < firstRow + Math.max(1, rowSpan); row += 1) {
+    const height = rowHeights[row];
+    if (!(height > 0)) return undefined;
+    total += height;
+  }
+  return Math.max(0, total - CELL_CHROME_PX);
+}
+
 const SheetRow = memo(function SheetRow({
   cells,
   height,
+  rowHeights,
   displayRow,
   rowActions,
   editable,
@@ -304,6 +340,8 @@ const SheetRow = memo(function SheetRow({
   /** 결재 서명 자리 */
   signKeys: Set<string>;
   height: number | undefined;
+  /** 시트 전체 줄 높이(px) — 여러 줄을 합친 칸의 높이를 셀 때 쓴다 */
+  rowHeights: number[];
   editable: boolean;
   /** 엑셀에서 시트 보호가 걸린 시트인가 — 이때만 "고칠 수 있는 칸"을 칠해 준다. */
   sheetLocked: boolean;
@@ -422,6 +460,8 @@ const SheetRow = memo(function SheetRow({
             editable={canEdit}
             value={values[cell.key]}
             spill={spillable.has(cell.key)}
+            // 원본 글자만 줄 높이 안에 가둔다. 사용자가 적은 글은 다 보여야 하므로 늘어나게 둔다.
+            maxHeight={values[cell.key] === undefined ? spanHeight(rowHeights, displayRow - 1, cell.rowSpan) : undefined}
             onChange={onChangeValue}
             onCommit={onCommitValue}
             onRevert={onRevertValue}
@@ -594,6 +634,7 @@ export default function FormSheetView({
               displayRow={rowIndex + 1}
               rowActions={rowActions}
               height={sheet.rowHeights[rowIndex]}
+              rowHeights={sheet.rowHeights}
               editable={editable}
               sheetLocked={sheet.locked === true}
               tint={tint}

@@ -40,6 +40,16 @@ export interface FormCellStyle {
   align?: "left" | "center" | "right";
   valign?: "top" | "middle" | "bottom";
   wrap?: boolean;
+  /**
+   * 들여쓰기 단계(엑셀 "들여쓰기"). 0 이면 없다. 화면에서는 정렬한 쪽에 여백으로 준다.
+   * 빠뜨리면 글자가 왼쪽에 붙어, 글자 아래를 가리키는 선(QA-4.3-4)이 엉뚱한 곳을 가리킨다.
+   */
+  indent?: number;
+  /**
+   * 글자 방향. "up" 은 아래에서 위로(엑셀 +90°), "down" 은 위에서 아래로(엑셀 -90°),
+   * "stacked" 는 글자를 세로로 쌓기(엑셀 "세로 쓰기"). 비스듬한 각도는 다루지 않는다.
+   */
+  textDirection?: "up" | "down" | "stacked";
   borders: FormCellBorders;
 }
 
