@@ -26,7 +26,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 16; // 16: 숫자·날짜 표시 형식, 오류값 글자
+export const PARSER_VERSION = 17; // 17: 대각선 테두리·선 끝 원형·다이아몬드
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -155,7 +155,20 @@ function readBorders(border: unknown, theme: ThemeColors): FormCellBorders {
   if (right) borders.right = right;
   if (bottom) borders.bottom = bottom;
   if (left) borders.left = left;
+  Object.assign(borders, readDiagonals(record.diagonal, theme));
   return borders;
+}
+
+/** 대각선 테두리 — exceljs 는 `diagonal: { up, down, style, color }` 하나로 준다. */
+function readDiagonals(diagonal: unknown, theme: ThemeColors): Pick<FormCellBorders, "diagonalUp" | "diagonalDown"> {
+  if (!diagonal || typeof diagonal !== "object") return {};
+  const record = diagonal as { up?: unknown; down?: unknown };
+  const line = readBorder(diagonal, theme);
+  if (!line) return {};
+  return {
+    ...(record.up ? { diagonalUp: line } : {}),
+    ...(record.down ? { diagonalDown: line } : {}),
+  };
 }
 
 function readAlign(horizontal: unknown): FormCellStyle["align"] {
@@ -221,7 +234,7 @@ function isMeaningful(cell: {
 }): boolean {
   if (cellText(cell.value).trim() !== "") return true;
   const borders = readBorders(cell.border, DEFAULT_THEME);
-  if (borders.top || borders.right || borders.bottom || borders.left) return true;
+  if (borders.top || borders.right || borders.bottom || borders.left || borders.diagonalUp || borders.diagonalDown) return true;
   const fill = cell.fill;
   return Boolean(fill && fill.type === "pattern" && fill.pattern !== "none");
 }
@@ -291,6 +304,8 @@ function readMergedBorders(worksheet: any, box: SpanBox, theme: ThemeColors): Fo
   if (left) borders.left = left;
   if (right) borders.right = right;
   if (bottom) borders.bottom = bottom;
+  // 합친 칸의 대각선은 대표 칸(왼쪽 위)에 적힌다.
+  Object.assign(borders, readDiagonals(topLeft.border?.diagonal, theme));
   return borders;
 }
 

@@ -24,6 +24,10 @@ export interface FormCellBorders {
   right?: FormBorder;
   bottom?: FormBorder;
   left?: FormBorder;
+  /** 왼쪽 위 → 오른쪽 아래 대각선(엑셀 "대각선 테두리"). 일정표의 빗금·머리글 칸 나누기에 쓰인다. */
+  diagonalDown?: FormBorder;
+  /** 왼쪽 아래 → 오른쪽 위 대각선 */
+  diagonalUp?: FormBorder;
 }
 
 export interface FormCellStyle {
@@ -132,6 +136,12 @@ export interface FormShape {
   /** 선 끝의 화살촉 */
   arrowStart?: boolean;
   arrowEnd?: boolean;
+  /**
+   * 선 끝 모양이 화살촉이 아닐 때(엑셀 "원형"·"다이아몬드"). 없으면 화살촉이다.
+   * 빠뜨리면 공정표 막대의 시작 점(●)이 거꾸로 된 화살촉으로 그려져 양쪽 화살표처럼 보였다(8.6 공사관리).
+   */
+  startCap?: "oval" | "diamond";
+  endCap?: "oval" | "diamond";
   /** 도형 안 글자. 줄바꿈은 \n */
   text: string;
   /** 채움색 #RRGGBB. 없으면 투명 */

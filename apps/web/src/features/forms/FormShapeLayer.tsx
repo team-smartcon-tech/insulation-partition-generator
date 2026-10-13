@@ -199,7 +199,7 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
         .map((shape) => shape.line ?? "#000000"),
     ),
   ];
-  const markerOf = (color: string) => `url(#${uid}-arrow-${colorKey(color)})`;
+  const markerOf = (color: string, cap?: "oval" | "diamond") => `url(#${uid}-${cap ?? "arrow"}-${colorKey(color)})`;
 
   const text = (shape: FormShape, outlined: boolean) =>
     shape.text ? (
@@ -229,6 +229,33 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
                 <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
               </marker>
             ))}
+            {/* 원형·다이아몬드 끝 — 선 끝점이 모양의 한가운데에 온다(엑셀과 같다). */}
+            {arrowColors.map((color) => (
+              <marker
+                key={`oval-${color}`}
+                id={`${uid}-oval-${colorKey(color)}`}
+                viewBox="0 0 10 10"
+                refX="5"
+                refY="5"
+                markerWidth="4"
+                markerHeight="4"
+              >
+                <circle cx="5" cy="5" r="5" fill={color} />
+              </marker>
+            ))}
+            {arrowColors.map((color) => (
+              <marker
+                key={`diamond-${color}`}
+                id={`${uid}-diamond-${colorKey(color)}`}
+                viewBox="0 0 10 10"
+                refX="5"
+                refY="5"
+                markerWidth="5"
+                markerHeight="5"
+              >
+                <path d="M 5 0 L 10 5 L 5 10 L 0 5 z" fill={color} />
+              </marker>
+            ))}
           </defs>
         </svg>
       )}
@@ -243,8 +270,8 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
             stroke: color,
             strokeWidth,
             strokeDasharray: dashArray(shape),
-            markerStart: shape.arrowStart ? markerOf(color) : undefined,
-            markerEnd: shape.arrowEnd ? markerOf(color) : undefined,
+            markerStart: shape.arrowStart ? markerOf(color, shape.startCap) : undefined,
+            markerEnd: shape.arrowEnd ? markerOf(color, shape.endCap) : undefined,
             transform: svgRotate(shape),
           };
           return (
@@ -272,8 +299,8 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
                   strokeWidth={strokeWidth}
                   strokeDasharray={dashArray(shape)}
                   strokeLinejoin="round"
-                  markerStart={color && shape.arrowStart ? markerOf(color) : undefined}
-                  markerEnd={color && shape.arrowEnd ? markerOf(color) : undefined}
+                  markerStart={color && shape.arrowStart ? markerOf(color, shape.startCap) : undefined}
+                  markerEnd={color && shape.arrowEnd ? markerOf(color, shape.endCap) : undefined}
                   transform={svgRotate(shape)}
                 />
               ))}

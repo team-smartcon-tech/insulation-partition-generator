@@ -540,6 +540,11 @@ function readBodyLayout(bodyPr: string | undefined): Partial<FormShape> {
   };
 }
 
+/** 선 끝 모양 — 화살촉(triangle·stealth·arrow)이 아닌 것만 따로 적는다. */
+function capOf(key: "startCap" | "endCap", type: string | undefined): Partial<FormShape> {
+  return type === "oval" || type === "diamond" ? { [key]: type } : {};
+}
+
 /** 도형 하나(`sp`/`cxnSp`)의 서식을 읽는다. 자리·크기는 부르는 쪽이 정해 넘긴다. */
 function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
   const { left, top, width, height } = rect;
@@ -588,6 +593,8 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     flipV: ownAttr(xfrm, "flipV") === "1",
     arrowStart: Boolean(attrOf(lineBlock, "headEnd", "type")?.replace("none", "")),
     arrowEnd: Boolean(attrOf(lineBlock, "tailEnd", "type")?.replace("none", "")),
+    ...capOf("startCap", attrOf(lineBlock, "headEnd", "type")),
+    ...capOf("endCap", attrOf(lineBlock, "tailEnd", "type")),
     text: readText(txBody),
     fill: readFill(spPr, style, ctx),
     line: readLine(style, lineBlock, ctx),

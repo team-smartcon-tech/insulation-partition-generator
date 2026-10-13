@@ -86,9 +86,28 @@ function borderCss(border: FormBorder | undefined): string | undefined {
  */
 const INDENT_STEP_PX = 17;
 
+/**
+ * 대각선 테두리를 배경 그림으로. `to top right` 처럼 모서리를 향한 그라디언트는 50% 선이 정확히
+ * 반대쪽 두 모서리를 잇는다 — 칸이 납작해도 꼭짓점끼리 이어진다.
+ */
+function diagonalImage(borders: FormCellStyle["borders"]): string | undefined {
+  const line = (border: NonNullable<FormCellStyle["borders"]["diagonalUp"]>, toward: string) => {
+    const half = border.style === "medium" || border.style === "double" ? 1 : border.style === "thick" ? 1.5 : 0.6;
+    const color = border.color ?? DEFAULT_BORDER_COLOR;
+    return `linear-gradient(${toward}, transparent calc(50% - ${half}px), ${color} calc(50% - ${half}px), ${color} calc(50% + ${half}px), transparent calc(50% + ${half}px))`;
+  };
+  const images = [
+    borders.diagonalDown ? line(borders.diagonalDown, "to top right") : undefined,
+    borders.diagonalUp ? line(borders.diagonalUp, "to bottom right") : undefined,
+  ].filter(Boolean);
+  return images.length > 0 ? images.join(", ") : undefined;
+}
+
 function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProperties {
   const indent = (style.indent ?? 0) * INDENT_STEP_PX;
+  const diagonals = diagonalImage(style.borders);
   return {
+    ...(diagonals ? { backgroundImage: diagonals } : {}),
     borderTop: borderCss(style.borders.top),
     borderRight: borderCss(style.borders.right),
     borderBottom: borderCss(style.borders.bottom),
@@ -102,7 +121,7 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     fontSize: style.fontSize ? `${style.fontSize}pt` : undefined,
     fontFamily: fontStack(style.fontFamily),
     color: style.color,
-    background: style.background,
+    backgroundColor: style.background,
     // 엑셀의 "자동 줄바꿈" 설정을 그대로 따른다. 끄여 있는 칸까지 접으면
     // 한 줄로 적힌 항목(예: "소속: … 직급: … 성명: … (서명 또는 날인)")이 쪼개진다.
     // 접지 않는 칸이 넘칠 때는 FormCellContent 가 글자를 줄여 맞춘다.
@@ -393,7 +412,15 @@ const SheetRow = memo(function SheetRow({
             // (사용자 판단). 적는 자리에는 보통 `0000년 00월 00일` 같은 예시 글자가 들어 있다.
             ...(sheetLocked && tint && canEdit && cell.text.trim() !== ""
 
-              ? { backgroundImage: "linear-gradient(rgba(125, 211, 252, 0.38), rgba(125, 211, 252, 0.38))" }
+              ? {
+                  backgroundImage: [
+                    "linear-gradient(rgba(125, 211, 252, 0.38), rgba(125, 211, 252, 0.38))",
+                    // 대각선 테두리가 있으면 덧칠 위에 함께 그린다(덮어쓰면 빗금이 사라진다).
+                    diagonalImage(cell.style.borders),
+                  ]
+                    .filter(Boolean)
+                    .join(", "),
+                }
               : {}),
             // 결재 서명 자리 — 엑셀 테두리를 가리지 않게 안쪽에 점선을 그린다.
             ...(cellMarks.has(cell.key) || showActions ? { position: "relative" as const } : {}),
