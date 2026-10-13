@@ -102,3 +102,19 @@ test('서식 번호는 겹치지 않는다', () => {
   assert.equal(new Set(codes).size, codes.length);
   for (const s of QMP_SECTIONS) for (const f of s.forms) assert.ok(f.code.startsWith(`${s.no}-`), f.code);
 });
+
+test('배포 양식함 — 서식마다 그 시트가 든 가장 최근 양식, 기준 문서도 센다', async () => {
+  const { qmpLibraryStates, hasQmpSheet } = await import('../apps/web/src/features/forms/qmpPlan.ts');
+  const states = qmpLibraryStates([
+    { id: 'old', sheetNames: ['QA-7.2-1', 'QA-7.2-2'], uploadedAt: 1 },
+    { id: 'new', sheetNames: ['QA-7.2-2', '중복'], uploadedAt: 2 },
+  ]);
+  assert.equal(states.get('7.2-1').docId, 'old');
+  assert.equal(states.get('7.2-2').docId, 'new');
+  assert.equal(states.get('7.2-3'), undefined);
+  // 7.2 는 서식 3장(PROCESS 포함) 중 2장이 올라왔다
+  assert.deepEqual(qmpTally(states, null, '7', true).done, 2);
+  assert.equal(qmpTally(states, null, '7', false).done, 1, '현장 기준으로는 PROCESS 를 빼고 센다');
+  assert.equal(hasQmpSheet({ sheetNames: ['작업일보'] }), false);
+  assert.equal(hasQmpSheet({ sheetNames: ['표지', 'QA-8.6-1'] }), true);
+});

@@ -72,8 +72,8 @@ import FeedbackPage from "./FeedbackPage";
 import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
 import ScrollTopButton from "./ScrollTopButton";
-import QmpStatusPage from "./QmpStatusPage";
-import { qmpStates, templateForCode } from "./qmpPlan";
+import QmpBoard from "./QmpBoard";
+import { hasQmpSheet, qmpLibraryStates, qmpStates, templateForCode } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -270,6 +270,14 @@ const SCALES: { value: FormScale; label: string }[] = [
 const LAST_SITE_KEY = "ipg-forms:last-site";
 /** 마지막으로 보던 곳(배포 양식함 / 현장 서류함) */
 const SPACE_KEY = "ipg-forms:space";
+/**
+ * 서류함을 코드표(현장 문서트리)로 보여 줄까.
+ *
+ * 2026-10-13 사용자 결정: 지금 보여 줄 것은 품질관리계획서 기반 서류 통일화이고, 현장 문서트리는
+ * 제출 양식의 "확장 가능성"에 말로만 적는다. 그래서 두 서류함 모두 계획서 구조(`QmpBoard`)로 보이고,
+ * 코드표 화면은 지우지 않고 여기서 꺼 둔다. 다시 보이려면 true 로.
+ */
+const SHOW_CODE_TREE = false;
 /** 왼쪽 메뉴를 접어 두었나 */
 const NAV_COLLAPSED_KEY = "ipg-forms:nav-collapsed";
 /** 열어 둔 서류 탭 */
@@ -2354,23 +2362,40 @@ export default function FormsPage() {
             ) : (
               <SitesAudit rows={homeAudit} onOpenSite={(id) => selectSite(id)} />
             )
-          ) : space === "qmp" && siteId ? (
-            <QmpStatusPage
-              siteName={writeSite?.name ?? ""}
+          ) : space === "site" && !siteId ? (
+            <SiteOverview
+              rows={summarizeSites(sites, siteDocs, totalSlots)}
+              audit={homeAudit}
+              onOpen={(id) => selectSite(id)}
+              onAdd={() => void handleAddSite()}
+            />
+          ) : !SHOW_CODE_TREE && space === "library" ? (
+            <QmpBoard
+              mode="library"
+              title="배포 양식함"
+              states={qmpLibraryStates(templates)}
+              others={templates
+                .filter((form) => !hasQmpSheet(form))
+                .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
+              onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
+              onUpload={() => handleUpload()}
+              busy={state.status === "loading"}
+            />
+          ) : !SHOW_CODE_TREE && space === "site" ? (
+            <QmpBoard
+              mode="site"
+              title={`${writeSite?.name ?? "현장"} 서류함`}
               states={qmpStates(siteForms)}
+              others={siteForms
+                .filter((form) => !hasQmpSheet(form))
+                .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
               onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
               canWrite={(code) => Boolean(templateForCode(templates, code))}
               onWrite={(code) => {
                 const template = templateForCode(templates, code);
                 if (template) void handleWrite(template.id, siteId);
               }}
-            />
-          ) : (space === "site" || space === "qmp") && !siteId ? (
-            <SiteOverview
-              rows={summarizeSites(sites, siteDocs, totalSlots)}
-              audit={homeAudit}
-              onOpen={(id) => selectSite(id)}
-              onAdd={() => void handleAddSite()}
+              toolbarExtra={importButton}
             />
           ) : taxonomies.length > 0 ? (
             <FormTree

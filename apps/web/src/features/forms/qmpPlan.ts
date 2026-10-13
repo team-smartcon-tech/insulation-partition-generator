@@ -339,18 +339,22 @@ export function templateForCode<T extends { id: string; sheetNames: string[]; up
     .sort((a, b) => b.uploadedAt - a.uploadedAt)[0];
 }
 
-/** 부서 하나(또는 전체)의 신호등 집계. 기준 문서는 세지 않는다. */
+/**
+ * 부서 하나(또는 전체)의 신호등 집계.
+ * 기준 문서는 현장이 쓰지 않으므로 빼고 센다. 배포 양식함은 기준 문서도 양식이라 함께 센다.
+ */
 export function qmpTally(
   states: Map<string, QmpFormState>,
   dept: QmpDept | null,
   chapter: string | null = null,
+  includeReference = false,
 ): { done: number; doing: number; none: number; total: number } {
   const tally = { done: 0, doing: 0, none: 0, total: 0 };
   for (const sec of QMP_SECTIONS) {
     if (dept && sec.lead !== dept) continue;
     if (chapter && chapterOf(sec.no) !== chapter) continue;
     for (const form of sec.forms) {
-      if (form.reference) continue;
+      if (form.reference && !includeReference) continue;
       tally[states.get(form.code)?.status ?? "none"] += 1;
       tally.total += 1;
     }
@@ -362,4 +366,28 @@ export function qmpTally(
 export function lampOf(tally: { done: number; doing: number; total: number }): QmpStatus {
   if (tally.total > 0 && tally.done === tally.total) return "done";
   return tally.done + tally.doing > 0 ? "doing" : "none";
+}
+
+/** 시트 가운데 하나라도 QA 번호가 있나 — 없으면 계획서 서식이 아닌 서류("그 밖의 서류")다. */
+export const hasQmpSheet = (doc: { sheetNames: string[] }) => doc.sheetNames.some((name) => qaCodeOf(name) !== null);
+
+/**
+ * 배포 양식함용: 서식마다 그 시트가 든 배포 양식(가장 최근 것). 양식이 있으면 `done` 이다.
+ * 열면 그 서식 시트로 바로 간다.
+ */
+export function qmpLibraryStates<T extends { id: string; sheetNames: string[]; uploadedAt: number }>(
+  templates: T[],
+): Map<string, QmpFormState> {
+  const result = new Map<string, QmpFormState & { uploadedAt: number }>();
+  for (const template of templates) {
+    for (const sheetName of template.sheetNames) {
+      const code = qaCodeOf(sheetName);
+      if (!code) continue;
+      const current = result.get(code);
+      if (!current || template.uploadedAt > current.uploadedAt) {
+        result.set(code, { status: "done", docId: template.id, sheetName, uploadedAt: template.uploadedAt });
+      }
+    }
+  }
+  return result;
 }
