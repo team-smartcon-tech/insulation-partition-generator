@@ -977,8 +977,11 @@ export async function parseWorkbookShapes(
     const shapes: FormShape[] = [];
     for (const anchor of anchorsOf(drawingXml)) {
       for (const shape of readAnchorShapes(anchor, colWidths, rowHeights, defaults.col, defaults.row, ctx)) {
-        // 세로선은 너비가, 가로선은 높이가 0 이다. 둘 다 0 일 때만 버린다.
-        if (shape.width > 0 || shape.height > 0) shapes.push(shape);
+        // 세로선은 너비가, 가로선은 높이가 0 이다. 선은 둘 다 0 일 때만 버린다.
+        // 상자는 한쪽만 0 이어도 버린다 — 높이 0 짜리 글상자("사 내", 9.2)는 엑셀에서 안 보이는데
+        // 여기서는 글자가 표 위에 떠 보였다.
+        const lineLike = shape.kind === "line" || shape.kind === "path";
+        if (lineLike ? shape.width > 0 || shape.height > 0 : shape.width > 0 && shape.height > 0) shapes.push(shape);
       }
     }
     if (shapes.length > 0) result.set(unescapeXml(name), mergeDecorativeFrames(shapes));

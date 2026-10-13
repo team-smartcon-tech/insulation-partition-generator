@@ -27,7 +27,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 18; // 18: 칸·도형 글자의 부분 서식
+export const PARSER_VERSION = 20; // 20: 숨긴 열·줄, 선택 영역의 가운데로, 높이 0 글상자
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -520,6 +520,39 @@ export function parseFormSheet(
     }
   }
 
+  // 2-1) "선택 영역의 가운데로"(centerContinuous) — 병합 없이 오른쪽 빈 칸들에 걸쳐 가운데 맞춘다.
+  //      칸 하나 안에서만 가운데로 두면 머리글 "검사건수" 가 첫 칸에 몰리고 칸이 여덟 개로 쪼개져
+  //      보였다(9.2). 글자 칸 + 오른쪽으로 이어진 빈 centerContinuous 칸을 합친 칸처럼 다룬다.
+  const isSingle = (row: number, col: number) => {
+    const box = boxes.get(masterOf.get(`${row}:${col}`) ?? "");
+    return Boolean(box && box.minRow === box.maxRow && box.minCol === box.maxCol);
+  };
+  const centersAcross = (row: number, col: number) =>
+    worksheet.getCell(row, col).alignment?.horizontal === "centerContinuous";
+  for (let row = 1; row <= maxRow; row++) {
+    for (let col = 1; col <= maxCol; col++) {
+      if (!isSingle(row, col) || !centersAcross(row, col)) continue;
+      if (cellText(worksheet.getCell(row, col).value).trim() === "") continue;
+      let end = col;
+      while (
+        end + 1 <= maxCol &&
+        isSingle(row, end + 1) &&
+        centersAcross(row, end + 1) &&
+        cellText(worksheet.getCell(row, end + 1).value).trim() === ""
+      ) {
+        end += 1;
+      }
+      if (end === col) continue;
+      const masterAddress = masterOf.get(`${row}:${col}`)!;
+      boxes.get(masterAddress)!.maxCol = end;
+      for (let c = col + 1; c <= end; c++) {
+        boxes.delete(masterOf.get(`${row}:${c}`)!);
+        masterOf.set(`${row}:${c}`, masterAddress);
+      }
+      col = end;
+    }
+  }
+
   // 3) 대표 칸만 내보낸다. 병합에 가려진 자리는 표에서 자리를 차지하지 않는다.
   const cells: FormCell[] = [];
   for (let row = 1; row <= maxRow; row++) {
@@ -538,6 +571,11 @@ export function parseFormSheet(
 
       // 엑셀의 잠금 기본값은 "잠김"이다. 푼 칸만 protection.locked === false 로 온다.
       const unlocked = (cell.protection as { locked?: unknown } | undefined)?.locked === false;
+      // 차지한 열이 모두 숨었거나 줄이 모두 숨었으면 그리지 않는 칸이다.
+      const span = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+      const hidden =
+        span(box.minCol, box.maxCol).every((c) => worksheet.getColumn(c).hidden) ||
+        span(box.minRow, box.maxRow).every((r) => worksheet.getRow(r).hidden);
       cells.push({
         key: `${row}:${col}`,
         row,
@@ -556,6 +594,7 @@ export function parseFormSheet(
           const runs = readRuns(cell.value, theme);
           return runs ? { runs } : {};
         })(),
+        ...(hidden ? { hidden: true } : {}),
         style,
       });
     }
@@ -566,11 +605,12 @@ export function parseFormSheet(
   const defaultRowHeight: number | undefined = worksheet.properties?.defaultRowHeight;
   const colWidths: number[] = [];
   for (let col = 1; col <= maxCol; col++) {
-    colWidths.push(colWidthToPx(worksheet.getColumn(col).width, defaultColWidth));
+    // 숨긴 열·줄은 폭·높이 0 — 엑셀 화면·인쇄에 안 나온다(7.6 문서보안기준안의 "문서양식 NO." 열).
+    colWidths.push(worksheet.getColumn(col).hidden ? 0 : colWidthToPx(worksheet.getColumn(col).width, defaultColWidth));
   }
   const rowHeights: number[] = [];
   for (let row = 1; row <= maxRow; row++) {
-    rowHeights.push(rowHeightToPx(worksheet.getRow(row).height, defaultRowHeight));
+    rowHeights.push(worksheet.getRow(row).hidden ? 0 : rowHeightToPx(worksheet.getRow(row).height, defaultRowHeight));
   }
 
   return {

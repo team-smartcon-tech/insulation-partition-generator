@@ -84,6 +84,8 @@ export interface FormCell {
    * 검게 보였다(10.1·8.12 등). 서식이 칸 전체에 같으면 없다.
    */
   runs?: FormTextRun[];
+  /** 숨긴 열·줄에만 걸친 칸 — 자리(폭·높이 0)만 두고 그리지 않는다. */
+  hidden?: boolean;
   style: FormCellStyle;
 }
 

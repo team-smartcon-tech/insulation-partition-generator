@@ -381,6 +381,17 @@ const SheetRow = memo(function SheetRow({
   return (
     <tr style={{ height }} className={rowActions ? "group/row" : undefined}>
       {cells.map((cell, index) => {
+        // 숨긴 열·줄의 칸 — 표 자리만 지키고 테두리·여백·글자는 그리지 않는다.
+        if (cell.hidden) {
+          return (
+            <td
+              key={cell.key}
+              colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
+              rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
+              style={{ padding: 0, border: "none", overflow: "hidden", fontSize: 0, lineHeight: 0 }}
+            />
+          );
+        }
         const canEdit = editable && !cell.locked;
         const showActions = rowActions && index === 0;
         const selected =
