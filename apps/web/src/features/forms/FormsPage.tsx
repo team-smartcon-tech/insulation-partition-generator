@@ -73,7 +73,7 @@ import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
-import { hasQmpSheet, qmpLibraryStates, qmpStates, templateForCode, templatesToImport } from "./qmpPlan";
+import { hasQmpSheet, qaCodeOf, qmpLibraryStates, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -149,6 +149,7 @@ import {
   saveSites,
   saveTaxonomies,
   setSheetApproval,
+  setSheetDept,
   setExtraRows,
   setFormCode,
   touchForm,
@@ -1737,7 +1738,11 @@ export default function FormsPage() {
    * 같은 원본으로 이미 만든 서류가 있으면 한 번 묻는다. 월별로 여러 부 만드는 일이 흔해
    * 막지는 않지만, 모르고 두 번 누르면 같은 서류가 둘 생긴다.
    */
-  async function handleWrite(templateId: string, targetSiteId: string | undefined) {
+  async function handleWrite(
+    templateId: string,
+    targetSiteId: string | undefined,
+    qmp?: { code: string; dept: QmpDept },
+  ) {
     const target = sites.find((site) => site.id === targetSiteId);
     if (!target) {
       setStorageWarning("작성할 현장을 먼저 골라 주세요.");
@@ -1758,10 +1763,16 @@ export default function FormsPage() {
     }
     try {
       const copy = await copyTemplateToSite(templateId, target.id);
+      // 품질관리계획서 서류 현황에서 눌렀으면 그 서식 장에 쓰는 부서를 단다.
+      // 지난달 장(`QA-4.2-2(25.09)`)보다 번호만 있는 장을 고른다 — 새로 쓰는 장은 그쪽이다.
+      const qmpSheets = qmp ? copy.sheets.filter((item) => qaCodeOf(item.name) === qmp.code) : [];
+      const qmpSheet = (qmpSheets.find((item) => /^\s*QA-[\d.-]+\s*$/i.test(item.name)) ?? qmpSheets[0])?.name;
+      if (qmp && qmpSheet) await setSheetDept(copy.id, qmpSheet, qmp.dept);
       selectSite(target.id);
       setSpace("site");
       await refreshList();
-      await openStored(copy.id);
+      await openStored(copy.id, qmpSheet);
+      scrollToViewer();
       setSaveState("saved");
       setStorageWarning(`“${target.name}” 서류함에 “${copy.title}”을(를) 만들었습니다. 여기서 작성하세요.`);
     } catch (error) {
@@ -2393,9 +2404,21 @@ export default function FormsPage() {
                 .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
               onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
               canWrite={(code) => Boolean(templateForCode(templates, code))}
-              onWrite={(code) => {
+              onWrite={(code, dept, existing) => {
+                // 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 한 부 더 만들지 않고 그것을 연다.
+                if (existing) {
+                  void (async () => {
+                    if (existing.sheetName) await setSheetDept(existing.docId, existing.sheetName, dept);
+                    await refreshList();
+                    await openDocAt(existing.docId, existing.sheetName);
+                  })();
+                  return;
+                }
                 const template = templateForCode(templates, code);
-                if (template) void handleWrite(template.id, siteId);
+                if (template) void handleWrite(template.id, siteId, { code, dept });
+              }}
+              onSetDept={(docId, sheetName, dept) => {
+                void setSheetDept(docId, sheetName, dept).then(() => refreshList());
               }}
               toolbarExtra={importButton}
               importCount={templatesToImport(templates, siteForms).length}

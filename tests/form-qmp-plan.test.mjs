@@ -8,7 +8,9 @@ import {
   qaCodeOf,
   qmpStates,
   qmpTally,
+  sectionOfCode,
   templateForCode,
+  writersOf,
   writesSection,
 } from '../apps/web/src/features/forms/qmpPlan.ts';
 
@@ -140,4 +142,24 @@ test('[전체 가져오기] — 빠진 서식이 든 양식만, 이미 만든 �
     { sheetNames: ['작업일보'], templateId: 't72' },
   ];
   assert.deepEqual(templatesToImport(templates, siteDocs), ['t42', 't86']);
+});
+
+test('작성 부서 — 장마다 단 부서가 서식 상태에 실린다, 같은 진척이면 부서를 정한 장을 고른다', () => {
+  const states = qmpStates([
+    { id: 'a', sheetNames: ['QA-4.3-2', 'QA-4.3-3'], workingSheets: ['QA-4.3-2'], sheetDepts: { 'QA-4.3-2': '공사' } },
+    // 4.3-3: 앞 서류는 부서 없음, 뒤 서류는 부서만 정하고 아직 안 씀 — 둘 다 빈 불이면 부서 있는 쪽
+    { id: 'b', sheetNames: ['QA-4.3-3'], sheetDepts: { 'QA-4.3-3': '품질' } },
+    // 엉뚱한 값은 버린다
+    { id: 'c', sheetNames: ['QA-4.3-5'], sheetDepts: { 'QA-4.3-5': '환경' } },
+  ]);
+  assert.equal(states.get('4.3-2').dept, '공사');
+  assert.equal(states.get('4.3-2').status, 'done');
+  assert.deepEqual([states.get('4.3-3').docId, states.get('4.3-3').dept], ['b', '품질']);
+  assert.equal(states.get('4.3-5').dept, undefined);
+});
+
+test('작성 부서 고르기 — 그 절의 작성 부서만, 주관이 맨 앞', () => {
+  assert.deepEqual(writersOf(sectionOfCode('4.3-3')), ['품질', '공무', '공사']);
+  assert.deepEqual(writersOf(sectionOfCode('4.2-2')), ['공무']);
+  assert.equal(sectionOfCode('99.9-9'), undefined);
 });

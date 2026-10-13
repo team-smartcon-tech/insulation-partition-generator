@@ -13,7 +13,7 @@
  * (누가 썼든 서류가 있으면 켜진다) — 부서마다 불을 달면 서식 한 장에 불이 셋 붙어 흐려진다.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, Download, FileSpreadsheet, Search, Upload } from "lucide-react";
+import { Check, ChevronDown, Download, FilePenLine, FileSpreadsheet, Search, Upload, X } from "lucide-react";
 import {
   QMP_CHAPTERS,
   QMP_DEPTS,
@@ -21,6 +21,8 @@ import {
   chapterOf,
   lampOf,
   qmpTally,
+  sectionOfCode,
+  writersOf,
   writesSection,
   type QmpDept,
   type QmpFormState,
@@ -36,8 +38,13 @@ interface Props {
   others: { id: string; title: string }[];
   /** 서류(또는 배포 양식)를 그 시트로 연다 */
   onOpen: (docId: string, sheetName?: string) => void;
-  /** 현장 서류함: 배포 양식으로 새로 작성한다 */
-  onWrite?: (code: string) => void;
+  /**
+   * 현장 서류함: 그 서식을 쓴다 — 쓰는 부서와 함께. 이미 이 현장에 그 서식이 든 서류가 있으면
+   * 그것을 열고(`existing`), 없으면 배포 양식으로 새로 만든다.
+   */
+  onWrite?: (code: string, dept: QmpDept, existing?: { docId: string; sheetName?: string }) => void;
+  /** 현장 서류함: 이미 정한 작성 부서를 바꾼다 */
+  onSetDept?: (docId: string, sheetName: string, dept: QmpDept) => void;
   /** 현장 서류함: 그 서식이 든 배포 양식이 있나 */
   canWrite?: (code: string) => boolean;
   /** 배포 양식함: 양식 올리기 */
@@ -84,6 +91,7 @@ export default function QmpBoard({
   others,
   onOpen,
   onWrite,
+  onSetDept,
   canWrite,
   onUpload,
   importCount = 0,
@@ -98,12 +106,34 @@ export default function QmpBoard({
   const [chapter, setChapter] = useState<string | null>(null);
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [query, setQuery] = useState("");
+  /** 부서를 골라야 하는 서식(전체 탭에서 [작성하기], 또는 부서 바꾸기) */
+  const [picking, setPicking] = useState<{ code: string; name: string; change: boolean } | null>(null);
+
+  /** 그 서식이 든 이 현장 서류(전체 가져오기 등으로 이미 있으면) */
+  const existingOf = (code: string) => {
+    const state = states.get(code);
+    return state?.docId ? { docId: state.docId, sheetName: state.sheetName } : undefined;
+  };
+
+  /**
+   * [작성하기] — 부서 탭에서 누르면 그 부서가 쓴다(묻지 않는다). 전체 탭에서 누르면 누가 쓰는지
+   * 몰라서 묻는다(2026-10-13 사용자 요청). 그 부서가 쓰는 절이 아니면 역시 묻는다.
+   */
+  const requestWrite = (code: string, name: string) => {
+    const sec = sectionOfCode(code);
+    if (dept && sec && writersOf(sec).includes(dept)) onWrite?.(code, dept, existingOf(code));
+    else setPicking({ code, name, change: false });
+  };
 
   const tally = (d: QmpDept | null, ch: string | null = null) => qmpTally(states, d, ch, withRefs);
   const overall = tally(null);
   /** 진행률 막대는 고른 부서 탭을 따른다 — "우리 부서는 얼마나 했나" 가 바로 보이게. */
   const current = tally(dept);
   const percent = percentOf(current);
+  /** 고른 부서가 실제로 맡아 쓴(쓰는 중 포함) 서식 수 */
+  const ownWritten = dept
+    ? [...states.values()].filter((state) => state.dept === dept && state.status !== "none").length
+    : 0;
   const needle = query.trim().toLowerCase();
 
   const sections = useMemo(
@@ -149,6 +179,7 @@ export default function QmpBoard({
                 <span className="text-slate-500">
                   {" "}
                   · {dept} {current.done}/{current.total}
+                  {!library && ownWritten > 0 && ` · ${dept}가 맡아 쓴 서식 ${ownWritten}장`}
                 </span>
               )}
             </span>
@@ -360,7 +391,10 @@ export default function QmpBoard({
                               library={library}
                               state={states.get(form.code)}
                               onOpen={onOpen}
-                              onWrite={onWrite}
+                              onWrite={onWrite ? () => requestWrite(form.code, form.name) : undefined}
+                              onChangeDept={
+                                onSetDept ? () => setPicking({ code: form.code, name: form.name, change: true }) : undefined
+                              }
                               canWrite={canWrite}
                             />
                           ))}
@@ -407,7 +441,96 @@ export default function QmpBoard({
           )}
         </div>
       </div>
+      {picking && (
+        <DeptPickDialog
+          code={picking.code}
+          name={picking.name}
+          change={picking.change}
+          writers={writersOf(sectionOfCode(picking.code) ?? QMP_SECTIONS[0])}
+          current={states.get(picking.code)?.dept}
+          onCancel={() => setPicking(null)}
+          onConfirm={(chosen) => {
+            const existing = existingOf(picking.code);
+            setPicking(null);
+            if (!picking.change) onWrite?.(picking.code, chosen, existing);
+            else if (existing?.sheetName) onSetDept?.(existing.docId, existing.sheetName, chosen);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/** 누가 쓰는지 고른다 — 그 절의 작성 부서만 보이고, 주관 부서를 미리 골라 둔다. */
+function DeptPickDialog({
+  code,
+  name,
+  change,
+  writers,
+  current,
+  onCancel,
+  onConfirm,
+}: {
+  code: string;
+  name: string;
+  change: boolean;
+  writers: QmpDept[];
+  current?: QmpDept;
+  onCancel: () => void;
+  onConfirm: (dept: QmpDept) => void;
+}) {
+  const [chosen, setChosen] = useState<QmpDept>(current && writers.includes(current) ? current : writers[0]);
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dept-pick-title"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onCancel();
+      }}
+    >
+      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4">
+          <FilePenLine size={20} className="mt-0.5 text-blue-600" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <h2 id="dept-pick-title" className="text-base font-bold text-slate-900">
+              {change ? "작성 부서 바꾸기" : "어느 부서가 쓰나요?"}
+            </h2>
+            <p className="mt-0.5 truncate text-xs text-slate-500" title={name}>
+              QA-{code} {name}
+            </p>
+          </div>
+          <button type="button" onClick={onCancel} aria-label="닫기" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
+            <X size={18} />
+          </button>
+        </div>
+        <ul className="px-5 py-3">
+          {writers.map((writer, index) => (
+            <li key={writer}>
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-800 hover:bg-slate-50">
+                <input type="radio" name="qmp-dept" checked={chosen === writer} onChange={() => setChosen(writer)} />
+                {writer}
+                {index === 0 && <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">주관</span>}
+              </label>
+            </li>
+          ))}
+        </ul>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+          <button type="button" onClick={onCancel} className="rounded-lg px-4 py-2 text-sm text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50">
+            취소
+          </button>
+          <button
+            type="button"
+            autoFocus
+            onClick={() => onConfirm(chosen)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            <Check size={15} /> {change ? "바꾸기" : "작성하기"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -419,6 +542,7 @@ function FormRow({
   state,
   onOpen,
   onWrite,
+  onChangeDept,
   canWrite,
 }: {
   code: string;
@@ -427,11 +551,24 @@ function FormRow({
   library: boolean;
   state: QmpFormState | undefined;
   onOpen: (docId: string, sheetName?: string) => void;
-  onWrite?: (code: string) => void;
+  onWrite?: () => void;
+  onChangeDept?: () => void;
   canWrite?: (code: string) => boolean;
 }) {
   const status = state?.status ?? "none";
   const dim = reference && !library;
+  /** 쓰는 부서 — 누르면 바꾼다 */
+  const deptTag = state?.dept ? (
+    <button
+      type="button"
+      onClick={onChangeDept}
+      disabled={!onChangeDept || !state.sheetName}
+      title="작성 부서 바꾸기"
+      className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 transition hover:bg-slate-200 disabled:hover:bg-slate-100"
+    >
+      {state.dept}
+    </button>
+  ) : null;
   return (
     <li className="flex h-9 items-center gap-3 border-b border-slate-100 text-sm">
       <span className="w-16 shrink-0 text-xs tabular-nums text-slate-400">QA-{code}</span>
@@ -463,21 +600,25 @@ function FormRow({
         <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] text-slate-500">참고</span>
       ) : status === "done" ? (
         <span className="inline-flex shrink-0 items-center gap-1.5 text-xs tabular-nums text-green-700">
+          {deptTag}
           <Lamp status="done" />
           {state?.finishedAt ? formatDate(state.finishedAt) : "작성됨"}
         </span>
       ) : status === "doing" ? (
         <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-amber-700">
+          {deptTag}
           <Lamp status="doing" />
           작성 중
         </span>
       ) : (
         <span className="inline-flex shrink-0 items-center gap-2 text-xs">
+          {deptTag}
           <Lamp status="none" />
-          {canWrite?.(code) ? (
+          {/* 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 새로 만들지 않고 그것을 연다. */}
+          {state?.docId || canWrite?.(code) ? (
             <button
               type="button"
-              onClick={() => onWrite?.(code)}
+              onClick={() => onWrite?.()}
               className="rounded px-1.5 py-0.5 text-blue-600 transition hover:bg-blue-50"
             >
               작성하기

@@ -330,6 +330,8 @@ export async function patchDoc(
     extraRows?: unknown;
     approvalLines?: unknown;
     approvals?: unknown;
+    /** 시트 이름 → 그 장을 쓰는 부서 */
+    sheetDepts?: unknown;
     sheets?: unknown;
     parserVersion?: number;
     taxonomyId?: string | null;

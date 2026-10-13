@@ -157,6 +157,13 @@ export interface StoredForm {
   approvalLines: Record<string, Record<string, Assignee>>;
   /** 시트 이름 → (서명 자리 키 → 결재 기록). 결재한 서명 그림을 함께 담는다. */
   approvals: Record<string, Record<string, Approval>>;
+  /**
+   * 시트 이름 → 그 장을 쓰는 부서(품질·공무·공사).
+   *
+   * 품질관리계획서 서식마다 "어느 부서가 썼나"를 남긴다(2026-10-13 사용자 결정). 엑셀 한 권에
+   * 서식이 여러 장(QA-4.3-2·4.3-3…)이라 **장마다** 단다. 나중에 생긴 칸이라 옛 서류는 없다.
+   */
+  sheetDepts?: Record<string, string>;
 }
 
 /**
@@ -199,6 +206,8 @@ export interface FormSummary {
   approvalSheets: ApprovalSheetSummary[];
   /** 현장 서류: 작성 중인 장(무언가 적었거나 결재가 걸린 시트). 계획서 서류 현황이 쓴다. */
   workingSheets: string[];
+  /** 시트 이름 → 그 장을 쓰는 부서 */
+  sheetDepts?: Record<string, string>;
 }
 
 /**
@@ -239,6 +248,7 @@ function normalize(raw: StoredForm): StoredForm {
     mergeEdits: raw.mergeEdits ?? {},
     approvalLines: raw.approvalLines ?? {},
     approvals: raw.approvals ?? {},
+    sheetDepts: raw.sheetDepts ?? {},
     values: restoreBlankedTitles(
       normalizeValues(raw.values, raw.sheets ?? []),
       raw.sheets ?? [],
@@ -490,6 +500,7 @@ function summarize(form: StoredForm): FormSummary {
     fileSize: form.fileSize ?? form.bytes?.byteLength,
     templateId: form.templateId,
     templateUploadedAt: form.templateUploadedAt,
+    sheetDepts: form.sheetDepts,
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
@@ -1210,6 +1221,18 @@ export async function setSheetApproval(
   }
 }
 
+/** 그 장을 쓰는 부서를 정한다(비우면 지운다). 서버에도 통째로 보낸다 — 결재와 같은 까닭. */
+export async function setSheetDept(id: string, sheetName: string, dept: string | undefined): Promise<void> {
+  await patchForm(id, (form) => {
+    const sheetDepts = { ...form.sheetDepts };
+    if (dept) sheetDepts[sheetName] = dept;
+    else delete sheetDepts[sheetName];
+    return { sheetDepts, updatedAt: Date.now() };
+  });
+  const saved = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
+  if (saved) void syncPatch(id, { sheetDepts: saved.sheetDepts ?? {} });
+}
+
 /** 이 양식에서 이미 쓰이고 있는 시트 이름(원본 + 더한 것). */
 function usedSheetNames(form: StoredForm): string[] {
   return withCustomSheets(form.sheets, form.customSheets).map((sheet) => sheet.name);
@@ -1283,9 +1306,15 @@ export async function renameCustomSheet(
       approvals[name] = approvals[from];
       delete approvals[from];
     }
+    const sheetDepts = { ...form.sheetDepts };
+    if (sheetDepts[from]) {
+      sheetDepts[name] = sheetDepts[from];
+      delete sheetDepts[from];
+    }
     return {
       approvalLines,
       approvals,
+      sheetDepts,
       customSheets: form.customSheets.map((item) =>
         item.name === from ? { ...item, name } : item,
       ),
@@ -1308,9 +1337,12 @@ export async function removeCustomSheet(id: string, name: string): Promise<void>
     delete approvalLines[name];
     const approvals = { ...form.approvals };
     delete approvals[name];
+    const sheetDepts = { ...form.sheetDepts };
+    delete sheetDepts[name];
     return {
       approvalLines,
       approvals,
+      sheetDepts,
       customSheets: form.customSheets.filter((item) => item.name !== name),
       values,
       updatedAt: Date.now(),

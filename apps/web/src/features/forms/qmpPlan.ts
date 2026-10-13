@@ -270,6 +270,8 @@ export interface QmpDoc {
     approvals: Record<string, { approvedAt?: number }>;
     changed?: boolean;
   }[];
+  /** 시트 이름 → 그 장을 쓰는 부서 */
+  sheetDepts?: Record<string, string>;
 }
 
 export interface QmpFormState {
@@ -279,6 +281,8 @@ export interface QmpFormState {
   sheetName?: string;
   /** 다 끝난 때(결재 마지막 시각). 결재칸이 없는 장은 없다. */
   finishedAt?: number;
+  /** 그 장을 쓰는 부서([작성하기] 때 정한다). 정하기 전에 만든 서류는 없다. */
+  dept?: QmpDept;
 }
 
 const RANK: Record<QmpStatus, number> = { none: 0, doing: 1, done: 2 };
@@ -300,7 +304,9 @@ export function qmpStates(docs: QmpDoc[]): Map<string, QmpFormState> {
     if (
       !current ||
       RANK[next.status] > RANK[current.status] ||
-      (next.status === current.status && (next.finishedAt ?? 0) > (current.finishedAt ?? 0))
+      (next.status === current.status && (next.finishedAt ?? 0) > (current.finishedAt ?? 0)) ||
+      // 같은 진척이면 부서를 정해 둔 장을 — [작성하기]로 부서만 정하고 아직 안 쓴 장도 그 부서가 보이게.
+      (next.status === current.status && (next.finishedAt ?? 0) === (current.finishedAt ?? 0) && !current.dept && next.dept)
     ) {
       result.set(code, next);
     }
@@ -323,7 +329,13 @@ export function qmpStates(docs: QmpDoc[]): Map<string, QmpFormState> {
       } else {
         state = { status: working.has(sheetName) ? "done" : "none" };
       }
-      offer(code, { ...state, docId: doc.id, sheetName });
+      const dept = doc.sheetDepts?.[sheetName];
+      offer(code, {
+        ...state,
+        docId: doc.id,
+        sheetName,
+        ...(QMP_DEPTS.includes(dept as QmpDept) ? { dept: dept as QmpDept } : {}),
+      });
     }
   }
   return result;
@@ -337,6 +349,16 @@ export function templateForCode<T extends { id: string; sheetNames: string[]; up
   return templates
     .filter((template) => template.sheetNames.some((name) => qaCodeOf(name) === code))
     .sort((a, b) => b.uploadedAt - a.uploadedAt)[0];
+}
+
+/** 그 절을 쓰는 부서들 — 주관이 맨 앞 */
+export function writersOf(sec: QmpSection): QmpDept[] {
+  return [sec.lead, ...sec.help.filter((dept) => dept !== sec.lead)];
+}
+
+/** 서식 번호가 든 절 */
+export function sectionOfCode(code: string): QmpSection | undefined {
+  return QMP_SECTIONS.find((sec) => sec.forms.some((form) => form.code === code));
 }
 
 /**
