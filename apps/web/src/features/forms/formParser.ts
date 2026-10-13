@@ -28,7 +28,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 23; // 23: 차트, 글자를 세워 두는 회전 도형
+export const PARSER_VERSION = 24; // 24: 한국어 날짜, 숫자 오른쪽 정렬, 차트 눈금 형식·고정 범위
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -142,8 +142,8 @@ function readRuns(value: unknown, theme: ThemeColors): FormTextRun[] | undefined
     const color = excelColor(font.color, theme);
     return {
       text: typeof run.text === "string" ? run.text : String(run.text ?? ""),
-      ...(font.bold === true ? { bold: true } : {}),
-      ...(font.italic === true ? { italic: true } : {}),
+      // 조각에 제 서식(rPr)이 있으면 굵기·기울임은 "없으면 보통"이다 — 칸 전체가 굵어도 따라가지 않는다.
+      ...(run.font ? { bold: font.bold === true, italic: font.italic === true } : {}),
       ...(font.underline ? { underline: true } : {}),
       ...(typeof font.size === "number" ? { fontSize: font.size } : {}),
       ...(color ? { color } : {}),
@@ -580,6 +580,15 @@ export function parseFormSheet(
       const rowSpan = box.maxRow - box.minRow + 1;
       const colSpan = box.maxCol - box.minCol + 1;
       const style = readStyle(cell, theme);
+      // 엑셀 "일반" 정렬은 숫자·날짜를 오른쪽에 붙인다(글자는 왼쪽). 정렬을 안 적은 숫자 칸을 왼쪽에
+      // 두면 회계 형식의 "-" 와 금액이 칸 왼쪽에 몰렸다(8.4-2).
+      if (!style.align) {
+        const raw = cell.value as unknown;
+        const result = raw && typeof raw === "object" && "result" in (raw as object) ? (raw as { result?: unknown }).result : raw;
+        const saved = formulaResults?.get(cell.address);
+        const shown = result === undefined ? saved : result;
+        if (typeof shown === "number" || shown instanceof Date) style.align = "right";
+      }
       // 병합된 칸은 바깥 테두리를 모서리 칸들에서 다시 읽는다.
       if (rowSpan > 1 || colSpan > 1) style.borders = readMergedBorders(worksheet, box, theme);
 
@@ -634,12 +643,12 @@ export function parseFormSheet(
     colWidths,
     rowHeights,
     cells,
-    // 인쇄 영역 밖에 놓인 그림은 격자 밖으로 계산되므로 여기서 걸러진다.
-    images: withinGrid(
-      readImages(worksheet, workbook, colWidths, rowHeights),
-      colWidths,
-      rowHeights,
-    ),
+    // 인쇄 영역 밖에 놓인 그림은 격자 밖으로 계산되므로 여기서 걸러진다. 인쇄 영역이 없으면
+    // 거르지 않는다 — 표 오른쪽 빈 칸 위에 둔 그림(7.2 카메라의 복사본)까지 버려졌다. 그런 그림은
+    // 나중에 격자를 늘려 자리를 잡는다(coverFloating).
+    images: printArea
+      ? withinGrid(readImages(worksheet, workbook, colWidths, rowHeights), colWidths, rowHeights)
+      : readImages(worksheet, workbook, colWidths, rowHeights),
     // 도형은 exceljs 가 내주지 않아 원본 파일에서 따로 읽는다(parseFormWorkbook).
     shapes: [],
     // 실제로 잘라낸 경우에만 알린다. 인쇄 영역이 내용보다 넓으면 알릴 것이 없다.

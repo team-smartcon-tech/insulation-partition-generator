@@ -96,9 +96,18 @@ function readChart(xml: string, ctx: ShapeContext): Omit<FormChart, "left" | "to
   }
   const title = child(chart, "title");
   const valAx = child(plot, "valAx");
+  const scaling = valAx ? child(valAx, "scaling") : undefined;
+  const fixed = (xml: string | undefined, name: string) => {
+    const raw = ownAttr(xml ? child(xml, name) : undefined, "val");
+    return raw !== undefined && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+  };
   return {
     title: title ? allText(title) || undefined : undefined,
     valueTitle: valAx ? allText(child(valAx, "title")) || undefined : undefined,
+    valueFormat: valAx ? ownAttr(child(valAx, "numFmt"), "formatCode") : undefined,
+    valueMin: fixed(scaling, "min"),
+    valueMax: fixed(scaling, "max"),
+    valueStep: fixed(valAx, "majorUnit"),
     categories,
     groups,
   };

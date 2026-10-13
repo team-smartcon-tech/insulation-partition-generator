@@ -133,6 +133,12 @@ export interface FormChart {
   title?: string;
   /** 세로축 제목 */
   valueTitle?: string;
+  /** 세로축 눈금의 표시 형식(엑셀 numFmt, 예: "0.0%") */
+  valueFormat?: string;
+  /** 세로축 눈금 범위·간격을 엑셀에서 고정해 둔 값(비었으면 값에 맞춰 정한다) */
+  valueMin?: number;
+  valueMax?: number;
+  valueStep?: number;
   categories: string[];
   groups: FormChartGroup[];
 }

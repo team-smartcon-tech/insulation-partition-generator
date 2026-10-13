@@ -104,7 +104,8 @@ function formatDate(date: Date, tokens: Token[]): string {
     else if (/[ymdhsaAP]/i.test(token.code!) && parts.at(-1)?.run?.[0]?.toLowerCase() === token.code!.toLowerCase()) {
       parts.at(-1)!.run += token.code!;
     } else if (/[ymdhs]/i.test(token.code!)) parts.push({ run: token.code! });
-    else parts.push({ literal: token.code! });
+    // 날짜 형식의 "/" 는 지역 날짜 구분자 자리다 — 한국어 엑셀은 "-" 로 보여 준다.
+    else parts.push({ literal: token.code === "/" ? "-" : token.code! });
   }
 
   let out = "";
@@ -178,7 +179,10 @@ function formatNumberSection(value: number, tokens: Token[]): string {
  * 형식이 없거나 "General" 이면 일반 형식. 날짜 값(Date)은 날짜 형식이 없으면 yyyy-mm-dd.
  */
 export function formatValue(value: number | Date, format: string | undefined): string {
-  const fmt = (format ?? "").trim();
+  let fmt = (format ?? "").trim();
+  // 엑셀 기본 "간단한 날짜"(형식 번호 14)는 파일에 mm-dd-yy 로 적히지만, 한국어 엑셀은 지역 설정대로
+  // yyyy-mm-dd 로 보여 준다. 그대로 쓰면 2022-05-12 가 05-12-22 로 보였다(10.1·5.2·7.3 견본).
+  if (/^(mm-dd-yy|m\/d\/yy|m\/d\/yyyy)$/i.test(fmt)) fmt = "yyyy-mm-dd";
   if (value instanceof Date) {
     if (!fmt || !isDateCode(codeOf(tokenize(splitSections(fmt)[0])))) return value.toISOString().slice(0, 10);
     return formatDate(value, tokenize(splitSections(fmt)[0]));

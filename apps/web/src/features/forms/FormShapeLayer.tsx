@@ -190,6 +190,35 @@ function textCss(shape: FormShape): CSSProperties {
   };
 }
 
+/**
+ * 도형 안 글자. 부분 서식이 있으면 조각마다 그린다 — 상자를 그리는 길이 둘(테두리를 SVG 로 그리는
+ * 도형, 그냥 사각형)이라 한쪽에만 두면 다른 쪽은 첫 조각 서식으로 통째로 그려진다(8.13-2 본문이 굵게).
+ * 조각의 굵기·기울임은 "없으면 보통"으로 분명히 준다 — 도형 전체가 굵게 잡혀 있어도 b="0" 조각은 보통이다.
+ */
+function ShapeText({ shape }: { shape: FormShape }) {
+  return (
+    <span style={textCss(shape)}>
+      {shape.textRuns
+        ? shape.textRuns.map((run, index) => (
+            <span
+              key={index}
+              style={{
+                // 도형 글자 크기에 대한 비율 — 도형마다 기준 크기가 달라도 조각 사이 비율이 맞는다.
+                fontSize: run.fontSize ? `${run.fontSize / (shape.fontSize ?? DEFAULT_SHAPE_FONT_PT)}em` : undefined,
+                fontWeight: run.bold ? 700 : 400,
+                fontStyle: run.italic ? "italic" : "normal",
+                textDecoration: run.underline ? "underline" : undefined,
+                color: run.color,
+              }}
+            >
+              {run.text}
+            </span>
+          ))
+        : shape.text}
+    </span>
+  );
+}
+
 /** 선·윤곽선 하나를 그리는 SVG. 도형마다 따로 둬야 도형 순서대로 쌓인다. */
 function ShapeSvg({ children }: { children: ReactNode }) {
   return (
@@ -218,25 +247,7 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
   const text = (shape: FormShape, outlined: boolean) =>
     shape.text ? (
       <div style={boxCss(shape, outlined)}>
-        <span style={textCss(shape)}>
-          {shape.textRuns
-            ? shape.textRuns.map((run, index) => (
-                <span
-                  key={index}
-                  style={{
-                    // 도형 글자 크기에 대한 비율 — 도형마다 기준 크기가 달라도 조각 사이 비율이 맞는다.
-                    fontSize: run.fontSize ? `${run.fontSize / (shape.fontSize ?? DEFAULT_SHAPE_FONT_PT)}em` : undefined,
-                    fontWeight: run.bold ? 700 : shape.bold ? 400 : undefined,
-                    fontStyle: run.italic ? "italic" : undefined,
-                    textDecoration: run.underline ? "underline" : undefined,
-                    color: run.color,
-                  }}
-                >
-                  {run.text}
-                </span>
-              ))
-            : shape.text}
-        </span>
+        <ShapeText shape={shape} />
       </div>
     ) : null;
 
@@ -364,7 +375,7 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
 
         return (
           <div key={index} style={boxCss(shape, false)}>
-            {shape.text && <span style={textCss(shape)}>{shape.text}</span>}
+            {shape.text && <ShapeText shape={shape} />}
           </div>
         );
       })}

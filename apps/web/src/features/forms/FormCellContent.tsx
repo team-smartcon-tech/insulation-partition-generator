@@ -29,8 +29,8 @@ function RichRuns({ runs, basePt }: { runs: FormTextRun[]; basePt: number }) {
           <span
             key={index}
             style={{
-              fontWeight: run.bold ? 700 : undefined,
-              fontStyle: run.italic ? "italic" : undefined,
+              fontWeight: run.bold === true ? 700 : run.bold === false ? 400 : undefined,
+              fontStyle: run.italic === true ? "italic" : run.italic === false ? "normal" : undefined,
               textDecoration: run.underline ? "underline" : undefined,
               fontSize: run.fontSize ? `${run.fontSize / basePt}em` : undefined,
               color: run.color,
@@ -86,8 +86,9 @@ function fitToCell(
   if (!overflows()) return;
 
   const original = Number.parseFloat(window.getComputedStyle(element).fontSize);
-  // 세로로 맞출 때는 원본의 70% 까지만 줄인다 — 그보다 작으면 읽기 어려워 차라리 잘리게 둔다.
-  const floor = Math.max(MIN_FONT_PX, check.height ? original * 0.7 : 0);
+  // 세로로 맞출 때는 원본의 85% 까지만 줄인다 — 많이 넘치는 칸은 엑셀도 잘라 보여 주는 경우라
+  // 그대로 잘리게 둔다(70% 까지 줄였더니 7.1-2·8.10-2 칸이 읽을 수 없게 작아졌다).
+  const floor = Math.max(MIN_FONT_PX, check.height ? original * 0.85 : 0);
   let size = original;
   while (overflows() && size > floor) {
     size -= SHRINK_STEP_PX;
@@ -116,6 +117,8 @@ interface FormCellContentProps {
    * 넘길 수 있으면 글자를 줄이지 않는다 — 줄이면 원본보다 훨씬 작아져 읽기 어렵다.
    */
   spill?: boolean;
+  /** 넘겨 쓸 때 쓸 수 있는 폭(px, 자기 칸 포함). Infinity 면 끝없이(표 밖 빈 열 위로). */
+  spillWidth?: number;
   /** 셀 키를 함께 넘긴다 — 칸마다 새 함수를 만들면 메모가 소용없어진다. */
   onChange: (cellKey: string, value: string) => void;
   /**
@@ -135,6 +138,7 @@ function FormCellContent({
   editable,
   value,
   spill = false,
+  spillWidth,
   maxHeight,
   onChange,
   onCommit,
@@ -241,7 +245,12 @@ function FormCellContent({
       ref={readonlyRef}
       style={{
         // 넘길 수 있는 칸은 옆 칸 위로 글자가 지나가게 둔다(엑셀과 같은 모습).
-        ...(spill ? { overflow: "visible", position: "relative", zIndex: 1 } : {}),
+        ...(spill
+          ? spillWidth !== undefined && Number.isFinite(spillWidth)
+            ? // 이어진 빈 칸까지만 — 그 너머 글자 있는 칸 앞에서 엑셀처럼 자른다.
+              { width: spillWidth, overflow: "hidden", position: "relative", zIndex: 1 }
+            : { overflow: "visible", position: "relative", zIndex: 1 }
+          : {}),
         // 누를 수 있는 자리를 칸 전체로 넓힌다. 글자 높이만큼만 잡으면 줄 높이가 큰 칸에서
         // 아래쪽 빈 곳을 눌러도 아무 일이 없어 "편집이 안 된다"로 보인다.
         ...(editable ? { minHeight: "100%" } : {}),

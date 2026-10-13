@@ -34,7 +34,12 @@ const EMPTY_VALUES: FormCellValues = {};
  * 우리는 칸 안에 가두고 글자를 줄여 맞췄더니, 한 줄짜리 설명문이 7px 까지 작아져 읽을 수
  * 없게 됐다(사용자 신고: "글씨 크기 왜 이래?"). 옆이 비었으면 줄이지 말고 넘긴다.
  */
-function spillableKeys(sheet: FormSheet): Set<string> {
+/**
+ * 칸 키 → 넘겨 쓸 수 있는 폭(px, 자기 칸 포함). 오른쪽으로 **이어진 빈 칸까지만** 넘긴다 — 엑셀은 글자가
+ * 있는 칸을 만나면 거기서 자른다. 끝까지 보면 각주가 옆 칸 글자("일반문서→")를 덮었다(7.6).
+ * 표 오른쪽 끝까지 비어 있으면 끝이 없다(Infinity) — 표 밖 빈 열 위로 넘긴다.
+ */
+function spillableKeys(sheet: FormSheet): Map<string, number> {
   // 글자가 있는 칸이 차지하는 자리(행:열)를 모두 표시한다. 병합은 그 범위 전부.
   const filled = new Set<string>();
   for (const cell of sheet.cells) {
@@ -44,13 +49,18 @@ function spillableKeys(sheet: FormSheet): Set<string> {
     }
   }
 
-  const keys = new Set<string>();
+  const keys = new Map<string, number>();
+  const widthOf = (from: number, count: number) =>
+    sheet.colWidths.slice(from - 1, from - 1 + count).reduce((sum, w) => sum + w, 0);
   for (const cell of sheet.cells) {
     if (cell.style.wrap === true || cell.text.trim() === "") continue;
     const next = cell.col + cell.colSpan;
     // 마지막 열에 닿은 칸도 넘긴다 — 엑셀은 표 밖의 빈 열 위로 넘겨 보여 준다. 가두면 두 열짜리
     // 시트의 제목("Ⅰ. 현장 품질방침 및 품질목표")이 7px 까지 줄어 "Ⅰ" 만 보였다(9.4 경영검토).
-    if (next > sheet.colCount || !filled.has(`${cell.row}:${next}`)) keys.add(cell.key);
+    if (next <= sheet.colCount && filled.has(`${cell.row}:${next}`)) continue;
+    let col = next;
+    while (col <= sheet.colCount && !filled.has(`${cell.row}:${col}`)) col += 1;
+    keys.set(cell.key, col > sheet.colCount ? Infinity : widthOf(cell.col, col - cell.col));
   }
   return keys;
 }
@@ -368,7 +378,7 @@ const SheetRow = memo(function SheetRow({
   /** 고칠 수 있는 칸에 하늘색을 칠할까(사용자가 끌 수 있다) */
   tint: boolean;
   /** 옆 칸으로 글자를 넘겨도 되는 칸들의 키 */
-  spillable: Set<string>;
+  spillable: Map<string, number>;
   /** 이 줄에서 고친 글자만 담긴다(셀 키 → 값). 줄마다 잘라 넘겨야 메모가 듣는다. */
   values: FormCellValues;
   onChangeValue: (cellKey: string, value: string) => void;
@@ -499,6 +509,7 @@ const SheetRow = memo(function SheetRow({
             editable={canEdit}
             value={values[cell.key]}
             spill={spillable.has(cell.key)}
+            spillWidth={spillable.get(cell.key)}
             // 원본 글자만 줄 높이 안에 가둔다. 사용자가 적은 글은 다 보여야 하므로 늘어나게 둔다.
             maxHeight={values[cell.key] === undefined ? spanHeight(rowHeights, displayRow - 1, cell.rowSpan) : undefined}
             onChange={onChangeValue}

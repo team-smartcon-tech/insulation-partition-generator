@@ -6,6 +6,7 @@
  */
 import type { ReactElement } from "react";
 import type { FormChart } from "./types";
+import { formatValue } from "./numberFormat";
 
 /** 엑셀 기본 계열 색(Office 테마) — 계열 색을 따로 적지 않은 차트용 */
 const PALETTE = ["#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47"];
@@ -19,16 +20,18 @@ function niceScale(max: number): { top: number; step: number } {
   return { top: Math.ceil(max / step) * step, step };
 }
 
-const label = (n: number) => String(Number(n.toPrecision(6)));
+/** 눈금 글자 — 엑셀이 세로축에 적은 표시 형식(0.0% 등)을 따른다. */
+const label = (n: number, format: string | undefined) =>
+  format && !/^general$/i.test(format) ? formatValue(Number(n.toPrecision(12)), format) : String(Number(n.toPrecision(6)));
 
 function ChartSvg({ chart }: { chart: FormChart }) {
   const { width: W, height: H } = chart;
   const series = chart.groups.flatMap((group) => group.series.map((s) => ({ ...s, group })));
   const showLegend = series.length > 1 || series.some((s) => s.name);
   const padTop = chart.title ? 26 : 10;
-  const padLeft = (chart.valueTitle ? 18 : 0) + 34;
+  const padLeft = (chart.valueTitle ? 22 : 0) + 42;
   const padRight = showLegend ? Math.min(110, W * 0.28) : 12;
-  const padBottom = 22;
+  const padBottom = 24;
   const plotW = Math.max(10, W - padLeft - padRight);
   const plotH = Math.max(10, H - padTop - padBottom);
   const n = Math.max(1, chart.categories.length || Math.max(0, ...series.map((s) => s.values.length)));
@@ -41,8 +44,12 @@ function ChartSvg({ chart }: { chart: FormChart }) {
       for (let i = 0; i < n; i++) max = Math.max(max, group.series.reduce((sum, s) => sum + Math.max(0, s.values[i] ?? 0), 0));
     } else for (const s of group.series) for (const v of s.values) if (v !== null) max = Math.max(max, v);
   }
-  const { top, step } = niceScale(max);
-  const y = (v: number) => padTop + plotH - (v / top) * plotH;
+  // 엑셀에서 축 범위·간격을 고정해 두었으면 그대로 쓴다(9.4 재검측율: 0~3%, 1% 간격).
+  const bottom = chart.valueMin ?? 0;
+  const auto = niceScale((chart.valueMax ?? max) - bottom);
+  const top = chart.valueMax ?? bottom + auto.top;
+  const step = chart.valueStep ?? auto.step;
+  const y = (v: number) => padTop + plotH - ((Math.min(Math.max(v, bottom), top) - bottom) / (top - bottom)) * plotH;
   const band = plotW / n;
   const colorOf = (index: number, own?: string) => own ?? PALETTE[index % PALETTE.length];
 
@@ -82,7 +89,7 @@ function ChartSvg({ chart }: { chart: FormChart }) {
   }
 
   const ticks: number[] = [];
-  for (let v = 0; v <= top + step / 2; v += step) ticks.push(v);
+  for (let i = 0; bottom + i * step <= top + step * 0.01 && i < 50; i++) ticks.push(bottom + i * step);
 
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={chart.title ?? "차트"}>
@@ -93,15 +100,20 @@ function ChartSvg({ chart }: { chart: FormChart }) {
         </text>
       )}
       {chart.valueTitle && (
-        <text x={12} y={padTop + plotH / 2} textAnchor="middle" fontSize={10} fill="#595959" transform={`rotate(-90 12 ${padTop + plotH / 2})`}>
-          {chart.valueTitle}
+        // 엑셀처럼 한 글자씩 세로로 쌓는다(회전하면 작은 한글이 뭉개졌다).
+        <text x={13} y={padTop + plotH / 2 - (chart.valueTitle.length - 1) * 6.5} textAnchor="middle" fontSize={11} fontWeight={700} fill="#404040">
+          {[...chart.valueTitle].map((ch, i) => (
+            <tspan key={i} x={13} dy={i === 0 ? 0 : 13}>
+              {ch}
+            </tspan>
+          ))}
         </text>
       )}
       {ticks.map((v) => (
         <g key={v}>
           <line x1={padLeft} x2={padLeft + plotW} y1={y(v)} y2={y(v)} stroke="#e5e5e5" />
-          <text x={padLeft - 4} y={y(v) + 3} textAnchor="end" fontSize={9} fill="#595959">
-            {label(v)}
+          <text x={padLeft - 5} y={y(v) + 4} textAnchor="end" fontSize={11} fill="#595959">
+            {label(v, chart.valueFormat)}
           </text>
         </g>
       ))}
@@ -109,7 +121,7 @@ function ChartSvg({ chart }: { chart: FormChart }) {
       {bars}
       {lines}
       {chart.categories.map((name, i) => (
-        <text key={i} x={padLeft + band * i + band / 2} y={padTop + plotH + 14} textAnchor="middle" fontSize={9} fill="#595959">
+        <text key={i} x={padLeft + band * i + band / 2} y={padTop + plotH + 16} textAnchor="middle" fontSize={11} fill="#595959">
           {name}
         </text>
       ))}

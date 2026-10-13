@@ -47,3 +47,10 @@ test('날짜 — 한글 글자와 섞인 형식', () => {
   assert.equal(formatValue(new Date(Date.UTC(2022, 3, 20, 9, 5)), 'hh:mm'), '09:05');
   assert.equal(formatValue(d, '[$-412]yyyy"년" m"월" d"일"'), '2022년 4월 20일');
 });
+
+test('한국어 엑셀의 기본 날짜 — mm-dd-yy 는 yyyy-mm-dd, "/" 는 "-" 로', () => {
+  const d = new Date(Date.UTC(2022, 4, 12));
+  assert.equal(formatValue(d, 'mm-dd-yy'), '2022-05-12');
+  assert.equal(formatValue(d, 'yyyy/mm/dd'), '2022-05-12');
+  assert.equal(formatValue(d, 'yyyy"/"mm'), '2022/05', '따옴표 안의 / 는 글자 그대로');
+});
