@@ -114,6 +114,11 @@ export interface FormImage {
   top: number;
   width: number;
   height: number;
+  /**
+   * 브라우저가 못 여는 그림 형식(EMF·WMF — 엑셀 "카메라"로 찍은 그림 등). 이때 `src` 는 비어 있고
+   * 화면에는 자리 표시만 한다 — 말없이 빼면 원본에 있던 그림이 왜 없는지 알 수 없다(7.2 카메라).
+   */
+  unsupported?: "emf" | "wmf";
 }
 
 /**

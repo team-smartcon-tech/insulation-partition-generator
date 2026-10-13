@@ -27,7 +27,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 20; // 20: 숨긴 열·줄, 선택 영역의 가운데로, 높이 0 글상자
+export const PARSER_VERSION = 21; // 21: 크기로 잡힌 그림, 그림만 있는 시트
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -407,14 +407,14 @@ function readImages(
   for (const item of worksheet.getImages() ?? []) {
     try {
       const media = workbook.getImage(Number(item.imageId));
-      // EMF/WMF 는 윈도우 전용 그림 형식이라 브라우저가 못 연다. 넣어 봐야 깨진
-      // 그림이 되고, alt 가 비어 있어 화면에서는 "아무것도 없는 것"으로 보인다.
-      if (["emf", "wmf"].includes(String(media?.extension).toLowerCase())) continue;
+      // EMF/WMF 는 윈도우 전용 그림 형식이라 브라우저가 못 연다. 그림 대신 자리 표시만 남긴다.
+      const extension = String(media?.extension).toLowerCase();
+      const unsupported = extension === "emf" || extension === "wmf" ? (extension as "emf" | "wmf") : undefined;
       // exceljs 판에 따라 바이트가 buffer/data 중 어디에 오는지 갈린다.
       const raw = media?.buffer ?? media?.data;
-      const src = toDataUrl(raw, media?.extension);
+      const src = unsupported ? "" : toDataUrl(raw, media?.extension);
       // 못 읽은 그림을 넣으면 화면에 보이지 않는 <img> 만 남아 원인 찾기가 어려워진다.
-      if (!src) continue;
+      if (!src && !unsupported) continue;
 
       const tl = item.range?.tl;
       if (!tl) continue;
@@ -429,12 +429,14 @@ function readImages(
         width = anchorToPx(colWidths, defaultCol, br.nativeCol ?? 0, br.nativeColOff ?? 0) - left;
         height = anchorToPx(rowHeights, defaultRow, br.nativeRow ?? 0, br.nativeRowOff ?? 0) - top;
       } else {
-        width = (item.range?.ext?.width ?? 0) / EMU_PER_PX;
-        height = (item.range?.ext?.height ?? 0) / EMU_PER_PX;
+        // exceljs 는 ext 를 **이미 px 로** 준다(1927411 EMU → 202.35). EMU 로 보고 한 번 더 나누면
+        // 그림이 0.02px 로 줄어 사라졌다(8.11 견본·7.2 카메라의 로고).
+        width = item.range?.ext?.width ?? 0;
+        height = item.range?.ext?.height ?? 0;
       }
       if (!(width > 0) || !(height > 0)) continue;
 
-      images.push({ src, left, top, width, height });
+      images.push({ src: src ?? "", left, top, width, height, ...(unsupported ? { unsupported } : {}) });
     } catch {
       // 그림 하나를 못 읽는다고 양식 전체를 못 열면 안 된다. 그 그림만 건너뛴다.
     }
@@ -468,6 +470,17 @@ export function parseFormSheet(
     if (!end) continue;
     if (end.row > maxRow) maxRow = end.row;
     if (end.col > maxCol) maxCol = end.col;
+  }
+
+  // 칸에 아무것도 없고 그림만 있는 시트(6.1-2 "리스크 평가기준" 은 표 전체가 그림 한 장)는
+  // 그림이 닿는 칸까지를 범위로 삼는다. 안 그러면 "내용이 없는 시트"로 보고 그림까지 버린다.
+  if (maxRow === 0 || maxCol === 0) {
+    for (const item of typeof worksheet.getImages === "function" ? worksheet.getImages() ?? [] : []) {
+      const corner = item.range?.br ?? item.range?.tl;
+      if (!corner) continue;
+      maxRow = Math.max(maxRow, (corner.nativeRow ?? 0) + 1);
+      maxCol = Math.max(maxCol, (corner.nativeCol ?? 0) + 1);
+    }
   }
 
   /**

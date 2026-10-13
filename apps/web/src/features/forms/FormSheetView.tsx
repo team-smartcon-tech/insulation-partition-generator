@@ -700,7 +700,17 @@ export default function FormSheetView({
       */}
       <FormShapeLayer shapes={sheet.shapes ?? []} />
 
-      {(sheet.images ?? []).map((image, index) => (
+      {(sheet.images ?? []).map((image, index) =>
+        image.unsupported ? (
+          <div
+            key={index}
+            title={`${image.unsupported.toUpperCase()} 그림은 브라우저에서 보이지 않습니다. 엑셀에서 열면 보입니다.`}
+            className="pointer-events-none absolute flex select-none items-center justify-center border border-dashed border-slate-300 bg-slate-50/70 p-1 text-center text-[11px] leading-tight text-slate-400"
+            style={{ left: image.left, top: image.top, width: image.width, height: image.height }}
+          >
+            엑셀 그림({image.unsupported.toUpperCase()}) — 엑셀에서만 보입니다
+          </div>
+        ) : (
         <img
           key={index}
           src={image.src}
@@ -715,7 +725,8 @@ export default function FormSheetView({
             height: image.height,
           }}
         />
-      ))}
+        ),
+      )}
       </div>
       </div>
     </div>
