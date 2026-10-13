@@ -575,6 +575,7 @@ function readBodyLayout(bodyPr: string | undefined): Partial<FormShape> {
     valign: anchor === "ctr" ? "middle" : anchor === "b" ? "bottom" : "top",
     noWrap: ownAttr(bodyPr, "wrap") === "none" || undefined,
     vertical: vert === "vert" || vert === "vert270" || vert === "eaVert" ? vert : undefined,
+    upright: ownAttr(bodyPr, "upright") === "1" || undefined,
   };
 }
 

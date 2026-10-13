@@ -129,12 +129,21 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
         ? Math.min(shape.width, shape.height) * ROUND_RATIO
         : undefined;
   const [padTop, padRight, padBottom, padLeft] = shape.inset ?? [2, 4, 2, 4];
+  // 글자를 세워 두는 도형을 90°·270° 돌렸으면, 돌린 뒤 모습(가로·세로를 바꾼 같은 가운데의 틀)에
+  // 그대로 그린다 — 직사각형을 90° 돌린 것과 같은 자리이고, 글자는 돌지 않는다.
+  const quarter = shape.rotation !== undefined && Math.abs(Math.abs(shape.rotation) % 180 - 90) < 1;
+  const flat = shape.upright && quarter;
+  const frame = flat
+    ? {
+        left: shape.left + shape.width / 2 - shape.height / 2,
+        top: shape.top + shape.height / 2 - shape.width / 2,
+        width: shape.height,
+        height: shape.width,
+      }
+    : { left: shape.left, top: shape.top, width: shape.width, height: shape.height };
   return {
     position: "absolute",
-    left: shape.left,
-    top: shape.top,
-    width: shape.width,
-    height: shape.height,
+    ...frame,
     background: outlined ? "transparent" : (shape.fill ?? "transparent"),
     border:
       !outlined && shape.line
@@ -142,7 +151,7 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
         : undefined,
     borderRadius: radius,
     // 회전은 도형 가운데를 축으로 돈다. 엑셀도 같은 기준이라 자리가 어긋나지 않는다.
-    transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
+    transform: shape.rotation && !flat ? `rotate(${shape.rotation}deg)` : undefined,
     display: "flex",
     alignItems:
       shape.valign === "top" ? "flex-start" : shape.valign === "bottom" ? "flex-end" : "center",

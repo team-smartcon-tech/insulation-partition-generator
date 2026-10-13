@@ -225,6 +225,11 @@ export interface FormShape {
   noWrap?: boolean;
   /** 세로 글자. vert = 시계방향으로 누움, vert270 = 반시계, eaVert = 글자는 서고 줄만 세로 */
   vertical?: "vert" | "vert270" | "eaVert";
+  /**
+   * 도형을 돌려도 글자는 돌리지 않는다(엑셀 "텍스트 회전 안 함", bodyPr upright). 이때 글자는 돌린 뒤의
+   * 모습(가로·세로가 바뀐 틀) 안에 세로 쓰기만 건다 — 두 번 돌려 글자가 좁은 틀에 쌓였다(8.7 "필요시 문서 개정").
+   */
+  upright?: boolean;
 }
 
 export interface FormSheet {
