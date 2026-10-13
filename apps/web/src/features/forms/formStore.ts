@@ -197,6 +197,8 @@ export interface FormSummary {
   editedCount: number;
   /** 결재칸이 있는 시트들의 결재 상태(홈 화면용). 배포 원본·견본 시트는 없다. */
   approvalSheets: ApprovalSheetSummary[];
+  /** 현장 서류: 작성 중인 장(무언가 적었거나 결재가 걸린 시트). 계획서 서류 현황이 쓴다. */
+  workingSheets: string[];
 }
 
 /**
@@ -429,6 +431,16 @@ export function isTemplateSheet(sheet: FormSheet): boolean {
   return words.some((word) => name.includes(word));
 }
 
+/** 작성 중인 장인가 — 앱에서 더한 장, 글자를 적은 장, 결재선·결재가 걸린 장. */
+function isWorkingSheet(form: StoredForm, sheet: FormSheet): boolean {
+  return (
+    sheet.custom === true ||
+    Object.keys(form.values[sheet.name] ?? {}).length > 0 ||
+    Object.keys(form.approvalLines[sheet.name] ?? {}).length > 0 ||
+    Object.keys(form.approvals[sheet.name] ?? {}).length > 0
+  );
+}
+
 /**
  * 결재칸이 있는 시트마다 결재선·결재 기록을 요약한다(서명 그림은 뺀다 — 목록이 무거워진다).
  * 결재칸은 저장해 두지 않고 격자에서 다시 찾는다 — 양식을 다시 읽으면 결재칸도 새 격자를 따른다.
@@ -443,12 +455,7 @@ export function approvalSheetsOf(form: StoredForm): ApprovalSheetSummary[] {
      * (`QA-4.2-2(25.09)`…), 결재칸이 있다고 다 세면 이미 종이로 끝난 과거 기록이 "결재선 미지정"에
      * 쌓여 정작 처리할 것이 묻힌다. 앱에서 더한 장, 글자를 적은 장, 이미 결재선·결재가 있는 장만 본다.
      */
-    const working =
-      sheet.custom === true ||
-      Object.keys(form.values[sheet.name] ?? {}).length > 0 ||
-      Object.keys(form.approvalLines[sheet.name] ?? {}).length > 0 ||
-      Object.keys(form.approvals[sheet.name] ?? {}).length > 0;
-    if (!working) continue;
+    if (!isWorkingSheet(form, sheet)) continue;
     const slots = findApprovalBoxes(sheet).flatMap((box) =>
       box.slots.map((slot) => ({ label: slot.label, signKey: slot.signKey })),
     );
@@ -493,6 +500,12 @@ function summarize(form: StoredForm): FormSummary {
       0,
     ),
     approvalSheets: approvalSheetsOf(form),
+    workingSheets:
+      form.kind === "site"
+        ? withCustomSheets(form.sheets, form.customSheets)
+            .filter((sheet) => isWorkingSheet(form, sheet))
+            .map((sheet) => sheet.name)
+        : [],
   };
 }
 

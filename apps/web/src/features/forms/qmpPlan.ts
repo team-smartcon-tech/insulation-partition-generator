@@ -1,0 +1,365 @@
+/**
+ * 품질관리계획서(PQP) 서식 목록과 부서별 작성 현황.
+ *
+ * 왜 있나: 현장 서류는 회사 품질관리계획서가 정한 서식(QA-4.2-1 ~ QA-10.2-2)을 채우는 일이
+ * 많다. 계획서는 절마다 **주관 부서**를 정해 두었으므로(첨부 QA-6.3-2 "항목별 담당파트 현황"),
+ * "우리 부서가 써야 할 서류를 다 썼나"를 신호등으로 보여 준다(2026-10-13 사용자 결정).
+ *
+ * 서식 이름·주관·협조는 부산 장안 품질관리계획서(P0453C-PQP-01 개정 2)의 각 절 "첨부" 목록과
+ * QA-6.3-2 를 그대로 옮겼다. 환경은 계획서 범위 밖이라(담당파트 표에 없다) 여기 없다.
+ *
+ * **어느 서류가 어느 서식인지는 시트 이름으로 안다.** 회사 양식 엑셀은 시트 이름이 서식 번호다
+ * (`QA-7.2-2`, 지난달 장은 `QA-4.2-2(25.09)`). 그래서 배포 양식에 번호를 따로 붙이지 않아도
+ * 배포 양식에서 만든 현장 서류가 저절로 맞물린다.
+ */
+
+export type QmpDept = "품질" | "공무" | "공사";
+export const QMP_DEPTS: QmpDept[] = ["품질", "공무", "공사"];
+
+export interface QmpForm {
+  /** 서식 번호에서 "QA-" 를 뺀 것(예: "7.2-2") */
+  code: string;
+  name: string;
+  /**
+   * 절차·기준 문서인가(PROCESS 흐름도, 작성방법, 평가기준). 현장이 채우지 않고 따르기만 하므로
+   * 신호등을 달지 않는다 — 달면 영영 꺼진 불이 "안 한 일"처럼 보인다.
+   */
+  reference: boolean;
+}
+
+export interface QmpSection {
+  /** 절 번호(예: "7.2") */
+  no: string;
+  title: string;
+  /** 주관 부서 */
+  lead: QmpDept;
+  /** 협조 부서 */
+  help: QmpDept[];
+  forms: QmpForm[];
+}
+
+export const QMP_CHAPTERS: Record<string, string> = {
+  "4": "조직의 상황",
+  "5": "리더십",
+  "6": "기획",
+  "7": "지원",
+  "8": "운용",
+  "9": "성과관리",
+  "10": "개선",
+};
+
+type Raw = [code: string, name: string, kind?: "ref"];
+
+function section(no: string, title: string, lead: QmpDept, help: QmpDept[], forms: Raw[]): QmpSection {
+  return {
+    no,
+    title,
+    lead,
+    help,
+    forms: forms.map(([code, name, kind]) => ({ code, name, reference: kind === "ref" || /PROCESS/.test(name) })),
+  };
+}
+
+/*
+ * 8.3 설계관리·8.9 고객재산관리는 표에 주관이 있지만 부산 장안은 "적용 제외"(계획서 2.2)다.
+ * 현장마다 다르므로 목록에는 넣고, 현장별 적용 제외는 나중에 정한다.
+ */
+export const QMP_SECTIONS: QmpSection[] = [
+  section("4.2", "이해관계자의 요구와 기대관리", "공무", [], [
+    ["4.2-1", "이해관계자의 요구와 기대관리 PROCESS"],
+    ["4.2-2", "이해관계자의 요구사항 및 관리방안"],
+  ]),
+  section("4.3", "프로세스 관리", "품질", ["공무", "공사"], [
+    ["4.3-1", "프로세스 관리 PROCESS"],
+    ["4.3-2", "건설공사 프로세스 간의 상호작용 관계도"],
+    ["4.3-3", "표준 프로세스 등록대장"],
+    ["4.3-4", "프로세스 관리번호 작성방법", "ref"],
+    ["4.3-5", "표준 프로세스 Map"],
+  ]),
+  section("5.1", "품질방침", "품질", [], [
+    ["5.1-1", "품질방침 PROCESS"],
+    ["5.1-2", "현장 품질방침 및 목표"],
+  ]),
+  section("5.2", "책임 및 권한", "품질", ["공무", "공사"], [
+    ["5.2-1", "현장 조직도"],
+    ["5.2-2", "개인별 업무 분장표"],
+  ]),
+  section("6.1", "리스크 및 기회관리", "공무", ["공사"], [
+    ["6.1-1", "리스크 및 기회관리 PROCESS"],
+    ["6.1-2", "리스크 평가기준", "ref"],
+    ["6.1-3", "리스크 및 기회 평가표"],
+    ["6.1-4", "리스크 및 기회 대응계획서"],
+  ]),
+  section("6.2", "품질목표관리", "품질", [], [
+    ["6.2-1", "품질목표 수립 PROCESS"],
+    ["6.2-2", "품질목표 및 달성계획"],
+    ["6.2-3", "품질목표 운영 현황"],
+  ]),
+  section("6.3", "품질관리계획서의 변경관리", "품질", ["공사"], [
+    ["6.3-1", "품질관리계획서 변경관리 PROCESS"],
+    ["6.3-2", "품질관리계획서 항목별 담당파트 현황"],
+  ]),
+  section("7.1", "자원관리", "공무", [], [
+    ["7.1-1", "자원관리 PROCESS"],
+    ["7.1-2", "현장 기반시설 및 업무환경 구축 요구사항"],
+    ["7.1-3", "기반구조관리상태 점검표"],
+  ]),
+  section("7.2", "모니터링 자원 및 측정자원의 관리", "품질", ["공무"], [
+    ["7.2-1", "모니터링 자원 및 측정자원의 관리 PROCESS"],
+    ["7.2-2", "검교정 측정장비 관리대장"],
+    ["7.2-3", "측정기기 관리카드"],
+  ]),
+  section("7.3", "조직의 지식관리", "품질", ["공무", "공사"], [
+    ["7.3-1", "지식관리 PROCESS"],
+    ["7.3-2", "현장 지식관리대장"],
+  ]),
+  section("7.4", "역량 및 적격성 관리", "품질", ["공무", "공사"], [
+    ["7.4-1", "역량 및 적격성 관리 PROCESS"],
+    ["7.4-2", "교육훈련 운영 기준표"],
+    ["7.4-3", "연간 교육훈련 계획표"],
+    ["7.4-4", "역량/적격성 평가서"],
+    ["7.4-5", "교육결과 보고서"],
+    ["7.4-6", "참석자 명단"],
+  ]),
+  section("7.5", "의사소통 관리", "공무", ["공사"], [
+    ["7.5-1", "주요 의사소통 관리기준"],
+    ["7.5-2", "공문 접수 대장"],
+    ["7.5-3", "공문 발송 대장"],
+    ["7.5-4", "회의록"],
+  ]),
+  section("7.6", "문서화된 정보 및 정보의 관리", "공무", ["품질"], [
+    ["7.6-1", "문서화된 정보 및 정보의 관리 PROCESS"],
+    ["7.6-2", "설계도서 관리대장"],
+    ["7.6-3", "문서관리 대장"],
+    ["7.6-4", "문서 접수/발송 관리 대장"],
+    ["7.6-5", "문서 및 기록 목록표"],
+  ]),
+  section("8.1", "건설공사 요구사항 검토 및 준비", "공사", [], [
+    ["8.1-1", "인허가 업무계획"],
+    ["8.1-2", "사업승인(인허가)조건 이행현황"],
+    ["8.1-3", "실시도서 도면 검토 체크리스트"],
+  ]),
+  section("8.2", "건설공사 요구사항 변경", "공무", ["공사"], [
+    ["8.2-1", "건설공사 요구사항 변경 PROCESS"],
+    ["8.2-2", "현장 설계변경 요청서"],
+    ["8.2-3", "설계변경 관리대장"],
+  ]),
+  section("8.3", "설계관리", "공무", [], [
+    ["8.3-1", "설계관리 PROCESS"],
+    ["8.3-2", "설계입력 기준서"],
+    ["8.3-3", "설계 검토·검증 정보"],
+    ["8.3-4", "설계 검토·검증 정보"],
+    ["8.3-5", "설계 실현성 확인 정보"],
+  ]),
+  section("8.4", "기자재 구매관리", "공무", ["품질", "공사"], [
+    ["8.4-1", "기자재 구매관리 PROCESS"],
+    ["8.4-2", "주요기자재 수급계획서"],
+    ["8.4-3", "공장점검 계획서"],
+    ["8.4-4", "주요기자재 공급원 검토 요청서"],
+    ["8.4-5", "기자재 청구서"],
+    ["8.4-6", "주요자재 검사 및 수불부"],
+  ]),
+  section("8.5", "외부에서 제공되는 프로세스 관리", "공무", ["공사"], [
+    ["8.5-1", "외부에서 제공되는 프로세스 관리 PROCESS"],
+    ["8.5-2", "하도업체 발주계획"],
+  ]),
+  section("8.6", "공사관리", "공사", [], [
+    ["8.6-1", "공사 예정공정표"],
+    ["8.6-2", "3개월 공정표"],
+    ["8.6-3", "주간 공정표"],
+    ["8.6-4", "시공상세도 작성계획"],
+    ["8.6-5", "시공상세도 검토요청서"],
+    ["8.6-6", "시공상세도 배포대장"],
+    ["8.6-7", "주변 민원관리 대장"],
+    ["8.6-8", "주변 민원일지"],
+  ]),
+  section("8.7", "중점품질관리", "품질", ["공사"], [
+    ["8.7-1", "중점 품질관리 PROCESS"],
+    ["8.7-2", "특수공정/중점관리 수행인원 적격성 평가표"],
+    ["8.7-3", "중점관리 요원 자격관리 대장"],
+  ]),
+  section("8.8", "식별 및 추적관리", "공무", ["품질", "공사"], [
+    ["8.8-1", "식별 및 추적관리 PROCESS"],
+    ["8.8-2", "기자재식별표지"],
+  ]),
+  section("8.9", "고객 또는 외부공급자의 재산관리", "공무", ["공사"], [
+    ["8.9-1", "고객 또는 외부공급자의 재산관리 PROCESS"],
+    ["8.9-2", "고객재산 목록표"],
+  ]),
+  section("8.10", "보존관리", "공무", ["공사"], [
+    ["8.10-1", "보존관리 PROCESS"],
+    ["8.10-2", "기자재 유형별 관리방법"],
+    ["8.10-3", "주요 기자재 품목별 보관방법"],
+    ["8.10-4", "기자재 보관상태 점검"],
+  ]),
+  section("8.11", "검사 및 시험, 모니터링", "품질", ["공사"], [
+    ["8.11-1", "검사 및 시험, 모니터링관리 PROCESS"],
+    ["8.11-2", "검사 및 시험계획(ITP)"],
+    ["8.11-3", "공장점검 보고서"],
+    ["8.11-4", "자재 입고검사 Checklist"],
+    ["8.11-5", "자재검수 요청서"],
+    ["8.11-6", "품질검사 실시대장"],
+    ["8.11-7", "품질검사 실적보고서"],
+    ["8.11-8", "품질검사 성과 총괄표"],
+    ["8.11-9", "검측 요청서"],
+    ["8.11-10", "검측 체크리스트"],
+  ]),
+  section("8.12", "부적합 공사의 관리", "품질", ["공무", "공사"], [
+    ["8.12-1", "부적합 공사의 관리 PROCESS"],
+    ["8.12-2", "현지시정 통보서"],
+    ["8.12-3", "부적합보고서"],
+    ["8.12-4", "부적합보고서 관리대장"],
+    ["8.12-5", "실패비용 산출서"],
+  ]),
+  section("8.13", "공사준공 및 인계", "공무", ["품질", "공사"], [
+    ["8.13-1", "장비 및 시설물 인수인계서"],
+    ["8.13-2", "이관자료 목록"],
+  ]),
+  section("9.1", "고객만족", "공무", ["공사"], [
+    ["9.1-1", "고객만족 PROCESS"],
+    ["9.1-2", "프로젝트 만족도 설문 조사서"],
+  ]),
+  section("9.2", "분석 및 평가", "품질", ["공무", "공사"], [["9.2-1", "데이터 수집 및 분석보고서"]]),
+  section("9.3", "내부심사", "품질", ["공사"], [
+    ["9.3-1", "자체 내부심사 PROCESS"],
+    ["9.3-2", "내부심사 계획서"],
+    ["9.3-3", "자체 내부심사 점검표"],
+    ["9.3-4", "자체 내부심사 결과 보고서"],
+  ]),
+  section("9.4", "경영검토", "품질", ["공무", "공사"], [
+    ["9.4-1", "품질경영검토 PROCESS"],
+    ["9.4-2", "품질경영검토 보고서"],
+  ]),
+  section("10.1", "부적합 및 시정조치", "품질", ["공무", "공사"], [
+    ["10.1-1", "부적합 및 시정조치 PROCESS"],
+    ["10.1-2", "부적합 시정조치 요구서"],
+    ["10.1-3", "부적합 시정조치 요구서 관리대장"],
+    ["10.1-4", "부적합 시정조치 보고서"],
+  ]),
+  section("10.2", "지속적 개선", "품질", ["공사"], [
+    ["10.2-1", "지속적 개선 PROCESS"],
+    ["10.2-2", "지속적 개선항목 관리대장"],
+  ]),
+];
+
+export const chapterOf = (sectionNo: string) => sectionNo.split(".")[0];
+
+/**
+ * 시트 이름에서 서식 번호를 읽는다. 없으면 null.
+ *
+ * `QA-7.2-2`, `QA-4.2-2(25.09)`, `QA-7.5-4(양식)`, 회사 원본의 오타 `QA-7.3.-1` 까지 받는다.
+ * 앞뒤 공백·대소문자·하이픈 대신 쓴 밑줄도 너그럽게 본다.
+ */
+export function qaCodeOf(sheetName: string): string | null {
+  const match = sheetName.trim().match(/^QA[\s_-]*(\d+)\.(\d+)\.?[\s_-]+(\d+)/i);
+  return match ? `${Number(match[1])}.${Number(match[2])}-${Number(match[3])}` : null;
+}
+
+/** 서식 한 장의 상태 */
+export type QmpStatus = "done" | "doing" | "none";
+
+/** 현황 계산에 필요한 서류 정보(목록 요약에서 이만큼만 쓴다) */
+export interface QmpDoc {
+  id: string;
+  sheetNames: string[];
+  /** 무언가 적었거나 결재가 걸린 시트(작성 중인 장) */
+  workingSheets?: string[];
+  approvalSheets?: {
+    sheetName: string;
+    slots: { signKey: string }[];
+    approvals: Record<string, { approvedAt?: number }>;
+    changed?: boolean;
+  }[];
+}
+
+export interface QmpFormState {
+  status: QmpStatus;
+  /** 열어 볼 서류와 시트(같은 서식이 여러 장이면 가장 진척된 것) */
+  docId?: string;
+  sheetName?: string;
+  /** 다 끝난 때(결재 마지막 시각). 결재칸이 없는 장은 없다. */
+  finishedAt?: number;
+}
+
+const RANK: Record<QmpStatus, number> = { none: 0, doing: 1, done: 2 };
+
+/**
+ * 현장 서류들로 서식마다 상태를 매긴다.
+ *
+ * - **초록(done)**: 그 서식 시트의 결재가 다 끝났다. 결재칸이 없는 서식은 무언가 적었으면 끝으로 본다.
+ * - **노랑(doing)**: 적기 시작했거나 결재가 진행 중이다. 결재 뒤 내용을 고친 것도 여기다.
+ * - **빈 불(none)**: 그 서식 시트를 적은 적이 없다. 배포 양식을 복사만 해 둔 것도 아직 빈 불이다.
+ *
+ * 같은 서식이 여러 장이면(월별) **한 장이라도 끝났으면 초록**이다 — 계획서는 "작성·보관"을 묻지,
+ * 모든 달을 다 결재했는지까지 이 화면이 따질 일은 아니다.
+ */
+export function qmpStates(docs: QmpDoc[]): Map<string, QmpFormState> {
+  const result = new Map<string, QmpFormState>();
+  const offer = (code: string, next: QmpFormState) => {
+    const current = result.get(code);
+    if (
+      !current ||
+      RANK[next.status] > RANK[current.status] ||
+      (next.status === current.status && (next.finishedAt ?? 0) > (current.finishedAt ?? 0))
+    ) {
+      result.set(code, next);
+    }
+  };
+
+  for (const doc of docs) {
+    const working = new Set(doc.workingSheets ?? []);
+    const approvalBySheet = new Map((doc.approvalSheets ?? []).map((sheet) => [sheet.sheetName, sheet]));
+    for (const sheetName of doc.sheetNames) {
+      const code = qaCodeOf(sheetName);
+      if (!code) continue;
+      const approval = approvalBySheet.get(sheetName);
+      let state: QmpFormState;
+      if (approval) {
+        const times = approval.slots.map((slot) => approval.approvals[slot.signKey]?.approvedAt);
+        const complete = approval.slots.length > 0 && times.every((at) => at !== undefined) && !approval.changed;
+        state = complete
+          ? { status: "done", finishedAt: Math.max(...times.map((at) => at ?? 0)) }
+          : { status: "doing" };
+      } else {
+        state = { status: working.has(sheetName) ? "done" : "none" };
+      }
+      offer(code, { ...state, docId: doc.id, sheetName });
+    }
+  }
+  return result;
+}
+
+/** 배포 양식 가운데 그 서식 시트를 가진 것(가장 최근에 올라온 것). [작성하기]에 쓴다. */
+export function templateForCode<T extends { id: string; sheetNames: string[]; uploadedAt: number }>(
+  templates: T[],
+  code: string,
+): T | undefined {
+  return templates
+    .filter((template) => template.sheetNames.some((name) => qaCodeOf(name) === code))
+    .sort((a, b) => b.uploadedAt - a.uploadedAt)[0];
+}
+
+/** 부서 하나(또는 전체)의 신호등 집계. 기준 문서는 세지 않는다. */
+export function qmpTally(
+  states: Map<string, QmpFormState>,
+  dept: QmpDept | null,
+  chapter: string | null = null,
+): { done: number; doing: number; none: number; total: number } {
+  const tally = { done: 0, doing: 0, none: 0, total: 0 };
+  for (const sec of QMP_SECTIONS) {
+    if (dept && sec.lead !== dept) continue;
+    if (chapter && chapterOf(sec.no) !== chapter) continue;
+    for (const form of sec.forms) {
+      if (form.reference) continue;
+      tally[states.get(form.code)?.status ?? "none"] += 1;
+      tally.total += 1;
+    }
+  }
+  return tally;
+}
+
+/** 집계를 신호등 하나로: 다 끝났으면 초록, 하나라도 시작했으면 노랑, 아니면 빈 불. */
+export function lampOf(tally: { done: number; doing: number; total: number }): QmpStatus {
+  if (tally.total > 0 && tally.done === tally.total) return "done";
+  return tally.done + tally.doing > 0 ? "doing" : "none";
+}

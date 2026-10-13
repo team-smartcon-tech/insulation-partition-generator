@@ -72,6 +72,8 @@ import FeedbackPage from "./FeedbackPage";
 import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
 import ScrollTopButton from "./ScrollTopButton";
+import QmpStatusPage from "./QmpStatusPage";
+import { qmpStates, templateForCode } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -2352,7 +2354,18 @@ export default function FormsPage() {
             ) : (
               <SitesAudit rows={homeAudit} onOpenSite={(id) => selectSite(id)} />
             )
-          ) : space === "site" && !siteId ? (
+          ) : space === "qmp" && siteId ? (
+            <QmpStatusPage
+              siteName={writeSite?.name ?? ""}
+              states={qmpStates(siteForms)}
+              onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
+              canWrite={(code) => Boolean(templateForCode(templates, code))}
+              onWrite={(code) => {
+                const template = templateForCode(templates, code);
+                if (template) void handleWrite(template.id, siteId);
+              }}
+            />
+          ) : (space === "site" || space === "qmp") && !siteId ? (
             <SiteOverview
               rows={summarizeSites(sites, siteDocs, totalSlots)}
               audit={homeAudit}

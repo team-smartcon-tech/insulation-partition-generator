@@ -10,10 +10,10 @@
  * 좁은 화면(휴대폰·태블릿)에서는 왼쪽 메뉴를 숨기고 **위 탭**으로 보여 준다 — 좁은 화면에서
  * 왼쪽을 220px 떼어 가면 표가 들어갈 자리가 없다.
  */
-import { BookOpen, ChevronsLeft, ChevronsRight, ClipboardCheck, FolderOpen, House, MessageSquare } from "lucide-react";
+import { BookOpen, ChevronsLeft, ChevronsRight, ClipboardCheck, FolderOpen, House, ListChecks, MessageSquare } from "lucide-react";
 import type { ComponentType } from "react";
 
-export type Space = "home" | "library" | "site" | "review" | "feedback";
+export type Space = "home" | "library" | "site" | "qmp" | "review" | "feedback";
 
 /** 본사 관리자만 들어갈 수 있는 곳 */
 export const HQ_ONLY: ReadonlySet<Space> = new Set<Space>(["library", "review"]);
@@ -44,6 +44,12 @@ const GROUPS: { name: string | null; items: Item[] }[] = [
         hq: true,
       },
       { value: "site", label: "현장 서류함", icon: FolderOpen, title: "현장별로 작성하는 서류" },
+      {
+        value: "qmp",
+        label: "계획서 서류 현황",
+        icon: ListChecks,
+        title: "품질관리계획서 서식마다 주관 부서가 작성했는지 — 부서별 신호등",
+      },
     ],
   },
   {
