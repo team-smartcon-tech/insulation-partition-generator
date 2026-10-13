@@ -9,7 +9,7 @@
  * 상자를 만들고 높이를 재느라 몇 초씩 멈춘다. 평소에는 글자만 있는 가벼운 칸으로 두고,
  * 누르거나 Tab 으로 들어온 칸만 입력 상자로 바꾼다 — 보이는 모습은 같다.
  */
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { FormCell, FormTextRun } from "./types";
 
 /** 엑셀이 칸 글자 크기를 적지 않았을 때의 크기(pt) — 부분 서식 크기를 칸 크기에 대한 비율로 바꿀 때 쓴다. */
@@ -46,6 +46,8 @@ function RichRuns({ runs, basePt }: { runs: FormTextRun[]; basePt: number }) {
 
 /** 글자를 줄여 맞출 때의 하한. 이보다 작아지면 읽을 수 없어 그냥 넘치게 둔다. */
 const MIN_FONT_PX = 7;
+/** "축소하여 맞춤" 칸은 엑셀처럼 더 작게도 줄인다 */
+const MIN_FREE_FONT_PX = 4;
 /** 한 번에 줄이는 폭(px). 작을수록 원본에 가깝지만 재계산이 늘어난다. */
 const SHRINK_STEP_PX = 0.5;
 
@@ -73,7 +75,7 @@ export function displayText(text: string): string {
  */
 function fitToCell(
   element: HTMLElement | null,
-  check: { width: boolean; height: boolean } = { width: true, height: false },
+  check: { width: boolean; height: boolean; free?: boolean } = { width: true, height: false },
 ): void {
   if (!element || (!check.width && !check.height)) return;
   if (element.style.fontSize) element.style.fontSize = "";
@@ -88,7 +90,12 @@ function fitToCell(
   const original = Number.parseFloat(window.getComputedStyle(element).fontSize);
   // 세로로 맞출 때는 원본의 85% 까지만 줄인다 — 많이 넘치는 칸은 엑셀도 잘라 보여 주는 경우라
   // 그대로 잘리게 둔다(70% 까지 줄였더니 7.1-2·8.10-2 칸이 읽을 수 없게 작아졌다).
-  const floor = Math.max(MIN_FONT_PX, check.height ? original * 0.85 : 0);
+  // 가로로 맞출 때도 80% 까지만 — 엑셀은 "축소하여 맞춤"이 아니면 줄이지 않고 자른다. 브라우저 글꼴이
+  // 조금 넓은 만큼만 메우고 그 너머는 자른다(머리글이 읽을 수 없게 작아졌다, 7.6·8.11·8.12 재점검).
+  // "축소하여 맞춤" 칸(free)은 엑셀처럼 끝까지 줄여 다 보인다("ITP-해당코드-공정약호-일련번호", 8.11-4).
+  const floor = check.free
+    ? MIN_FREE_FONT_PX
+    : Math.max(MIN_FONT_PX, original * (check.height ? 0.85 : 0.8));
   let size = original;
   while (overflows() && size > floor) {
     size -= SHRINK_STEP_PX;
@@ -117,8 +124,11 @@ interface FormCellContentProps {
    * 넘길 수 있으면 글자를 줄이지 않는다 — 줄이면 원본보다 훨씬 작아져 읽기 어렵다.
    */
   spill?: boolean;
-  /** 넘겨 쓸 때 쓸 수 있는 폭(px, 자기 칸 포함). Infinity 면 끝없이(표 밖 빈 열 위로). */
-  spillWidth?: number;
+  /** 넘겨 쓸 수 있는 폭(px, 자기 칸 밖) — 왼쪽·오른쪽. 오른쪽 Infinity 면 끝없이(표 밖 빈 열 위로). */
+  spillLeft?: number;
+  spillRight?: number;
+  /** 엑셀에 적힌 정렬 — 가운데면 칸 가운데를 지키며 양쪽으로, 오른쪽이면 왼쪽으로 넘긴다 */
+  spillAlign?: "left" | "center" | "right";
   /** 셀 키를 함께 넘긴다 — 칸마다 새 함수를 만들면 메모가 소용없어진다. */
   onChange: (cellKey: string, value: string) => void;
   /**
@@ -133,12 +143,45 @@ interface FormCellContentProps {
   onRedo?: () => void;
 }
 
+/** 칸의 빈 곳을 눌렀을 때 그 칸 글자 상자에 보내는 신호 이름 */
+export const START_EDIT_EVENT = "form-cell-start-edit";
+
+/** 끝없이 넘길 수 있을 때 잡는 폭(px) — 칸 밖 빈 열 위로 이만큼이면 어떤 글도 다 보인다 */
+const OPEN_SPILL_PX = 2000;
+
+/**
+ * 넘겨 쓰는 글자 상자의 자리. 이어진 빈 칸까지만 보이고 그 너머(글자 있는 칸)에서 엑셀처럼 자른다.
+ * 가운데 정렬은 칸 가운데를 중심으로 양쪽을 똑같이 넓힌 뒤, 넘길 수 없는 쪽만 잘라 낸다.
+ */
+function spillBox(left: number, right: number, align: "left" | "center" | "right"): CSSProperties {
+  const center = align === "center";
+  /*
+   * 넘친 글자는 누르기를 **통과시킨다** — 엑셀처럼 그 아래 빈 칸을 누르면 빈 칸에 적는다. 막으면
+   * 넘친 글자가 덮은 빈 칸은 영영 고칠 수 없었다(QA-4.3-4 분류표 17칸). 제 칸은 칸(td)이 받아서 연다.
+   */
+  // 넘기는 쪽에 맞춰 글자를 붙인다 — 칸의 정렬(A 열 자동 가운데 등)과 달라도 엑셀이 그리는 쪽을 따른다.
+  const pass: CSSProperties = { pointerEvents: "none", textAlign: align };
+  if (!center && left === 0 && right === Infinity) return { ...pass, overflow: "visible", position: "relative", zIndex: 1 };
+  const r = Number.isFinite(right) ? right : OPEN_SPILL_PX;
+  const base: CSSProperties = { ...pass, position: "relative", zIndex: 1, overflow: "hidden" };
+  if (!center) return { ...base, marginLeft: -left, width: `calc(100% + ${left + r}px)` };
+  const half = Math.max(left, r);
+  return {
+    ...base,
+    marginLeft: -half,
+    width: `calc(100% + ${half * 2}px)`,
+    clipPath: `inset(0 ${half - r}px 0 ${half - left}px)`,
+  };
+}
+
 function FormCellContent({
   cell,
   editable,
   value,
   spill = false,
-  spillWidth,
+  spillLeft = 0,
+  spillRight = 0,
+  spillAlign = "left",
   maxHeight,
   onChange,
   onCommit,
@@ -152,6 +195,18 @@ function FormCellContent({
   const readonlyRef = useRef<HTMLSpanElement>(null);
   /** 고치기 시작할 때의 값. 되돌리기에 쓴다(없으면 엑셀 원본 글자 그대로였다는 뜻). */
   const startRef = useRef<string | undefined>(undefined);
+
+  // 칸의 빈 곳을 눌렀을 때 표(`FormSheetView`)가 보내는 "고치기 시작" 신호.
+  useEffect(() => {
+    const element = readonlyRef.current;
+    if (!element || !editable || editing) return;
+    const start = () => {
+      startRef.current = value;
+      setEditing(true);
+    };
+    element.addEventListener(START_EDIT_EVENT, start);
+    return () => element.removeEventListener(START_EDIT_EVENT, start);
+  }, [editable, editing, value]);
   const text = value ?? displayText(cell.text);
   const wraps = cell.style.wrap === true;
 
@@ -166,13 +221,17 @@ function FormCellContent({
     }
     if (!element) {
       // 줄바꿈을 끈 칸은 가로로, 줄 높이가 정해진 칸(원본 글자)은 세로로 넘치면 글자를 줄여 맞춘다.
-      fitToCell(readonlyRef.current, { width: !wraps && !spill, height: maxHeight !== undefined });
+      fitToCell(readonlyRef.current, {
+        width: !wraps && !spill,
+        height: maxHeight !== undefined,
+        free: cell.style.shrink === true,
+      });
       return;
     }
     // 글이 길어지면 칸이 함께 늘어나야 잘리지 않는다. textarea 는 스스로 늘지 않는다.
     element.style.height = "auto";
     element.style.height = `${element.scrollHeight}px`;
-    if (!wraps && !spill) fitToCell(element);
+    if (!wraps && !spill) fitToCell(element, { width: true, height: false, free: cell.style.shrink === true });
 
     // 옆으로 넘겨 쓰던 칸은 **누를 때도 글자가 다 보여야 한다.** 칸 너비에 맞추면 긴 줄이
     // 잘려 보여서, 어디를 고치는지 모른 채 지우게 된다. 글자 길이만큼 상자를 넓힌다.
@@ -245,12 +304,7 @@ function FormCellContent({
       ref={readonlyRef}
       style={{
         // 넘길 수 있는 칸은 옆 칸 위로 글자가 지나가게 둔다(엑셀과 같은 모습).
-        ...(spill
-          ? spillWidth !== undefined && Number.isFinite(spillWidth)
-            ? // 이어진 빈 칸까지만 — 그 너머 글자 있는 칸 앞에서 엑셀처럼 자른다.
-              { width: spillWidth, overflow: "hidden", position: "relative", zIndex: 1 }
-            : { overflow: "visible", position: "relative", zIndex: 1 }
-          : {}),
+        ...(spill ? spillBox(spillLeft, spillRight, spillAlign) : {}),
         // 누를 수 있는 자리를 칸 전체로 넓힌다. 글자 높이만큼만 잡으면 줄 높이가 큰 칸에서
         // 아래쪽 빈 곳을 눌러도 아무 일이 없어 "편집이 안 된다"로 보인다.
         ...(editable ? { minHeight: "100%" } : {}),

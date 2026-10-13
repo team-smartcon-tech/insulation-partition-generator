@@ -9,7 +9,7 @@
  * SVG 에 모아 먼저 그리고 상자를 나중에 얹으면, 회색 배경 띠(구역 표시)가 그 위를 지나는
  * 화살표를 덮어 흐름이 끊겨 보인다.
  */
-import { Fragment, useId } from "react";
+import { Fragment, useId, useLayoutEffect, useRef } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { FormShape } from "./types";
 
@@ -175,8 +175,11 @@ function textCss(shape: FormShape): CSSProperties {
     // DrawingML 의 기본 정렬은 왼쪽이다(가운데는 엑셀이 algn="ctr" 로 적는다). 가운데로 두면
     // [비고]·[작성방법] 같은 설명 상자가 가운데로 몰렸다(7.6-5·6.3-2).
     textAlign: shape.align ?? "left",
-    fontSize: shape.fontSize ? `${shape.fontSize}pt` : undefined,
+    // 크기를 적지 않은 도형도 엑셀 기본(11pt)으로 — 비워 두면 화면 기본 16px 를 물려받아 글자가 9% 커지고,
+    // 조각(run) 크기의 비율 기준도 어긋난다(4.3 견본 상자 글이 세 줄로 넘쳤다).
+    fontSize: `${shape.fontSize ?? DEFAULT_SHAPE_FONT_PT}pt`,
     fontFamily: shape.fontFamily ? `"${shape.fontFamily}", "맑은 고딕", sans-serif` : undefined,
+    letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : undefined,
     fontWeight: shape.bold ? 700 : undefined,
     color: shape.color,
     lineHeight: 1.25,
@@ -196,8 +199,43 @@ function textCss(shape: FormShape): CSSProperties {
  * 조각의 굵기·기울임은 "없으면 보통"으로 분명히 준다 — 도형 전체가 굵게 잡혀 있어도 b="0" 조각은 보통이다.
  */
 function ShapeText({ shape }: { shape: FormShape }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  /*
+   * 상자 밖으로 넘치면 글자를 조금 줄인다(원래 크기의 80% 까지). 브라우저 글꼴이 엑셀보다 조금 넓어,
+   * 엑셀에서 두 줄에 딱 들어가던 글이 세 줄로 접혀 상자 아래로 빠져나왔다(4.3 견본 맨 위 상자, 사용자 신고).
+   * 엑셀처럼 그대로 넘기면 글자가 화살표·옆 상자와 겹친다.
+   */
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const box = element?.parentElement;
+    if (!element || !box || shape.vertical) return;
+    // 원래 크기는 화면 규칙(textCss)의 값 — 비우면 위에서 물려받은 16px 로 돌아간다.
+    const original = String(textCss(shape).fontSize ?? "");
+    const fit = () => {
+      element.style.fontSize = original;
+      const css = getComputedStyle(box);
+      const roomHeight = box.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom);
+      const roomWidth = box.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+      const overflows = () =>
+        element.offsetHeight > roomHeight + 1 || (shape.noWrap === true && element.scrollWidth > roomWidth + 1);
+      if (!(roomHeight > 0) || !overflows()) return;
+      const base = parseFloat(getComputedStyle(element).fontSize);
+      for (let step = 1; step <= 8 && overflows(); step += 1) element.style.fontSize = `${base * (1 - step * 0.025)}px`;
+    };
+    fit();
+    // 처음 그릴 때는 표 크기가 아직 안 잡혀(배율 계산 전) 잴 수 없을 때가 있다 — 글꼴이 다 오면 한 번 더 잰다.
+    let alive = true;
+    void document.fonts?.ready.then(() => {
+      if (alive) fit();
+    });
+    const frame = window.requestAnimationFrame(fit);
+    return () => {
+      alive = false;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [shape]);
   return (
-    <span style={textCss(shape)}>
+    <span ref={ref} style={textCss(shape)}>
       {shape.textRuns
         ? shape.textRuns.map((run, index) => (
             <span
@@ -207,6 +245,7 @@ function ShapeText({ shape }: { shape: FormShape }) {
                 fontSize: run.fontSize ? `${run.fontSize / (shape.fontSize ?? DEFAULT_SHAPE_FONT_PT)}em` : undefined,
                 fontWeight: run.bold ? 700 : 400,
                 fontStyle: run.italic ? "italic" : "normal",
+                letterSpacing: run.letterSpacing !== undefined ? `${run.letterSpacing}pt` : "normal",
                 textDecoration: run.underline ? "underline" : undefined,
                 color: run.color,
               }}

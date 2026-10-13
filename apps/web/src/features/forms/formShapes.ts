@@ -284,6 +284,7 @@ function readTextRuns(txBody: string | undefined, ctx: Context): FormTextRun[] |
         ...(ownAttr(rPr, "i") === "1" ? { italic: true } : {}),
         ...(underline && underline !== "none" ? { underline: true } : {}),
         ...(size > 0 ? { fontSize: size / 100 } : {}),
+        ...(Number(ownAttr(rPr, "spc")) ? { letterSpacing: Number(ownAttr(rPr, "spc")) / 100 } : {}),
         ...(color ? { color } : {}),
       });
     }
@@ -292,7 +293,8 @@ function readTextRuns(txBody: string | undefined, ctx: Context): FormTextRun[] |
   while (runs.length > 0 && /^\n*$/.test(runs[runs.length - 1].text)) runs.pop();
   const styled = runs.filter((run) => run.text.trim() !== "");
   if (styled.length < 2) return undefined;
-  const signature = (run: FormTextRun) => `${run.bold}|${run.italic}|${run.underline}|${run.fontSize}|${run.color}`;
+  const signature = (run: FormTextRun) =>
+    `${run.bold}|${run.italic}|${run.underline}|${run.fontSize}|${run.letterSpacing}|${run.color}`;
   return styled.every((run) => signature(run) === signature(styled[0])) ? undefined : runs;
 }
 
@@ -648,6 +650,7 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     elbow: elbowRatio(prst, adjust),
     paths,
     fontSize: sizeHundredths > 0 ? sizeHundredths / 100 : undefined,
+    ...(Number(ownAttr(firstRun, "spc")) ? { letterSpacing: Number(ownAttr(firstRun, "spc")) / 100 } : {}),
     fontFamily: attrOf(firstRun, "latin", "typeface") ?? attrOf(firstRun, "ea", "typeface"),
     bold: ownAttr(firstRun, "b") === "1",
     // 글자 색을 안 적었으면 도형 스타일의 글자 색(fontRef)을 따른다.
@@ -848,6 +851,7 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     // 부분 서식도 함께 옮긴다 — 빠뜨리면 마름모 안 작은 둘째 줄이 첫 줄 크기로 커져 넘친다(8.7·8.8).
     outer.textRuns = inner.textRuns;
     outer.fontSize = inner.fontSize;
+    outer.letterSpacing = inner.letterSpacing;
     outer.fontFamily = inner.fontFamily;
     outer.bold = inner.bold;
     outer.color = inner.color;

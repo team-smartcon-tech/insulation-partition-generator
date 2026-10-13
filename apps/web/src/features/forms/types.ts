@@ -44,6 +44,8 @@ export interface FormCellStyle {
   align?: "left" | "center" | "right";
   valign?: "top" | "middle" | "bottom";
   wrap?: boolean;
+  /** 엑셀 "축소하여 맞춤" — 글자가 길면 옆 칸으로 넘기지 않고 칸 안에 들도록 줄인다 */
+  shrink?: boolean;
   /**
    * 들여쓰기 단계(엑셀 "들여쓰기"). 0 이면 없다. 화면에서는 정렬한 쪽에 여백으로 준다.
    * 빠뜨리면 글자가 왼쪽에 붙어, 글자 아래를 가리키는 선(QA-4.3-4)이 엉뚱한 곳을 가리킨다.
@@ -97,6 +99,8 @@ export interface FormTextRun {
   underline?: boolean;
   /** pt */
   fontSize?: number;
+  /** 글자 사이 간격(pt, 음수면 좁힘) */
+  letterSpacing?: number;
   /** #RRGGBB */
   color?: string;
 }
@@ -219,6 +223,11 @@ export interface FormShape {
   /** kind 가 "path" 일 때의 윤곽선 */
   paths?: FormShapePath[];
   fontSize?: number;
+  /**
+   * 글자 사이 간격(pt). 순서도 상자 글은 흔히 좁혀 둔다(spc="-40" = -0.4pt). 빠뜨리면 글이 넓어져
+   * 두 줄짜리가 세 줄로 접혀 상자 밖으로 나온다(4.3 견본).
+   */
+  letterSpacing?: number;
   fontFamily?: string;
   bold?: boolean;
   color?: string;

@@ -6,7 +6,7 @@
  * 셀마다 테두리·글꼴이 달라 Tailwind 클래스로는 표현할 수 없다.
  */
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import FormCellContent from "./FormCellContent";
+import FormCellContent, { START_EDIT_EVENT } from "./FormCellContent";
 import FormShapeLayer from "./FormShapeLayer";
 import FormChartLayer from "./FormChartLayer";
 import { cellRangeOf, type CellRange } from "./sheetMerges";
@@ -35,11 +35,15 @@ const EMPTY_VALUES: FormCellValues = {};
  * 없게 됐다(사용자 신고: "글씨 크기 왜 이래?"). 옆이 비었으면 줄이지 말고 넘긴다.
  */
 /**
- * 칸 키 → 넘겨 쓸 수 있는 폭(px, 자기 칸 포함). 오른쪽으로 **이어진 빈 칸까지만** 넘긴다 — 엑셀은 글자가
- * 있는 칸을 만나면 거기서 자른다. 끝까지 보면 각주가 옆 칸 글자("일반문서→")를 덮었다(7.6).
- * 표 오른쪽 끝까지 비어 있으면 끝이 없다(Infinity) — 표 밖 빈 열 위로 넘긴다.
+ * 칸 키 → 양옆으로 넘겨 쓸 수 있는 폭(px, 자기 칸 **밖**). **이어진 빈 칸까지만** 넘긴다 — 엑셀은
+ * 글자가 있는 칸을 만나면 거기서 자른다. 끝까지 보면 각주가 옆 칸 글자("일반문서→")를 덮었다(7.6).
+ * 표 오른쪽 끝까지 비어 있으면 끝이 없다(Infinity) — 표 밖 빈 열 위로 넘긴다. 왼쪽은 A 열이 끝이다.
+ *
+ * 어느 쪽으로 넘기는지는 정렬이 정한다(엑셀과 같다): 왼쪽 정렬은 오른쪽으로, 오른쪽 정렬은 왼쪽으로,
+ * **가운데 정렬은 양쪽으로 똑같이.** 오른쪽으로만 넘겼더니 상자 가운데 적은 "9.3 내부심사"·"8.3 설계관리"가
+ * 상자 밖 오른쪽으로 밀려났다(QA-4.3-2, 사용자 신고).
  */
-function spillableKeys(sheet: FormSheet): Map<string, number> {
+function spillableKeys(sheet: FormSheet, autoCenter: Set<string>): Map<string, { left: number; right: number }> {
   // 글자가 있는 칸이 차지하는 자리(행:열)를 모두 표시한다. 병합은 그 범위 전부.
   const filled = new Set<string>();
   for (const cell of sheet.cells) {
@@ -49,18 +53,34 @@ function spillableKeys(sheet: FormSheet): Map<string, number> {
     }
   }
 
-  const keys = new Map<string, number>();
+  const keys = new Map<string, { left: number; right: number }>();
   const widthOf = (from: number, count: number) =>
     sheet.colWidths.slice(from - 1, from - 1 + count).reduce((sum, w) => sum + w, 0);
   for (const cell of sheet.cells) {
-    if (cell.style.wrap === true || cell.text.trim() === "") continue;
-    const next = cell.col + cell.colSpan;
-    // 마지막 열에 닿은 칸도 넘긴다 — 엑셀은 표 밖의 빈 열 위로 넘겨 보여 준다. 가두면 두 열짜리
-    // 시트의 제목("Ⅰ. 현장 품질방침 및 품질목표")이 7px 까지 줄어 "Ⅰ" 만 보였다(9.4 경영검토).
-    if (next <= sheet.colCount && filled.has(`${cell.row}:${next}`)) continue;
-    let col = next;
-    while (col <= sheet.colCount && !filled.has(`${cell.row}:${col}`)) col += 1;
-    keys.set(cell.key, col > sheet.colCount ? Infinity : widthOf(cell.col, col - cell.col));
+    // 줄바꿈·축소하여 맞춤 칸은 넘기지 않는다. 병합 칸도 엑셀은 넘기지 않고 그 안에서 자른다.
+    if (cell.style.wrap === true || cell.style.shrink === true || cell.text.trim() === "") continue;
+    if (cell.rowSpan > 1 || cell.colSpan > 1) continue;
+    // 엑셀에 적힌 정렬로 정한다 — A 열 자동 가운데(`effectiveAlign`)는 넘치는 글에 쓰면 왼쪽 끝이 잘린다
+    // ("현장명 : 000 신축공사" 가 ": 000 신축공사" 로, 7.4-2). 정렬을 안 적은 글은 엑셀처럼 왼쪽 정렬이다.
+    const align = effectiveAlign(cell, autoCenter);
+    const towardRight = align !== "right";
+    const towardLeft = align === "right" || align === "center";
+
+    let right = 0;
+    if (towardRight) {
+      // 마지막 열에 닿은 칸도 넘긴다 — 엑셀은 표 밖의 빈 열 위로 넘겨 보여 준다. 가두면 두 열짜리
+      // 시트의 제목("Ⅰ. 현장 품질방침 및 품질목표")이 7px 까지 줄어 "Ⅰ" 만 보였다(9.4 경영검토).
+      let col = cell.col + cell.colSpan;
+      while (col <= sheet.colCount && !filled.has(`${cell.row}:${col}`)) col += 1;
+      right = col > sheet.colCount ? Infinity : widthOf(cell.col + cell.colSpan, col - cell.col - cell.colSpan);
+    }
+    let left = 0;
+    if (towardLeft) {
+      let col = cell.col - 1;
+      while (col >= 1 && !filled.has(`${cell.row}:${col}`)) col -= 1;
+      left = widthOf(col + 1, cell.col - col - 1);
+    }
+    if (left > 0 || right > 0) keys.set(cell.key, { left, right });
   }
   return keys;
 }
@@ -164,9 +184,35 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
  * 왼쪽에 붙는데, 제목이 줄바꿈되면 들쭉날쭉해 보인다. 원본에 지정이 없을 때만 가운데로
  * 맞춘다 — 엑셀이 명시한 정렬은 그대로 따른다.
  */
-function effectiveAlign(cell: FormCell): FormCellStyle["align"] {
+function effectiveAlign(cell: FormCell, autoCenter: Set<string>): FormCellStyle["align"] {
   if (cell.style.align) return cell.style.align;
-  return cell.col === 1 ? "center" : undefined;
+  return autoCenter.has(cell.key) ? "center" : undefined;
+}
+
+/** 글자 폭 어림(px) — 한글·한자는 글자 크기만큼, 나머지는 그 반 남짓 */
+function estimateTextWidth(text: string, fontPt: number): number {
+  const px = (fontPt * 4) / 3;
+  let width = 0;
+  for (const ch of text) width += /[ᄀ-ᇿ⺀-꓏가-힯豈-﫿＀-￯]/.test(ch) ? px : px * 0.55;
+  return width;
+}
+
+/**
+ * 첫 열 자동 가운데를 받을 칸. **칸 안에 드는 글만** 가운데로 둔다 — 좁은 A 열에 적은 긴 제목
+ * ("6.1 리스크 및 기회", "1. 이해관계자의 만족도")은 엑셀처럼 왼쪽에서 시작해 오른쪽으로 넘겨야 한다.
+ * 가운데로 두면 앞머리가 표 왼쪽 밖으로 밀려 잘렸다(9.2·9.3·9.4, 재점검에서 발견).
+ */
+function autoCenterKeys(sheet: FormSheet): Set<string> {
+  const keys = new Set<string>();
+  for (const cell of sheet.cells) {
+    // 여러 열을 합친 칸("[ 착공 전 ]" A8:Q8)은 넓어서 엑셀처럼 왼쪽에 둔다 — 가운데는 좁은 A 열 제목용이다.
+    if (cell.col !== 1 || cell.style.align || cell.colSpan > 1) continue;
+    const width = sheet.colWidths.slice(0, cell.colSpan).reduce((sum, w) => sum + w, 0) - 4;
+    const lines = cell.text.split("\n").map((line) => estimateTextWidth(line, cell.style.fontSize ?? 11));
+    const longest = Math.max(0, ...lines);
+    if (cell.style.wrap === true || longest <= width) keys.add(cell.key);
+  }
+  return keys;
 }
 
 /** 화면 배율. "fit" 이면 표 전체가 가로로 들어가도록 자동 계산한다. */
@@ -338,6 +384,7 @@ const SheetRow = memo(function SheetRow({
   tint,
   values,
   spillable,
+  autoCenter,
   signKeys,
   cellMarks,
   onChangeValue,
@@ -378,7 +425,9 @@ const SheetRow = memo(function SheetRow({
   /** 고칠 수 있는 칸에 하늘색을 칠할까(사용자가 끌 수 있다) */
   tint: boolean;
   /** 옆 칸으로 글자를 넘겨도 되는 칸들의 키 */
-  spillable: Map<string, number>;
+  spillable: Map<string, { left: number; right: number }>;
+  /** 첫 열 자동 가운데를 받는 칸 */
+  autoCenter: Set<string>;
   /** 이 줄에서 고친 글자만 담긴다(셀 키 → 값). 줄마다 잘라 넘겨야 메모가 듣는다. */
   values: FormCellValues;
   onChangeValue: (cellKey: string, value: string) => void;
@@ -412,10 +461,26 @@ const SheetRow = memo(function SheetRow({
           key={cell.key}
           colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
           rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-          onMouseDown={onPickCell ? (event) => {
-            if (event.button !== 0) return;
-            onPickCell(cell, event.shiftKey);
-          } : undefined}
+          onMouseDown={
+            onPickCell || canEdit
+              ? (event) => {
+                  if (event.button !== 0) return;
+                  onPickCell?.(cell, event.shiftKey);
+                  /*
+                   * 글자 상자 **밖**(칸의 빈 곳)을 눌러도 고치기 시작한다. 엑셀 기본은 아래 맞춤이라 키 큰
+                   * 칸은 글자가 바닥에 붙고, 위·가운데를 누르면 아무 일이 없어 "편집이 안 된다"로 보였다
+                   * (사용자 신고 — 첨부 엑셀 33개를 눌러 보니 칸 수백 곳이 그랬다).
+                   */
+                  if (canEdit && event.target === event.currentTarget) {
+                    const box = event.currentTarget.querySelector<HTMLElement>('[role="textbox"]');
+                    if (box) {
+                      event.preventDefault();
+                      box.dispatchEvent(new Event(START_EDIT_EVENT));
+                    }
+                  }
+                }
+              : undefined
+          }
           onMouseEnter={onSweepCell ? () => onSweepCell(cell) : undefined}
           title={
             signKeys.has(cell.key)
@@ -425,7 +490,7 @@ const SheetRow = memo(function SheetRow({
                 : undefined
           }
           style={{
-            ...cellCss(cell.style, effectiveAlign(cell)),
+            ...cellCss(cell.style, effectiveAlign(cell, autoCenter)),
             // 잠긴 시트에서 "여기에 적으면 된다"를 한눈에 보이게 연한 하늘색을 덧칠한다.
             // 배경색 대신 덧칠(gradient)이라 엑셀 원본의 칸 색이 그대로 비쳐 보인다.
             //
@@ -509,7 +574,9 @@ const SheetRow = memo(function SheetRow({
             editable={canEdit}
             value={values[cell.key]}
             spill={spillable.has(cell.key)}
-            spillWidth={spillable.get(cell.key)}
+            spillLeft={spillable.get(cell.key)?.left}
+            spillRight={spillable.get(cell.key)?.right}
+            spillAlign={effectiveAlign(cell, autoCenter) ?? "left"}
             // 원본 글자만 줄 높이 안에 가둔다. 사용자가 적은 글은 다 보여야 하므로 늘어나게 둔다.
             maxHeight={values[cell.key] === undefined ? spanHeight(rowHeights, displayRow - 1, cell.rowSpan) : undefined}
             onChange={onChangeValue}
@@ -605,7 +672,8 @@ export default function FormSheetView({
   );
 
   // 옆 칸으로 넘겨도 되는 칸은 시트가 바뀔 때만 다시 센다.
-  const spillable = useMemo(() => spillableKeys(sheet), [sheet]);
+  const autoCenter = useMemo(() => autoCenterKeys(sheet), [sheet]);
+  const spillable = useMemo(() => spillableKeys(sheet, autoCenter), [sheet, autoCenter]);
 
   /**
    * 고친 글자를 줄별로 잘라 둔다. 줄마다 자기 줄의 값만 받아야, 다른 줄에 글자를 쳐도
@@ -690,6 +758,7 @@ export default function FormSheetView({
               tint={tint}
               values={rowValues[rowIndex] ?? EMPTY_VALUES}
               spillable={spillable}
+              autoCenter={autoCenter}
               signKeys={signKeys}
               cellMarks={cellMarks}
               onChangeValue={handleChange}

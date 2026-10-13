@@ -28,7 +28,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 24; // 24: 한국어 날짜, 숫자 오른쪽 정렬, 차트 눈금 형식·고정 범위
+export const PARSER_VERSION = 25; // 25: 가운데·오른쪽 정렬 칸의 넘치는 글자, 축소하여 맞춤, 도형 글자 간격
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -244,6 +244,8 @@ function readStyle(
   const valign = readValign(alignment.vertical);
   if (valign) style.valign = valign;
   if (alignment.wrapText === true) style.wrap = true;
+  // "축소하여 맞춤" — 옆 칸으로 넘기지 않고 글자를 줄인다(QA-4.3-2 "9.4 경영검토"). 줄바꿈이 켜져 있으면 엑셀이 무시한다.
+  else if (alignment.shrinkToFit === true) style.shrink = true;
   if (typeof alignment.indent === "number" && alignment.indent > 0) style.indent = alignment.indent;
   // 옆 띠에 세로로 적은 제목(QA-4.3-2 "고객 요구사항") — 빠뜨리면 한 글자씩 접혀 내려간다.
   const rotation = alignment.textRotation;
@@ -583,10 +585,10 @@ export function parseFormSheet(
       // 엑셀 "일반" 정렬은 숫자·날짜를 오른쪽에 붙인다(글자는 왼쪽). 정렬을 안 적은 숫자 칸을 왼쪽에
       // 두면 회계 형식의 "-" 와 금액이 칸 왼쪽에 몰렸다(8.4-2).
       if (!style.align) {
-        const raw = cell.value as unknown;
-        const result = raw && typeof raw === "object" && "result" in (raw as object) ? (raw as { result?: unknown }).result : raw;
-        const saved = formulaResults?.get(cell.address);
-        const shown = result === undefined ? saved : result;
+        // 결과가 0 인 수식은 exceljs 가 결과 칸을 아예 빼므로(`{ formula }` 만 온다) 저장된 결과로 본다.
+        const raw = withSavedResult(cell.value, formulaResults?.get(cell.address));
+        const isFormula = !!raw && typeof raw === "object" && ("formula" in raw || "sharedFormula" in raw || "result" in raw);
+        const shown = isFormula ? (raw as { result?: unknown }).result : raw;
         if (typeof shown === "number" || shown instanceof Date) style.align = "right";
       }
       // 병합된 칸은 바깥 테두리를 모서리 칸들에서 다시 읽는다.
