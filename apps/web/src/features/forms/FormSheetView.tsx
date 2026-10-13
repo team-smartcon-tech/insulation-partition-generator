@@ -47,9 +47,9 @@ function spillableKeys(sheet: FormSheet): Set<string> {
   for (const cell of sheet.cells) {
     if (cell.style.wrap === true || cell.text.trim() === "") continue;
     const next = cell.col + cell.colSpan;
-    // 마지막 열까지 꽉 찼으면 넘길 자리가 없다.
-    if (next > sheet.colCount) continue;
-    if (!filled.has(`${cell.row}:${next}`)) keys.add(cell.key);
+    // 마지막 열에 닿은 칸도 넘긴다 — 엑셀은 표 밖의 빈 열 위로 넘겨 보여 준다. 가두면 두 열짜리
+    // 시트의 제목("Ⅰ. 현장 품질방침 및 품질목표")이 7px 까지 줄어 "Ⅰ" 만 보였다(9.4 경영검토).
+    if (next > sheet.colCount || !filled.has(`${cell.row}:${next}`)) keys.add(cell.key);
   }
   return keys;
 }

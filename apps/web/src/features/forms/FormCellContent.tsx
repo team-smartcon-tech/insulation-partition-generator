@@ -39,14 +39,25 @@ export function displayText(text: string): string {
  * 쓰기와 읽기를 번갈아 하면 브라우저가 그때마다 화면 계산을 다시 해(레이아웃 스래싱)
  * 칸 수에 비례해 느려진다. 읽기만 이어지면 계산은 한 번으로 묶인다.
  */
-function fitToCell(element: HTMLElement | null): void {
-  if (!element) return;
+function fitToCell(
+  element: HTMLElement | null,
+  check: { width: boolean; height: boolean } = { width: true, height: false },
+): void {
+  if (!element || (!check.width && !check.height)) return;
   if (element.style.fontSize) element.style.fontSize = "";
+  const overflows = () =>
+    (check.width && element.scrollWidth > element.clientWidth) ||
+    // 세로: 엑셀은 같은 글이 줄 높이 안에 들어가는데(줄 간격이 조금 더 좁다) 여기서는 한 줄이
+    // 더 생겨 아랫줄이 잘렸다. 1px 은 반올림 오차로 본다.
+    (check.height && element.scrollHeight > element.clientHeight + 1);
   // 넘치지 않으면 원본 크기 그대로 둔다.
-  if (element.scrollWidth <= element.clientWidth) return;
+  if (!overflows()) return;
 
-  let size = Number.parseFloat(window.getComputedStyle(element).fontSize);
-  while (element.scrollWidth > element.clientWidth && size > MIN_FONT_PX) {
+  const original = Number.parseFloat(window.getComputedStyle(element).fontSize);
+  // 세로로 맞출 때는 원본의 70% 까지만 줄인다 — 그보다 작으면 읽기 어려워 차라리 잘리게 둔다.
+  const floor = Math.max(MIN_FONT_PX, check.height ? original * 0.7 : 0);
+  let size = original;
+  while (overflows() && size > floor) {
     size -= SHRINK_STEP_PX;
     element.style.fontSize = `${size}px`;
   }
@@ -118,7 +129,8 @@ function FormCellContent({
       element.setSelectionRange(end, end);
     }
     if (!element) {
-      if (!wraps && !spill) fitToCell(readonlyRef.current);
+      // 줄바꿈을 끈 칸은 가로로, 줄 높이가 정해진 칸(원본 글자)은 세로로 넘치면 글자를 줄여 맞춘다.
+      fitToCell(readonlyRef.current, { width: !wraps && !spill, height: maxHeight !== undefined });
       return;
     }
     // 글이 길어지면 칸이 함께 늘어나야 잘리지 않는다. textarea 는 스스로 늘지 않는다.
@@ -133,7 +145,7 @@ function FormCellContent({
       const needed = element.scrollWidth + 2;
       element.style.width = `${Math.max(needed, element.parentElement?.clientWidth ?? 0)}px`;
     }
-  }, [text, editing, wraps, spill]);
+  }, [text, editing, wraps, spill, maxHeight]);
 
   if (editable && editing) {
     return (
