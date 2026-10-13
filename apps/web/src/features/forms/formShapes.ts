@@ -989,3 +989,7 @@ export async function parseWorkbookShapes(
 
   return result;
 }
+
+/** 차트 읽기(`formCharts.ts`)가 같은 XML 도우미를 쓴다 — 두 벌 두면 한쪽만 고쳐진다. */
+export { anchorsOf, attrOf, child, childElements, findBlocks, ownAttr, readAnchor, readColor, resolvePath, toPx, unescapeXml };
+export type { Context as ShapeContext };

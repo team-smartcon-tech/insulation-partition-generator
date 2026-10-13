@@ -8,6 +8,7 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import FormCellContent from "./FormCellContent";
 import FormShapeLayer from "./FormShapeLayer";
+import FormChartLayer from "./FormChartLayer";
 import { cellRangeOf, type CellRange } from "./sheetMerges";
 import type { FormBorder, FormCell, FormCellStyle, FormCellValues, FormSheet } from "./types";
 
@@ -699,6 +700,7 @@ export default function FormSheetView({
         pointer-events 를 꺼 둬야 그림에 가린 칸도 눌러서 고칠 수 있다.
       */}
       <FormShapeLayer shapes={sheet.shapes ?? []} />
+      <FormChartLayer charts={sheet.charts ?? []} />
 
       {(sheet.images ?? []).map((image, index) =>
         image.unsupported ? (

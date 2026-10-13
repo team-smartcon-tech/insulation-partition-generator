@@ -122,6 +122,30 @@ export interface FormImage {
 }
 
 /**
+ * 시트에 얹힌 차트(막대·꺾은선). 엑셀이 차트 안에 **저장해 둔 값**(numCache)으로 다시 그린다 —
+ * 수식을 다시 계산하지 않으므로 원본 엑셀이 저장될 때의 모습과 같다. 3차원 막대는 평면으로 그린다.
+ */
+export interface FormChart {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  title?: string;
+  /** 세로축 제목 */
+  valueTitle?: string;
+  categories: string[];
+  groups: FormChartGroup[];
+}
+
+export interface FormChartGroup {
+  type: "bar" | "line";
+  /** 막대 방향: col = 세로 막대, bar = 가로 막대 */
+  direction?: "col" | "bar";
+  grouping: "clustered" | "stacked" | "percentStacked" | "standard";
+  series: { name: string; color?: string; values: (number | null)[] }[];
+}
+
+/**
  * 도형의 모양. 엑셀에는 수백 가지 도형이 있지만 업무 양식의 순서도에 실제로 쓰이는
  * 것은 몇 가지뿐이다. 모르는 도형은 네모로 떨어뜨린다 — 안 그리는 것보다 낫다.
  */
@@ -217,6 +241,8 @@ export interface FormSheet {
   images: FormImage[];
   /** 격자 위에 떠 있는 도형(순서도 등). 없으면 빈 배열 */
   shapes: FormShape[];
+  /** 격자 위에 떠 있는 차트. 옛 저장본에는 없다. */
+  charts?: FormChart[];
   /**
    * 엑셀에 지정된 인쇄 영역(`A1:N29`). 이만큼만 옮겼다는 뜻이라 화면에 알려 준다 —
    * 안 그러면 원본에 있던 줄이 왜 없는지 알 방법이 없다. 지정이 없으면 undefined.

@@ -7,6 +7,7 @@
 import { DEFAULT_THEME, excelColor, parseThemeXml } from "./colors.ts";
 import type { ThemeColors } from "./colors.ts";
 import { parseWorkbookShapes } from "./formShapes.ts";
+import { parseWorkbookCharts } from "./formCharts.ts";
 import { readZipIndex, readZipText } from "./zip.ts";
 import { formatValue } from "./numberFormat.ts";
 import type {
@@ -27,7 +28,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 21; // 21: 크기로 잡힌 그림, 그림만 있는 시트
+export const PARSER_VERSION = 22; // 22: 차트(막대·꺾은선)
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -741,6 +742,32 @@ async function readFormulaResults(data: ArrayBuffer): Promise<Map<string, Map<st
   return result;
 }
 
+/**
+ * 표 아래·오른쪽으로 삐져나간 차트·그림까지 보이도록 빈 줄·열을 덧붙인다.
+ *
+ * 엑셀은 차트를 표 밖 빈 칸 위에 두어도 시트의 일부로 보여 준다. 여기서는 표 크기만큼만 자리를
+ * 잡아, 표 아래에 둔 경영검토 차트 세 개가 통째로 잘려 안 보였다(9.4).
+ */
+function coverFloating(sheet: FormSheet, defaultRow: number, defaultCol: number): void {
+  if (sheet.rowCount === 0) return;
+  const floating = [...(sheet.charts ?? []), ...sheet.images];
+  if (floating.length === 0) return;
+  const bottom = Math.max(...floating.map((item) => item.top + item.height));
+  const right = Math.max(...floating.map((item) => item.left + item.width));
+  let height = sheet.rowHeights.reduce((sum, h) => sum + h, 0);
+  while (height < bottom - 0.5) {
+    sheet.rowHeights.push(defaultRow);
+    sheet.rowCount += 1;
+    height += defaultRow;
+  }
+  let width = sheet.colWidths.reduce((sum, w) => sum + w, 0);
+  while (width < right - 0.5) {
+    sheet.colWidths.push(defaultCol);
+    sheet.colCount += 1;
+    width += defaultCol;
+  }
+}
+
 /** .xlsx 파일 내용을 시트 목록으로 바꾼다. 시트가 여러 개면 전부 돌려준다. */
 export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]> {
   // 브라우저용 exceljs 는 UMD 번들이라 default 로 감싸질 때와 아닐 때가 갈린다.
@@ -774,6 +801,18 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
     );
     for (const sheet of sheets) {
       sheet.shapes = withinGrid(shapes.get(sheet.name) ?? [], sheet.colWidths, sheet.rowHeights);
+    }
+    // 차트 — 빠뜨리면 경영검토 보고서의 공정·재검측율·NCR 차트 자리가 통째로 비었다(9.4).
+    const charts = await parseWorkbookCharts(
+      data,
+      sizes,
+      { col: colWidthToPx(undefined, undefined), row: rowHeightToPx(undefined, undefined) },
+      theme,
+    );
+    for (const sheet of sheets) {
+      const found = charts.get(sheet.name);
+      if (found) sheet.charts = found;
+      coverFloating(sheet, rowHeightToPx(undefined, undefined), colWidthToPx(undefined, undefined));
     }
   } catch {
     // 도형을 못 읽는 것은 양식을 못 여는 것보다 가볍다.
