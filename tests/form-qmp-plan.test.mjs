@@ -9,6 +9,7 @@ import {
   qmpStates,
   qmpTally,
   templateForCode,
+  writesSection,
 } from '../apps/web/src/features/forms/qmpPlan.ts';
 
 test('시트 이름에서 서식 번호를 읽는다 — 지난달 장·양식 표시·원본 오타까지', () => {
@@ -78,13 +79,19 @@ test('[작성하기]는 그 서식 시트가 든 배포 양식 중 가장 최근
   assert.equal(templateForCode(templates, '8.6-1'), undefined);
 });
 
-test('집계는 기준 문서(PROCESS 등)를 세지 않고, 부서는 주관으로 가른다', () => {
+test('집계는 기준 문서(PROCESS 등)를 세지 않고, 부서는 주관·협조 모두 그 부서 몫으로 센다', () => {
   const tracked = (dept) =>
-    QMP_SECTIONS.filter((s) => !dept || s.lead === dept).flatMap((s) => s.forms).filter((f) => !f.reference).length;
+    QMP_SECTIONS.filter((s) => !dept || s.lead === dept || s.help.includes(dept))
+      .flatMap((s) => s.forms)
+      .filter((f) => !f.reference).length;
   const empty = new Map();
   assert.equal(qmpTally(empty, null).total, tracked(null));
   assert.equal(qmpTally(empty, '공사').total, tracked('공사'));
-  assert.equal(qmpTally(empty, '공사').total, 11, '8.1 세 장 + 8.6 여덟 장');
+  // 공사가 주관인 8.1·8.6 열한 장에 협조 절(4.3 프로세스 관리 등)이 더해진다
+  assert.ok(qmpTally(empty, '공사').total > 11);
+  const s43 = QMP_SECTIONS.find((s) => s.no === '4.3');
+  assert.ok(writesSection(s43, '공사') && writesSection(s43, '품질'));
+  assert.equal(writesSection(QMP_SECTIONS.find((s) => s.no === '4.2'), '공사'), false);
   // PROCESS 흐름도 26장 + 작성방법(4.3-4)·평가기준(6.1-2)
   assert.equal(QMP_SECTIONS.flatMap((s) => s.forms).filter((f) => f.reference).length, 28);
 });

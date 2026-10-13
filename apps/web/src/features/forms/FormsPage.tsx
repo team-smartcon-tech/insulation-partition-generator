@@ -458,7 +458,7 @@ export default function FormsPage() {
     const { list, next } = closeOpenDoc(openDocs, id);
     rememberOpenDocs(list);
     if (state.status !== "ready" || state.id !== id) return;
-    if (next) await openStored(next.id);
+    if (next) await openDocAt(next.id);
     else setState({ status: "idle" });
   }
 
@@ -2308,7 +2308,9 @@ export default function FormsPage() {
           <OpenDocTabs
             docs={openDocs}
             activeId={state.status === "ready" ? state.id : null}
-            onOpen={(id) => void handleOpen(id)}
+            // 탭에는 배포 양식·다른 현장 서류도 섞여 있다. 지금 서류함에서만 열면 화면에 펼쳐지지 않아
+            // "눌러도 안 열린다"(2026-10-13 사용자 보고) — 그 서류가 있는 서류함·현장으로 옮겨서 연다.
+            onOpen={(id) => void openDocAt(id)}
             onClose={(id) => void closeDocTab(id)}
           />
         )}

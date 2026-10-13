@@ -340,6 +340,14 @@ export function templateForCode<T extends { id: string; sheetNames: string[]; up
 }
 
 /**
+ * 그 부서가 쓰는 절인가 — 주관이든 협조든 작성에 참여한다(2026-10-13 사용자 결정: "공사·공무도
+ * 작성해야 하는 것"). 부서 탭에 협조 절이 빠지면 그 부서가 써야 할 서류가 안 보인다.
+ */
+export function writesSection(sec: QmpSection, dept: QmpDept): boolean {
+  return sec.lead === dept || sec.help.includes(dept);
+}
+
+/**
  * 부서 하나(또는 전체)의 신호등 집계.
  * 기준 문서는 현장이 쓰지 않으므로 빼고 센다. 배포 양식함은 기준 문서도 양식이라 함께 센다.
  */
@@ -351,7 +359,7 @@ export function qmpTally(
 ): { done: number; doing: number; none: number; total: number } {
   const tally = { done: 0, doing: 0, none: 0, total: 0 };
   for (const sec of QMP_SECTIONS) {
-    if (dept && sec.lead !== dept) continue;
+    if (dept && !writesSection(sec, dept)) continue;
     if (chapter && chapterOf(sec.no) !== chapter) continue;
     for (const form of sec.forms) {
       if (form.reference && !includeReference) continue;

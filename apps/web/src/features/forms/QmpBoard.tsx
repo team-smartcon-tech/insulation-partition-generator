@@ -5,11 +5,12 @@
  * (코드표)는 제출 양식의 "확장 가능성"에 말로만 적는다 — 그래서 두 서류함 모두 이 화면이 기본이고,
  * 코드표 화면(`FormTree.tsx`)은 지우지 않고 숨겨 둔다.
  *
- * - **현장 서류함**: 서식마다 주관 부서(첨부 QA-6.3-2)의 신호등. 결재까지 끝나면 초록.
+ * - **현장 서류함**: 서식마다 신호등. 결재까지 끝나면 초록. 절마다 작성 부서(첨부 QA-6.3-2 의 주관·협조)를 단다.
  * - **배포 양식함**: 서식마다 회사 양식이 올라와 있는지. 빠진 것을 본사가 바로 찾는다.
  *
  * 생김새는 기존 서류함(`FormTree.tsx`)을 따른다 — 흰 카드, 서류철 탭, 왼쪽 목록, 한 줄짜리 행.
- * 부서 탭은 **주관** 부서로 거른다. 협조까지 불을 켜면 서식 한 장에 불이 셋 붙어 흐려진다.
+ * 부서 탭은 주관·협조를 가리지 않고 **그 부서가 쓰는 절**을 모두 보인다. 불은 서식마다 하나다
+ * (누가 썼든 서류가 있으면 켜진다) — 부서마다 불을 달면 서식 한 장에 불이 셋 붙어 흐려진다.
  */
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Download, FileSpreadsheet, Search, Upload } from "lucide-react";
@@ -20,6 +21,7 @@ import {
   chapterOf,
   lampOf,
   qmpTally,
+  writesSection,
   type QmpDept,
   type QmpFormState,
   type QmpStatus,
@@ -50,6 +52,9 @@ interface Props {
 }
 
 const CHAPTER_NOS = ["4", "5", "6", "7", "8", "9", "10"];
+
+/** 끝난 비율(%) — 결재까지 끝난 것만 센다 */
+const percentOf = (t: { done: number; total: number }) => (t.total > 0 ? Math.round((t.done / t.total) * 100) : 0);
 
 /** 신호등 하나. 색만으로 가르지 않도록 테두리·밝기도 다르게 하고 이름을 붙인다. */
 export function Lamp({ status, size = 11, labels }: { status: QmpStatus; size?: number; labels?: Record<QmpStatus, string> }) {
@@ -96,12 +101,14 @@ export default function QmpBoard({
 
   const tally = (d: QmpDept | null, ch: string | null = null) => qmpTally(states, d, ch, withRefs);
   const overall = tally(null);
-  const percent = overall.total > 0 ? Math.round((overall.done / overall.total) * 100) : 0;
+  /** 진행률 막대는 고른 부서 탭을 따른다 — "우리 부서는 얼마나 했나" 가 바로 보이게. */
+  const current = tally(dept);
+  const percent = percentOf(current);
   const needle = query.trim().toLowerCase();
 
   const sections = useMemo(
     () =>
-      QMP_SECTIONS.filter((sec) => (!dept || sec.lead === dept) && (!chapter || chapterOf(sec.no) === chapter))
+      QMP_SECTIONS.filter((sec) => (!dept || writesSection(sec, dept)) && (!chapter || chapterOf(sec.no) === chapter))
         .map((sec) => ({
           ...sec,
           forms: sec.forms.filter((form) => {
@@ -129,16 +136,27 @@ export default function QmpBoard({
               {library ? "종" : "장"}
             </span>
           </h2>
-          <div className="mt-2 h-1.5 w-44 overflow-hidden rounded-full bg-slate-100" aria-hidden>
-            <div
-              className={"h-full rounded-full transition-all " + (library ? "bg-blue-600" : "bg-green-600")}
-              style={{ width: `${percent}%` }}
-            />
+          <div className="mt-2 flex items-center gap-2.5">
+            <div className="h-1.5 w-44 overflow-hidden rounded-full bg-slate-100" aria-hidden>
+              <div
+                className={"h-full rounded-full transition-all " + (library ? "bg-blue-600" : "bg-green-600")}
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+            <span className="text-xs tabular-nums text-slate-600">
+              <span className="font-semibold text-slate-900">{percent}%</span>
+              {dept && (
+                <span className="text-slate-500">
+                  {" "}
+                  · {dept} {current.done}/{current.total}
+                </span>
+              )}
+            </span>
           </div>
           <p className="mt-2 text-xs text-slate-500">
             {library
               ? "품질관리계획서 서식별로 회사 양식이 올라와 있는지 봅니다. 양식 엑셀의 시트 이름(QA-7.2-2 등)으로 저절로 제자리를 찾습니다."
-              : "품질관리계획서 절마다 주관 부서(첨부 QA-6.3-2)가 서류를 작성해 결재까지 마치면 초록불이 켜집니다."}
+              : "품질관리계획서 절마다 작성 부서(첨부 QA-6.3-2)가 서류를 작성해 결재까지 마치면 초록불이 켜집니다."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -194,7 +212,7 @@ export default function QmpBoard({
       </div>
 
       <div className="mt-5 flex flex-wrap items-end justify-between gap-3 border-b border-slate-200">
-        <div className="flex flex-wrap gap-1" role="tablist" aria-label="주관 부서">
+        <div className="flex flex-wrap gap-1" role="tablist" aria-label="작성 부서">
           {tabs.map((tab) => {
             const t = tally(tab.key);
             const active = dept === tab.key;
@@ -218,7 +236,7 @@ export default function QmpBoard({
                 {tab.key && !library && <Lamp status={lampOf(t)} size={9} />}
                 {tab.label}{" "}
                 <span className="font-normal tabular-nums text-slate-400">
-                  {t.done}/{t.total}
+                  {t.done}/{t.total} · {percentOf(t)}%
                 </span>
               </button>
             );
@@ -236,7 +254,7 @@ export default function QmpBoard({
               <span className="inline-flex items-center gap-1.5"><Lamp status="doing" size={10} />작성 중·결재 대기</span>
               <span className="inline-flex items-center gap-1.5"><Lamp status="none" size={10} />미작성</span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="rounded border border-slate-300 px-1 text-[10px] text-slate-500">기준</span>절차·기준(작성 안 함)
+                <span className="rounded border border-slate-300 px-1 text-[10px] text-slate-500">참고</span>작성하지 않고 보고 따르는 서류(흐름도·작성방법·평가기준)
               </span>
             </>
           )}
@@ -329,11 +347,8 @@ export default function QmpBoard({
                           </span>
                           <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700">
                             {!library && <Lamp status={lampOf(secTally)} size={8} />}
-                            주관 {sec.lead}
+                            작성 {[`${sec.lead}(주관)`, ...sec.help].join(" · ")}
                           </span>
-                          {sec.help.length > 0 && (
-                            <span className="text-xs font-normal text-slate-500">협조 {sec.help.join(" · ")}</span>
-                          )}
                         </h4>
                         <ul className="mt-2 grid gap-x-8 lg:grid-cols-2">
                           {sec.forms.map((form) => (
@@ -445,7 +460,7 @@ function FormRow({
           </span>
         )
       ) : reference ? (
-        <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] text-slate-500">기준</span>
+        <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] text-slate-500">참고</span>
       ) : status === "done" ? (
         <span className="inline-flex shrink-0 items-center gap-1.5 text-xs tabular-nums text-green-700">
           <Lamp status="done" />
