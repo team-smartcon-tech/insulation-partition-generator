@@ -171,7 +171,9 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
       : style.textDirection === "down"
         ? { writingMode: "sideways-rl" as const }
         : style.textDirection === "stacked"
-          ? { writingMode: "vertical-rl" as const, textOrientation: "upright" as const }
+          ? // 세로로 쌓은 글자는 엑셀에서 한 줄 높이(글자 크기의 약 1.35배)마다 하나씩 놓인다. 1배로 붙여
+            // 두었더니 옆 띠 제목("발행(누구나)", 8.12-1)이 엑셀보다 촘촘하게 몰렸다.
+            { writingMode: "vertical-rl" as const, textOrientation: "upright" as const, letterSpacing: "0.35em" }
           : {}),
     // 들여쓰기는 정렬한 쪽에 준다(가운데 정렬에는 엑셀도 쓰지 않는다).
     ...(indent > 0 && align !== "center"

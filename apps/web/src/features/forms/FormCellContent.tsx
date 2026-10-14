@@ -37,7 +37,8 @@ function RichRuns({ runs, basePt }: { runs: FormTextRun[]; basePt: number }) {
               fontWeight: run.bold === true ? 700 : run.bold === false ? 400 : undefined,
               fontStyle: run.italic === true ? "italic" : run.italic === false ? "normal" : undefined,
               textDecoration: run.underline ? "underline" : undefined,
-              fontSize: size ? `${size / basePt}em` : undefined,
+              fontSize: run.vertAlign ? `${((size ?? basePt) / basePt) * 0.7}em` : size ? `${size / basePt}em` : undefined,
+              verticalAlign: run.vertAlign,
               lineHeight: "normal",
               color: run.color,
             }}
@@ -349,7 +350,15 @@ function FormCellContent({
       {value === undefined && cell.runs ? (
         <RichRuns runs={cell.runs} basePt={cell.style.fontSize ?? DEFAULT_FONT_PT} />
       ) : null}
-      {value === undefined && cell.runs ? null : text === "" ? " " : text}
+      {value === undefined && cell.runs
+        ? null
+        : text === ""
+          ? " "
+          : // 세로 쌓기 글자는 공백도 한 글자 높이를 차지한다(엑셀). 그냥 두면 세로쓰기에서 공백이 좁아
+            // "   참  석  자"(7.5-4 양식)가 칸 위쪽에 몰렸다 — 전각 공백으로 바꿔 같은 높이를 준다.
+            cell.style.textDirection === "stacked"
+            ? text.replace(/ /g, "　")
+            : text}
     </span>
   );
 }

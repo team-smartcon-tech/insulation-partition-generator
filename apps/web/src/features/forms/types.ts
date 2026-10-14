@@ -101,6 +101,8 @@ export interface FormTextRun {
   fontSize?: number;
   /** 글자 사이 간격(pt, 음수면 좁힘) */
   letterSpacing?: number;
+  /** 위첨자·아래첨자 */
+  vertAlign?: "super" | "sub";
   /** #RRGGBB */
   color?: string;
 }
@@ -247,10 +249,17 @@ export interface FormShape {
   fontFamily?: string;
   bold?: boolean;
   italic?: boolean;
+  underline?: boolean;
   color?: string;
   align?: "left" | "center" | "right";
   /** 글자의 세로 자리. 엑셀 기본은 위쪽이다(순서도 상자는 보통 가운데로 적혀 있다). */
   valign?: "top" | "middle" | "bottom";
+  /** 둥근 사각형의 모서리 반지름(짧은 변에 대한 비율, 0.5 = 알약). 없으면 기본 */
+  roundRatio?: number;
+  /** 줄 간격 — pt 는 고정 간격, ratio 는 글자 크기에 대한 배수(엑셀 "1줄" = 1.2) */
+  lineSpacing?: { pt?: number; ratio?: number };
+  /** 그림자(바깥) — 엑셀 [도형 효과]. 숨겨 둔 그림자(hiddenEffects)는 읽지 않는다 */
+  shadow?: { dx: number; dy: number; color: string };
   /** 글자 안쪽 여백(px) — 위·오른쪽·아래·왼쪽. 여백이 달라지면 줄 바뀌는 자리가 달라진다. */
   inset?: [number, number, number, number];
   /** 틀 너비에 맞춰 줄을 바꾸지 않는다(짧은 라벨이 틀보다 길게 삐져나오는 경우) */

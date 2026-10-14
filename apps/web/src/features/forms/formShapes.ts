@@ -386,6 +386,36 @@ function readLine(style: string | undefined, lineBlock: string, ctx: Context): s
  * 엑셀에서 그냥 그린 네모가 파란색인 이유가 이것이다. 그림자·윤곽선 색을 채움으로 잘못
  * 집지 않도록 `ln`·`effectLst` 는 빼고 본다.
  */
+/**
+ * 문단 줄 간격(`a:lnSpc`) — 고정(spcPts, 100분의 1pt)이거나 배수(spcPct, 1000분의 1%).
+ * 빠뜨리면 7.6-5 [작성방법]·[비고] 상자처럼 13~15pt 로 넉넉히 띄운 글이 가운데로 몰렸다.
+ */
+function readLineSpacing(paragraph: string | undefined): Partial<FormShape> {
+  const pPr = paragraph ? child(paragraph, "pPr") : undefined;
+  const lnSpc = pPr ? child(pPr, "lnSpc") : undefined;
+  if (!lnSpc) return {};
+  const pts = Number(ownAttr(child(lnSpc, "spcPts"), "val"));
+  if (pts > 0) return { lineSpacing: { pt: pts / 100 } };
+  const pct = Number(ownAttr(child(lnSpc, "spcPct"), "val"));
+  return pct > 0 ? { lineSpacing: { ratio: pct / 100000 } } : {};
+}
+
+/** 바깥 그림자. 도형 서식에 바로 적힌 것만 — 확장 영역의 숨긴 그림자(a14:hiddenEffects)는 엑셀도 안 그린다. */
+function readShadow(spPr: string, ctx: Context): Partial<FormShape> {
+  const effects = child(spPr, "effectLst");
+  const shadow = effects ? child(effects, "outerShdw") : undefined;
+  if (!shadow) return {};
+  const dist = Number(ownAttr(shadow, "dist") ?? 0) / EMU_PER_PX;
+  const angle = ((Number(ownAttr(shadow, "dir") ?? 0) / 60000) * Math.PI) / 180;
+  return {
+    shadow: {
+      dx: Math.round(dist * Math.cos(angle) * 10) / 10,
+      dy: Math.round(dist * Math.sin(angle) * 10) / 10,
+      color: readColor(shadow, ctx) ?? "#808080",
+    },
+  };
+}
+
 function readFill(spPr: string, style: string | undefined, ctx: Context): string | undefined {
   const own = childElements(spPr);
   for (const element of own) {
@@ -681,16 +711,25 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     // 회전은 60000분의 1도 단위로 들어온다. 워터마크가 비스듬히 걸려 있는 경우다.
     rotation: rotationDegrees(ownAttr(xfrm, "rot")),
     elbow: elbowRatio(prst, adjust),
+    // 둥근 모서리 크기(짧은 변에 대한 비율). 순서도 "단말"은 양끝이 반원인 알약 모양이다(8.12-1 "종 결").
+    ...(prst === "flowChartTerminator"
+      ? { roundRatio: 0.5 }
+      : prst === "roundRect"
+        ? { roundRatio: Math.min(0.5, (adjust.adj ?? 16667) / 100000) }
+        : {}),
     paths,
     fontSize: sizeHundredths > 0 ? sizeHundredths / 100 : undefined,
     ...(Number(ownAttr(firstRun, "spc")) ? { letterSpacing: Number(ownAttr(firstRun, "spc")) / 100 } : {}),
     fontFamily: attrOf(firstRun, "latin", "typeface") ?? attrOf(firstRun, "ea", "typeface"),
     bold: flag(firstRun, inheritedRunProps(txBody), "b"),
+    ...((ownAttr(firstRun, "u") ?? ownAttr(inheritedRunProps(txBody), "u") ?? "none") !== "none" ? { underline: true } : {}),
     ...(flag(firstRun, inheritedRunProps(txBody), "i") ? { italic: true } : {}),
     // 글자 색을 안 적었으면 도형 스타일의 글자 색(fontRef)을 따른다.
     color: readColor(firstRun, ctx) ?? readColor(fontRef, ctx),
     align: algn === "ctr" ? "center" : algn === "r" ? "right" : algn === "l" ? "left" : undefined,
     ...(txBody ? readBodyLayout(child(txBody, "bodyPr")) : {}),
+    ...readLineSpacing(paragraphs[0]),
+    ...readShadow(spPr, ctx),
   };
 }
 
@@ -886,9 +925,11 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     outer.textRuns = inner.textRuns;
     outer.fontSize = inner.fontSize;
     outer.letterSpacing = inner.letterSpacing;
+    outer.lineSpacing = inner.lineSpacing;
     outer.fontFamily = inner.fontFamily;
     outer.bold = inner.bold;
     outer.italic = inner.italic;
+    outer.underline = inner.underline;
     outer.color = inner.color;
     outer.align = inner.align;
     outer.valign = inner.valign;

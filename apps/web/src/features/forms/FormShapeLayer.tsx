@@ -126,7 +126,7 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
     shape.kind === "ellipse"
       ? "50%"
       : shape.kind === "roundBox"
-        ? Math.min(shape.width, shape.height) * ROUND_RATIO
+        ? Math.min(shape.width, shape.height) * (shape.roundRatio ?? ROUND_RATIO)
         : undefined;
   const [padTop, padRight, padBottom, padLeft] = shape.inset ?? [2, 4, 2, 4];
   // 글자를 세워 두는 도형을 90°·270° 돌렸으면, 돌린 뒤 모습(가로·세로를 바꾼 같은 가운데의 틀)에
@@ -150,6 +150,7 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
         ? `${Math.max(MIN_LINE_PX, shape.lineWidth)}px ${shape.dash ?? "solid"} ${shape.line}`
         : undefined,
     borderRadius: radius,
+    boxShadow: shape.shadow && !outlined ? `${shape.shadow.dx}px ${shape.shadow.dy}px 0 ${shape.shadow.color}` : undefined,
     // 회전은 도형 가운데를 축으로 돈다. 엑셀도 같은 기준이라 자리가 어긋나지 않는다.
     transform: shape.rotation && !flat ? `rotate(${shape.rotation}deg)` : undefined,
     display: "flex",
@@ -184,8 +185,11 @@ function textCss(shape: FormShape): CSSProperties {
     letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : undefined,
     fontWeight: shape.bold ? 700 : undefined,
     fontStyle: shape.italic ? "italic" : undefined,
+    textDecoration: shape.underline ? "underline" : undefined,
     color: shape.color,
-    lineHeight: 1.25,
+    lineHeight: shape.lineSpacing?.pt
+      ? `${shape.lineSpacing.pt}pt`
+      : (shape.lineSpacing?.ratio ?? 1) * SINGLE_SPACING,
     whiteSpace: shape.noWrap ? "pre" : "pre-wrap",
     // 한글은 어절 단위로 끊어야 "지식관리"가 "지식관"+"리"로 쪼개지지 않는다.
     wordBreak: "keep-all",
@@ -195,6 +199,13 @@ function textCss(shape: FormShape): CSSProperties {
     transform: vertical === "vert270" ? "rotate(180deg)" : undefined,
   };
 }
+
+/**
+ * 도형 글자의 "1줄" 간격(글자 크기의 배수). 순서도 상자 대부분이 엑셀과 맞는 값이다. 줄 간격을 적어 둔
+ * 상자(고정 pt·배수)는 그 값을 따른다. 1.6 으로 넓혔더니 7.6-5 설명 상자는 맞았지만 10.1-1 순서도 상자
+ * 글이 넘쳐 작게 줄었다 — 엑셀 기본 간격이 상자마다 달라 하나로 못 맞춘다.
+ */
+const SINGLE_SPACING = 1.25;
 
 /**
  * 도형 안 글자. 부분 서식이 있으면 조각마다 그린다 — 상자를 그리는 길이 둘(테두리를 SVG 로 그리는
@@ -216,14 +227,14 @@ function ShapeText({ shape }: { shape: FormShape }) {
     const original = String(textCss(shape).fontSize ?? "");
     const fit = () => {
       element.style.fontSize = original;
-      const css = getComputedStyle(box);
-      const roomHeight = box.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom);
-      const roomWidth = box.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
-      const overflows = () =>
-        element.offsetHeight > roomHeight + 1 || (shape.noWrap === true && element.scrollWidth > roomWidth + 1);
-      if (!(roomHeight > 0) || !overflows()) return;
+      // 엑셀은 상자 글을 줄이지 않는다 — 안쪽 여백까지는 넘쳐도 그대로 둔다. **상자 테두리 밖으로**
+      // 나갈 때만 줄인다. 여백 안쪽 기준으로 줄였더니 "부적합보고서 / 발행"·"시정조치 요구서 (원본)"
+      // (10.1-1)이 엑셀보다 작아졌다.
+      const outside = () =>
+        element.offsetHeight > box.clientHeight + 1 || (shape.noWrap === true && element.scrollWidth > box.clientWidth + 1);
+      if (!(box.clientHeight > 0) || !outside()) return;
       const base = parseFloat(getComputedStyle(element).fontSize);
-      for (let step = 1; step <= 8 && overflows(); step += 1) element.style.fontSize = `${base * (1 - step * 0.025)}px`;
+      for (let step = 1; step <= 8 && outside(); step += 1) element.style.fontSize = `${base * (1 - step * 0.025)}px`;
     };
     fit();
     // 처음 그릴 때는 표 크기가 아직 안 잡혀(배율 계산 전) 잴 수 없을 때가 있다 — 글꼴이 다 오면 한 번 더 잰다.

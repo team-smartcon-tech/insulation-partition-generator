@@ -28,7 +28,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 26; // 26: 표 밖 도형·칸 크기를 넘는 오프셋·화살촉 크기·차트 범례와 값
+export const PARSER_VERSION = 27; // 27: 표 밖 도형·칸을 넘는 오프셋·화살촉·차트 범례와 값·도형 줄 간격·그림자·위첨자
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -146,10 +146,14 @@ function readRuns(value: unknown, theme: ThemeColors): FormTextRun[] | undefined
       ...(run.font ? { bold: font.bold === true, italic: font.italic === true } : {}),
       ...(font.underline ? { underline: true } : {}),
       ...(typeof font.size === "number" ? { fontSize: font.size } : {}),
+      // 위·아래 첨자("검토의견*" 의 *, 8.3-4)
+      ...(font.vertAlign === "superscript" ? { vertAlign: "super" as const } : {}),
+      ...(font.vertAlign === "subscript" ? { vertAlign: "sub" as const } : {}),
       ...(color ? { color } : {}),
     };
   });
-  const signature = (run: FormTextRun) => `${run.bold}|${run.italic}|${run.underline}|${run.fontSize}|${run.color}`;
+  const signature = (run: FormTextRun) =>
+    `${run.bold}|${run.italic}|${run.underline}|${run.fontSize}|${run.vertAlign}|${run.color}`;
   return runs.every((run) => signature(run) === signature(runs[0])) ? undefined : runs;
 }
 
