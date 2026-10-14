@@ -814,6 +814,29 @@ function unrotatedFrame(block: string, box: Rect): Rect {
   };
 }
 
+/** 그림 테두리만(채우기 없음). 테두리가 없으면 아무것도 없다. */
+function pictureOutline(picXml: string, box: Rect, ctx: Context): FormShape[] {
+  const spPr = child(picXml, "spPr") ?? "";
+  const lineBlock = child(spPr, "ln") ?? "";
+  if (!lineBlock || /<([A-Za-z0-9_]+:)?noFill\s*\/>/.test(lineBlock)) return [];
+  const color = readColor(lineBlock, ctx);
+  if (!color) return [];
+  const widthEmu = Number(ownAttr(lineBlock, "w") ?? 0);
+  return [
+    {
+      kind: "box",
+      ...box,
+      flipH: false,
+      flipV: false,
+      arrowStart: false,
+      arrowEnd: false,
+      text: "",
+      line: color,
+      lineWidth: (widthEmu > 0 ? widthEmu / EMU_PER_PT : DEFAULT_LINE_PT) * PT_TO_PX,
+    },
+  ];
+}
+
 /** 앵커 하나를 화면에 그릴 도형들로 바꾼다. 그룹이면 여러 개가 나온다. */
 function readAnchorShapes(
   anchor: Element,
@@ -824,8 +847,11 @@ function readAnchorShapes(
   ctx: Context,
 ): FormShape[] {
   const parts = childElements(anchor.xml);
-  // 그림(pic)은 exceljs 가 이미 주므로 여기서 다시 담지 않는다 — 두 번 그려진다.
-  const shape = parts.find((part) => part.name === "sp" || part.name === "cxnSp" || part.name === "grpSp");
+  // 그림(pic)은 exceljs 가 이미 주므로 여기서 다시 담지 않는다 — 두 번 그려진다. 다만 그림 **테두리**는
+  // exceljs 가 주지 않아 여기서 테두리만 그린다(7.2 카메라 그림의 검은 테두리).
+  const shape = parts.find(
+    (part) => part.name === "sp" || part.name === "cxnSp" || part.name === "grpSp" || part.name === "pic",
+  );
   if (!shape) return [];
 
   let box: Rect;
@@ -859,6 +885,7 @@ function readAnchorShapes(
   }
 
   if (shape.name === "grpSp") return readGroup(shape.xml, box, ctx);
+  if (shape.name === "pic") return pictureOutline(shape.xml, box, ctx);
   return [buildShape(shape.xml, unrotatedFrame(shape.xml, box), ctx)];
 }
 

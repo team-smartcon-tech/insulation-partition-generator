@@ -10,6 +10,7 @@ import { parseWorkbookShapes } from "./formShapes.ts";
 import { parseWorkbookCharts } from "./formCharts.ts";
 import { readZipIndex, readZipText } from "./zip.ts";
 import { formatValue } from "./numberFormat.ts";
+import { emfToSvg } from "./emfToSvg.ts";
 import type {
   FormBorder,
   FormBorderStyle,
@@ -28,7 +29,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 27; // 27: 표 밖 도형·칸을 넘는 오프셋·화살촉·차트 범례와 값·도형 줄 간격·그림자·위첨자
+export const PARSER_VERSION = 28; // 28: EMF 그림을 SVG 로(카메라), 표 밖 도형·화살촉·차트 범례·도형 줄 간격·위첨자
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -368,6 +369,16 @@ function toBytes(data: unknown): Uint8Array | null {
 }
 
 /** 바이트 뭉치를 `<img src>` 에 바로 넣을 수 있는 data: URL 로 만든다. 못 만들면 빈 문자열. */
+/** EMF 바이트 → SVG data: URL. 못 그리면 빈 문자열. */
+function emfToSvgUrl(data: unknown): string {
+  const bytes = toBytes(data);
+  if (!bytes) return "";
+  const svg = emfToSvg(bytes);
+  if (!svg) return "";
+  const utf8 = new TextEncoder().encode(svg);
+  return toDataUrl(utf8, "svg+xml");
+}
+
 function toDataUrl(data: unknown, extension: string): string {
   const bytes = toBytes(data);
   if (!bytes || bytes.length === 0) return "";
@@ -419,7 +430,9 @@ function readImages(
       const unsupported = extension === "emf" || extension === "wmf" ? (extension as "emf" | "wmf") : undefined;
       // exceljs 판에 따라 바이트가 buffer/data 중 어디에 오는지 갈린다.
       const raw = media?.buffer ?? media?.data;
-      const src = unsupported ? "" : toDataUrl(raw, media?.extension);
+      // EMF 는 그리는 명령을 SVG 로 옮겨 그린다(카메라로 찍은 표 그림 등). 못 옮기면 자리 표시만 남긴다.
+      const emfSvg = unsupported === "emf" ? emfToSvgUrl(raw) : "";
+      const src = emfSvg || (unsupported ? "" : toDataUrl(raw, media?.extension));
       // 못 읽은 그림을 넣으면 화면에 보이지 않는 <img> 만 남아 원인 찾기가 어려워진다.
       if (!src && !unsupported) continue;
 
@@ -443,7 +456,7 @@ function readImages(
       }
       if (!(width > 0) || !(height > 0)) continue;
 
-      images.push({ src: src ?? "", left, top, width, height, ...(unsupported ? { unsupported } : {}) });
+      images.push({ src: src ?? "", left, top, width, height, ...(unsupported && !emfSvg ? { unsupported } : {}) });
     } catch {
       // 그림 하나를 못 읽는다고 양식 전체를 못 열면 안 된다. 그 그림만 건너뛴다.
     }
