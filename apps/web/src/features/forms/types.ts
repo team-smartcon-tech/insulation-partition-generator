@@ -167,6 +167,8 @@ export interface FormChartGroup {
   grouping: "clustered" | "stacked" | "percentStacked" | "standard";
   /** 3차원 막대 — 윗면·옆면을 더해 입체로 그린다 */
   threeD?: boolean;
+  /** 막대 사이 간격(막대 너비에 대한 %, 엑셀 기본 150) */
+  gapWidth?: number;
   series: {
     name: string;
     color?: string;
@@ -273,6 +275,8 @@ export interface FormShape {
   valign?: "top" | "middle" | "bottom";
   /** 글자가 겹쳐 놓인 안쪽 글상자에서 왔다(여백이 이미 그 자리를 나타낸다) */
   textFromInner?: boolean;
+  /** 점선 무늬(선 굵기의 배수, 선·빈칸 번갈아) — 엑셀 선 종류 그대로 */
+  dashPattern?: number[];
   /** 넘치는 글을 상자 안에서 자른다(엑셀 vertOverflow="clip") */
   clipText?: boolean;
   /** 둥근 사각형의 모서리 반지름(짧은 변에 대한 비율, 0.5 = 알약). 없으면 기본 */

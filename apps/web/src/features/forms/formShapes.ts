@@ -229,6 +229,20 @@ function readColor(chunk: string | undefined, ctx: Context): string | undefined 
 }
 
 /** 엑셀 선 모양 → 화면. 종류가 많지만 화면에서 구분되는 것은 실선·파선·점선뿐이다. */
+/** DrawingML 선 종류 → [선, 빈칸, …] (선 굵기의 배수) */
+const DASH_PATTERNS: Record<string, number[]> = {
+  sysDot: [1, 1],
+  sysDash: [3, 1],
+  dot: [1, 3],
+  dash: [4, 3],
+  lgDash: [8, 3],
+  dashDot: [4, 3, 1, 3],
+  lgDashDot: [8, 3, 1, 3],
+  lgDashDotDot: [8, 3, 1, 3, 1, 3],
+  sysDashDot: [3, 1, 1, 1],
+  sysDashDotDot: [3, 1, 1, 1, 1, 1],
+};
+
 function readDash(value: string | undefined): FormShape["dash"] {
   if (!value || value === "solid") return undefined;
   if (value.toLowerCase().includes("dot") && !value.toLowerCase().includes("dash")) return "dotted";
@@ -720,6 +734,10 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     line: readLine(style, lineBlock, ctx),
     lineWidth: (lineWidthEmu > 0 ? lineWidthEmu / EMU_PER_PT : DEFAULT_LINE_PT) * PT_TO_PX,
     dash: readDash(attrOf(lineBlock, "prstDash", "val")),
+    ...(() => {
+      const pattern = DASH_PATTERNS[attrOf(lineBlock, "prstDash", "val") ?? ""];
+      return pattern ? { dashPattern: pattern } : {};
+    })(),
     // 회전은 60000분의 1도 단위로 들어온다. 워터마크가 비스듬히 걸려 있는 경우다.
     rotation: rotationDegrees(ownAttr(xfrm, "rot")),
     elbow: elbowRatio(prst, adjust),

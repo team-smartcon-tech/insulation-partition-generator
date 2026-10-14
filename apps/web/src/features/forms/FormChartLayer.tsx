@@ -42,9 +42,10 @@ function ChartSvg({ chart }: { chart: FormChart }) {
   // 자리를 정해 둔 범례는 그림 위에 얹고, 아니면 오른쪽(또는 위)에 자리를 비운다.
   const sideLegend = legend && !legend.box && legend.pos === "r";
   const topLegend = legend && !legend.box && legend.pos === "t";
-  const padTop = (chart.title ? TITLE_PX + 16 : 10) + (topLegend ? 18 : 0);
-  const padLeft = (chart.valueTitle ? 22 : 0) + 46;
-  const padRight = sideLegend ? Math.min(120, W * 0.28) : 14;
+  // 그림 영역은 제목 아래·양옆에 여백을 두고 들인다(엑셀 기본 배치) — 꽉 채웠더니 제목이 맨 위 눈금선에 닿았다.
+  const padTop = (chart.title ? TITLE_PX + 26 : 16) + (topLegend ? 18 : 0);
+  const padLeft = (chart.valueTitle ? 26 : 0) + 56;
+  const padRight = sideLegend ? Math.min(120, W * 0.28) : 28;
   // 가로축 글자를 눕힌 차트는 아래 자리를 더 둔다(9.4 재검사율 45°).
   const padBottom = chart.categoryRotation ? 44 : 26;
   // 3차원 차트는 뒷벽 눈금선을 깊이만큼 비스듬히 올려 그린다(엑셀 3차원 묶은·누적 막대).
@@ -79,7 +80,10 @@ function ChartSvg({ chart }: { chart: FormChart }) {
   for (const group of chart.groups) {
     if (group.type === "bar") {
       const stacked = group.grouping === "stacked" || group.grouping === "percentStacked";
-      const barW = stacked ? band * 0.6 : (band * 0.7) / Math.max(1, group.series.length);
+      // 막대 너비는 엑셀 "간격 너비"(gapWidth, 막대 너비에 대한 %)로 — 기본 150% 면 막대가 칸의 40%.
+      const gap = (group.gapWidth ?? 150) / 100;
+      const barW = stacked ? band / (1 + gap) : band / (group.series.length + gap);
+      const clusterLeft = (band - barW * group.series.length) / 2;
       const base = new Array<number>(n).fill(0);
       group.series.forEach((s, k) => {
         const color = colorOf(seriesIndex++, s.color);
@@ -92,7 +96,7 @@ function ChartSvg({ chart }: { chart: FormChart }) {
           if (!(v > 0)) {
             // 3차원 막대는 값이 0 이어도 납작한 판(윗면)이 보인다(9.4 재검사율·NCR).
             if (group.threeD && s.values[i] === 0) {
-              const x0 = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + band * 0.15 + barW * k;
+              const x0 = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + clusterLeft + barW * k;
               const base0 = y(stacked ? base[i] : 0);
               const d = Math.min(8, barW * 0.25);
               bars.push(
@@ -100,13 +104,12 @@ function ChartSvg({ chart }: { chart: FormChart }) {
                   key={`zs${seriesIndex}-${i}`}
                   points={`${x0},${base0} ${x0 + d},${base0 - d} ${x0 + barW + d},${base0 - d} ${x0 + barW},${base0}`}
                   fill={color}
-                  style={{ filter: "brightness(1.2)" }}
                 />,
               );
             }
             // 0 인 값도 엑셀은 "0" 레이블을 바닥에 적는다(9.4 NCR 4월·6~11월).
             if (s.showValues && s.values[i] === 0) {
-              const x0 = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + band * 0.15 + barW * k;
+              const x0 = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + clusterLeft + barW * k;
               labels.push(
                 <text key={`z${seriesIndex}-${i}`} x={x0 + barW / 2} y={y(stacked ? base[i] : 0) - 4} textAnchor="middle" fontSize={TEXT_PX} fill="#404040">
                   0
@@ -115,7 +118,7 @@ function ChartSvg({ chart }: { chart: FormChart }) {
             }
             continue;
           }
-          const x = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + band * 0.15 + barW * k;
+          const x = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + clusterLeft + barW * k;
           const from = stacked ? base[i] : 0;
           const topY = y(from + v);
           const bottomY = y(from);
@@ -169,13 +172,13 @@ function ChartSvg({ chart }: { chart: FormChart }) {
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={chart.title ?? "차트"}>
       <rect x={0.5} y={0.5} width={W - 1} height={H - 1} fill="#ffffff" stroke="#d9d9d9" />
       {chart.title && (
-        <text x={W / 2} y={TITLE_PX + 6} textAnchor="middle" fontSize={TITLE_PX} fontWeight={700} fill="#404040">
+        <text x={W / 2} y={TITLE_PX + 6} textAnchor="middle" fontSize={TITLE_PX} fontWeight={700} fill="#000000">
           {chart.title}
         </text>
       )}
       {chart.valueTitle && (
         // 엑셀처럼 한 글자씩 세로로 쌓는다(회전하면 작은 한글이 뭉개졌다).
-        <text x={13} y={padTop + plotH / 2 - (chart.valueTitle.length - 1) * 6.5} textAnchor="middle" fontSize={11} fontWeight={700} fill="#404040">
+        <text x={13} y={padTop + plotH / 2 - (chart.valueTitle.length - 1) * 6.5} textAnchor="middle" fontSize={TEXT_PX} fontWeight={700} fill="#000000">
           {[...chart.valueTitle].map((ch, i) => (
             <tspan key={i} x={13} dy={i === 0 ? 0 : 13}>
               {ch}
@@ -187,7 +190,7 @@ function ChartSvg({ chart }: { chart: FormChart }) {
         <g key={v}>
           {depth > 0 && <line x1={padLeft} x2={padLeft + depth} y1={y(v)} y2={y(v) - depth} stroke="#d9d9d9" />}
           <line x1={padLeft + depth} x2={padLeft + plotW + depth} y1={y(v) - depth} y2={y(v) - depth} stroke="#e5e5e5" />
-          <text x={padLeft - 6} y={y(v) + 4} textAnchor="end" fontSize={TEXT_PX - 1} fill="#595959">
+          <text x={padLeft - 6} y={y(v) + 4} textAnchor="end" fontSize={TEXT_PX} fill="#000000">
             {label(v, chart.valueFormat)}
           </text>
         </g>
@@ -208,11 +211,11 @@ function ChartSvg({ chart }: { chart: FormChart }) {
         const cx = padLeft + band * i + band / 2;
         const cy = padTop + plotH + 17;
         return chart.categoryRotation ? (
-          <text key={i} x={cx} y={cy - 4} textAnchor="start" fontSize={TEXT_PX - 1} fill="#595959" transform={`rotate(${chart.categoryRotation} ${cx} ${cy - 8})`}>
+          <text key={i} x={cx} y={cy - 4} textAnchor="start" fontSize={TEXT_PX} fill="#000000" transform={`rotate(${chart.categoryRotation} ${cx} ${cy - 8})`}>
             {name}
           </text>
         ) : (
-          <text key={i} x={cx} y={cy} textAnchor="middle" fontSize={TEXT_PX - 1} fill="#595959">
+          <text key={i} x={cx} y={cy} textAnchor="middle" fontSize={TEXT_PX} fill="#000000">
             {name}
           </text>
         );

@@ -32,8 +32,10 @@ function svgRotate(shape: FormShape): string | undefined {
 /** 점선 간격은 선 굵기에 비례해야 굵은 선에서도 점선으로 보인다. */
 function dashArray(shape: FormShape): string | undefined {
   const width = Math.max(MIN_LINE_PX, shape.lineWidth);
+  // 엑셀 선 종류마다 길이·간격(선 굵기의 배수) — sysDot 은 작은 사각 점, sysDash 는 짧은 파선, dash 는 긴 파선.
+  if (shape.dashPattern) return shape.dashPattern.map((n) => n * width).join(" ");
   if (shape.dash === "dashed") return `${width * 3} ${width * 2}`;
-  if (shape.dash === "dotted") return `${width} ${width * 2}`;
+  if (shape.dash === "dotted") return `${width} ${width}`;
   return undefined;
 }
 
@@ -208,11 +210,11 @@ function textCss(shape: FormShape): CSSProperties {
     fontFamily: shapeFontStack(shape),
     // 간격을 안 적은 글은 1% 좁힌다 — 엑셀 글자 폭이 브라우저보다 조금 좁아, 딱 맞던 "설계검토 지연건수"
     // (4.3 견본)가 0.3px 차이로 접혔다. 칸 글자와 같은 보정이다.
-    letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : "-0.01em",
+    letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : "-0.02em",
     fontWeight: shape.bold ? 700 : undefined,
     fontStyle: shape.italic ? "italic" : undefined,
     textDecoration: shape.underline ? "underline" : undefined,
-    color: shape.color,
+    color: shape.color ?? "#000000",
     lineHeight: shape.lineSpacing?.pt
       ? `${shape.lineSpacing.pt}pt`
       : (shape.lineSpacing?.ratio ?? 1) * singleSpacing(shape.text),
@@ -220,11 +222,18 @@ function textCss(shape: FormShape): CSSProperties {
     // 한글은 어절 단위로 끊어야 "지식관리"가 "지식관"+"리"로 쪼개지지 않는다.
     wordBreak: "keep-all",
     overflowWrap: "break-word",
-    writingMode: vertical ? "vertical-rl" : undefined,
+    // vert = 글줄째 90° 돌림(위→아래), vert270 = 270°(아래→위, 8.7-1 "필요시 문서 개정"), eaVert = 글자를 세워 쌓기.
+    // 한글은 세로쓰기에서도 서 있으므로 vert·vert270 은 sideways 로 글자까지 눕혀야 엑셀과 같다.
+    writingMode: vertical === "eaVert" ? "vertical-rl" : vertical === "vert270" ? "sideways-lr" : vertical ? "sideways-rl" : undefined,
     textOrientation: vertical === "eaVert" ? "upright" : undefined,
-    transform: vertical === "vert270" ? "rotate(180deg)" : undefined,
   };
 }
+
+/**
+ * 말과 바로 붙은 여는 괄호 사이에서는 줄을 바꾸지 않는다(엑셀) — "시정조치요구서 / 발행(필요시)" 가
+ * "시정조치요구서 발행 / (필요시)" 로 접혔다(9.3-1). 보이지 않는 이음표(U+2060)를 끼운다.
+ */
+const keepParen = (text: string) => text.replace(/([^\s(])\(/g, "$1⁠(");
 
 /** 동아시아 글꼴 이름(테마 글꼴 "+mn-ea" 등은 맑은 고딕으로) → 설치된 글꼴 이름들 */
 const EA_LOCAL: Record<string, string[]> = {
@@ -323,15 +332,15 @@ function ShapeText({ shape }: { shape: FormShape }) {
                 fontSize: run.fontSize ? `${run.fontSize / (shape.fontSize ?? DEFAULT_SHAPE_FONT_PT)}em` : undefined,
                 fontWeight: run.bold ? 700 : 400,
                 fontStyle: run.italic ? "italic" : "normal",
-                letterSpacing: run.letterSpacing !== undefined ? `${run.letterSpacing}pt` : "-0.01em",
+                letterSpacing: run.letterSpacing !== undefined ? `${run.letterSpacing}pt` : "-0.02em",
                 textDecoration: run.underline ? "underline" : undefined,
                 color: run.color,
               }}
             >
-              {run.text}
+              {keepParen(run.text)}
             </span>
           ))
-        : shape.text}
+        : keepParen(shape.text)}
     </span>
   );
 }
@@ -488,7 +497,8 @@ export default function FormShapeLayer({
 
   return (
     // 도형은 보기용이다. 클릭이 통과해야 도형에 가린 칸도 눌러서 고칠 수 있다.
-    <div className="pointer-events-none absolute inset-0">
+    // 칸에서 옆으로 넘친 글(z-index 1)보다 위에 둔다 — 도장("Sample") 아래 글이 도장을 뚫고 보였다(8.11-6).
+    <div className="pointer-events-none absolute inset-0" style={{ zIndex: 2 }}>
       {markers.length > 0 && (
         <svg className="absolute h-0 w-0" aria-hidden>
           <defs>

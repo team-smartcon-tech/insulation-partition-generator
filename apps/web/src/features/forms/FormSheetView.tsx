@@ -27,7 +27,8 @@ const BORDER_WIDTH: Record<FormBorder["style"], string> = {
   mediumDashed: "2px dashed",
 };
 
-const DEFAULT_BORDER_COLOR = "#111827";
+/** 색을 안 적은 테두리 — 엑셀 "자동"은 검정이다 */
+const DEFAULT_BORDER_COLOR = "#000000";
 
 /** 고친 글자가 없는 줄에 넘기는 빈 값. 매번 새 객체를 만들면 줄 메모가 듣지 않는다. */
 const EMPTY_VALUES: FormCellValues = {};
@@ -166,7 +167,8 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     // 엑셀 원본이 pt 라 그대로 pt 로 넘긴다. px 로 환산하면 반올림 오차가 쌓인다.
     fontSize: style.fontSize ? `${style.fontSize}pt` : undefined,
     fontFamily: fontStack(style.fontFamily),
-    color: style.color,
+    // 색을 안 적은 글자는 엑셀 "자동" 색(검정). 비워 두면 화면 글자색(짙은 회색)을 물려받았다.
+    color: style.color ?? "#000000",
     backgroundColor: style.background,
     // 엑셀의 "자동 줄바꿈" 설정을 그대로 따른다. 끄여 있는 칸까지 접으면
     // 한 줄로 적힌 항목(예: "소속: … 직급: … 성명: … (서명 또는 날인)")이 쪼개진다.
@@ -177,14 +179,17 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     // 영어 단어는 여전히 띄어쓰기에서 끊는다(브라우저 기본 규칙과 같다).
     wordBreak: "normal",
     // 엑셀(GDI) 글자는 브라우저보다 몇 % 좁게 그려진다. 그대로 두면 엑셀에서 한 줄인 글이 1px 차이로
-    // 두 줄이 됐다("Project/Project No." 10.1-3, "설계검토 지연건수 0건" 4.3 견본). 글자 사이를 1% 좁힌다.
-    letterSpacing: "-0.01em",
+    // 두 줄이 됐다("Project/Project No." 10.1-3, "설계검토 지연건수 0건" 4.3 견본). 글자 사이를 2% 좁힌다
+    // (1% 로는 9.1-2 머리말이 한 글자 일찍 접혔다).
+    letterSpacing: "-0.02em",
     overflowWrap: "break-word",
     // 칸이 좁아 글자가 접히는 것을 막으려고 여백을 최소로 둔다.
     padding: "1px 2px",
     // 줄 간격은 글꼴 자체 값(엑셀과 같은 기준). 화면 기본(1.5배)을 물려받으면 여러 줄 칸이 엑셀보다
     // 높아져, 칸에 맞추느라 글자를 줄이거나 아랫줄이 잘렸다(7.1-2·8.1-1·8.10-2 재점검).
-    lineHeight: "normal",
+    // 맑은 고딕은 엑셀(GDI)이 줄 사이를 글꼴 높이보다 조금 더 띄운다(약 1.4배) — 글꼴 값(1.33)으로는 여러 줄
+    // 칸이 엑셀보다 5~10% 촘촘해, 엑셀이 잘라 보이는 줄까지 다 보였다(8.10-2·7.1-2 재점검).
+    lineHeight: !style.fontFamily || /맑은|malgun/i.test(style.fontFamily) ? 1.4 : "normal",
     // 세로 글자. 표 칸에는 회전(transform)이 듣지 않아 쓰기 방향으로 돌린다.
     ...(style.textDirection === "up"
       ? { writingMode: "sideways-lr" as const }

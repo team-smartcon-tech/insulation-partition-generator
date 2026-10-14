@@ -113,6 +113,10 @@ function readChart(xml: string, ctx: ShapeContext): Omit<FormChart, "left" | "to
       type,
       direction: ownAttr(child(element.xml, "barDir"), "val") === "bar" ? "bar" : "col",
       ...(/3D/.test(element.name) ? { threeD: true } : {}),
+      ...(() => {
+        const gap = Number(ownAttr(child(element.xml, "gapWidth"), "val"));
+        return Number.isFinite(gap) && ownAttr(child(element.xml, "gapWidth"), "val") !== undefined ? { gapWidth: gap } : {};
+      })(),
       grouping:
         grouping === "stacked" || grouping === "percentStacked" || grouping === "standard" ? grouping : "clustered",
       series: series.map((ser) =>
