@@ -145,6 +145,11 @@ export interface FormChart {
   valueStep?: number;
   categories: string[];
   groups: FormChartGroup[];
+  /**
+   * 범례. null 이면 없다. 엑셀이 자리·크기를 정해 둔 범례(manualLayout, 차트 크기에 대한 비율)는
+   * 그 상자 안에 **들어가는 항목만** 보인다 — 9.4 부적합 차트는 세 계열 중 "NCR 발행건수" 하나만 보인다.
+   */
+  legend?: { pos: "t" | "b" | "l" | "r" | "tr"; box?: { x: number; y: number; w: number; h: number } } | null;
 }
 
 export interface FormChartGroup {
@@ -152,7 +157,15 @@ export interface FormChartGroup {
   /** 막대 방향: col = 세로 막대, bar = 가로 막대 */
   direction?: "col" | "bar";
   grouping: "clustered" | "stacked" | "percentStacked" | "standard";
-  series: { name: string; color?: string; values: (number | null)[] }[];
+  series: {
+    name: string;
+    color?: string;
+    values: (number | null)[];
+    /** 막대 위에 값을 적는다(엑셀 "데이터 레이블 - 값") */
+    showValues?: boolean;
+    /** 값의 표시 형식(차트에 저장된 formatCode) */
+    format?: string;
+  }[];
 }
 
 /**
@@ -201,6 +214,9 @@ export interface FormShape {
    */
   startCap?: "oval" | "diamond";
   endCap?: "oval" | "diamond";
+  /** 선 끝 모양의 [너비, 길이] 배수(엑셀 sm=2·med=3·lg=5). 없으면 보통(3, 3) */
+  startArrowSize?: [number, number];
+  endArrowSize?: [number, number];
   /** 도형 안 글자. 줄바꿈은 \n */
   text: string;
   /** 도형 안 글자의 부분 서식 조각(이어 붙이면 `text`). 조각마다 서식이 같으면 없다. */
@@ -230,6 +246,7 @@ export interface FormShape {
   letterSpacing?: number;
   fontFamily?: string;
   bold?: boolean;
+  italic?: boolean;
   color?: string;
   align?: "left" | "center" | "right";
   /** 글자의 세로 자리. 엑셀 기본은 위쪽이다(순서도 상자는 보통 가운데로 적혀 있다). */

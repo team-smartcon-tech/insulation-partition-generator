@@ -164,6 +164,8 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
 
 /** 도형 글자 크기를 엑셀이 적지 않았을 때(pt) */
 const DEFAULT_SHAPE_FONT_PT = 11;
+/** 화살촉 크기를 잴 때 선 굵기의 하한(px) — 엑셀은 2pt 보다 가는 선도 2pt 로 보고 화살촉을 그린다 */
+const ARROW_MIN_LINE_PX = (2 * 4) / 3;
 
 function textCss(shape: FormShape): CSSProperties {
   const vertical = shape.vertical;
@@ -181,6 +183,7 @@ function textCss(shape: FormShape): CSSProperties {
     fontFamily: shape.fontFamily ? `"${shape.fontFamily}", "맑은 고딕", sans-serif` : undefined,
     letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : undefined,
     fontWeight: shape.bold ? 700 : undefined,
+    fontStyle: shape.italic ? "italic" : undefined,
     color: shape.color,
     lineHeight: 1.25,
     whiteSpace: shape.noWrap ? "pre" : "pre-wrap",
@@ -274,14 +277,22 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
 
   if (shapes.length === 0) return null;
 
-  const arrowColors = [
-    ...new Set(
-      shapes
-        .filter((shape) => (shape.kind === "line" || shape.kind === "path") && (shape.arrowStart || shape.arrowEnd))
-        .map((shape) => shape.line ?? "#000000"),
-    ),
-  ];
-  const markerOf = (color: string, cap?: "oval" | "diamond") => `url(#${uid}-${cap ?? "arrow"}-${colorKey(color)})`;
+  /*
+   * 선 끝 모양(화살촉·원형·다이아몬드)을 색·크기마다 하나씩 정의한다. 크기는 엑셀 규칙대로 선 굵기에
+   * 비례하되 가는 선은 2pt 로 보고 잰다 — 0.5pt 선의 "보통" 화살촉이 엑셀에서 6pt 인데, 선 굵기의
+   * 5배로만 그렸더니 3분의 1 크기로 작게 보였다(재점검).
+   */
+  const markers: { id: string; color: string; cap?: "oval" | "diamond"; width: number; length: number }[] = [];
+  const markerOf = (shape: FormShape, color: string, end: "start" | "end") => {
+    const cap = end === "start" ? shape.startCap : shape.endCap;
+    const [w, len] = (end === "start" ? shape.startArrowSize : shape.endArrowSize) ?? [3, 3];
+    const base = Math.max(shape.lineWidth, ARROW_MIN_LINE_PX);
+    const width = Math.round(base * w * 10) / 10;
+    const length = Math.round(base * len * 10) / 10;
+    const id = `${uid}-${cap ?? "arrow"}-${colorKey(color)}-${width}x${length}`.replace(/\./g, "_");
+    if (!markers.some((marker) => marker.id === id)) markers.push({ id, color, cap, width, length });
+    return `url(#${id})`;
+  };
 
   const text = (shape: FormShape, outlined: boolean) =>
     shape.text ? (
@@ -290,134 +301,119 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
       </div>
     ) : null;
 
+  // 도형을 먼저 그려야 쓰인 화살촉 정의(markers)가 모인다.
+  const drawn = shapes.map((shape, index) => {
+      const strokeWidth = Math.max(MIN_LINE_PX, shape.lineWidth);
+
+      if (shape.kind === "line") {
+        if (!shape.line) return null;
+        const color = shape.line;
+        const common = {
+          stroke: color,
+          strokeWidth,
+          strokeDasharray: dashArray(shape),
+          markerStart: shape.arrowStart ? markerOf(shape, color, "start") : undefined,
+          markerEnd: shape.arrowEnd ? markerOf(shape, color, "end") : undefined,
+          transform: svgRotate(shape),
+        };
+        return (
+          <ShapeSvg key={index}>
+            {shape.elbow !== undefined ? (
+              <polyline points={elbowPoints(shape)} fill="none" strokeLinejoin="round" {...common} />
+            ) : (
+              <line {...endpoints(shape)} {...common} />
+            )}
+          </ShapeSvg>
+        );
+      }
+
+      if (shape.kind === "path" && shape.paths) {
+        const color = shape.line;
+        return (
+          <Fragment key={index}>
+          <ShapeSvg>
+            {shape.paths.map((path, pathIndex) => (
+              <path
+                key={pathIndex}
+                d={framePath(shape, path.segments)}
+                fill={path.fill ? (shape.fill ?? "none") : "none"}
+                stroke={path.stroke ? (color ?? "none") : "none"}
+                strokeWidth={strokeWidth}
+                strokeDasharray={dashArray(shape)}
+                strokeLinejoin="round"
+                markerStart={color && shape.arrowStart ? markerOf(shape, color, "start") : undefined}
+                markerEnd={color && shape.arrowEnd ? markerOf(shape, color, "end") : undefined}
+                transform={svgRotate(shape)}
+              />
+            ))}
+          </ShapeSvg>
+          {text(shape, true)}
+          </Fragment>
+        );
+      }
+
+      const outline = outlinePath(shape);
+      if (outline) {
+        return (
+          <Fragment key={index}>
+          <ShapeSvg>
+            <path
+              d={outline}
+              fill={shape.fill ?? "none"}
+              stroke={shape.line ?? "none"}
+              strokeWidth={strokeWidth}
+              strokeDasharray={dashArray(shape)}
+              strokeLinejoin="round"
+              transform={svgRotate(shape)}
+            />
+          </ShapeSvg>
+          {text(shape, true)}
+          </Fragment>
+        );
+      }
+
+      return (
+        <div key={index} style={boxCss(shape, false)}>
+          {shape.text && <ShapeText shape={shape} />}
+        </div>
+      );
+    });
+
   return (
     // 도형은 보기용이다. 클릭이 통과해야 도형에 가린 칸도 눌러서 고칠 수 있다.
     <div className="pointer-events-none absolute inset-0">
-      {arrowColors.length > 0 && (
+      {markers.length > 0 && (
         <svg className="absolute h-0 w-0" aria-hidden>
           <defs>
-            {arrowColors.map((color) => (
+            {markers.map((marker) => (
               <marker
-                key={color}
-                id={`${uid}-arrow-${colorKey(color)}`}
+                key={marker.id}
+                id={marker.id}
                 viewBox="0 0 10 10"
-                refX="9"
+                preserveAspectRatio="none"
+                // 화살촉은 선 끝이 끝점, 원형·다이아몬드는 한가운데가 끝점이다(엑셀과 같다).
+                refX={marker.cap ? 5 : 9.5}
                 refY="5"
-                markerWidth="5"
-                markerHeight="5"
+                markerUnits="userSpaceOnUse"
+                markerWidth={marker.length}
+                markerHeight={marker.width}
                 // start 쪽에 쓰면 저절로 뒤집힌다 — 화살촉 정의를 두 벌 두지 않아도 된다.
                 orient="auto-start-reverse"
               >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
-              </marker>
-            ))}
-            {/* 원형·다이아몬드 끝 — 선 끝점이 모양의 한가운데에 온다(엑셀과 같다). */}
-            {arrowColors.map((color) => (
-              <marker
-                key={`oval-${color}`}
-                id={`${uid}-oval-${colorKey(color)}`}
-                viewBox="0 0 10 10"
-                refX="5"
-                refY="5"
-                markerWidth="4"
-                markerHeight="4"
-              >
-                <circle cx="5" cy="5" r="5" fill={color} />
-              </marker>
-            ))}
-            {arrowColors.map((color) => (
-              <marker
-                key={`diamond-${color}`}
-                id={`${uid}-diamond-${colorKey(color)}`}
-                viewBox="0 0 10 10"
-                refX="5"
-                refY="5"
-                markerWidth="5"
-                markerHeight="5"
-              >
-                <path d="M 5 0 L 10 5 L 5 10 L 0 5 z" fill={color} />
+                {marker.cap === "oval" ? (
+                  <ellipse cx="5" cy="5" rx="5" ry="5" fill={marker.color} />
+                ) : marker.cap === "diamond" ? (
+                  <path d="M 5 0 L 10 5 L 5 10 L 0 5 z" fill={marker.color} />
+                ) : (
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill={marker.color} />
+                )}
               </marker>
             ))}
           </defs>
         </svg>
       )}
 
-      {shapes.map((shape, index) => {
-        const strokeWidth = Math.max(MIN_LINE_PX, shape.lineWidth);
-
-        if (shape.kind === "line") {
-          if (!shape.line) return null;
-          const color = shape.line;
-          const common = {
-            stroke: color,
-            strokeWidth,
-            strokeDasharray: dashArray(shape),
-            markerStart: shape.arrowStart ? markerOf(color, shape.startCap) : undefined,
-            markerEnd: shape.arrowEnd ? markerOf(color, shape.endCap) : undefined,
-            transform: svgRotate(shape),
-          };
-          return (
-            <ShapeSvg key={index}>
-              {shape.elbow !== undefined ? (
-                <polyline points={elbowPoints(shape)} fill="none" strokeLinejoin="round" {...common} />
-              ) : (
-                <line {...endpoints(shape)} {...common} />
-              )}
-            </ShapeSvg>
-          );
-        }
-
-        if (shape.kind === "path" && shape.paths) {
-          const color = shape.line;
-          return (
-            <Fragment key={index}>
-            <ShapeSvg>
-              {shape.paths.map((path, pathIndex) => (
-                <path
-                  key={pathIndex}
-                  d={framePath(shape, path.segments)}
-                  fill={path.fill ? (shape.fill ?? "none") : "none"}
-                  stroke={path.stroke ? (color ?? "none") : "none"}
-                  strokeWidth={strokeWidth}
-                  strokeDasharray={dashArray(shape)}
-                  strokeLinejoin="round"
-                  markerStart={color && shape.arrowStart ? markerOf(color, shape.startCap) : undefined}
-                  markerEnd={color && shape.arrowEnd ? markerOf(color, shape.endCap) : undefined}
-                  transform={svgRotate(shape)}
-                />
-              ))}
-            </ShapeSvg>
-            {text(shape, true)}
-            </Fragment>
-          );
-        }
-
-        const outline = outlinePath(shape);
-        if (outline) {
-          return (
-            <Fragment key={index}>
-            <ShapeSvg>
-              <path
-                d={outline}
-                fill={shape.fill ?? "none"}
-                stroke={shape.line ?? "none"}
-                strokeWidth={strokeWidth}
-                strokeDasharray={dashArray(shape)}
-                strokeLinejoin="round"
-                transform={svgRotate(shape)}
-              />
-            </ShapeSvg>
-            {text(shape, true)}
-            </Fragment>
-          );
-        }
-
-        return (
-          <div key={index} style={boxCss(shape, false)}>
-            {shape.text && <ShapeText shape={shape} />}
-          </div>
-        );
-      })}
+      {drawn}
     </div>
   );
 }

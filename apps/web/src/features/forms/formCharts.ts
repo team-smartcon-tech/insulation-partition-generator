@@ -55,17 +55,22 @@ function readCategories(ser: string): string[] {
   return Array.from({ length: count }, (_, i) => values.get(i) ?? "");
 }
 
-function readSeries(ser: string, ctx: ShapeContext): FormChartGroup["series"][number] {
+function readSeries(ser: string, ctx: ShapeContext, groupLabels: boolean): FormChartGroup["series"][number] {
   const tx = child(ser, "tx");
   const name = tx ? (readPoints(child(child(tx, "strRef") ?? "", "strCache")).values.get(0) ?? allText(tx)) : "";
   const val = child(ser, "val");
   const cache = child(child(val ?? "", "numRef") ?? "", "numCache") ?? child(val ?? "", "numLit");
   const { count, values } = readPoints(cache);
+  const format = cache ? findBlocks(cache, "formatCode")[0]?.replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "") : undefined;
+  const ownLabels = child(ser, "dLbls");
+  const showValues = ownLabels ? ownAttr(child(ownLabels, "showVal"), "val") === "1" : groupLabels;
   const spPr = child(ser, "spPr");
   const fill = spPr ? child(spPr, "solidFill") : undefined;
   const line = spPr ? child(child(spPr, "ln") ?? "", "solidFill") : undefined;
   return {
     name,
+    ...(showValues ? { showValues: true } : {}),
+    ...(format && !/^general$/i.test(format) ? { format: unescapeXml(format) } : {}),
     color: readColor(fill ?? line, ctx),
     values: Array.from({ length: count }, (_, i) => {
       const raw = values.get(i);
@@ -91,11 +96,17 @@ function readChart(xml: string, ctx: ShapeContext): Omit<FormChart, "left" | "to
       direction: ownAttr(child(element.xml, "barDir"), "val") === "bar" ? "bar" : "col",
       grouping:
         grouping === "stacked" || grouping === "percentStacked" || grouping === "standard" ? grouping : "clustered",
-      series: series.map((ser) => readSeries(ser, ctx)),
+      series: series.map((ser) =>
+        readSeries(ser, ctx, ownAttr(child(child(element.xml, "dLbls") ?? "", "showVal"), "val") === "1"),
+      ),
     });
   }
   const title = child(chart, "title");
   const valAx = child(plot, "valAx");
+  const legendXml = child(chart, "legend");
+  const layout = legendXml ? child(child(legendXml, "layout") ?? "", "manualLayout") : undefined;
+  const frac = (name: string) => Number(ownAttr(child(layout ?? "", name), "val"));
+  const legendPos = (ownAttr(child(legendXml ?? "", "legendPos"), "val") ?? "r") as "t" | "b" | "l" | "r" | "tr";
   const scaling = valAx ? child(valAx, "scaling") : undefined;
   const fixed = (xml: string | undefined, name: string) => {
     const raw = ownAttr(xml ? child(xml, name) : undefined, "val");
@@ -110,6 +121,14 @@ function readChart(xml: string, ctx: ShapeContext): Omit<FormChart, "left" | "to
     valueStep: fixed(valAx, "majorUnit"),
     categories,
     groups,
+    legend: legendXml
+      ? {
+          pos: legendPos,
+          ...(layout && [frac("x"), frac("y"), frac("w"), frac("h")].every(Number.isFinite)
+            ? { box: { x: frac("x"), y: frac("y"), w: frac("w"), h: frac("h") } }
+            : {}),
+        }
+      : null,
   };
 }
 

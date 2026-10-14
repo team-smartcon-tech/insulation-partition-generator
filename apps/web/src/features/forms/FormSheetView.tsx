@@ -162,6 +162,9 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     overflowWrap: "break-word",
     // 칸이 좁아 글자가 접히는 것을 막으려고 여백을 최소로 둔다.
     padding: "1px 2px",
+    // 줄 간격은 글꼴 자체 값(엑셀과 같은 기준). 화면 기본(1.5배)을 물려받으면 여러 줄 칸이 엑셀보다
+    // 높아져, 칸에 맞추느라 글자를 줄이거나 아랫줄이 잘렸다(7.1-2·8.1-1·8.10-2 재점검).
+    lineHeight: "normal",
     // 세로 글자. 표 칸에는 회전(transform)이 듣지 않아 쓰기 방향으로 돌린다.
     ...(style.textDirection === "up"
       ? { writingMode: "sideways-lr" as const }
@@ -779,8 +782,9 @@ export default function FormSheetView({
         그림(로고·도장)은 칸 안이 아니라 격자 위에 떠 있다. 클릭이 통과하도록
         pointer-events 를 꺼 둬야 그림에 가린 칸도 눌러서 고칠 수 있다.
       */}
-      <FormShapeLayer shapes={sheet.shapes ?? []} />
+      {/* 차트를 먼저 — 엑셀에서 차트 위에 얹은 도형("목표 : 2% 이내", 9.4)이 가려지지 않게. */}
       <FormChartLayer charts={sheet.charts ?? []} />
+      <FormShapeLayer shapes={sheet.shapes ?? []} />
 
       {(sheet.images ?? []).map((image, index) =>
         image.unsupported ? (

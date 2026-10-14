@@ -262,8 +262,23 @@ function readText(txBody: string | undefined): string {
  * 도형 글자의 부분 서식 조각. 마름모 안 "검토 및 승인" 아래 작은 "(현장소장/건설사업관리)" 처럼
  * 줄마다 크기·굵기가 다르면, 첫 조각 서식 하나로 그려서는 작은 줄이 커져 도형 밖으로 넘친다(8.7·8.8).
  */
+/**
+ * 글상자의 기본 글자 서식(`lstStyle` 1단계). 조각에 굵기·기울임을 안 적었으면 이것을 따른다 —
+ * 순서도의 "Yes"·"No" 는 굵게가 여기에만 적혀 있어 보통 굵기로 그려졌다(10.1-1, 10.2-1).
+ */
+function inheritedRunProps(txBody: string | undefined): string | undefined {
+  const lstStyle = txBody ? child(txBody, "lstStyle") : undefined;
+  const level = lstStyle ? child(lstStyle, "lvl1pPr") : undefined;
+  return level ? child(level, "defRPr") : undefined;
+}
+
+/** 조각의 켜고 끄는 서식(b·i) — 조각에 없으면 글상자 기본을 따른다 */
+const flag = (rPr: string | undefined, inherited: string | undefined, name: string) =>
+  (ownAttr(rPr, name) ?? ownAttr(inherited, name)) === "1";
+
 function readTextRuns(txBody: string | undefined, ctx: Context): FormTextRun[] | undefined {
   if (!txBody) return undefined;
+  const inherited = inheritedRunProps(txBody);
   const runs: FormTextRun[] = [];
   const paragraphs = findBlocks(txBody, "p");
   paragraphs.forEach((paragraph, index) => {
@@ -280,8 +295,8 @@ function readTextRuns(txBody: string | undefined, ctx: Context): FormTextRun[] |
       const underline = ownAttr(rPr, "u");
       runs.push({
         text: unescapeXml(t.replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "")),
-        ...(ownAttr(rPr, "b") === "1" ? { bold: true } : {}),
-        ...(ownAttr(rPr, "i") === "1" ? { italic: true } : {}),
+        ...(flag(rPr, inherited, "b") ? { bold: true } : {}),
+        ...(flag(rPr, inherited, "i") ? { italic: true } : {}),
         ...(underline && underline !== "none" ? { underline: true } : {}),
         ...(size > 0 ? { fontSize: size / 100 } : {}),
         ...(Number(ownAttr(rPr, "spc")) ? { letterSpacing: Number(ownAttr(rPr, "spc")) / 100 } : {}),
@@ -331,7 +346,9 @@ function readAnchor(part: string | undefined): Anchor | null {
 function toPx(sizes: number[], fallback: number, index: number, offsetEmu: number): number {
   let px = 0;
   for (let i = 0; i < index; i++) px += sizes[i] ?? fallback;
-  return px + offsetEmu / EMU_PER_PX;
+  // 칸 크기보다 큰 오프셋은 엑셀이 칸 끝으로 자른다 — 그대로 더하면 8.6→8.10 연결선이 상자 안
+  // 글자까지 15px 더 내려왔다(QA-4.3-2, 행 높이 33px 칸에 48px 오프셋).
+  return px + Math.min(offsetEmu / EMU_PER_PX, sizes[index] ?? fallback);
 }
 
 interface Rect {
@@ -586,6 +603,15 @@ function capOf(key: "startCap" | "endCap", type: string | undefined): Partial<Fo
   return type === "oval" || type === "diamond" ? { [key]: type } : {};
 }
 
+const ARROW_FACTOR: Record<string, number> = { sm: 2, med: 3, lg: 5 };
+
+/** 선 끝 모양의 크기(엑셀 w·len = sm·med·lg). 보통이면 적지 않는다. */
+function arrowSizeOf(key: "startArrowSize" | "endArrowSize", end: string | undefined): Partial<FormShape> {
+  const w = ARROW_FACTOR[ownAttr(end, "w") ?? "med"] ?? 3;
+  const len = ARROW_FACTOR[ownAttr(end, "len") ?? "med"] ?? 3;
+  return w === 3 && len === 3 ? {} : { [key]: [w, len] };
+}
+
 /** 도형 하나(`sp`/`cxnSp`)의 서식을 읽는다. 자리·크기는 부르는 쪽이 정해 넘긴다. */
 function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
   const { left, top, width, height } = rect;
@@ -616,7 +642,12 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
 
   const lineWidthEmu = Number(ownAttr(lineBlock, "w") ?? 0);
   const paragraphs = txBody ? findBlocks(txBody, "p") : [];
+  // 글자가 있는 첫 조각의 서식 — 앞 공백 조각만 굵게 적힌 " Yes"(6.3)가 통째로 굵게 그려졌다.
+  const textRun = paragraphs
+    .flatMap((p) => findBlocks(p, "r"))
+    .find((run) => (findBlocks(run, "t")[0] ?? "").replace(/<[^>]*>/g, "").trim() !== "");
   const firstRun =
+    (textRun ? findBlocks(textRun, "rPr")[0] : undefined) ??
     paragraphs.map((p) => findBlocks(p, "rPr")[0]).find(Boolean) ??
     (txBody ? findBlocks(txBody, "endParaRPr")[0] ?? findBlocks(txBody, "defRPr")[0] : undefined) ??
     "";
@@ -636,6 +667,8 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     arrowEnd: Boolean(attrOf(lineBlock, "tailEnd", "type")?.replace("none", "")),
     ...capOf("startCap", attrOf(lineBlock, "headEnd", "type")),
     ...capOf("endCap", attrOf(lineBlock, "tailEnd", "type")),
+    ...arrowSizeOf("startArrowSize", child(lineBlock, "headEnd")),
+    ...arrowSizeOf("endArrowSize", child(lineBlock, "tailEnd")),
     text: readText(txBody),
     ...(() => {
       const textRuns = readTextRuns(txBody, ctx);
@@ -652,7 +685,8 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     fontSize: sizeHundredths > 0 ? sizeHundredths / 100 : undefined,
     ...(Number(ownAttr(firstRun, "spc")) ? { letterSpacing: Number(ownAttr(firstRun, "spc")) / 100 } : {}),
     fontFamily: attrOf(firstRun, "latin", "typeface") ?? attrOf(firstRun, "ea", "typeface"),
-    bold: ownAttr(firstRun, "b") === "1",
+    bold: flag(firstRun, inheritedRunProps(txBody), "b"),
+    ...(flag(firstRun, inheritedRunProps(txBody), "i") ? { italic: true } : {}),
     // 글자 색을 안 적었으면 도형 스타일의 글자 색(fontRef)을 따른다.
     color: readColor(firstRun, ctx) ?? readColor(fontRef, ctx),
     align: algn === "ctr" ? "center" : algn === "r" ? "right" : algn === "l" ? "left" : undefined,
@@ -854,6 +888,7 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     outer.letterSpacing = inner.letterSpacing;
     outer.fontFamily = inner.fontFamily;
     outer.bold = inner.bold;
+    outer.italic = inner.italic;
     outer.color = inner.color;
     outer.align = inner.align;
     outer.valign = inner.valign;

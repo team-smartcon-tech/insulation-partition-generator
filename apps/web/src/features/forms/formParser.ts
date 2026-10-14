@@ -28,7 +28,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 25; // 25: 가운데·오른쪽 정렬 칸의 넘치는 글자, 축소하여 맞춤, 도형 글자 간격
+export const PARSER_VERSION = 26; // 26: 표 밖 도형·칸 크기를 넘는 오프셋·화살촉 크기·차트 범례와 값
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -759,23 +759,51 @@ async function readFormulaResults(data: ArrayBuffer): Promise<Map<string, Map<st
  * 엑셀은 차트를 표 밖 빈 칸 위에 두어도 시트의 일부로 보여 준다. 여기서는 표 크기만큼만 자리를
  * 잡아, 표 아래에 둔 경영검토 차트 세 개가 통째로 잘려 안 보였다(9.4).
  */
-function coverFloating(sheet: FormSheet, defaultRow: number, defaultCol: number): void {
+/** 표 밖으로 이 만큼(열·줄) 더 실제 크기를 알아 둔다 — 도형·차트가 표 밖에 놓여도 자리가 맞게. */
+const BEYOND_COLS = 80;
+const BEYOND_ROWS = 400;
+
+/** 표의 열 너비·행 높이에 표 밖 열·줄의 실제 크기를 이어 붙인 것(시트는 바꾸지 않는다). */
+function beyondGrid(worksheet: any, sheet: FormSheet): { colWidths: number[]; rowHeights: number[] } {
+  const colWidths = [...sheet.colWidths];
+  const rowHeights = [...sheet.rowHeights];
+  if (!worksheet) return { colWidths, rowHeights };
+  const defaultColWidth: number | undefined = worksheet.properties?.defaultColWidth;
+  const defaultRowHeight: number | undefined = worksheet.properties?.defaultRowHeight;
+  for (let col = colWidths.length + 1; col <= sheet.colCount + BEYOND_COLS; col++) {
+    const column = worksheet.getColumn(col);
+    colWidths.push(column.hidden ? 0 : colWidthToPx(column.width, defaultColWidth));
+  }
+  for (let row = rowHeights.length + 1; row <= sheet.rowCount + BEYOND_ROWS; row++) {
+    const line = worksheet.findRow?.(row);
+    rowHeights.push(line?.hidden ? 0 : rowHeightToPx(line?.height, defaultRowHeight));
+  }
+  return { colWidths, rowHeights };
+}
+
+function coverFloating(sheet: FormSheet, beyond: { colWidths: number[]; rowHeights: number[] }): void {
+  const defaultRow = beyond.rowHeights[beyond.rowHeights.length - 1] ?? rowHeightToPx(undefined, undefined);
+  const defaultCol = beyond.colWidths[beyond.colWidths.length - 1] ?? colWidthToPx(undefined, undefined);
   if (sheet.rowCount === 0) return;
-  const floating = [...(sheet.charts ?? []), ...sheet.images];
+  const floating = [...(sheet.charts ?? []), ...sheet.images, ...(sheet.shapes ?? [])];
   if (floating.length === 0) return;
   const bottom = Math.max(...floating.map((item) => item.top + item.height));
   const right = Math.max(...floating.map((item) => item.left + item.width));
   let height = sheet.rowHeights.reduce((sum, h) => sum + h, 0);
   while (height < bottom - 0.5) {
-    sheet.rowHeights.push(defaultRow);
+    const next = beyond.rowHeights[sheet.rowHeights.length] ?? defaultRow;
+    sheet.rowHeights.push(next);
     sheet.rowCount += 1;
-    height += defaultRow;
+    height += next;
+    if (sheet.rowHeights.length > beyond.rowHeights.length + 50) break;
   }
   let width = sheet.colWidths.reduce((sum, w) => sum + w, 0);
   while (width < right - 0.5) {
-    sheet.colWidths.push(defaultCol);
+    const next = beyond.colWidths[sheet.colWidths.length] ?? defaultCol;
+    sheet.colWidths.push(next);
     sheet.colCount += 1;
-    width += defaultCol;
+    width += next;
+    if (sheet.colWidths.length > beyond.colWidths.length + 50) break;
   }
 }
 
@@ -798,12 +826,9 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
   // 도형은 exceljs 가 내주지 않으므로 원본 압축을 직접 열어 읽는다.
   // 실패해도 셀·그림은 이미 다 읽었으니 양식은 그대로 열어 준다.
   try {
-    const sizes = new Map(
-      sheets.map((sheet) => [
-        sheet.name,
-        { colWidths: sheet.colWidths, rowHeights: sheet.rowHeights },
-      ]),
-    );
+    // 도형·차트 자리는 표 **밖** 열·줄의 실제 너비·높이로 잰다. 표 크기까지만 알고 그 너머를 기본
+    // 너비(72px)로 보면, 좁은 열(21px)이 33열까지 이어지는 목차 시트의 밑줄이 두 배로 길어졌다(9.4).
+    const sizes = new Map(sheets.map((sheet) => [sheet.name, beyondGrid(workbook.getWorksheet(sheet.name), sheet)]));
     const shapes = await parseWorkbookShapes(
       data,
       sizes,
@@ -811,7 +836,16 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
       theme,
     );
     for (const sheet of sheets) {
-      sheet.shapes = withinGrid(shapes.get(sheet.name) ?? [], sheet.colWidths, sheet.rowHeights);
+      // 인쇄 영역이 있을 때만 표 밖 도형을 버린다(그림과 같은 규칙). 없으면 엑셀처럼 시트 어디든 보인다 —
+      // 표가 8줄뿐인 9.4 재검사율 시트에서 표 바로 아래 "목표 : 2% 이내" 상자가 빠졌다.
+      const found = shapes.get(sheet.name) ?? [];
+      // 인쇄 영역이 있으면 그 **영역** 밖 도형만 버린다(표 크기가 아니라). 표가 8줄뿐인 9.4 재검사율
+      // 시트에서 인쇄 영역(36줄) 안 "목표 : 2% 이내" 상자가 표 밖이라고 빠졌다.
+      const area = readPrintArea(workbook.getWorksheet(sheet.name));
+      const beyond = sizes.get(sheet.name)!;
+      sheet.shapes = area
+        ? withinGrid(found, beyond.colWidths.slice(0, area.maxCol), beyond.rowHeights.slice(0, area.maxRow))
+        : found;
     }
     // 차트 — 빠뜨리면 경영검토 보고서의 공정·재검측율·NCR 차트 자리가 통째로 비었다(9.4).
     const charts = await parseWorkbookCharts(
@@ -823,7 +857,7 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
     for (const sheet of sheets) {
       const found = charts.get(sheet.name);
       if (found) sheet.charts = found;
-      coverFloating(sheet, rowHeightToPx(undefined, undefined), colWidthToPx(undefined, undefined));
+      coverFloating(sheet, sizes.get(sheet.name)!);
     }
   } catch {
     // 도형을 못 읽는 것은 양식을 못 여는 것보다 가볍다.

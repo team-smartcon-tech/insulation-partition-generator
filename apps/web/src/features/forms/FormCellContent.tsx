@@ -20,11 +20,16 @@ const DEFAULT_FONT_PT = 11;
  * 줄일 때(fitToCell) 조각들도 함께 줄어야 한다. 줄 끝 공백은 `displayText` 처럼 걷는다.
  */
 function RichRuns({ runs, basePt }: { runs: FormTextRun[]; basePt: number }) {
+  // 줄바꿈·공백뿐인 조각은 앞 조각 크기를 따른다 — 제 크기(칸 기본 40pt)로 두면 그 줄만 높아진다.
+  let lastSize: number | undefined;
   return (
     <>
       {runs.map((run, index) => {
         let text = run.text.replace(/[ \t]+\n/g, "\n");
         if (index === runs.length - 1) text = text.replace(/\s+$/, "");
+        const blank = text.trim() === "";
+        const size = blank ? (lastSize ?? run.fontSize) : run.fontSize;
+        if (!blank) lastSize = run.fontSize;
         return (
           <span
             key={index}
@@ -32,7 +37,8 @@ function RichRuns({ runs, basePt }: { runs: FormTextRun[]; basePt: number }) {
               fontWeight: run.bold === true ? 700 : run.bold === false ? 400 : undefined,
               fontStyle: run.italic === true ? "italic" : run.italic === false ? "normal" : undefined,
               textDecoration: run.underline ? "underline" : undefined,
-              fontSize: run.fontSize ? `${run.fontSize / basePt}em` : undefined,
+              fontSize: size ? `${size / basePt}em` : undefined,
+              lineHeight: "normal",
               color: run.color,
             }}
           >
@@ -309,6 +315,9 @@ function FormCellContent({
         // 아래쪽 빈 곳을 눌러도 아무 일이 없어 "편집이 안 된다"로 보인다.
         ...(editable ? { minHeight: "100%" } : {}),
         ...(maxHeight !== undefined ? { maxHeight } : {}),
+        // 부분 서식 칸은 줄 높이를 조각들이 정한다(엑셀처럼 그 줄에서 가장 큰 글자 기준). 칸 기본 크기
+        // (40pt)가 줄마다 깔리면 35pt·28pt 두 줄 제목이 크게 벌어졌다(8.6-2 공정표 제목).
+        ...(value === undefined && cell.runs ? { lineHeight: 0 } : {}),
       }}
       className={
         (spill ? "block" : "block overflow-hidden") +
