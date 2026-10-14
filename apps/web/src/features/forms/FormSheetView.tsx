@@ -18,10 +18,12 @@ const BORDER_WIDTH: Record<FormBorder["style"], string> = {
   medium: "2px solid",
   thick: "3px solid",
   dashed: "1px dashed",
-  // 엑셀 "점선"(dotted)은 둥근 점이 아니라 짧은 파선으로 보인다(10.1-4 "□ 부적합" 밑줄). 가장 가는 점선은 hair.
+  // 엑셀 "점선"(dotted)은 둥근 점이 아니라 짧은 파선으로 보인다(10.1-4 "□ 부적합" 밑줄).
   dotted: "1px dashed",
   double: "3px double",
-  hair: "1px dotted",
+  // "가는 선"(hair)은 엑셀이 인쇄·화면 모두 가는 실선으로 그린다 — 점선으로 그렸더니 표 격자가 온통
+  // 점선이 됐다(7.4-6·7.6·8.11 재점검).
+  hair: "1px solid",
   mediumDashed: "2px dashed",
 };
 
