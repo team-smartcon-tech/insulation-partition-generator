@@ -43,8 +43,8 @@ function ChartSvg({ chart }: { chart: FormChart }) {
   const sideLegend = legend && !legend.box && legend.pos === "r";
   const topLegend = legend && !legend.box && legend.pos === "t";
   // 그림 영역은 제목 아래·양옆에 여백을 두고 들인다(엑셀 기본 배치) — 꽉 채웠더니 제목이 맨 위 눈금선에 닿았다.
-  const padTop = (chart.title ? TITLE_PX + 26 : 16) + (topLegend ? 18 : 0);
-  const padLeft = (chart.valueTitle ? 26 : 0) + 56;
+  const padTop = (chart.title ? TITLE_PX + 36 : 20) + (topLegend ? 18 : 0);
+  const padLeft = (chart.valueTitle ? 30 : 0) + 64;
   const padRight = sideLegend ? Math.min(120, W * 0.28) : 28;
   // 가로축 글자를 눕힌 차트는 아래 자리를 더 둔다(9.4 재검사율 45°).
   const padBottom = chart.categoryRotation ? 44 : 26;
@@ -111,7 +111,7 @@ function ChartSvg({ chart }: { chart: FormChart }) {
             if (s.showValues && s.values[i] === 0) {
               const x0 = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + clusterLeft + barW * k;
               labels.push(
-                <text key={`z${seriesIndex}-${i}`} x={x0 + barW / 2} y={y(stacked ? base[i] : 0) - 4} textAnchor="middle" fontSize={TEXT_PX} fill="#404040">
+                <text key={`z${seriesIndex}-${i}`} x={x0 + barW / 2} y={y(stacked ? base[i] : 0) - 4} textAnchor="middle" fontSize={TEXT_PX} fill="#000000">
                   0
                 </text>,
               );
@@ -145,7 +145,7 @@ function ChartSvg({ chart }: { chart: FormChart }) {
             // 누적 막대는 조각 가운데, 묶은 막대는 막대 위에(엑셀 기본 자리).
             const ly = stacked ? (y(from) + y(from + v)) / 2 + 4 : y(from + v) - 4;
             labels.push(
-              <text key={`v${seriesIndex}-${i}`} x={x + barW / 2} y={ly} textAnchor="middle" fontSize={TEXT_PX} fill="#404040">
+              <text key={`v${seriesIndex}-${i}`} x={x + barW / 2} y={ly} textAnchor="middle" fontSize={TEXT_PX} fill="#000000">
                 {valueText(s.values[i] ?? 0, s.pointFormats?.[i] ?? s.format)}
               </text>,
             );
@@ -275,7 +275,7 @@ function Legend({
         {shown.map((entry, i) => (
           <g key={i}>
             <rect x={start + entry.x} y={cy - 4.5} width={9} height={9} fill={entry.color} />
-            <text x={start + entry.x + 13} y={cy + 4} fontSize={LEGEND_PX} fill="#404040">
+            <text x={start + entry.x + 13} y={cy + 4} fontSize={LEGEND_PX} fill="#000000">
               {entry.name}
             </text>
           </g>
@@ -288,7 +288,7 @@ function Legend({
       {series.map((s, i) => (
         <g key={i}>
           <rect x={W - padRight + 10} y={padTop + 6 + i * 16} width={9} height={9} fill={colorOf(i, s.color)} />
-          <text x={W - padRight + 23} y={padTop + 14 + i * 16} fontSize={LEGEND_PX} fill="#404040">
+          <text x={W - padRight + 23} y={padTop + 14 + i * 16} fontSize={LEGEND_PX} fill="#000000">
             {s.name}
           </text>
         </g>
