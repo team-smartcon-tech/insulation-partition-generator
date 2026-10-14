@@ -73,7 +73,7 @@ import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
-import { hasQmpSheet, qaCodeOf, qmpLibraryStates, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
+import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -1765,7 +1765,8 @@ export default function FormsPage() {
       const copy = await copyTemplateToSite(templateId, target.id);
       // 품질관리계획서 서류 현황에서 눌렀으면 그 서식 장에 쓰는 부서를 단다.
       // 지난달 장(`QA-4.2-2(25.09)`)보다 번호만 있는 장을 고른다 — 새로 쓰는 장은 그쪽이다.
-      const qmpSheets = qmp ? copy.sheets.filter((item) => qaCodeOf(item.name) === qmp.code) : [];
+      const codes = sheetCodesOf({ sheetNames: copy.sheets.map((item) => item.name), title: copy.title, fileName: copy.fileName });
+      const qmpSheets = qmp ? copy.sheets.filter((item) => codes.get(item.name) === qmp.code) : [];
       const qmpSheet = (qmpSheets.find((item) => /^\s*QA-[\d.-]+\s*$/i.test(item.name)) ?? qmpSheets[0])?.name;
       if (qmp && qmpSheet) await setSheetDept(copy.id, qmpSheet, qmp.dept);
       selectSite(target.id);

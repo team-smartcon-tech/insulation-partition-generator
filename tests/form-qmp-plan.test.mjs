@@ -9,6 +9,8 @@ import {
   qmpStates,
   qmpTally,
   sectionOfCode,
+  sheetCodesOf,
+  hasQmpSheet,
   templateForCode,
   writersOf,
   writesSection,
@@ -162,4 +164,20 @@ test('작성 부서 고르기 — 그 절의 작성 부서만, 주관이 맨 앞
   assert.deepEqual(writersOf(sectionOfCode('4.3-3')), ['품질', '공무', '공사']);
   assert.deepEqual(writersOf(sectionOfCode('4.2-2')), ['공무']);
   assert.equal(sectionOfCode('99.9-9'), undefined);
+});
+
+test('시트에 QA 번호가 없으면 서류 이름의 절 번호로 — 9.4 경영검토', () => {
+  const doc = { title: '9.4 경영검토', fileName: '9.4 경영검토.xlsx', sheetNames: ['경영검토 프로세스', '표지', '1.현장방침', '견본'] };
+  const codes = sheetCodesOf(doc);
+  assert.equal(codes.get('경영검토 프로세스'), '9.4-1');
+  assert.equal(codes.get('표지'), '9.4-2');
+  assert.equal(codes.get('1.현장방침'), '9.4-2');
+  assert.equal(hasQmpSheet(doc), true);
+  assert.equal(qmpStates([{ id: 'x', ...doc, workingSheets: ['표지'] }]).get('9.4-2').status, 'done');
+  // 시트에 번호가 하나라도 있으면 그것만 본다
+  assert.deepEqual([...sheetCodesOf({ title: '9.4 경영검토', sheetNames: ['QA-9.4-2', '표지'] })], [['QA-9.4-2', '9.4-2']]);
+  // 쓰는 서식이 여럿인 절은 어느 것인지 몰라 두지 않는다
+  assert.equal(sheetCodesOf({ title: '9.3 내부심사', sheetNames: ['계획서', '점검표'] }).size, 0);
+  // 절 번호가 없는 이름
+  assert.equal(sheetCodesOf({ title: '회의록', sheetNames: ['Sheet1'] }).size, 0);
 });

@@ -255,13 +255,52 @@ export function qaCodeOf(sheetName: string): string | null {
   return match ? `${Number(match[1])}.${Number(match[2])}-${Number(match[3])}` : null;
 }
 
+/** 서식 번호를 찾을 때 쓰는 서류 정보 — 시트 이름과, 시트에 번호가 없을 때 볼 서류 이름 */
+export interface QmpNamed {
+  sheetNames: string[];
+  title?: string;
+  fileName?: string;
+}
+
+/**
+ * 서류의 시트 이름 → 서식 번호.
+ *
+ * 보통은 시트 이름에 번호가 있다(`QA-7.2-2`). **어느 시트에도 번호가 없으면** 서류 이름의 절 번호로
+ * 찾는다 — 9.4 경영검토 양식은 시트가 "경영검토 프로세스", "표지", "1.현장방침"… 이라 올려도 아무
+ * 서식에도 잡히지 않았다(사용자 신고). 그때는
+ * - 이름에 "프로세스"·"PROCESS" 가 든 시트 → 그 절의 PROCESS 서식
+ * - 나머지 시트 → 그 절에 현장이 쓰는 서식이 **하나뿐**일 때만 그 서식(여럿이면 어느 것인지 몰라 두지 않는다)
+ */
+export function sheetCodesOf(doc: QmpNamed): Map<string, string> {
+  const codes = new Map<string, string>();
+  for (const name of doc.sheetNames) {
+    const code = qaCodeOf(name);
+    if (code) codes.set(name, code);
+  }
+  if (codes.size > 0) return codes;
+
+  const label = `${doc.title ?? ""} ${doc.fileName ?? ""}`;
+  const match = /(?:^|[^\d.])(\d{1,2})\.(\d{1,2})(?![\d.-])/.exec(label);
+  const sec = match ? QMP_SECTIONS.find((item) => item.no === `${Number(match[1])}.${Number(match[2])}`) : undefined;
+  if (!sec) return codes;
+  const process = sec.forms.find((form) => /PROCESS/i.test(form.name));
+  const writable = sec.forms.filter((form) => !form.reference);
+  for (const name of doc.sheetNames) {
+    if (/프로세스|process/i.test(name)) {
+      if (process) codes.set(name, process.code);
+    } else if (writable.length === 1) {
+      codes.set(name, writable[0].code);
+    }
+  }
+  return codes;
+}
+
 /** 서식 한 장의 상태 */
 export type QmpStatus = "done" | "doing" | "none";
 
 /** 현황 계산에 필요한 서류 정보(목록 요약에서 이만큼만 쓴다) */
-export interface QmpDoc {
+export interface QmpDoc extends QmpNamed {
   id: string;
-  sheetNames: string[];
   /** 무언가 적었거나 결재가 걸린 시트(작성 중인 장) */
   workingSheets?: string[];
   approvalSheets?: {
@@ -315,9 +354,7 @@ export function qmpStates(docs: QmpDoc[]): Map<string, QmpFormState> {
   for (const doc of docs) {
     const working = new Set(doc.workingSheets ?? []);
     const approvalBySheet = new Map((doc.approvalSheets ?? []).map((sheet) => [sheet.sheetName, sheet]));
-    for (const sheetName of doc.sheetNames) {
-      const code = qaCodeOf(sheetName);
-      if (!code) continue;
+    for (const [sheetName, code] of sheetCodesOf(doc)) {
       const approval = approvalBySheet.get(sheetName);
       let state: QmpFormState;
       if (approval) {
@@ -342,12 +379,12 @@ export function qmpStates(docs: QmpDoc[]): Map<string, QmpFormState> {
 }
 
 /** 배포 양식 가운데 그 서식 시트를 가진 것(가장 최근에 올라온 것). [작성하기]에 쓴다. */
-export function templateForCode<T extends { id: string; sheetNames: string[]; uploadedAt: number }>(
+export function templateForCode<T extends QmpNamed & { id: string; uploadedAt: number }>(
   templates: T[],
   code: string,
 ): T | undefined {
   return templates
-    .filter((template) => template.sheetNames.some((name) => qaCodeOf(name) === code))
+    .filter((template) => [...sheetCodesOf(template).values()].includes(code))
     .sort((a, b) => b.uploadedAt - a.uploadedAt)[0];
 }
 
@@ -398,21 +435,19 @@ export function lampOf(tally: { done: number; doing: number; total: number }): Q
   return tally.done + tally.doing > 0 ? "doing" : "none";
 }
 
-/** 시트 가운데 하나라도 QA 번호가 있나 — 없으면 계획서 서식이 아닌 서류("그 밖의 서류")다. */
-export const hasQmpSheet = (doc: { sheetNames: string[] }) => doc.sheetNames.some((name) => qaCodeOf(name) !== null);
+/** 계획서 서식에 맞춘 시트가 하나라도 있나 — 없으면 계획서 서식이 아닌 서류("그 밖의 서류")다. */
+export const hasQmpSheet = (doc: QmpNamed) => sheetCodesOf(doc).size > 0;
 
 /**
  * 배포 양식함용: 서식마다 그 시트가 든 배포 양식(가장 최근 것). 양식이 있으면 `done` 이다.
  * 열면 그 서식 시트로 바로 간다.
  */
-export function qmpLibraryStates<T extends { id: string; sheetNames: string[]; uploadedAt: number }>(
+export function qmpLibraryStates<T extends QmpNamed & { id: string; uploadedAt: number }>(
   templates: T[],
 ): Map<string, QmpFormState> {
   const result = new Map<string, QmpFormState & { uploadedAt: number }>();
   for (const template of templates) {
-    for (const sheetName of template.sheetNames) {
-      const code = qaCodeOf(sheetName);
-      if (!code) continue;
+    for (const [sheetName, code] of sheetCodesOf(template)) {
       const current = result.get(code);
       if (!current || template.uploadedAt > current.uploadedAt) {
         result.set(code, { status: "done", docId: template.id, sheetName, uploadedAt: template.uploadedAt });
@@ -430,16 +465,13 @@ export function qmpLibraryStates<T extends { id: string; sheetNames: string[]; u
  * - 이미 그 양식으로 만든 서류가 있으면 건너뛴다(같은 사본이 둘 생기지 않게).
  * - 서식마다 가장 최근 양식을 쓴다(`qmpLibraryStates` 와 같은 기준).
  */
-export function templatesToImport<T extends { id: string; sheetNames: string[]; uploadedAt: number }>(
+export function templatesToImport<T extends QmpNamed & { id: string; uploadedAt: number }>(
   templates: T[],
-  siteDocs: { sheetNames: string[]; templateId?: string }[],
+  siteDocs: (QmpNamed & { templateId?: string })[],
 ): string[] {
   const library = qmpLibraryStates(templates);
   const have = new Set<string>();
-  for (const doc of siteDocs) for (const name of doc.sheetNames) {
-    const code = qaCodeOf(name);
-    if (code) have.add(code);
-  }
+  for (const doc of siteDocs) for (const code of sheetCodesOf(doc).values()) have.add(code);
   const copied = new Set(siteDocs.map((doc) => doc.templateId).filter(Boolean));
   const picked: string[] = [];
   for (const sec of QMP_SECTIONS) {
