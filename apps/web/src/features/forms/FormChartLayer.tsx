@@ -86,7 +86,18 @@ function ChartSvg({ chart }: { chart: FormChart }) {
             const total = group.series.reduce((sum, t) => sum + Math.max(0, t.values[i] ?? 0), 0);
             v = total > 0 ? (Math.max(0, v) / total) * 100 : 0;
           }
-          if (!(v > 0)) continue;
+          if (!(v > 0)) {
+            // 0 인 값도 엑셀은 "0" 레이블을 바닥에 적는다(9.4 NCR 4월·6~11월).
+            if (s.showValues && s.values[i] === 0) {
+              const x0 = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + band * 0.15 + barW * k;
+              labels.push(
+                <text key={`z${seriesIndex}-${i}`} x={x0 + barW / 2} y={y(stacked ? base[i] : 0) - 4} textAnchor="middle" fontSize={TEXT_PX} fill="#404040">
+                  0
+                </text>,
+              );
+            }
+            continue;
+          }
           const x = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + band * 0.15 + barW * k;
           const from = stacked ? base[i] : 0;
           const topY = y(from + v);
@@ -115,7 +126,7 @@ function ChartSvg({ chart }: { chart: FormChart }) {
             const ly = stacked ? (y(from) + y(from + v)) / 2 + 4 : y(from + v) - 4;
             labels.push(
               <text key={`v${seriesIndex}-${i}`} x={x + barW / 2} y={ly} textAnchor="middle" fontSize={TEXT_PX} fill="#404040">
-                {valueText(s.values[i] ?? 0, s.format)}
+                {valueText(s.values[i] ?? 0, s.pointFormats?.[i] ?? s.format)}
               </text>,
             );
           }
@@ -202,7 +213,11 @@ function Legend({
   // 들어가는지는 엑셀 글자 크기(10pt ≈ 13.3px)로 어림한다 — 한글은 글자 크기만큼, 나머지는 그 반 남짓.
   // 앞 표지·간격 20px. 화면 글자(12px)로 재면 엑셀에서 안 들어가는 항목까지 들어갔다.
   const entryWidth = (name: string) =>
-    20 + [...name.trim()].reduce((sum, ch) => sum + (/[ㄱ-힣]/.test(ch) ? EXCEL_LEGEND_PX : EXCEL_LEGEND_PX * 0.55), 0);
+    20 +
+    [...name.trim()].reduce(
+      (sum, ch) => sum + (ch === " " ? 4 : /[ㄱ-힣]/.test(ch) ? EXCEL_LEGEND_PX : EXCEL_LEGEND_PX * 0.55),
+      0,
+    );
   if (legend.box || legend.pos === "t" || legend.pos === "b") {
     const box = legend.box
       ? { x: legend.box.x * W, y: legend.box.y * H, w: legend.box.w * W, h: legend.box.h * H }

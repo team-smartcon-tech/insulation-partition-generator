@@ -53,13 +53,16 @@ const PT_TO_PX = 96 / 72;
 
 const BORDER_STYLES: Record<string, FormBorderStyle> = {
   thin: "thin",
-  hair: "thin",
+  hair: "hair",
   medium: "medium",
   thick: "thick",
   dashed: "dashed",
   dashDot: "dashed",
   dashDotDot: "dashed",
-  mediumDashed: "dashed",
+  mediumDashed: "mediumDashed",
+  mediumDashDot: "mediumDashed",
+  mediumDashDotDot: "mediumDashed",
+  slantDashDot: "mediumDashed",
   dotted: "dotted",
   double: "double",
 };
@@ -601,13 +604,15 @@ export function parseFormSheet(
       const style = readStyle(cell, theme);
       // 엑셀 "일반" 정렬은 숫자·날짜를 오른쪽에 붙인다(글자는 왼쪽). 정렬을 안 적은 숫자 칸을 왼쪽에
       // 두면 회계 형식의 "-" 와 금액이 칸 왼쪽에 몰렸다(8.4-2).
-      if (!style.align) {
-        // 결과가 0 인 수식은 exceljs 가 결과 칸을 아예 빼므로(`{ formula }` 만 온다) 저장된 결과로 본다.
-        const raw = withSavedResult(cell.value, formulaResults?.get(cell.address));
-        const isFormula = !!raw && typeof raw === "object" && ("formula" in raw || "sharedFormula" in raw || "result" in raw);
-        const shown = isFormula ? (raw as { result?: unknown }).result : raw;
-        if (typeof shown === "number" || shown instanceof Date) style.align = "right";
-      }
+      // 결과가 0 인 수식은 exceljs 가 결과 칸을 아예 빼므로(`{ formula }` 만 온다) 저장된 결과로 본다.
+      const raw = withSavedResult(cell.value, formulaResults?.get(cell.address));
+      const isFormula = !!raw && typeof raw === "object" && ("formula" in raw || "sharedFormula" in raw || "result" in raw);
+      const shown = isFormula ? (raw as { result?: unknown }).result : raw;
+      const numeric = typeof shown === "number" || shown instanceof Date;
+      if (!style.align && numeric) style.align = "right";
+      // 표시 형식에 채우기(`* `, 회계 형식)가 있으면 정렬과 상관없이 칸을 채워 오른쪽에 붙는다 — 가운데
+      // 정렬로 적힌 잔여량 칸의 "-"(8.4-2)가 엑셀에서는 오른쪽에 있다.
+      if (numeric && typeof cell.numFmt === "string" && /(^|[^\\])\*./.test(cell.numFmt)) style.align = "right";
       // 병합된 칸은 바깥 테두리를 모서리 칸들에서 다시 읽는다.
       if (rowSpan > 1 || colSpan > 1) style.borders = readMergedBorders(worksheet, box, theme);
 

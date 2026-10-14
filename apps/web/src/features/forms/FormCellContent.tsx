@@ -100,9 +100,9 @@ function fitToCell(
   // 가로로 맞출 때도 80% 까지만 — 엑셀은 "축소하여 맞춤"이 아니면 줄이지 않고 자른다. 브라우저 글꼴이
   // 조금 넓은 만큼만 메우고 그 너머는 자른다(머리글이 읽을 수 없게 작아졌다, 7.6·8.11·8.12 재점검).
   // "축소하여 맞춤" 칸(free)은 엑셀처럼 끝까지 줄여 다 보인다("ITP-해당코드-공정약호-일련번호", 8.11-4).
-  const floor = check.free
-    ? MIN_FREE_FONT_PX
-    : Math.max(MIN_FONT_PX, original * (check.height ? 0.85 : 0.8));
+  // 2026-10-14 재점검: 엑셀은 "축소하여 맞춤"이 아니면 글자를 줄이지 않고 **자른다**. 줄인 칸이 엑셀보다
+  // 작아 보였다(7.1-2·8.10-2·문서보안기준안). 브라우저 글꼴이 조금 넓은 만큼(10%)만 줄이고 나머지는 자른다.
+  const floor = check.free ? MIN_FREE_FONT_PX : Math.max(MIN_FONT_PX, original * 0.9);
   let size = original;
   while (overflows() && size > floor) {
     size -= SHRINK_STEP_PX;
@@ -148,6 +148,14 @@ interface FormCellContentProps {
   /** 이 칸에서 되돌릴 것이 없으면 **서류 전체**의 되돌리기·다시하기로 넘긴다. */
   onUndo?: () => void;
   onRedo?: () => void;
+}
+
+/**
+ * 세로로 쌓는 글자 — 엑셀처럼 공백은 한 글자 높이(전각 공백), 괄호는 옆으로 누운 세로쓰기 괄호.
+ * 그냥 두면 공백이 좁아 글자가 몰리고("참 석 자", 7.5-4 양식) 괄호가 서 있었다("발행(누구나)", 8.12-1).
+ */
+function stackedText(text: string): string {
+  return text.replace(/ /g, "　").replace(/\(/g, "︵").replace(/\)/g, "︶");
 }
 
 /** 칸의 빈 곳을 눌렀을 때 그 칸 글자 상자에 보내는 신호 이름 */
@@ -228,11 +236,20 @@ function FormCellContent({
     }
     if (!element) {
       // 줄바꿈을 끈 칸은 가로로, 줄 높이가 정해진 칸(원본 글자)은 세로로 넘치면 글자를 줄여 맞춘다.
-      fitToCell(readonlyRef.current, {
+      const span = readonlyRef.current;
+      fitToCell(span, {
         width: !wraps && !spill,
-        height: maxHeight !== undefined,
+        // 세로로 넘치는 글은 줄이지 않는다(엑셀) — "축소하여 맞춤" 칸만 줄인다.
+        height: maxHeight !== undefined && cell.style.shrink === true,
         free: cell.style.shrink === true,
       });
+      // 세로로 넘치면 엑셀처럼 세로 맞춤 쪽을 보여 준다 — 가운데 맞춤은 위아래가 같이 잘리고, 아래 맞춤
+      // (엑셀 기본)은 아랫줄이 보인다. 그냥 두면 늘 윗줄만 보이고 아래가 잘렸다.
+      if (span && maxHeight !== undefined) {
+        const extra = span.scrollHeight - span.clientHeight;
+        const valign = cell.style.valign ?? "bottom";
+        span.scrollTop = extra > 0 ? (valign === "top" ? 0 : valign === "middle" ? extra / 2 : extra) : 0;
+      }
       return;
     }
     // 글이 길어지면 칸이 함께 늘어나야 잘리지 않는다. textarea 는 스스로 늘지 않는다.
@@ -357,7 +374,7 @@ function FormCellContent({
           : // 세로 쌓기 글자는 공백도 한 글자 높이를 차지한다(엑셀). 그냥 두면 세로쓰기에서 공백이 좁아
             // "   참  석  자"(7.5-4 양식)가 칸 위쪽에 몰렸다 — 전각 공백으로 바꿔 같은 높이를 준다.
             cell.style.textDirection === "stacked"
-            ? text.replace(/ /g, "　")
+            ? stackedText(text)
             : text}
     </span>
   );

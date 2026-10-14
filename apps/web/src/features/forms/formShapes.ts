@@ -276,9 +276,12 @@ function inheritedRunProps(txBody: string | undefined): string | undefined {
 const flag = (rPr: string | undefined, inherited: string | undefined, name: string) =>
   (ownAttr(rPr, name) ?? ownAttr(inherited, name)) === "1";
 
-function readTextRuns(txBody: string | undefined, ctx: Context): FormTextRun[] | undefined {
+function readTextRuns(txBody: string | undefined, ctx: Context, baseColor?: string): FormTextRun[] | undefined {
   if (!txBody) return undefined;
   const inherited = inheritedRunProps(txBody);
+  // 색을 안 적은 조각은 글상자 기본색(없으면 검정)이다 — 비워 두면 도형 글자색(첫 조각의 빨강)을
+  // 물려받아 "- 현장 여건에 맞게 수정"(6.3-2)까지 빨갛게 그려졌다.
+  const fallbackColor = (inherited ? readColor(inherited, ctx) : undefined) ?? baseColor ?? "#000000";
   const runs: FormTextRun[] = [];
   const paragraphs = findBlocks(txBody, "p");
   paragraphs.forEach((paragraph, index) => {
@@ -291,7 +294,7 @@ function readTextRuns(txBody: string | undefined, ctx: Context): FormTextRun[] |
       const t = findBlocks(piece.xml, "t")[0] ?? "";
       const rPr = findBlocks(piece.xml, "rPr")[0] ?? "";
       const size = Number(ownAttr(rPr, "sz") ?? 0);
-      const color = rPr ? readColor(rPr, ctx) : undefined;
+      const color = (rPr ? readColor(rPr, ctx) : undefined) ?? fallbackColor;
       const underline = ownAttr(rPr, "u");
       runs.push({
         text: unescapeXml(t.replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "")),
@@ -630,6 +633,8 @@ function readBodyLayout(bodyPr: string | undefined): Partial<FormShape> {
 
 /** 선 끝 모양 — 화살촉(triangle·stealth·arrow)이 아닌 것만 따로 적는다. */
 function capOf(key: "startCap" | "endCap", type: string | undefined): Partial<FormShape> {
+  // "arrow" 는 속이 빈 V 화살촉(8.8-2 치수선), triangle·stealth 는 채운 화살촉(기본).
+  if (type === "arrow") return { [key]: "open" };
   return type === "oval" || type === "diamond" ? { [key]: type } : {};
 }
 
@@ -701,7 +706,8 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     ...arrowSizeOf("endArrowSize", child(lineBlock, "tailEnd")),
     text: readText(txBody),
     ...(() => {
-      const textRuns = readTextRuns(txBody, ctx);
+      const fontRef = style ? findBlocks(style, "fontRef")[0] : undefined;
+      const textRuns = readTextRuns(txBody, ctx, readColor(fontRef, ctx));
       return textRuns ? { textRuns } : {};
     })(),
     fill: readFill(spPr, style, ctx),

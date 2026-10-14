@@ -11,7 +11,11 @@ export type FormBorderStyle =
   | "thick"
   | "dashed"
   | "dotted"
-  | "double";
+  | "double"
+  /** 엑셀 "가는 점선"(hair) — 가장 가는 점선 */
+  | "hair"
+  /** 엑셀 굵은 파선(mediumDashed 등) */
+  | "mediumDashed";
 
 export interface FormBorder {
   style: FormBorderStyle;
@@ -169,6 +173,8 @@ export interface FormChartGroup {
     showValues?: boolean;
     /** 값의 표시 형식(차트에 저장된 formatCode) */
     format?: string;
+    /** 점마다 따로 붙은 표시 형식(있으면 format 보다 앞선다) */
+    pointFormats?: (string | undefined)[];
   }[];
 }
 
@@ -216,8 +222,8 @@ export interface FormShape {
    * 선 끝 모양이 화살촉이 아닐 때(엑셀 "원형"·"다이아몬드"). 없으면 화살촉이다.
    * 빠뜨리면 공정표 막대의 시작 점(●)이 거꾸로 된 화살촉으로 그려져 양쪽 화살표처럼 보였다(8.6 공사관리).
    */
-  startCap?: "oval" | "diamond";
-  endCap?: "oval" | "diamond";
+  startCap?: "oval" | "diamond" | "open";
+  endCap?: "oval" | "diamond" | "open";
   /** 선 끝 모양의 [너비, 길이] 배수(엑셀 sm=2·med=3·lg=5). 없으면 보통(3, 3) */
   startArrowSize?: [number, number];
   endArrowSize?: [number, number];

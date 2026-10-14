@@ -18,8 +18,11 @@ const BORDER_WIDTH: Record<FormBorder["style"], string> = {
   medium: "2px solid",
   thick: "3px solid",
   dashed: "1px dashed",
-  dotted: "1px dotted",
+  // 엑셀 "점선"(dotted)은 둥근 점이 아니라 짧은 파선으로 보인다(10.1-4 "□ 부적합" 밑줄). 가장 가는 점선은 hair.
+  dotted: "1px dashed",
   double: "3px double",
+  hair: "1px dotted",
+  mediumDashed: "2px dashed",
 };
 
 const DEFAULT_BORDER_COLOR = "#111827";
@@ -134,6 +137,14 @@ function diagonalImage(borders: FormCellStyle["borders"]): string | undefined {
   return images.length > 0 ? images.join(", ") : undefined;
 }
 
+/** 세로 글자의 글줄 안 자리 — 위→아래로 쓰는 글은 위 맞춤이 글 시작, 아래→위(up)는 그 반대 */
+function verticalTextAlign(style: FormCellStyle): CSSProperties["textAlign"] {
+  const valign = style.valign ?? "middle";
+  if (valign === "middle") return "center";
+  const fromTop = style.textDirection !== "up";
+  return (valign === "top") === fromTop ? "start" : "end";
+}
+
 function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProperties {
   const indent = (style.indent ?? 0) * INDENT_STEP_PX;
   const diagonals = diagonalImage(style.borders);
@@ -143,7 +154,9 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     borderRight: borderCss(style.borders.right),
     borderBottom: borderCss(style.borders.bottom),
     borderLeft: borderCss(style.borders.left),
-    textAlign: align,
+    // 세로 글자는 글 방향이 세로라 **세로 맞춤이 글줄 안 자리**를 정한다(엑셀). 가로 정렬을 쓰면 위 맞춤인
+    // "   참  석  자"(7.5-4 양식)가 칸 가운데로 내려왔다.
+    textAlign: style.textDirection ? verticalTextAlign(style) : align,
     verticalAlign: style.valign ?? "middle",
     fontWeight: style.bold ? 700 : undefined,
     fontStyle: style.italic ? "italic" : undefined,
@@ -784,10 +797,8 @@ export default function FormSheetView({
         그림(로고·도장)은 칸 안이 아니라 격자 위에 떠 있다. 클릭이 통과하도록
         pointer-events 를 꺼 둬야 그림에 가린 칸도 눌러서 고칠 수 있다.
       */}
-      {/* 차트를 먼저 — 엑셀에서 차트 위에 얹은 도형("목표 : 2% 이내", 9.4)이 가려지지 않게. */}
-      <FormChartLayer charts={sheet.charts ?? []} />
-      <FormShapeLayer shapes={sheet.shapes ?? []} />
-
+      {/* 그림·차트를 먼저, 도형을 위에 — 엑셀에서 그림·차트 위에 얹은 도장("Sample", 5.1-2)·상자("목표 : 2% 이내",
+          9.4)가 그림에 가려지지 않게. 도형 층은 누르기를 통과시키므로 칸 고치기에는 상관없다. */}
       {(sheet.images ?? []).map((image, index) =>
         image.unsupported ? (
           <div
@@ -815,6 +826,8 @@ export default function FormSheetView({
         />
         ),
       )}
+      <FormChartLayer charts={sheet.charts ?? []} />
+      <FormShapeLayer shapes={sheet.shapes ?? []} />
       </div>
       </div>
     </div>

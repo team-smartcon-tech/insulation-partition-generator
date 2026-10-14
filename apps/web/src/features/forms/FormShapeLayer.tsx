@@ -105,7 +105,10 @@ function elbowPoints(shape: FormShape): string {
     [bend, h],
     [w, h],
   ];
+  // 끝에서 한 번 꺾는 연결선(bentConnector2, bend = w)은 마지막 두 점이 겹친다. 길이 0 인 마지막 선분은
+  // 화살촉 방향을 잃어 엉뚱한 쪽을 가리켰다(10.1-1 "No" 화살표가 아래를 향함) — 겹친 점은 뺀다.
   return frame
+    .filter(([x, y], index) => index === 0 || x !== frame[index - 1][0] || y !== frame[index - 1][1])
     .map(([x, y]) => `${left + (flipH ? w - x : x)},${top + (flipV ? h - y : y)}`)
     .join(" ");
 }
@@ -189,7 +192,7 @@ function textCss(shape: FormShape): CSSProperties {
     color: shape.color,
     lineHeight: shape.lineSpacing?.pt
       ? `${shape.lineSpacing.pt}pt`
-      : (shape.lineSpacing?.ratio ?? 1) * SINGLE_SPACING,
+      : (shape.lineSpacing?.ratio ?? 1) * singleSpacing(shape.text),
     whiteSpace: shape.noWrap ? "pre" : "pre-wrap",
     // 한글은 어절 단위로 끊어야 "지식관리"가 "지식관"+"리"로 쪼개지지 않는다.
     wordBreak: "keep-all",
@@ -201,11 +204,11 @@ function textCss(shape: FormShape): CSSProperties {
 }
 
 /**
- * 도형 글자의 "1줄" 간격(글자 크기의 배수). 순서도 상자 대부분이 엑셀과 맞는 값이다. 줄 간격을 적어 둔
- * 상자(고정 pt·배수)는 그 값을 따른다. 1.6 으로 넓혔더니 7.6-5 설명 상자는 맞았지만 10.1-1 순서도 상자
- * 글이 넘쳐 작게 줄었다 — 엑셀 기본 간격이 상자마다 달라 하나로 못 맞춘다.
+ * 도형 글자의 "1줄" 간격(글자 크기의 배수). 엑셀 글상자는 글꼴 높이의 1.2배를 한 줄로 잡는데, 한글은
+ * 동아시아 글꼴(맑은 고딕) 높이로 재서 약 1.6배가 된다 — 7.6-5 설명 상자를 엑셀 PDF 와 재어 보니 그랬고,
+ * 75% 로 적힌 8.2-1 상자들도 1.25 기준으로는 두 줄이 겹쳤다. 한글이 없는 글은 1.25.
  */
-const SINGLE_SPACING = 1.25;
+const singleSpacing = (text: string) => (/[ㄱ-힣]/.test(text) ? 1.6 : 1.25);
 
 /**
  * 도형 안 글자. 부분 서식이 있으면 조각마다 그린다 — 상자를 그리는 길이 둘(테두리를 SVG 로 그리는
@@ -293,7 +296,7 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
    * 비례하되 가는 선은 2pt 로 보고 잰다 — 0.5pt 선의 "보통" 화살촉이 엑셀에서 6pt 인데, 선 굵기의
    * 5배로만 그렸더니 3분의 1 크기로 작게 보였다(재점검).
    */
-  const markers: { id: string; color: string; cap?: "oval" | "diamond"; width: number; length: number }[] = [];
+  const markers: { id: string; color: string; cap?: "oval" | "diamond" | "open"; width: number; length: number }[] = [];
   const markerOf = (shape: FormShape, color: string, end: "start" | "end") => {
     const cap = end === "start" ? shape.startCap : shape.endCap;
     const [w, len] = (end === "start" ? shape.startArrowSize : shape.endArrowSize) ?? [3, 3];
@@ -403,7 +406,7 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
                 viewBox="0 0 10 10"
                 preserveAspectRatio="none"
                 // 화살촉은 선 끝이 끝점, 원형·다이아몬드는 한가운데가 끝점이다(엑셀과 같다).
-                refX={marker.cap ? 5 : 9.5}
+                refX={marker.cap === "oval" || marker.cap === "diamond" ? 5 : 9.5}
                 refY="5"
                 markerUnits="userSpaceOnUse"
                 markerWidth={marker.length}
@@ -415,6 +418,8 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
                   <ellipse cx="5" cy="5" rx="5" ry="5" fill={marker.color} />
                 ) : marker.cap === "diamond" ? (
                   <path d="M 5 0 L 10 5 L 5 10 L 0 5 z" fill={marker.color} />
+                ) : marker.cap === "open" ? (
+                  <path d="M 1 1 L 9.5 5 L 1 9" fill="none" stroke={marker.color} strokeWidth={1.4} />
                 ) : (
                   <path d="M 0 0 L 10 5 L 0 10 z" fill={marker.color} />
                 )}
