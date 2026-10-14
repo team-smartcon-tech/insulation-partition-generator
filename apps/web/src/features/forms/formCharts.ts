@@ -128,7 +128,7 @@ function readChart(xml: string, ctx: ShapeContext): Omit<FormChart, "left" | "to
     const base = ctx.theme[4 + accentIndex] ?? ctx.theme[4];
     const plain = groups.flatMap((group) => group.series).filter((series) => !series.color);
     plain.forEach((series, i) => {
-      const t = plain.length <= 1 ? 0 : -0.35 + (0.8 * i) / (plain.length - 1);
+      const t = plain.length <= 1 ? 0 : -0.15 + (0.65 * i) / (plain.length - 1);
       series.color = mixColor(base, t);
     });
   }
