@@ -94,6 +94,7 @@ function readChart(xml: string, ctx: ShapeContext): Omit<FormChart, "left" | "to
     groups.push({
       type,
       direction: ownAttr(child(element.xml, "barDir"), "val") === "bar" ? "bar" : "col",
+      ...(/3D/.test(element.name) ? { threeD: true } : {}),
       grouping:
         grouping === "stacked" || grouping === "percentStacked" || grouping === "standard" ? grouping : "clustered",
       series: series.map((ser) =>

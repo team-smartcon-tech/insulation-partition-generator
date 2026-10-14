@@ -29,6 +29,7 @@ function niceScale(max: number, plotHeight: number): { top: number; step: number
 const TEXT_PX = 13;
 const TITLE_PX = 24;
 const LEGEND_PX = 12;
+const EXCEL_LEGEND_PX = 13.3;
 
 /** 눈금 글자 — 엑셀이 세로축에 적은 표시 형식(0.0% 등)을 따른다. */
 const label = (n: number, format: string | undefined) =>
@@ -88,7 +89,27 @@ function ChartSvg({ chart }: { chart: FormChart }) {
           if (!(v > 0)) continue;
           const x = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + band * 0.15 + barW * k;
           const from = stacked ? base[i] : 0;
-          bars.push(<rect key={`${seriesIndex}-${i}`} x={x} y={y(from + v)} width={barW} height={y(from) - y(from + v)} fill={color} />);
+          const topY = y(from + v);
+          const bottomY = y(from);
+          bars.push(<rect key={`${seriesIndex}-${i}`} x={x} y={topY} width={barW} height={bottomY - topY} fill={color} />);
+          if (group.threeD) {
+            // 3차원 막대 — 오른쪽 옆면(어둡게)과 윗면(밝게)을 비스듬히 붙인다(엑셀 3차원 묶은·누적 막대).
+            const d = Math.min(8, barW * 0.25);
+            bars.push(
+              <polygon
+                key={`s${seriesIndex}-${i}`}
+                points={`${x + barW},${topY} ${x + barW + d},${topY - d} ${x + barW + d},${bottomY - d} ${x + barW},${bottomY}`}
+                fill={color}
+                style={{ filter: "brightness(0.7)" }}
+              />,
+              <polygon
+                key={`t${seriesIndex}-${i}`}
+                points={`${x},${topY} ${x + d},${topY - d} ${x + barW + d},${topY - d} ${x + barW},${topY}`}
+                fill={color}
+                style={{ filter: "brightness(1.2)" }}
+              />,
+            );
+          }
           if (s.showValues) {
             // 누적 막대는 조각 가운데, 묶은 막대는 막대 위에(엑셀 기본 자리).
             const ly = stacked ? (y(from) + y(from + v)) / 2 + 4 : y(from + v) - 4;
@@ -178,9 +199,10 @@ function Legend({
   colorOf: (index: number, own?: string) => string;
 }) {
   const legend = chart.legend ?? { pos: "r" as const };
-  // 글자 폭 어림(범례 글자 12px) — 한글은 글자 크기만큼, 나머지는 그 반 남짓. 앞 표지·간격 20px.
+  // 들어가는지는 엑셀 글자 크기(10pt ≈ 13.3px)로 어림한다 — 한글은 글자 크기만큼, 나머지는 그 반 남짓.
+  // 앞 표지·간격 20px. 화면 글자(12px)로 재면 엑셀에서 안 들어가는 항목까지 들어갔다.
   const entryWidth = (name: string) =>
-    20 + [...name.trim()].reduce((sum, ch) => sum + (/[ㄱ-힣]/.test(ch) ? LEGEND_PX : LEGEND_PX * 0.55), 0);
+    20 + [...name.trim()].reduce((sum, ch) => sum + (/[ㄱ-힣]/.test(ch) ? EXCEL_LEGEND_PX : EXCEL_LEGEND_PX * 0.55), 0);
   if (legend.box || legend.pos === "t" || legend.pos === "b") {
     const box = legend.box
       ? { x: legend.box.x * W, y: legend.box.y * H, w: legend.box.w * W, h: legend.box.h * H }

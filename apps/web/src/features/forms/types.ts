@@ -159,6 +159,8 @@ export interface FormChartGroup {
   /** 막대 방향: col = 세로 막대, bar = 가로 막대 */
   direction?: "col" | "bar";
   grouping: "clustered" | "stacked" | "percentStacked" | "standard";
+  /** 3차원 막대 — 윗면·옆면을 더해 입체로 그린다 */
+  threeD?: boolean;
   series: {
     name: string;
     color?: string;
