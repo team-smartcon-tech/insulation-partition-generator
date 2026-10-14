@@ -206,7 +206,9 @@ function textCss(shape: FormShape): CSSProperties {
     // 조각(run) 크기의 비율 기준도 어긋난다(4.3 견본 상자 글이 세 줄로 넘쳤다).
     fontSize: `${shape.fontSize ?? DEFAULT_SHAPE_FONT_PT}pt`,
     fontFamily: shapeFontStack(shape),
-    letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : undefined,
+    // 간격을 안 적은 글은 1% 좁힌다 — 엑셀 글자 폭이 브라우저보다 조금 좁아, 딱 맞던 "설계검토 지연건수"
+    // (4.3 견본)가 0.3px 차이로 접혔다. 칸 글자와 같은 보정이다.
+    letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : "-0.01em",
     fontWeight: shape.bold ? 700 : undefined,
     fontStyle: shape.italic ? "italic" : undefined,
     textDecoration: shape.underline ? "underline" : undefined,
@@ -321,7 +323,7 @@ function ShapeText({ shape }: { shape: FormShape }) {
                 fontSize: run.fontSize ? `${run.fontSize / (shape.fontSize ?? DEFAULT_SHAPE_FONT_PT)}em` : undefined,
                 fontWeight: run.bold ? 700 : 400,
                 fontStyle: run.italic ? "italic" : "normal",
-                letterSpacing: run.letterSpacing !== undefined ? `${run.letterSpacing}pt` : "normal",
+                letterSpacing: run.letterSpacing !== undefined ? `${run.letterSpacing}pt` : "-0.01em",
                 textDecoration: run.underline ? "underline" : undefined,
                 color: run.color,
               }}
