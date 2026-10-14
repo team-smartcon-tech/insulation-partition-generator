@@ -135,7 +135,9 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
   // 도형마다 글자 영역이 정해져 있다(DrawingML 프리셋의 텍스트 사각형). 마름모는 가운데 절반, 타원은
   // 사방 14.6% 안쪽 — 틀 전체에 쓰면 "설계검토/검증/실현성 확인"(8.3-1)이 마름모를 가로질러 한 줄이 됐다.
   const [areaX, areaY] =
-    shape.kind === "diamond"
+    shape.textFromInner
+      ? [0, 0]
+      : shape.kind === "diamond"
       ? [shape.width / 4, shape.height / 4]
       : shape.kind === "ellipse"
         ? [shape.width * 0.1464, shape.height * 0.1464]

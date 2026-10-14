@@ -108,6 +108,9 @@ function fitToCell(
     size -= SHRINK_STEP_PX;
     element.style.fontSize = `${size}px`;
   }
+  // 조금 줄여서(글꼴 폭 차이만큼) 들어가면 그대로 두고, 그래도 넘치면 원래 크기로 돌려 엑셀처럼 자른다 —
+  // 넘치는 글을 어설프게 줄이면 엑셀보다 작고 그래도 잘려 보였다(7.1-2 기본서류 칸).
+  if (!check.free && overflows()) element.style.fontSize = "";
 }
 
 interface FormCellContentProps {

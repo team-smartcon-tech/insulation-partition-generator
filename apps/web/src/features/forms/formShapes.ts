@@ -967,6 +967,9 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     outer.text = inner.text;
     // 글자는 안쪽 글상자에 있다 — 고친 글자도 그 도형에 적어야 엑셀에서 같은 자리에 보인다.
     outer.textId = inner.textId;
+    // 글자 자리는 안쪽 글상자가 정한다(아래 여백으로 옮김) — 바깥 도형의 글자 영역(마름모 가운데 절반 등)을
+    // 또 적용하면 겹쳐 좁아진다(10.1-1 마름모 글이 한 글자씩 접혔다).
+    outer.textFromInner = true;
     // 부분 서식도 함께 옮긴다 — 빠뜨리면 마름모 안 작은 둘째 줄이 첫 줄 크기로 커져 넘친다(8.7·8.8).
     outer.textRuns = inner.textRuns;
     outer.fontSize = inner.fontSize;

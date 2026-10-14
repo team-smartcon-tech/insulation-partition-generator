@@ -271,6 +271,8 @@ export interface FormShape {
   align?: "left" | "center" | "right";
   /** 글자의 세로 자리. 엑셀 기본은 위쪽이다(순서도 상자는 보통 가운데로 적혀 있다). */
   valign?: "top" | "middle" | "bottom";
+  /** 글자가 겹쳐 놓인 안쪽 글상자에서 왔다(여백이 이미 그 자리를 나타낸다) */
+  textFromInner?: boolean;
   /** 넘치는 글을 상자 안에서 자른다(엑셀 vertOverflow="clip") */
   clipText?: boolean;
   /** 둥근 사각형의 모서리 반지름(짧은 변에 대한 비율, 0.5 = 알약). 없으면 기본 */
