@@ -184,12 +184,14 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     letterSpacing: "-0.02em",
     overflowWrap: "break-word",
     // 칸이 좁아 글자가 접히는 것을 막으려고 여백을 최소로 둔다.
-    padding: "1px 2px",
+    // 좌우 1px — 엑셀은 칸 너비를 거의 다 글자에 쓴다. 2px 씩 두었더니 딱 맞는 머리글("공사팀", 문서보안기준안)이
+    // 들어가지 않아 줄어들었다.
+    padding: "1px 1px",
     // 줄 간격은 글꼴 자체 값(엑셀과 같은 기준). 화면 기본(1.5배)을 물려받으면 여러 줄 칸이 엑셀보다
     // 높아져, 칸에 맞추느라 글자를 줄이거나 아랫줄이 잘렸다(7.1-2·8.1-1·8.10-2 재점검).
-    // 맑은 고딕은 엑셀(GDI)이 줄 사이를 글꼴 높이보다 조금 더 띄운다(약 1.4배) — 글꼴 값(1.33)으로는 여러 줄
-    // 칸이 엑셀보다 5~10% 촘촘해, 엑셀이 잘라 보이는 줄까지 다 보였다(8.10-2·7.1-2 재점검).
-    lineHeight: !style.fontFamily || /맑은|malgun/i.test(style.fontFamily) ? 1.4 : "normal",
+    // 줄 간격은 글꼴 자체 값. 1.4 로 넓혀 봤더니 짧은 줄에 다섯 줄을 넣은 칸(8.10-2 취급)의 첫 줄이 반쯤
+    // 잘려 엑셀보다 나빠져 되돌렸다.
+    lineHeight: "normal",
     // 세로 글자. 표 칸에는 회전(transform)이 듣지 않아 쓰기 방향으로 돌린다.
     ...(style.textDirection === "up"
       ? { writingMode: "sideways-lr" as const }
@@ -203,8 +205,8 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     // 들여쓰기는 정렬한 쪽에 준다(가운데 정렬에는 엑셀도 쓰지 않는다).
     ...(indent > 0 && align !== "center"
       ? align === "right"
-        ? { paddingRight: 2 + indent }
-        : { paddingLeft: 2 + indent }
+        ? { paddingRight: 1 + indent }
+        : { paddingLeft: 1 + indent }
       : {}),
   };
 }
