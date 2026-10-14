@@ -239,8 +239,9 @@ function FormCellContent({
       const span = readonlyRef.current;
       fitToCell(span, {
         width: !wraps && !spill,
-        // 세로로 넘치는 글은 줄이지 않는다(엑셀) — "축소하여 맞춤" 칸만 줄인다.
-        height: maxHeight !== undefined && cell.style.shrink === true,
+        // 세로로 넘치는 글도 90% 까지만 줄인다(가로와 같다) — 브라우저 글꼴이 조금 넓어 엑셀에서 한 줄인
+        // 문장이 두 줄로 접히는 만큼만 메운다(9.1-2 "4. 다음은 프로젝트를…"). 그 너머는 엑셀처럼 자른다.
+        height: maxHeight !== undefined,
         free: cell.style.shrink === true,
       });
       // 세로로 넘치면 엑셀처럼 세로 맞춤 쪽을 보여 준다 — 가운데 맞춤은 위아래가 같이 잘리고, 아래 맞춤
