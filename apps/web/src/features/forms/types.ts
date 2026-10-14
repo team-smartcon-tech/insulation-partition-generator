@@ -229,6 +229,11 @@ export interface FormShape {
   endArrowSize?: [number, number];
   /** 도형 안 글자. 줄바꿈은 \n */
   text: string;
+  /**
+   * 글자를 품은 도형의 번호(그림 판의 `cNvPr id`). 화면에서 고친 도형 글자를 `shape:번호` 로 저장하고,
+   * 엑셀로 내려받을 때 이 번호의 도형 글자를 바꾼다. 장식 틀과 합쳐진 글상자는 안쪽 글상자 번호다.
+   */
+  textId?: string;
   /** 도형 안 글자의 부분 서식 조각(이어 붙이면 `text`). 조각마다 서식이 같으면 없다. */
   textRuns?: FormTextRun[];
   /** 채움색 #RRGGBB. 없으면 투명 */

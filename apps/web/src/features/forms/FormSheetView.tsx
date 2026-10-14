@@ -827,7 +827,13 @@ export default function FormSheetView({
         ),
       )}
       <FormChartLayer charts={sheet.charts ?? []} />
-      <FormShapeLayer shapes={sheet.shapes ?? []} />
+      <FormShapeLayer
+        shapes={sheet.shapes ?? []}
+        values={values}
+        editable={editable}
+        onChangeValue={handleChange}
+        onCommitValue={handleCommit}
+      />
       </div>
       </div>
     </div>

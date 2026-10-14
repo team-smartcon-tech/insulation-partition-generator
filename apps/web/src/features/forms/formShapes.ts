@@ -706,6 +706,10 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     ...arrowSizeOf("endArrowSize", child(lineBlock, "tailEnd")),
     text: readText(txBody),
     ...(() => {
+      const id = ownAttr(findBlocks(block, "cNvPr")[0], "id");
+      return id && txBody && readText(txBody).trim() !== "" ? { textId: id } : {};
+    })(),
+    ...(() => {
       const fontRef = style ? findBlocks(style, "fontRef")[0] : undefined;
       const textRuns = readTextRuns(txBody, ctx, readColor(fontRef, ctx));
       return textRuns ? { textRuns } : {};
@@ -954,6 +958,8 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     const { shape: inner, index } = insiders[0];
     absorbed.add(index);
     outer.text = inner.text;
+    // 글자는 안쪽 글상자에 있다 — 고친 글자도 그 도형에 적어야 엑셀에서 같은 자리에 보인다.
+    outer.textId = inner.textId;
     // 부분 서식도 함께 옮긴다 — 빠뜨리면 마름모 안 작은 둘째 줄이 첫 줄 크기로 커져 넘친다(8.7·8.8).
     outer.textRuns = inner.textRuns;
     outer.fontSize = inner.fontSize;

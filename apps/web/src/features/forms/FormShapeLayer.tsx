@@ -9,7 +9,7 @@
  * SVG 에 모아 먼저 그리고 상자를 나중에 얹으면, 회색 배경 띠(구역 표시)가 그 위를 지나는
  * 화살표를 덮어 흐름이 끊겨 보인다.
  */
-import { Fragment, useId, useLayoutEffect, useRef } from "react";
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { FormShape } from "./types";
 
@@ -284,10 +284,42 @@ function ShapeSvg({ children }: { children: ReactNode }) {
   );
 }
 
-export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
+/** 고친 도형 글자를 시트 값에 담는 키 — 칸 키(`3:2`)와 겹치지 않는다 */
+export const shapeValueKey = (textId: string) => `shape:${textId}`;
+
+export default function FormShapeLayer({
+  shapes: original,
+  values,
+  editable = false,
+  onChangeValue,
+  onCommitValue,
+}: {
+  shapes: FormShape[];
+  /** 이 시트에 적은 값 — `shape:번호` 키에 고친 도형 글자가 있다 */
+  values?: Record<string, string>;
+  /** 도형 글자를 눌러 고칠 수 있나(편집 화면) */
+  editable?: boolean;
+  onChangeValue?: (key: string, value: string) => void;
+  onCommitValue?: (key: string, before: string | undefined, after: string) => void;
+}) {
   // 화살촉 정의(marker)는 문서 전체에서 id 로 참조된다. 시트를 바꿔 가며 그려도
   // 서로 충돌하지 않도록 이 컴포넌트만의 접두사를 붙인다.
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  /*
+   * 순서도 상자 글자도 고칠 수 있다(2026-10-14 사용자 요청: "엑셀 안 그림으로 된 것도 내용 수정").
+   * 고친 글자는 칸 값과 같은 곳에 `shape:번호` 로 담아 저장·서버 올리기·되돌리기를 그대로 탄다.
+   * 고친 상자는 부분 서식 없이 상자 서식 하나로 그린다.
+   */
+  const shapes = useMemo(
+    () =>
+      original.map((shape) => {
+        const edited = shape.textId ? values?.[shapeValueKey(shape.textId)] : undefined;
+        return edited === undefined ? shape : { ...shape, text: edited, textRuns: undefined };
+      }),
+    [original, values],
+  );
+  const [editing, setEditing] = useState<string | null>(null);
+  const startRef = useRef<string | undefined>(undefined);
 
   if (shapes.length === 0) return null;
 
@@ -430,6 +462,60 @@ export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
       )}
 
       {drawn}
+      {editable &&
+        shapes.map((shape, index) => {
+          if (!shape.textId || (shape.rotation && !shape.upright)) return null;
+          const key = shapeValueKey(shape.textId);
+          const frame = boxCss(shape, true);
+          const place: CSSProperties = {
+            position: "absolute",
+            left: frame.left,
+            top: frame.top,
+            width: frame.width,
+            height: frame.height,
+          };
+          if (editing === shape.textId) {
+            return (
+              <textarea
+                key={`edit-${index}`}
+                autoFocus
+                defaultValue={shape.text}
+                onChange={(event) => onChangeValue?.(key, event.target.value)}
+                onBlur={(event) => {
+                  setEditing(null);
+                  if (event.target.value !== (startRef.current ?? original[index].text)) {
+                    onCommitValue?.(key, startRef.current, event.target.value);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") event.currentTarget.blur();
+                }}
+                spellCheck={false}
+                className="pointer-events-auto z-30 resize-none rounded-sm bg-blue-50/95 p-1 outline-none ring-2 ring-blue-400"
+                style={{ ...place, ...textCss(shape), width: frame.width, height: frame.height }}
+              />
+            );
+          }
+          return (
+            <div
+              key={`hit-${index}`}
+              role="textbox"
+              tabIndex={0}
+              title="눌러서 글자를 고칩니다"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                startRef.current = values?.[key];
+                setEditing(shape.textId!);
+              }}
+              onFocus={() => {
+                startRef.current = values?.[key];
+                setEditing(shape.textId!);
+              }}
+              className="pointer-events-auto cursor-text rounded-sm hover:bg-blue-400/10 hover:ring-1 hover:ring-blue-300"
+              style={place}
+            />
+          );
+        })}
     </div>
   );
 }
