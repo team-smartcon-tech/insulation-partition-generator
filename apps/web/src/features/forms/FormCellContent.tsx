@@ -247,13 +247,9 @@ function FormCellContent({
         height: maxHeight !== undefined,
         free: cell.style.shrink === true,
       });
-      // 세로로 넘치면 엑셀처럼 세로 맞춤 쪽을 보여 준다 — 가운데 맞춤은 위아래가 같이 잘리고, 아래 맞춤
-      // (엑셀 기본)은 아랫줄이 보인다. 그냥 두면 늘 윗줄만 보이고 아래가 잘렸다.
-      if (span && maxHeight !== undefined) {
-        const extra = span.scrollHeight - span.clientHeight;
-        const valign = cell.style.valign ?? "bottom";
-        span.scrollTop = extra > 0 ? (valign === "top" ? 0 : valign === "middle" ? extra / 2 : extra) : 0;
-      }
+      // 세로로 넘치는 글은 엑셀처럼 **첫 줄부터** 보이고 아래가 잘린다(가운데 맞춤이어도) — 가운데로 두고
+      // 위아래를 같이 잘랐더니 "인정검사 신청서"(7.1-2)·"지면에서 10cm이상"(8.10-2) 같은 첫 줄이 사라졌다.
+      if (span && maxHeight !== undefined) span.scrollTop = 0;
       return;
     }
     // 글이 길어지면 칸이 함께 늘어나야 잘리지 않는다. textarea 는 스스로 늘지 않는다.
