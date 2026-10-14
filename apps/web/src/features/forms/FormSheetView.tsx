@@ -172,8 +172,13 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
     // 한 줄로 적힌 항목(예: "소속: … 직급: … 성명: … (서명 또는 날인)")이 쪼개진다.
     // 접지 않는 칸이 넘칠 때는 FormCellContent 가 글자를 줄여 맞춘다.
     whiteSpace: style.wrap ? "pre-wrap" : "pre",
-    // 한글은 어절 단위로 끊어야 한다. break-word 만 쓰면 "특기사항"이 "특기사"+"항"으로 쪼개진다.
-    wordBreak: "keep-all",
+    // 엑셀 칸은 한글을 **글자 단위로** 줄바꿈한다("…따라 적합 / 한 인력을", "…세부검 / 사방법"). 어절
+    // 단위(keep-all)로 끊었더니 줄이 일찍 접혀 엑셀보다 한 줄씩 늘었다(10.1-4·7.1-2·9.1-2 재점검).
+    // 영어 단어는 여전히 띄어쓰기에서 끊는다(브라우저 기본 규칙과 같다).
+    wordBreak: "normal",
+    // 엑셀(GDI) 글자는 브라우저보다 몇 % 좁게 그려진다. 그대로 두면 엑셀에서 한 줄인 글이 1px 차이로
+    // 두 줄이 됐다("Project/Project No." 10.1-3, "설계검토 지연건수 0건" 4.3 견본). 글자 사이를 1% 좁힌다.
+    letterSpacing: "-0.01em",
     overflowWrap: "break-word",
     // 칸이 좁아 글자가 접히는 것을 막으려고 여백을 최소로 둔다.
     padding: "1px 2px",
@@ -188,7 +193,7 @@ function cellCss(style: FormCellStyle, align: FormCellStyle["align"]): CSSProper
         : style.textDirection === "stacked"
           ? // 세로로 쌓은 글자는 엑셀에서 한 줄 높이(글자 크기의 약 1.35배)마다 하나씩 놓인다. 1배로 붙여
             // 두었더니 옆 띠 제목("발행(누구나)", 8.12-1)이 엑셀보다 촘촘하게 몰렸다.
-            { writingMode: "vertical-rl" as const, textOrientation: "upright" as const, letterSpacing: "0.35em" }
+            { writingMode: "vertical-rl" as const, textOrientation: "upright" as const, letterSpacing: "0.42em" }
           : {}),
     // 들여쓰기는 정렬한 쪽에 준다(가운데 정렬에는 엑셀도 쓰지 않는다).
     ...(indent > 0 && align !== "center"

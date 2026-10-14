@@ -135,6 +135,10 @@ function readChart(xml: string, ctx: ShapeContext): Omit<FormChart, "left" | "to
   const title = child(chart, "title");
   const valAx = child(plot, "valAx");
   const legendXml = child(chart, "legend");
+  // 가로축 글자 기울기(txPr bodyPr rot, 60000분의 1도) — 9.4 재검사율은 45° 로 눕혀 있다.
+  const catAx = child(plot, "catAx");
+  const catBodyPr = findBlocks(child(catAx ?? "", "txPr") ?? "", "bodyPr")[0];
+  const catRot = Number(ownAttr(catBodyPr, "rot") ?? 0) / 60000;
   const layout = legendXml ? child(child(legendXml, "layout") ?? "", "manualLayout") : undefined;
   const frac = (name: string) => Number(ownAttr(child(layout ?? "", name), "val"));
   const legendPos = (ownAttr(child(legendXml ?? "", "legendPos"), "val") ?? "r") as "t" | "b" | "l" | "r" | "tr";
@@ -152,6 +156,7 @@ function readChart(xml: string, ctx: ShapeContext): Omit<FormChart, "left" | "to
     valueStep: fixed(valAx, "majorUnit"),
     categories,
     groups,
+    ...(catRot ? { categoryRotation: catRot } : {}),
     legend: legendXml
       ? {
           pos: legendPos,

@@ -131,7 +131,24 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
       : shape.kind === "roundBox"
         ? Math.min(shape.width, shape.height) * (shape.roundRatio ?? ROUND_RATIO)
         : undefined;
-  const [padTop, padRight, padBottom, padLeft] = shape.inset ?? [2, 4, 2, 4];
+  const [insetTop, insetRight, insetBottom, insetLeft] = shape.inset ?? [2, 4, 2, 4];
+  // 도형마다 글자 영역이 정해져 있다(DrawingML 프리셋의 텍스트 사각형). 마름모는 가운데 절반, 타원은
+  // 사방 14.6% 안쪽 — 틀 전체에 쓰면 "설계검토/검증/실현성 확인"(8.3-1)이 마름모를 가로질러 한 줄이 됐다.
+  const [areaX, areaY] =
+    shape.kind === "diamond"
+      ? [shape.width / 4, shape.height / 4]
+      : shape.kind === "ellipse"
+        ? [shape.width * 0.1464, shape.height * 0.1464]
+        : [0, 0];
+  // 여백이 틀보다 크면 틀이 늘어난다(box-sizing) — 틀 안에 들도록 줄인다.
+  const fitX = Math.min(1, Math.max(0, shape.width - 2) / Math.max(1, insetLeft + insetRight + areaX * 2));
+  const fitY = Math.min(1, Math.max(0, shape.height - 2) / Math.max(1, insetTop + insetBottom + areaY * 2));
+  const [padTop, padRight, padBottom, padLeft] = [
+    (insetTop + areaY) * fitY,
+    (insetRight + areaX) * fitX,
+    (insetBottom + areaY) * fitY,
+    (insetLeft + areaX) * fitX,
+  ];
   // 글자를 세워 두는 도형을 90°·270° 돌렸으면, 돌린 뒤 모습(가로·세로를 바꾼 같은 가운데의 틀)에
   // 그대로 그린다 — 직사각형을 90° 돌린 것과 같은 자리이고, 글자는 돌지 않는다.
   const quarter = shape.rotation !== undefined && Math.abs(Math.abs(shape.rotation) % 180 - 90) < 1;
@@ -161,7 +178,9 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
       shape.valign === "top" ? "flex-start" : shape.valign === "bottom" ? "flex-end" : "center",
     justifyContent:
       shape.align === "left" ? "flex-start" : shape.align === "right" ? "flex-end" : "center",
-    padding: `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px`,
+    ...(shape.clipText ? { overflow: "hidden" as const } : {}),
+    // 글자 없는 도형은 여백을 두지 않는다 — 작은 원(8.8-2 구멍)은 여백이 틀보다 커서 옆으로 늘어났다.
+    padding: shape.text ? `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px` : 0,
     boxSizing: "border-box",
   };
 }
@@ -184,7 +203,7 @@ function textCss(shape: FormShape): CSSProperties {
     // 크기를 적지 않은 도형도 엑셀 기본(11pt)으로 — 비워 두면 화면 기본 16px 를 물려받아 글자가 9% 커지고,
     // 조각(run) 크기의 비율 기준도 어긋난다(4.3 견본 상자 글이 세 줄로 넘쳤다).
     fontSize: `${shape.fontSize ?? DEFAULT_SHAPE_FONT_PT}pt`,
-    fontFamily: shape.fontFamily ? `"${shape.fontFamily}", "맑은 고딕", sans-serif` : undefined,
+    fontFamily: shapeFontStack(shape),
     letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : undefined,
     fontWeight: shape.bold ? 700 : undefined,
     fontStyle: shape.italic ? "italic" : undefined,
@@ -201,6 +220,44 @@ function textCss(shape: FormShape): CSSProperties {
     textOrientation: vertical === "eaVert" ? "upright" : undefined,
     transform: vertical === "vert270" ? "rotate(180deg)" : undefined,
   };
+}
+
+/** 동아시아 글꼴 이름(테마 글꼴 "+mn-ea" 등은 맑은 고딕으로) → 설치된 글꼴 이름들 */
+const EA_LOCAL: Record<string, string[]> = {
+  "맑은 고딕": ["맑은 고딕", "Malgun Gothic"],
+  굴림: ["굴림", "Gulim"],
+  굴림체: ["굴림체", "GulimChe"],
+  돋움: ["돋움", "Dotum"],
+  돋움체: ["돋움체", "DotumChe"],
+  바탕: ["바탕", "Batang"],
+  바탕체: ["바탕체", "BatangChe"],
+  궁서: ["궁서", "Gungsuh"],
+};
+/** 엑셀이 동아시아 글꼴로 그리는 글자 범위 — 한글, 한자, 전각, 그리고 ○□※→ 같은 기호 */
+const EA_RANGE =
+  "U+1100-11FF, U+2010-2027, U+2030-205E, U+2190-23FF, U+2460-27BF, U+2E80-33FF, U+3400-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF";
+const injectedEa = new Set<string>();
+
+/**
+ * 도형 글꼴 묶음. 라틴 글꼴과 동아시아 글꼴이 다르면, 동아시아 글자 범위에만 쓰이는 이름(`XL EA …`)을
+ * 만들어 맨 앞에 둔다 — 엑셀처럼 한글·기호는 동아시아 글꼴, 영문·숫자는 라틴 글꼴로 그려진다.
+ */
+function shapeFontStack(shape: FormShape): string | undefined {
+  const latin = shape.fontFamily && !shape.fontFamily.startsWith("+") ? shape.fontFamily : undefined;
+  const eaRaw = shape.eaFontFamily && !shape.eaFontFamily.startsWith("+") ? shape.eaFontFamily : "맑은 고딕";
+  const locals = EA_LOCAL[eaRaw] ?? [eaRaw];
+  if (!latin || latin === eaRaw) return latin ? `"${latin}", "맑은 고딕", sans-serif` : undefined;
+  const alias = `XL EA ${eaRaw}`;
+  if (typeof document !== "undefined" && !injectedEa.has(alias)) {
+    injectedEa.add(alias);
+    const style = document.createElement("style");
+    const src = locals.map((name) => `local("${name}")`).join(", ");
+    style.textContent =
+      `@font-face{font-family:"${alias}";src:${src};unicode-range:${EA_RANGE};}` +
+      `@font-face{font-family:"${alias}";src:${locals.map((name) => `local("${name} Bold")`).join(", ")}, ${src};unicode-range:${EA_RANGE};font-weight:700;}`;
+    document.head.appendChild(style);
+  }
+  return `"${alias}", "${latin}", "맑은 고딕", sans-serif`;
 }
 
 /**

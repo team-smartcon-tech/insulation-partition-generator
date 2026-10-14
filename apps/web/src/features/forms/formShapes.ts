@@ -628,6 +628,8 @@ function readBodyLayout(bodyPr: string | undefined): Partial<FormShape> {
     noWrap: ownAttr(bodyPr, "wrap") === "none" || undefined,
     vertical: vert === "vert" || vert === "vert270" || vert === "eaVert" ? vert : undefined,
     upright: ownAttr(bodyPr, "upright") === "1" || undefined,
+    // 넘치는 글을 상자에서 자른다(엑셀 "텍스트 오버플로 - 자르기"). 7.6-5 [비고] 마지막 줄을 엑셀은 자른다.
+    clipText: ownAttr(bodyPr, "vertOverflow") === "clip" || undefined,
   };
 }
 
@@ -731,6 +733,11 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     fontSize: sizeHundredths > 0 ? sizeHundredths / 100 : undefined,
     ...(Number(ownAttr(firstRun, "spc")) ? { letterSpacing: Number(ownAttr(firstRun, "spc")) / 100 } : {}),
     fontFamily: attrOf(firstRun, "latin", "typeface") ?? attrOf(firstRun, "ea", "typeface"),
+    // 한글·기호(○ □ ※ 등)는 동아시아 글꼴로 그린다(엑셀). 라틴 글꼴만 쓰면 Times New Roman 의 작은 ○ 가 나왔다(8.8-2).
+    ...(() => {
+      const ea = attrOf(firstRun, "ea", "typeface") ?? attrOf(inheritedRunProps(txBody), "ea", "typeface");
+      return ea ? { eaFontFamily: ea } : {};
+    })(),
     bold: flag(firstRun, inheritedRunProps(txBody), "b"),
     ...((ownAttr(firstRun, "u") ?? ownAttr(inheritedRunProps(txBody), "u") ?? "none") !== "none" ? { underline: true } : {}),
     ...(flag(firstRun, inheritedRunProps(txBody), "i") ? { italic: true } : {}),
@@ -966,6 +973,7 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     outer.letterSpacing = inner.letterSpacing;
     outer.lineSpacing = inner.lineSpacing;
     outer.fontFamily = inner.fontFamily;
+    outer.eaFontFamily = inner.eaFontFamily;
     outer.bold = inner.bold;
     outer.italic = inner.italic;
     outer.underline = inner.underline;
@@ -973,6 +981,7 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     outer.align = inner.align;
     outer.valign = inner.valign;
     outer.noWrap = inner.noWrap;
+    outer.clipText = inner.clipText;
     outer.vertical = inner.vertical;
     // 글자는 안쪽 상자 자리에 있었다. 바깥 틀 기준 여백으로 옮겨 같은 자리에 둔다.
     const [t, r, b, l] = inner.inset ?? [0, 0, 0, 0];

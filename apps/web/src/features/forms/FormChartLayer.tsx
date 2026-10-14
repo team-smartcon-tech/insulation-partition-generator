@@ -45,7 +45,10 @@ function ChartSvg({ chart }: { chart: FormChart }) {
   const padTop = (chart.title ? TITLE_PX + 16 : 10) + (topLegend ? 18 : 0);
   const padLeft = (chart.valueTitle ? 22 : 0) + 46;
   const padRight = sideLegend ? Math.min(120, W * 0.28) : 14;
-  const padBottom = 26;
+  // 가로축 글자를 눕힌 차트는 아래 자리를 더 둔다(9.4 재검사율 45°).
+  const padBottom = chart.categoryRotation ? 44 : 26;
+  // 3차원 차트는 뒷벽 눈금선을 깊이만큼 비스듬히 올려 그린다(엑셀 3차원 묶은·누적 막대).
+  const depth = chart.groups.some((group) => group.threeD) ? 8 : 0;
   const plotW = Math.max(10, W - padLeft - padRight);
   const plotH = Math.max(10, H - padTop - padBottom);
   const n = Math.max(1, chart.categories.length || Math.max(0, ...series.map((s) => s.values.length)));
@@ -87,6 +90,20 @@ function ChartSvg({ chart }: { chart: FormChart }) {
             v = total > 0 ? (Math.max(0, v) / total) * 100 : 0;
           }
           if (!(v > 0)) {
+            // 3차원 막대는 값이 0 이어도 납작한 판(윗면)이 보인다(9.4 재검사율·NCR).
+            if (group.threeD && s.values[i] === 0) {
+              const x0 = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + band * 0.15 + barW * k;
+              const base0 = y(stacked ? base[i] : 0);
+              const d = Math.min(8, barW * 0.25);
+              bars.push(
+                <polygon
+                  key={`zs${seriesIndex}-${i}`}
+                  points={`${x0},${base0} ${x0 + d},${base0 - d} ${x0 + barW + d},${base0 - d} ${x0 + barW},${base0}`}
+                  fill={color}
+                  style={{ filter: "brightness(1.2)" }}
+                />,
+              );
+            }
             // 0 인 값도 엑셀은 "0" 레이블을 바닥에 적는다(9.4 NCR 4월·6~11월).
             if (s.showValues && s.values[i] === 0) {
               const x0 = stacked ? padLeft + band * i + (band - barW) / 2 : padLeft + band * i + band * 0.15 + barW * k;
@@ -168,21 +185,38 @@ function ChartSvg({ chart }: { chart: FormChart }) {
       )}
       {ticks.map((v) => (
         <g key={v}>
-          <line x1={padLeft} x2={padLeft + plotW} y1={y(v)} y2={y(v)} stroke="#e5e5e5" />
+          {depth > 0 && <line x1={padLeft} x2={padLeft + depth} y1={y(v)} y2={y(v) - depth} stroke="#d9d9d9" />}
+          <line x1={padLeft + depth} x2={padLeft + plotW + depth} y1={y(v) - depth} y2={y(v) - depth} stroke="#e5e5e5" />
           <text x={padLeft - 6} y={y(v) + 4} textAnchor="end" fontSize={TEXT_PX - 1} fill="#595959">
             {label(v, chart.valueFormat)}
           </text>
         </g>
       ))}
       <line x1={padLeft} x2={padLeft + plotW} y1={y(0)} y2={y(0)} stroke="#bfbfbf" />
+      {depth > 0 && (
+        // 바닥 — 앞 모서리와 뒷모서리를 잇는 평행사변형
+        <polygon
+          points={`${padLeft},${y(0)} ${padLeft + depth},${y(0) - depth} ${padLeft + plotW + depth},${y(0) - depth} ${padLeft + plotW},${y(0)}`}
+          fill="none"
+          stroke="#d9d9d9"
+        />
+      )}
       {bars}
       {lines}
       {labels}
-      {chart.categories.map((name, i) => (
-        <text key={i} x={padLeft + band * i + band / 2} y={padTop + plotH + 17} textAnchor="middle" fontSize={TEXT_PX - 1} fill="#595959">
-          {name}
-        </text>
-      ))}
+      {chart.categories.map((name, i) => {
+        const cx = padLeft + band * i + band / 2;
+        const cy = padTop + plotH + 17;
+        return chart.categoryRotation ? (
+          <text key={i} x={cx} y={cy - 4} textAnchor="start" fontSize={TEXT_PX - 1} fill="#595959" transform={`rotate(${chart.categoryRotation} ${cx} ${cy - 8})`}>
+            {name}
+          </text>
+        ) : (
+          <text key={i} x={cx} y={cy} textAnchor="middle" fontSize={TEXT_PX - 1} fill="#595959">
+            {name}
+          </text>
+        );
+      })}
       {legend && <Legend chart={chart} series={series} W={W} H={H} padTop={padTop} padRight={padRight} colorOf={colorOf} />}
     </svg>
   );

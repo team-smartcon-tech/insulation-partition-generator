@@ -150,6 +150,8 @@ export interface FormChart {
   valueMax?: number;
   valueStep?: number;
   categories: string[];
+  /** 가로축 글자 기울기(도, 시계 방향) */
+  categoryRotation?: number;
   groups: FormChartGroup[];
   /**
    * 범례. null 이면 없다. 엑셀이 자리·크기를 정해 둔 범례(manualLayout, 차트 크기에 대한 비율)는
@@ -260,6 +262,8 @@ export interface FormShape {
    */
   letterSpacing?: number;
   fontFamily?: string;
+  /** 한글·기호에 쓰는 동아시아 글꼴(엑셀 a:ea). 라틴 글꼴과 다르면 글자 종류에 따라 나눠 쓴다 */
+  eaFontFamily?: string;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -267,6 +271,8 @@ export interface FormShape {
   align?: "left" | "center" | "right";
   /** 글자의 세로 자리. 엑셀 기본은 위쪽이다(순서도 상자는 보통 가운데로 적혀 있다). */
   valign?: "top" | "middle" | "bottom";
+  /** 넘치는 글을 상자 안에서 자른다(엑셀 vertOverflow="clip") */
+  clipText?: boolean;
   /** 둥근 사각형의 모서리 반지름(짧은 변에 대한 비율, 0.5 = 알약). 없으면 기본 */
   roundRatio?: number;
   /** 줄 간격 — pt 는 고정 간격, ratio 는 글자 크기에 대한 배수(엑셀 "1줄" = 1.2) */
