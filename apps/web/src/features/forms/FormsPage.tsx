@@ -64,6 +64,7 @@ import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import HomeDashboard, { SitesAudit } from "./HomeDashboard";
 import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
+import AddSheetDialog from "./AddSheetDialog";
 import DropUploadDialog from "./DropUploadDialog";
 import AttachmentPanel from "./AttachmentPanel";
 import ServerSyncBanner from "./ServerSyncBanner";
@@ -306,6 +307,8 @@ function scrollToViewer(tries = 30) {
 
 export default function FormsPage() {
   const [state, setState] = useState<LoadState>({ status: "idle" });
+  /** [시트 추가] 창이 열려 있나 */
+  const [addingSheet, setAddingSheet] = useState(false);
   const [forms, setForms] = useState<FormSummary[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   // 다른 장으로 넘어가면 고른 범위를 놓는다 — 그 장에는 없는 자리라 엉뚱한 칸이 합쳐진다.
@@ -1985,20 +1988,20 @@ export default function FormsPage() {
     void refreshList();
   }
 
-  async function handleAddSheet() {
+  /**
+   * [시트 추가] — 바탕 시트를 작성자가 고른다(2026-10-14 사용자 요청). 처음엔 **견본**을 골라 둔다 —
+   * 직전 시트를 복사하면 지난달 내용이 그대로 딸려 온다. 어느 시트든 견본 표시("Sample")는 빠진다.
+   */
+  function handleAddSheet() {
     if (state.status !== "ready" || !sheet) return;
-    // 지금 보는 시트가 아니라 **빈 양식(견본)** 을 복사한다. 직전 시트를 복사하면
-    // 지난달 내용이 그대로 딸려 온다.
-    const source = template ?? sheet;
-    const name = window
-      .prompt(
-        `“${source.name}” 시트의 양식으로 새 장을 만듭니다.\n표·머리글은 그대로 두고 채워 넣은 내용은 비웁니다.\n\n새 시트 이름을 적어 주세요. (예: 2026-07)`,
-        "",
-      )
-      ?.trim();
-    if (!name) return;
+    setAddingSheet(true);
+  }
+
+  async function createSheet(source: string, name: string) {
+    if (state.status !== "ready") return;
+    setAddingSheet(false);
     try {
-      await addCustomSheet(state.id, { name, source: source.name });
+      await addCustomSheet(state.id, { name, source });
       await reloadSheets(name);
     } catch (error) {
       setStorageWarning(error instanceof Error ? error.message : "시트를 더하지 못했습니다.");
@@ -2625,6 +2628,14 @@ export default function FormsPage() {
           />
         )}
 
+        {addingSheet && state.status === "ready" && (
+          <AddSheetDialog
+            sheets={state.sheets.filter((item) => !item.custom).map((item) => item.name)}
+            initial={(template ?? sheet)?.name ?? ""}
+            onCancel={() => setAddingSheet(false)}
+            onConfirm={(source, name) => void createSheet(source, name)}
+          />
+        )}
         {slotWrite && (
           <SlotWriteDialog
             slotLabel={slotWrite.slotLabel}
@@ -2981,8 +2992,8 @@ export default function FormsPage() {
               {!readOnly && (
               <button
                 type="button"
-                onClick={() => void handleAddSheet()}
-                title={`“${(template ?? sheet).name}” 시트의 양식으로 새 장을 만듭니다. 표·머리글은 그대로, 채워 넣은 내용과 견본 표시는 비워집니다.`}
+                onClick={() => handleAddSheet()}
+                title="바탕으로 쓸 시트를 골라 새 장을 만듭니다. 표·머리글은 그대로, 채워 넣은 내용과 견본 표시는 비워집니다."
                 className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-dashed ring-slate-300 transition hover:bg-slate-50"
               >
                 <Plus size={13} /> 시트 추가
