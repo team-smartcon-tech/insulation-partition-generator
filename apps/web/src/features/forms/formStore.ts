@@ -228,6 +228,8 @@ export interface FormSummary {
   sheetDepts?: Record<string, string>;
   /** 시트 이름 → 마지막으로 글자를 고친 때 */
   sheetEditedAt?: Record<string, number>;
+  /** 서버에 있던 서류인가 — 서버에서 사라졌으면 지워진 것이라 다시 올리지 않는다 */
+  fromServer?: boolean;
   /** [시트 추가]로 더한 장 → 바탕 시트(서식 번호를 잇는다) */
   sheetSources?: Record<string, string>;
   /** [시트 추가]로 더한 장 → 더한 때 */
@@ -529,6 +531,7 @@ function summarize(form: StoredForm): FormSummary {
     templateUploadedAt: form.templateUploadedAt,
     sheetDepts: form.sheetDepts,
     sheetEditedAt: form.sheetEditedAt,
+    fromServer: form.fromServer,
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
