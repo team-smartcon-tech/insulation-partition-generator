@@ -20,6 +20,11 @@ export interface FormSite {
   members?: SiteMember[];
   /** 이 현장의 기본 결재선(칸 이름 → 사람들). 다음 서류에 미리 채운다. */
   lineDefaults?: LineDefaults;
+  /**
+   * 서버 목록에서 본 적이 있나. 본 적 있는 현장이 서버에서 사라지면 지워진 것이라 브라우저에서도 뺀다.
+   * 아직 서버에 못 올린 현장(본 적 없음)은 지키지 않으면 안 된다.
+   */
+  onServer?: boolean;
   /** 이 현장 작성 일정(품질관리계획서에 맞춘다) — 착공일·서식별 작성 주기·적용 제외 절 */
   qmp?: QmpSiteSettings;
 }
@@ -116,7 +121,8 @@ export function summarizeSites(
  * "우리 현장"이 새로 생겼고, 부산장안(B1) 같은 실제 현장은 보이지 않았다(2026-10-15 사용자 신고).
  * - 같은 번호: 브라우저에 있는 값을 쓰되, 비어 있는 조직·결재선·작성 일정은 서버 것으로 채운다.
  * - 같은 이름·다른 번호: 서버 번호로 바꾼다(`adopted` — 서류도 옮겨야 한다).
- * - 서버에만 있음: 더한다. 브라우저에만 있는 현장은 그대로 둔다(아직 못 올린 것).
+ * - 서버에만 있음: 더한다.
+ * - 브라우저에만 있음: 아직 못 올린 것이면 둔다. 예전에 서버에서 본 현장이면 서버에서 지워진 것이라 뺀다.
  */
 export function mergeServerSites(
   local: FormSite[],
@@ -126,7 +132,7 @@ export function mergeServerSites(
   const adopted: [string, string][] = [];
   const list = server.map((remote) => {
     const mine = local.find((site) => site.id === remote.id) ?? local.find((site) => site.name === remote.name && !used.has(site.id));
-    if (!mine) return remote;
+    if (!mine) return { ...remote, onServer: true };
     used.add(mine.id);
     if (mine.id !== remote.id) adopted.push([mine.id, remote.id]);
     return {
@@ -136,9 +142,11 @@ export function mergeServerSites(
       members: mine.members ?? remote.members,
       lineDefaults: mine.lineDefaults ?? remote.lineDefaults,
       qmp: mine.qmp ?? remote.qmp,
+      onServer: true,
     };
   });
-  return { list: [...list, ...local.filter((site) => !used.has(site.id) && !list.some((item) => item.id === site.id))], adopted };
+  const localOnly = local.filter((site) => !used.has(site.id) && !list.some((item) => item.id === site.id) && !site.onServer);
+  return { list: [...list, ...localOnly], adopted };
 }
 
 /**

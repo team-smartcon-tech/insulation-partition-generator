@@ -711,12 +711,24 @@ export async function storeServerForm(form: StoredForm, fields: Partial<StoredFo
   return current ? "updated" : "added";
 }
 
-/** 서버에서 받아 왔는데 서버에서 지워진 서류를 브라우저에서도 지운다. 지운 수를 돌려준다. */
+/**
+ * 서버 목록과 맞춘다. 지운 수를 돌려준다.
+ * - 서버에 있는 서류는 "서버에 있던 서류"로 표시한다(이 브라우저가 올린 것도).
+ * - 표시가 있는데 서버에서 사라졌으면 다른 곳에서 지운 것이라 브라우저에서도 지운다.
+ *   표시가 없는 것(아직 서버에 못 올린 것)은 지우지 않는다.
+ */
 export async function pruneServerForms(serverIds: Set<string>): Promise<number> {
   const forms = await run<StoredForm[]>("readonly", (store) => store.getAll());
-  const gone = forms.filter((form) => form.fromServer && !serverIds.has(form.id));
-  for (const form of gone) await run("readwrite", (store) => store.delete(form.id));
-  return gone.length;
+  let removed = 0;
+  for (const form of forms) {
+    if (serverIds.has(form.id)) {
+      if (!form.fromServer) await run("readwrite", (store) => store.put({ ...form, fromServer: true }));
+    } else if (form.fromServer) {
+      await run("readwrite", (store) => store.delete(form.id));
+      removed += 1;
+    }
+  }
+  return removed;
 }
 
 /** 새로 올린 엑셀을 저장한다. 저장한 내용을 그대로 돌려준다. */

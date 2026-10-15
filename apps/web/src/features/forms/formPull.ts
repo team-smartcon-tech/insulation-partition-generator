@@ -10,7 +10,8 @@
  * - 이 현장 서류 → 배포 양식 → 다른 현장 서류 순서로 받는다(지금 보는 화면부터 채운다).
  * - 서버가 1분 넘게 더 새것이면 적은 글자·결재·작성 부서를 덮는다. 원본 파일·줄 끼우기·즐겨찾기처럼
  *   서버에 없는 것은 그대로 둔다.
- * - 서버에서 받아 온 서류가 서버에서 지워졌으면 브라우저에서도 지운다.
+ * - 서버에 있던 서류(이 브라우저가 올린 것 포함)가 서버에서 지워졌으면 브라우저에서도 지운다.
+ *   아직 서버에 못 올린 서류는 건드리지 않는다.
  */
 import { fetchDoc, fetchDocs, type DocRow } from "./formServer.ts";
 import { listForms, pruneServerForms, storeServerForm, UNCATEGORIZED, type StoredForm } from "./formStore.ts";
@@ -22,6 +23,8 @@ const record = <T>(value: unknown): T => (value && typeof value === "object" && 
 
 /** 서버가 이만큼 넘게 더 새것이어야 덮는다 — 내가 방금 올린 것의 서버 시각은 몇 초 늦다. */
 const NEWER_MARGIN_MS = 60_000;
+/** 서버 목록 한 번의 최대 줄 수(Supabase 기본값) */
+const SERVER_PAGE_LIMIT = 1000;
 /** 한꺼번에 받는 수 */
 const PARALLEL = 4;
 
@@ -99,7 +102,8 @@ export async function pullDocs(
 ): Promise<PullResult> {
   const result: PullResult = { added: 0, updated: 0, removed: 0, failed: 0 };
   const all = await fetchDocs();
-  result.removed = await pruneServerForms(new Set(all.map((row) => row.id)));
+  // 서버는 한 번에 1000줄까지만 준다. 잘린 목록으로 맞추면 멀쩡한 서류를 지우게 되니 그때는 지우지 않는다.
+  if (all.length < SERVER_PAGE_LIMIT) result.removed = await pruneServerForms(new Set(all.map((row) => row.id)));
   // 파일 올리기가 끝나지 않은 꼬리표는 열 수 없어 받지 않는다.
   const rows = all.filter((row) => row.file_size !== null || row.attachment);
   const pendingDeletes = new Set(readPendingDeletes());

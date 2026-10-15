@@ -29,3 +29,11 @@ test('저절로 만든 빈 "우리 현장" 대신 실제 현장을 먼저 보여
   assert.equal(pickStartSite([busan, ours], 'o', ['o']), 'o');
   assert.equal(pickStartSite([ours], 'o', []), 'o');
 });
+
+test('서버에서 본 적 있는 현장이 서버에서 사라지면 뺀다 — 아직 못 올린 현장은 지킨다', () => {
+  const first = mergeServerSites([], [busan, ours]).list;
+  assert.equal(first.every((s) => s.onServer), true);
+  const notYet = { id: 'n', name: '새 현장', createdAt: 5 };
+  const { list } = mergeServerSites([...first, notYet], [busan]);
+  assert.deepEqual(list.map((s) => s.name), ['부산장안(B1)', '새 현장']);
+});
