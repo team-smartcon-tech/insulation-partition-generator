@@ -19,14 +19,15 @@ import {
   deleteDoc,
   deleteTaxonomy,
   fetchDoc,
+  fetchSites,
   fetchTaxonomies,
   pushSite,
   pushTaxonomy,
   type NewDoc,
 } from "./formServer.ts";
-import type { FormSite } from "./sites.ts";
+import { mergeServerSites, type FormSite } from "./sites.ts";
 import { mergeServerTaxonomies, type Taxonomy } from "./taxonomy.ts";
-import { adoptSiteId, adoptTaxonomyId, loadTaxonomies, storeTaxonomies } from "./formStore.ts";
+import { adoptSiteId, adoptTaxonomyId, loadSites, loadTaxonomies, storeSites, storeTaxonomies } from "./formStore.ts";
 import {
   addPending,
   readPendingDeletes,
@@ -74,6 +75,27 @@ export async function syncSites(sites: FormSite[]): Promise<void> {
       }
     }
   });
+}
+
+/**
+ * 서버의 현장 목록을 받아 브라우저 목록에 합친다. 서버에 못 닿으면 null(브라우저 것을 쓴다).
+ * 다른 사람이 처음 열어도 부산장안(B1) 같은 실제 현장이 보이게 한다.
+ */
+export async function pullSites(): Promise<FormSite[] | null> {
+  const result = await enqueue(async () => {
+    let server: FormSite[];
+    try {
+      server = await fetchSites();
+    } catch (error) {
+      console.warn("[스마트폼] 서버 현장 목록을 받아 오지 못했습니다(브라우저에 있는 것을 씁니다):", error);
+      return null;
+    }
+    const { list, adopted } = mergeServerSites(await loadSites(), server);
+    await storeSites(list);
+    for (const [oldId, newId] of adopted) await adoptSiteId(oldId, newId);
+    return list;
+  });
+  return result ?? null;
 }
 
 /** 코드표를 서버에도 올린다(서버에 못 닿으면 화면은 그대로 돌아간다). */

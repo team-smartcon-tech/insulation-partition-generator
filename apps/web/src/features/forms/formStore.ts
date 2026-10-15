@@ -1035,6 +1035,11 @@ export async function loadSites(): Promise<FormSite[]> {
   return (await readMeta<FormSite[]>(SITES_KEY)) ?? [];
 }
 
+/** 현장 목록을 브라우저에만 저장한다 — 서버에서 받아 온 것을 다시 올리지 않을 때. */
+export async function storeSites(list: FormSite[]): Promise<void> {
+  await writeMeta({ [SITES_KEY]: list });
+}
+
 /** 현장 목록을 통째로 저장한다(추가·이름 바꾸기). */
 export async function saveSites(list: FormSite[]): Promise<void> {
   await writeMeta({ [SITES_KEY]: list });

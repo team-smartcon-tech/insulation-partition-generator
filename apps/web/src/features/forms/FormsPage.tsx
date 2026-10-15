@@ -116,6 +116,7 @@ import { paperLabel } from "./printSheet";
 import {
   FIRST_SITE_NAME,
   addSite,
+  pickStartSite,
   formsOfSite,
   renameSite,
   updateSite,
@@ -159,7 +160,7 @@ import {
   writeLastOpenedId,
   type FormSummary,
 } from "./formStore";
-import { pullTaxonomies, syncTaxonomyDelete } from "./formSync";
+import { pullSites, pullTaxonomies, syncTaxonomyDelete } from "./formSync";
 import type { FormSheet, FormValues } from "./types";
 import {
   addGroup,
@@ -650,6 +651,13 @@ export default function FormsPage() {
       // 보여 주면 "어디에 올라가는지" 모른 채 올리게 된다.
       try {
         let list = await loadSites();
+        // 서버 현장 목록을 먼저 받는다 — 처음 여는 사람에게 "우리 현장" 대신 실제 현장이 보이게.
+        // 서버가 늦으면(4초) 기다리지 않고 브라우저 것을 쓴다.
+        const pulled = await Promise.race([
+          pullSites().catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        ]);
+        if (pulled && pulled.length > 0) list = pulled;
         if (list.length === 0) {
           list = addSite([], FIRST_SITE_NAME, () => crypto.randomUUID());
           await saveSites(list);
@@ -663,7 +671,8 @@ export default function FormsPage() {
               return undefined;
             }
           })();
-          setSiteId(list.some((site) => site.id === remembered) ? remembered : list[0].id);
+          const docSiteIds = (await listForms().catch(() => [])).map((form) => form.siteId);
+          setSiteId(pickStartSite(list, remembered, docSiteIds));
         }
 
         // 구분이 생기기 전에 올린 서류를 배포 양식 / 현장 서류로 나눈다(처음 한 번만 할 일이 있다).

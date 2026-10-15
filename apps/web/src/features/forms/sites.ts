@@ -108,3 +108,51 @@ export function summarizeSites(
     return { site, filled: slots.size, total, unfiled, updatedAt };
   });
 }
+
+/**
+ * 서버 현장 목록을 브라우저 목록에 합친다.
+ *
+ * 화면은 브라우저에 있는 현장만 보여 줬다. 그래서 다른 사람이 처음 열면 현장이 하나도 없어
+ * "우리 현장"이 새로 생겼고, 부산장안(B1) 같은 실제 현장은 보이지 않았다(2026-10-15 사용자 신고).
+ * - 같은 번호: 브라우저에 있는 값을 쓰되, 비어 있는 조직·결재선·작성 일정은 서버 것으로 채운다.
+ * - 같은 이름·다른 번호: 서버 번호로 바꾼다(`adopted` — 서류도 옮겨야 한다).
+ * - 서버에만 있음: 더한다. 브라우저에만 있는 현장은 그대로 둔다(아직 못 올린 것).
+ */
+export function mergeServerSites(
+  local: FormSite[],
+  server: FormSite[],
+): { list: FormSite[]; adopted: [oldId: string, newId: string][] } {
+  const used = new Set<string>();
+  const adopted: [string, string][] = [];
+  const list = server.map((remote) => {
+    const mine = local.find((site) => site.id === remote.id) ?? local.find((site) => site.name === remote.name && !used.has(site.id));
+    if (!mine) return remote;
+    used.add(mine.id);
+    if (mine.id !== remote.id) adopted.push([mine.id, remote.id]);
+    return {
+      ...remote,
+      ...mine,
+      id: remote.id,
+      members: mine.members ?? remote.members,
+      lineDefaults: mine.lineDefaults ?? remote.lineDefaults,
+      qmp: mine.qmp ?? remote.qmp,
+    };
+  });
+  return { list: [...list, ...local.filter((site) => !used.has(site.id) && !list.some((item) => item.id === site.id))], adopted };
+}
+
+/**
+ * 처음 보여 줄 현장. 지난번에 본 현장이 있으면 그것 — 다만 저절로 만들어진 빈 "우리 현장"이면
+ * 실제 현장을 먼저 보여 준다. 서류가 있는 현장 → "우리 현장"이 아닌 현장 → 첫 현장 순.
+ */
+export function pickStartSite(
+  sites: FormSite[],
+  remembered: string | undefined,
+  docSiteIds: (string | undefined)[],
+): string | undefined {
+  const hasDocs = (id: string) => docSiteIds.includes(id);
+  const placeholder = (site: FormSite) => site.name === FIRST_SITE_NAME && !hasDocs(site.id);
+  const mine = sites.find((site) => site.id === remembered);
+  if (mine && !(placeholder(mine) && sites.length > 1)) return mine.id;
+  return (sites.find((site) => hasDocs(site.id)) ?? sites.find((site) => !placeholder(site)) ?? sites[0])?.id;
+}
