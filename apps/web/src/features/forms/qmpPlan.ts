@@ -13,6 +13,8 @@
  * 배포 양식에서 만든 현장 서류가 저절로 맞물린다.
  */
 
+import { PERIODIC, cycleOf, parseDay, periodKeyOf, periodsBetween, sheetDate, type QmpCycle, type QmpSiteSettings } from "./qmpCycle.ts";
+
 export type QmpDept = "품질" | "공무" | "공사";
 export const QMP_DEPTS: QmpDept[] = ["품질", "공무", "공사"];
 
@@ -260,6 +262,11 @@ export interface QmpNamed {
   sheetNames: string[];
   title?: string;
   fileName?: string;
+  /**
+   * [시트 추가]로 더한 장 → 바탕으로 쓴 원본 시트. 더한 장은 이름이 "2026-07" 처럼 서식 번호가 없어서,
+   * 원본 시트의 번호로 같은 서식의 다음 장임을 안다(월별 서식의 달마다 장).
+   */
+  sheetSources?: Record<string, string>;
 }
 
 /**
@@ -275,6 +282,12 @@ export function sheetCodesOf(doc: QmpNamed): Map<string, string> {
   const codes = new Map<string, string>();
   for (const name of doc.sheetNames) {
     const code = qaCodeOf(name);
+    if (code) codes.set(name, code);
+  }
+  // 더한 장은 원본 시트의 번호를 잇는다.
+  for (const name of doc.sheetNames) {
+    const source = doc.sheetSources?.[name];
+    const code = !codes.has(name) && source ? codes.get(source) ?? qaCodeOf(source) : undefined;
     if (code) codes.set(name, code);
   }
   if (codes.size > 0) return codes;
@@ -311,6 +324,10 @@ export interface QmpDoc extends QmpNamed {
   }[];
   /** 시트 이름 → 그 장을 쓰는 부서 */
   sheetDepts?: Record<string, string>;
+  /** 서류를 만든 때 — 이름에 달이 없는 장은 이때 쓴 것으로 본다 */
+  uploadedAt?: number;
+  /** [시트 추가]로 더한 장 → 더한 때 */
+  sheetMadeAt?: Record<string, number>;
 }
 
 export interface QmpFormState {
@@ -322,6 +339,19 @@ export interface QmpFormState {
   finishedAt?: number;
   /** 그 장을 쓰는 부서([작성하기] 때 정한다). 정하기 전에 만든 서류는 없다. */
   dept?: QmpDept;
+  /** 이 현장에서 정한 작성 주기 */
+  cycle?: QmpCycle;
+  /** 주기 서식: 착공일부터 오늘까지의 기간마다 상태(마지막이 지금 기간) */
+  periods?: { key: string; label: string; status: QmpStatus; docId?: string; sheetName?: string }[];
+  /** 주기 서식: 쓴 기간 수 / 써야 할 기간 수(지금 기간 포함) */
+  written?: number;
+  due?: number;
+  /** 수시 서식: 쓴 장 수 */
+  count?: number;
+  /** 이 현장 계획서가 적용 제외한 절의 서식 — 세지 않는다 */
+  excluded?: boolean;
+  /** 준공 때 쓰는 서식인데 아직 안 썼다 — 때가 아니므로 세지 않는다 */
+  notYet?: boolean;
 }
 
 const RANK: Record<QmpStatus, number> = { none: 0, doing: 1, done: 2 };
@@ -336,8 +366,14 @@ const RANK: Record<QmpStatus, number> = { none: 0, doing: 1, done: 2 };
  * 같은 서식이 여러 장이면(월별) **한 장이라도 끝났으면 초록**이다 — 계획서는 "작성·보관"을 묻지,
  * 모든 달을 다 결재했는지까지 이 화면이 따질 일은 아니다.
  */
-export function qmpStates(docs: QmpDoc[]): Map<string, QmpFormState> {
+export function qmpStates(
+  docs: QmpDoc[],
+  /** 현장 계획서 설정과 오늘 — 주면 주기별 진척·적용 제외까지 매긴다 */
+  options?: { settings?: QmpSiteSettings; today?: Date },
+): Map<string, QmpFormState> {
   const result = new Map<string, QmpFormState>();
+  /** 서식마다 쓴 장들(주기 진척을 셀 때 쓴다) */
+  const instances = new Map<string, { state: QmpFormState; at: number }[]>();
   const offer = (code: string, next: QmpFormState) => {
     const current = result.get(code);
     if (
@@ -367,15 +403,81 @@ export function qmpStates(docs: QmpDoc[]): Map<string, QmpFormState> {
         state = { status: working.has(sheetName) ? "done" : "none" };
       }
       const dept = doc.sheetDepts?.[sheetName];
-      offer(code, {
+      const full: QmpFormState = {
         ...state,
         docId: doc.id,
         sheetName,
         ...(QMP_DEPTS.includes(dept as QmpDept) ? { dept: dept as QmpDept } : {}),
-      });
+      };
+      offer(code, full);
+      if (state.status !== "none") {
+        const at = sheetDate(sheetName)?.getTime() ?? doc.sheetMadeAt?.[sheetName] ?? doc.uploadedAt ?? 0;
+        instances.set(code, [...(instances.get(code) ?? []), { state: full, at }]);
+      }
     }
   }
+  if (options) applyCycles(result, instances, options.settings, options.today ?? new Date());
   return result;
+}
+
+/**
+ * 현장 설정으로 서식마다 주기 진척을 더한다.
+ * - 주기 서식: 착공일부터 기간마다 쓴 장이 있나. 지난 기간이 다 찼으면 초록, 하나라도 썼으면 노랑.
+ *   지금 기간은 아직 안 써도 빠진 것으로 치지 않는다.
+ * - 수시: 쓴 장 수만 센다(몇 번이 맞는지 정할 수 없다).
+ * - 준공 때: 쓰기 전에는 세지 않는다.
+ * - 적용 제외 절: 세지 않는다.
+ */
+function applyCycles(
+  result: Map<string, QmpFormState>,
+  instances: Map<string, { state: QmpFormState; at: number }[]>,
+  settings: QmpSiteSettings | undefined,
+  today: Date,
+) {
+  const start = parseDay(settings?.startDate);
+  const excluded = new Set(settings?.excluded ?? []);
+  for (const sec of QMP_SECTIONS) {
+    for (const form of sec.forms) {
+      if (form.reference) continue;
+      const base: QmpFormState = result.get(form.code) ?? { status: "none" };
+      const cycle = cycleOf(form.code, settings);
+      const list = instances.get(form.code) ?? [];
+      let next: QmpFormState = { ...base, cycle };
+      if (excluded.has(sec.no)) next = { ...next, excluded: true };
+      else if (cycle === "adhoc") next = { ...next, count: list.length };
+      else if (cycle === "completion" && base.status === "none") next = { ...next, notYet: true };
+      else if (PERIODIC.includes(cycle) && start) {
+        const periods = periodsBetween(cycle, start, today);
+        const byKey = new Map<string, QmpFormState>();
+        const firstKey = periods[0]?.key;
+        for (const item of list) {
+          let key = periodKeyOf(cycle, new Date(item.at));
+          if (item.at < (periods[0]?.from ?? 0) && firstKey) key = firstKey;
+          const current = byKey.get(key);
+          if (!current || RANK[item.state.status] > RANK[current.status]) byKey.set(key, item.state);
+        }
+        const rows = periods.map((period) => {
+          const hit = byKey.get(period.key);
+          return {
+            key: period.key,
+            label: period.label,
+            status: hit?.status ?? ("none" as QmpStatus),
+            ...(hit?.docId ? { docId: hit.docId, sheetName: hit.sheetName } : {}),
+          };
+        });
+        const written = rows.filter((row) => row.status === "done").length;
+        const past = rows.slice(0, -1);
+        const status: QmpStatus =
+          rows.length > 0 && past.every((row) => row.status === "done") && written > 0
+            ? "done"
+            : rows.some((row) => row.status !== "none")
+              ? "doing"
+              : "none";
+        next = { ...next, status, periods: rows, written, due: rows.length };
+      }
+      result.set(form.code, next);
+    }
+  }
 }
 
 /** 배포 양식 가운데 그 서식 시트를 가진 것(가장 최근에 올라온 것). [작성하기]에 쓴다. */
@@ -422,7 +524,10 @@ export function qmpTally(
     if (chapter && chapterOf(sec.no) !== chapter) continue;
     for (const form of sec.forms) {
       if (form.reference && !includeReference) continue;
-      tally[states.get(form.code)?.status ?? "none"] += 1;
+      const state = states.get(form.code);
+      // 적용 제외 절, 아직 때가 아닌 준공 서식은 세지 않는다.
+      if (state?.excluded || state?.notYet) continue;
+      tally[state?.status ?? "none"] += 1;
       tally.total += 1;
     }
   }

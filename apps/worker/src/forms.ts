@@ -350,19 +350,30 @@ forms.post("/sites", async (c) => {
       sortOrder?: number;
       members?: unknown;
       lineDefaults?: unknown;
+      qmpSettings?: unknown;
     };
     const name = String(body.name ?? "").trim();
     if (!name) return c.json({ error: "현장 이름을 적어 주세요." }, 400);
 
     const user = currentUser(c);
-    const res = await supabaseRest(c.env, "POST", "/form_sites", {
+    const row: Record<string, unknown> = {
       ...(uuidOrNull(body.id) ? { id: uuidOrNull(body.id) } : {}),
       name,
       sort_order: Number.isFinite(body.sortOrder) ? Number(body.sortOrder) : 0,
       members: Array.isArray(body.members) ? body.members : [],
       line_defaults: body.lineDefaults && typeof body.lineDefaults === "object" ? body.lineDefaults : {},
       created_by: user.id,
-    });
+    };
+    if (body.qmpSettings && typeof body.qmpSettings === "object") row.qmp_settings = body.qmpSettings;
+    let res = await supabaseRest(c.env, "POST", "/form_sites", row);
+    // 계획서 설정 칸(`qmp_settings`, 2026-10-15)은 운영 표에 나중에 더한다. 칸이 아직 없으면 그것만 빼고 저장한다.
+    if (!res.ok && "qmp_settings" in row) {
+      const text = await res.clone().text();
+      if (/qmp_settings/.test(text)) {
+        const { qmp_settings: _skipped, ...rest } = row;
+        res = await supabaseRest(c.env, "POST", "/form_sites", rest);
+      }
+    }
     // 같은 이름의 현장이 이미 있으면 그것을 돌려준다 — 두 개가 생기면 서류가 갈린다.
     if (res.status === 409) {
       const found = await supabaseRest(c.env, "GET", `/form_sites?name=eq.${encodeURIComponent(name)}&select=*`);
@@ -384,19 +395,30 @@ forms.post("/sites", async (c) => {
  */
 forms.patch("/sites/:id", async (c) => {
   try {
-    const body = (await c.req.json()) as { name?: string; members?: unknown; lineDefaults?: unknown; sortOrder?: number };
+    const body = (await c.req.json()) as {
+      name?: string;
+      members?: unknown;
+      lineDefaults?: unknown;
+      sortOrder?: number;
+      qmpSettings?: unknown;
+    };
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (body.qmpSettings !== undefined) patch.qmp_settings = body.qmpSettings ?? {};
     if (body.name !== undefined) patch.name = String(body.name).trim();
     if (body.members !== undefined) patch.members = Array.isArray(body.members) ? body.members : [];
     if (body.lineDefaults !== undefined) patch.line_defaults = body.lineDefaults ?? {};
     if (body.sortOrder !== undefined) patch.sort_order = Number(body.sortOrder) || 0;
 
-    const res = await supabaseRest(
-      c.env,
-      "PATCH",
-      `/form_sites?id=eq.${encodeURIComponent(c.req.param("id"))}`,
-      patch,
-    );
+    const target = `/form_sites?id=eq.${encodeURIComponent(c.req.param("id"))}`;
+    let res = await supabaseRest(c.env, "PATCH", target, patch);
+    // 계획서 설정 칸이 아직 없는 운영 표에서도 다른 저장은 되게 그 칸만 빼고 다시 보낸다.
+    if (!res.ok && "qmp_settings" in patch) {
+      const text = await res.clone().text();
+      if (/qmp_settings/.test(text)) {
+        const { qmp_settings: _skipped, ...rest } = patch;
+        res = await supabaseRest(c.env, "PATCH", target, rest);
+      }
+    }
     if (!res.ok) throw new Error(await res.text());
     const site = await firstRow(res);
     if (!site) return c.json({ error: "그 현장을 찾지 못했습니다." }, 404);

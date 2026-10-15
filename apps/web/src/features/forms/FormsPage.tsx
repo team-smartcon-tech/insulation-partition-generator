@@ -2402,7 +2402,18 @@ export default function FormsPage() {
             <QmpBoard
               mode="site"
               title={`${writeSite?.name ?? "현장"} 서류함`}
-              states={qmpStates(siteForms)}
+              states={qmpStates(siteForms, { settings: writeSite?.qmp })}
+              siteName={writeSite?.name}
+              settings={writeSite?.qmp}
+              onSaveSettings={(qmp) => {
+                if (!writeSite) return;
+                const next = updateSite(sites, writeSite.id, { qmp });
+                void saveSites(next)
+                  .then(() => setSites(next))
+                  .catch((error) =>
+                    setStorageWarning(error instanceof Error ? `계획서 설정을 저장하지 못했습니다: ${error.message}` : "계획서 설정을 저장하지 못했습니다."),
+                  );
+              }}
               others={siteForms
                 .filter((form) => !hasQmpSheet(form))
                 .map((form) => ({ id: form.id, title: form.title || form.fileName }))}

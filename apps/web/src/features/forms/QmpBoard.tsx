@@ -13,7 +13,9 @@
  * (누가 썼든 서류가 있으면 켜진다) — 부서마다 불을 달면 서식 한 장에 불이 셋 붙어 흐려진다.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { Check, ChevronDown, Download, FilePenLine, FileSpreadsheet, Search, Upload, X } from "lucide-react";
+import { Check, ChevronDown, Download, FilePenLine, FileSpreadsheet, Search, Settings2, Upload, X } from "lucide-react";
+import QmpSettingsDialog from "./QmpSettingsDialog";
+import { CYCLE_LABEL, PERIODIC, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
 import {
   QMP_CHAPTERS,
   QMP_DEPTS,
@@ -56,6 +58,10 @@ interface Props {
   busy?: boolean;
   /** 도구 줄 오른쪽에 더 붙일 것(현장 서류함의 "배포 양식에서 가져오기" 등) */
   toolbarExtra?: ReactNode;
+  /** 현장 서류함: 이 현장 계획서 설정(착공일·작성 주기·적용 제외)과 저장 */
+  siteName?: string;
+  settings?: QmpSiteSettings;
+  onSaveSettings?: (next: QmpSiteSettings) => void;
 }
 
 const CHAPTER_NOS = ["4", "5", "6", "7", "8", "9", "10"];
@@ -98,7 +104,11 @@ export default function QmpBoard({
   onImportAll,
   busy,
   toolbarExtra,
+  siteName,
+  settings,
+  onSaveSettings,
 }: Props) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const library = mode === "library";
   /** 배포 양식함은 절차·기준 문서(PROCESS 등)도 양식이므로 함께 센다. */
   const withRefs = library;
@@ -189,6 +199,20 @@ export default function QmpBoard({
               ? "품질관리계획서 서식별로 회사 양식이 올라와 있는지 봅니다. 양식 엑셀의 시트 이름(QA-7.2-2 등)으로 저절로 제자리를 찾습니다."
               : "품질관리계획서 절마다 작성 부서(첨부 QA-6.3-2)가 서류를 작성해 결재까지 마치면 초록불이 켜집니다."}
           </p>
+          {!library && onSaveSettings && (
+            <p className="mt-1 text-xs text-slate-500">
+              {settings?.startDate ? (
+                <>
+                  착공 {settings.startDate.replace(/-/g, ".")} 부터 월간·분기·연간 서식의 작성 횟수를 셉니다.
+                  {(settings.excluded?.length ?? 0) > 0 && ` 적용 제외: ${settings.excluded!.join(", ")}`}
+                </>
+              ) : (
+                <span className="text-amber-700">
+                  [계획서 설정]에서 착공일을 정하면 월간·분기·연간 서식이 몇 번 중 몇 번 작성됐는지 보입니다.
+                </span>
+              )}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
@@ -213,6 +237,16 @@ export default function QmpBoard({
           >
             {library ? "빠진 양식만" : "아직 안 끝난 것만"}
           </button>
+          {!library && onSaveSettings && (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              title="이 현장 품질관리계획서에 맞게 착공일·서식별 작성 주기·적용 제외 절을 정합니다"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50"
+            >
+              <Settings2 size={13} /> 계획서 설정
+            </button>
+          )}
           {toolbarExtra}
           {onImportAll && (
             <button
@@ -360,9 +394,12 @@ export default function QmpBoard({
                 <div className="mt-3 space-y-4">
                   {inChapter.map((sec) => {
                     const secTally = { done: 0, doing: 0, total: 0 };
+                    const secExcluded = !library && (settings?.excluded ?? []).includes(sec.no);
                     for (const form of sec.forms) {
                       if (!withRefs && form.reference) continue;
-                      const status = states.get(form.code)?.status ?? "none";
+                      const formState = states.get(form.code);
+                      if (formState?.excluded || formState?.notYet) continue;
+                      const status = formState?.status ?? "none";
                       if (status === "done") secTally.done += 1;
                       if (status === "doing") secTally.doing += 1;
                       secTally.total += 1;
@@ -377,9 +414,14 @@ export default function QmpBoard({
                             {secTally.total === 0 ? "–" : `${secTally.done}/${secTally.total}`}
                           </span>
                           <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700">
-                            {!library && <Lamp status={lampOf(secTally)} size={8} />}
+                            {!library && !secExcluded && <Lamp status={lampOf(secTally)} size={8} />}
                             작성 {[`${sec.lead}(주관)`, ...sec.help].join(" · ")}
                           </span>
+                          {secExcluded && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                              이 현장 적용 제외
+                            </span>
+                          )}
                         </h4>
                         <ul className="mt-2 grid gap-x-8 lg:grid-cols-2">
                           {sec.forms.map((form) => (
@@ -441,6 +483,17 @@ export default function QmpBoard({
           )}
         </div>
       </div>
+      {settingsOpen && onSaveSettings && (
+        <QmpSettingsDialog
+          siteName={siteName ?? "현장"}
+          settings={settings}
+          onCancel={() => setSettingsOpen(false)}
+          onSave={(next) => {
+            setSettingsOpen(false);
+            onSaveSettings(next);
+          }}
+        />
+      )}
       {picking && (
         <DeptPickDialog
           code={picking.code}
@@ -569,21 +622,53 @@ function FormRow({
       {state.dept}
     </button>
   ) : null;
+  const [open, setOpen] = useState(false);
+  const cycle = !library && !reference ? state?.cycle : undefined;
+  const periodic = cycle !== undefined && PERIODIC.includes(cycle);
+  const periods = state?.periods;
+  /** 지난 기간 가운데 비어 있는 수(지금 기간은 빼고) */
+  const missed = periods ? periods.slice(0, -1).filter((period) => period.status === "none").length : 0;
+  /** 주기 표시 — 누르면 기간별 칸이 펼쳐진다 */
+  const cycleTag = !cycle || cycle === "once" || state?.excluded || state?.notYet ? null : periodic && periods ? (
+    <button
+      type="button"
+      onClick={() => setOpen((on) => !on)}
+      aria-expanded={open}
+      title={missed > 0 ? `지난 기간 중 ${missed}번이 비어 있습니다 — 눌러서 기간별로 봅니다` : "눌러서 기간별로 봅니다"}
+      className={
+        "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] tabular-nums ring-1 transition " +
+        (missed > 0 ? "bg-rose-50 text-rose-700 ring-rose-200 hover:bg-rose-100" : "bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100")
+      }
+    >
+      {CYCLE_LABEL[cycle]} · {state?.written ?? 0}/{state?.due ?? 0}
+      <ChevronDown size={11} aria-hidden className={open ? "rotate-180 transition" : "transition"} />
+    </button>
+  ) : (
+    <span
+      className="rounded bg-slate-50 px-1.5 py-0.5 text-[11px] tabular-nums text-slate-500 ring-1 ring-slate-200"
+      title={periodic ? "[계획서 설정]에서 착공일을 정하면 몇 번 중 몇 번 썼는지 셉니다" : "일이 생길 때마다 쓰는 서식 — 쓴 장 수"}
+    >
+      {CYCLE_LABEL[cycle]}
+      {cycle === "adhoc" ? ` · ${state?.count ?? 0}건` : ""}
+    </span>
+  );
   return (
-    <li className="flex h-9 items-center gap-3 border-b border-slate-100 text-sm">
+    <li className="border-b border-slate-100">
+      <div className="flex h-9 items-center gap-3 text-sm">
       <span className="w-16 shrink-0 text-xs tabular-nums text-slate-400">QA-{code}</span>
       {state?.docId ? (
         <button
           type="button"
           onClick={() => onOpen(state.docId!, state.sheetName)}
           title={library ? `${name} — 배포 양식 열기` : `${name} — 이 현장 서류 열기`}
-          className={"min-w-0 flex-1 truncate text-left hover:text-blue-700 hover:underline " + (dim ? "text-slate-400" : "text-slate-600")}
+          className={"min-w-0 flex-1 truncate text-left hover:text-blue-700 hover:underline " + (dim || state.excluded ? "text-slate-400" : "text-slate-600")}
         >
           {name}
         </button>
       ) : (
-        <span className={"min-w-0 flex-1 truncate " + (dim ? "text-slate-400" : "text-slate-600")}>{name}</span>
+        <span className={"min-w-0 flex-1 truncate " + (dim || state?.excluded ? "text-slate-400" : "text-slate-600")}>{name}</span>
       )}
+      {cycleTag}
       {library ? (
         status === "none" ? (
           <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-slate-400">
@@ -598,17 +683,23 @@ function FormRow({
         )
       ) : reference ? (
         <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] text-slate-500">참고</span>
+      ) : state?.excluded ? (
+        <span className="shrink-0 text-xs text-slate-400">적용 제외</span>
+      ) : state?.notYet ? (
+        <span className="shrink-0 text-xs text-slate-400" title="준공 때 쓰는 서식입니다 — 그 전에는 세지 않습니다">
+          준공 때 작성
+        </span>
       ) : status === "done" ? (
         <span className="inline-flex shrink-0 items-center gap-1.5 text-xs tabular-nums text-green-700">
           {deptTag}
           <Lamp status="done" />
-          {state?.finishedAt ? formatDate(state.finishedAt) : "작성됨"}
+          {periodic && periods ? "기간 모두 작성" : state?.finishedAt ? formatDate(state.finishedAt) : "작성됨"}
         </span>
       ) : status === "doing" ? (
         <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-amber-700">
           {deptTag}
           <Lamp status="doing" />
-          작성 중
+          {periodic && periods && missed > 0 ? `${missed}번 빠짐` : "작성 중"}
         </span>
       ) : (
         <span className="inline-flex shrink-0 items-center gap-2 text-xs">
@@ -630,6 +721,91 @@ function FormRow({
           )}
         </span>
       )}
+      </div>
+      {open && periods && cycle && <PeriodDots cycle={cycle} periods={periods} onOpen={onOpen} onWrite={onWrite} />}
     </li>
+  );
+}
+
+/** 기간별 칸 — 해마다 한 줄. ● 씀, ◐ 작성 중, ○ 빠짐, 점선 ○ 지금 기간(아직 안 써도 됨) */
+function PeriodDots({
+  cycle,
+  periods,
+  onOpen,
+  onWrite,
+}: {
+  cycle: QmpCycle;
+  periods: NonNullable<QmpFormState["periods"]>;
+  onOpen: (docId: string, sheetName?: string) => void;
+  onWrite?: () => void;
+}) {
+  const years = new Map<string, typeof periods>();
+  for (const period of periods) {
+    const year = period.key.slice(0, 4);
+    years.set(year, [...(years.get(year) ?? []), period]);
+  }
+  const lastKey = periods[periods.length - 1]?.key;
+  /** 해의 몇 번째 칸인가 — 첫 해는 착공 전 칸을 비워 두어 열이 1월(1분기)부터 맞게 */
+  const slot = (key: string) =>
+    cycle === "monthly" ? Number(key.slice(5, 7)) - 1 : cycle === "quarterly" || cycle === "half" ? Number(key.slice(6)) - 1 : 0;
+  const slots = cycle === "monthly" ? 12 : cycle === "quarterly" ? 4 : cycle === "half" ? 2 : 0;
+  return (
+    <div className="mb-2 ml-[76px] space-y-1 rounded-lg bg-slate-50 px-3 py-2">
+      {[...years.entries()].map(([year, list]) => (
+        <div key={year} className="flex items-center gap-2">
+          <span className="w-10 shrink-0 text-[11px] tabular-nums text-slate-500">{year}</span>
+          <div className="flex flex-wrap gap-1">
+            {Array.from({ length: slot(list[0].key) }, (_, i) => (
+              <span key={`pad${i}`} aria-hidden className="h-3.5 w-3.5" />
+            ))}
+            {list.map((period) => {
+              const current = period.key === lastKey;
+              const label =
+                period.status === "done"
+                  ? "작성"
+                  : period.status === "doing"
+                    ? "작성 중"
+                    : current
+                      ? "지금 기간 — 아직 안 씀"
+                      : "빠짐";
+              const look =
+                period.status === "done"
+                  ? "bg-green-600"
+                  : period.status === "doing"
+                    ? "bg-amber-500"
+                    : current
+                      ? "border border-dashed border-slate-400 bg-white"
+                      : "border-2 border-rose-400 bg-white";
+              return (
+                <button
+                  key={period.key}
+                  type="button"
+                  title={`${period.label} — ${label}${period.docId ? " (눌러서 열기)" : ""}`}
+                  aria-label={`${period.label} ${label}`}
+                  onClick={() => (period.docId ? onOpen(period.docId, period.sheetName) : onWrite?.())}
+                  className={"h-3.5 w-3.5 rounded-full transition hover:scale-125 " + look}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      {slots > 0 && (
+        <div className="flex items-center gap-2" aria-hidden>
+          <span className="w-10 shrink-0" />
+          <div className="flex gap-1">
+            {Array.from({ length: slots }, (_, i) => (
+              <span key={i} className="w-3.5 text-center text-[9px] tabular-nums text-slate-400">
+                {i + 1}
+              </span>
+            ))}
+          </div>
+          <span className="text-[10px] text-slate-400">{cycle === "monthly" ? "월" : cycle === "quarterly" ? "분기" : "반기"}</span>
+        </div>
+      )}
+      <p className="pt-0.5 text-[11px] text-slate-500">
+        월별 장은 [시트 추가]로 더하고 이름에 달을 적으면(예: 2026-07) 그 달로 셉니다. 달이 없으면 만든 날로 셉니다.
+      </p>
+    </div>
   );
 }

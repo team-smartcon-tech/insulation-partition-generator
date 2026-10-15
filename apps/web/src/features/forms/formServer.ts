@@ -22,6 +22,7 @@ interface SiteRow {
   sort_order?: number;
   members?: unknown;
   line_defaults?: unknown;
+  qmp_settings?: unknown;
   created_at?: string;
 }
 
@@ -89,6 +90,10 @@ const toSite = (row: SiteRow): FormSite => ({
   lineDefaults:
     row.line_defaults && typeof row.line_defaults === "object"
       ? (row.line_defaults as FormSite["lineDefaults"])
+      : undefined,
+  qmp:
+    row.qmp_settings && typeof row.qmp_settings === "object" && Object.keys(row.qmp_settings).length > 0
+      ? (row.qmp_settings as FormSite["qmp"])
       : undefined,
 });
 
@@ -170,6 +175,8 @@ export async function pushSite(site: Pick<FormSite, "name"> & Partial<FormSite>)
       name: site.name,
       members: site.members ?? [],
       lineDefaults: site.lineDefaults ?? {},
+      // 계획서 설정은 설정한 현장만 보낸다 — 안 보내면 서버 값을 건드리지 않는다.
+      ...(site.qmp ? { qmpSettings: site.qmp } : {}),
     }),
   });
   return toSite(row);

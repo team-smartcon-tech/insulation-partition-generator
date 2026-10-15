@@ -10,6 +10,7 @@
  */
 
 import type { LineDefaults, SiteMember } from "./approvalLine.ts";
+import type { QmpSiteSettings } from "./qmpCycle.ts";
 
 export interface FormSite {
   id: string;
@@ -19,13 +20,15 @@ export interface FormSite {
   members?: SiteMember[];
   /** 이 현장의 기본 결재선(칸 이름 → 사람들). 다음 서류에 미리 채운다. */
   lineDefaults?: LineDefaults;
+  /** 이 현장 품질관리계획서 설정 — 착공일·서식별 작성 주기·적용 제외 절 */
+  qmp?: QmpSiteSettings;
 }
 
 /** 현장 하나의 조직·기본 결재선 같은 부가 정보를 바꾼다. */
 export function updateSite(
   sites: FormSite[],
   siteId: string,
-  patch: Partial<Pick<FormSite, "members" | "lineDefaults">>,
+  patch: Partial<Pick<FormSite, "members" | "lineDefaults" | "qmp">>,
 ): FormSite[] {
   return sites.map((site) => (site.id === siteId ? { ...site, ...patch } : site));
 }

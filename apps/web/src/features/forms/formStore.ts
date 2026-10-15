@@ -45,6 +45,8 @@ export interface CustomSheet {
   name: string;
   /** 복사해 온 원본 시트 이름 */
   source: string;
+  /** 더한 때 — 이름에 달이 없는 월별 장을 어느 달 것으로 볼지 정한다 */
+  createdAt?: number;
 }
 
 const DB_NAME = "ipg-forms";
@@ -208,6 +210,10 @@ export interface FormSummary {
   workingSheets: string[];
   /** 시트 이름 → 그 장을 쓰는 부서 */
   sheetDepts?: Record<string, string>;
+  /** [시트 추가]로 더한 장 → 바탕 시트(서식 번호를 잇는다) */
+  sheetSources?: Record<string, string>;
+  /** [시트 추가]로 더한 장 → 더한 때 */
+  sheetMadeAt?: Record<string, number>;
 }
 
 /**
@@ -505,6 +511,10 @@ function summarize(form: StoredForm): FormSummary {
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
     sheetNames: withCustomSheets(form.sheets, form.customSheets).map((sheet) => sheet.name),
+    sheetSources: Object.fromEntries(form.customSheets.map((item) => [item.name, item.source])),
+    sheetMadeAt: Object.fromEntries(
+      form.customSheets.filter((item) => item.createdAt).map((item) => [item.name, item.createdAt as number]),
+    ),
     // 시트마다 따로 담기므로 전부 더해야 "고친 칸 수"가 된다.
     editedCount: Object.values(form.values).reduce(
       (sum, cells) => sum + Object.keys(cells).length,
@@ -1262,7 +1272,7 @@ export async function addCustomSheet(id: string, sheet: CustomSheet): Promise<vo
     const blanks = source ? blankValuesFor(form.sheets, source) : {};
 
     return {
-      customSheets: [...form.customSheets, { name, source: sheet.source }],
+      customSheets: [...form.customSheets, { name, source: sheet.source, createdAt: Date.now() }],
       values: Object.keys(blanks).length > 0 ? { ...form.values, [name]: blanks } : form.values,
       updatedAt: Date.now(),
     };
