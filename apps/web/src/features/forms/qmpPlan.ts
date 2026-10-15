@@ -383,7 +383,7 @@ const RANK: Record<QmpStatus, number> = { none: 0, doing: 1, done: 2 };
  */
 export function qmpStates(
   docs: QmpDoc[],
-  /** 현장 작성 기준과 오늘 — 주면 주기별 진척·적용 제외까지 매긴다 */
+  /** 현장 작성 일정과 오늘 — 주면 주기별 진척·적용 제외까지 매긴다 */
   options?: { settings?: QmpSiteSettings; today?: Date },
 ): Map<string, QmpFormState> {
   const result = new Map<string, QmpFormState>();

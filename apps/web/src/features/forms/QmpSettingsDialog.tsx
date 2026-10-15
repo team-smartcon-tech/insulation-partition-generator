@@ -1,13 +1,15 @@
 /**
- * [작성 기준] — 이 현장에서 무엇을 언제 써야 하는지: 착공일·서식별 작성 주기·적용 제외 절을 정한다
+ * [작성 일정] — 이 현장에서 서식마다 언제 써야 하는지: 착공일·서식별 작성 주기·적용 제외 절을 정한다
  * (2026-10-15 사용자 결정: 현장마다 계획서가 달라 주기도 다르다, 그 현장 사람 누구나 바꾼다).
- * 이름은 "계획서 설정"이었다 — 계획서 파일을 고치는 것처럼 읽혀 바꿨다(같은 날 사용자 요청).
+ * 이름 고민(같은 날 사용자 요청): "계획서 설정"은 계획서 파일을 고치는 것처럼, "작성 기준"은 참고 문서
+ * (예전 이름 "기준")처럼 읽혔다. 정하는 것이 "언제부터·얼마나 자주·어느 절은 빼고"라 **일정**이다.
+ * 계획서 문구도 "계획된 주기"라, 창 안의 말은 "주기"를 그대로 쓴다.
  *
  * 회사 기본값(`DEFAULT_CYCLES`)과 다른 주기만 저장한다 — 기본값이 나중에 바뀌어도 현장이 일부러
  * 바꾼 것만 남는다.
  */
 import { useMemo, useState } from "react";
-import { Check, RotateCcw, Settings2, X } from "lucide-react";
+import { CalendarClock, Check, RotateCcw, X } from "lucide-react";
 import { QMP_SECTIONS } from "./qmpPlan";
 import { CYCLE_LABEL, CYCLE_ORDER, DEFAULT_CYCLES, cycleOf, parseDay, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
 
@@ -73,14 +75,14 @@ export default function QmpSettingsDialog({
         }}
       >
         <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4">
-          <Settings2 size={20} className="mt-0.5 text-blue-600" aria-hidden />
+          <CalendarClock size={20} className="mt-0.5 text-blue-600" aria-hidden />
           <div className="min-w-0 flex-1">
             <h2 id="qmp-settings-title" className="text-base font-bold text-slate-900">
-              {siteName} 작성 기준
+              {siteName} 작성 일정
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              이 현장에서 무엇을 언제 써야 하는지 품질관리계획서대로 정합니다. 진척(%)은 이 기준으로 셉니다 — 월간·분기·연간
-              서식은 착공일부터 오늘까지 써야 했던 횟수와 비교합니다.
+              서식마다 언제 써야 하는지 이 현장 품질관리계획서의 "계획된 주기"대로 정합니다. 진척(%)은 이 일정으로 셉니다 —
+              월간·분기·연간 서식은 착공일부터 오늘까지 써야 했던 횟수와 비교합니다.
             </p>
           </div>
           <button type="button" onClick={onCancel} aria-label="닫기" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">
@@ -90,7 +92,7 @@ export default function QmpSettingsDialog({
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
           <label className="block text-sm font-medium text-slate-700">
-            착공일
+            착공일 <span className="font-normal text-slate-500">(이날부터 셉니다)</span>
             <input
               type="date"
               value={startDate}
@@ -106,7 +108,7 @@ export default function QmpSettingsDialog({
           <div>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-medium text-slate-700">
-                서식별 작성 주기{" "}
+                서식마다 얼마나 자주 쓰나요{" "}
                 <span className="font-normal text-slate-500">· 회사 기본값과 다르게 정한 서식 {changedCount}개</span>
               </h3>
               {changedCount > 0 && (
@@ -138,7 +140,7 @@ export default function QmpSettingsDialog({
                             )
                           }
                         />
-                        이 현장 적용 제외
+                        이 현장에서 안 씀(적용 제외)
                       </label>
                     </div>
                     {!off && (
