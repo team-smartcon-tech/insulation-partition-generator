@@ -7,7 +7,10 @@
 import { DEFAULT_THEME, excelColor, parseThemeXml } from "./colors.ts";
 import type { ThemeColors } from "./colors.ts";
 import { parseWorkbookShapes } from "./formShapes.ts";
+import { parseWorkbookCharts } from "./formCharts.ts";
 import { readZipIndex, readZipText } from "./zip.ts";
+import { formatValue } from "./numberFormat.ts";
+import { emfToSvg } from "./emfToSvg.ts";
 import type {
   FormBorder,
   FormBorderStyle,
@@ -15,6 +18,7 @@ import type {
   FormCellBorders,
   FormCellStyle,
   FormImage,
+  FormTextRun,
   FormSheet,
 } from "./types";
 
@@ -25,7 +29,7 @@ import type {
  * 양식은 옛 모양 그대로 남는다. 규칙을 고칠 때 이 번호를 올리면 저장소가 원본 엑셀에서
  * 다시 읽어 반영한다. 열 너비·테두리·줄바꿈처럼 화면 모양이 달라지는 변경이 대상이다.
  */
-export const PARSER_VERSION = 14;
+export const PARSER_VERSION = 28; // 28: EMF 그림을 SVG 로(카메라), 표 밖 도형·화살촉·차트 범례·도형 줄 간격·위첨자
 
 /**
  * 엑셀 열 너비 1단위(=기본 글꼴 숫자 하나 폭, MDW)에 해당하는 픽셀.
@@ -49,13 +53,16 @@ const PT_TO_PX = 96 / 72;
 
 const BORDER_STYLES: Record<string, FormBorderStyle> = {
   thin: "thin",
-  hair: "thin",
+  hair: "hair",
   medium: "medium",
   thick: "thick",
   dashed: "dashed",
   dashDot: "dashed",
   dashDotDot: "dashed",
-  mediumDashed: "dashed",
+  mediumDashed: "mediumDashed",
+  mediumDashDot: "mediumDashed",
+  mediumDashDotDot: "mediumDashed",
+  slantDashDot: "mediumDashed",
   dotted: "dotted",
   double: "double",
 };
@@ -105,6 +112,63 @@ function cellText(value: unknown): string {
   return "";
 }
 
+/**
+ * 칸에 **보이는** 글자 — 숫자·날짜에는 엑셀 표시 형식을 입힌다(100%, 58,607,000, 22년 4월).
+ * 수식은 계산해 둔 결과를, 오류 결과(#DIV/0! 등)는 그 글자를 보여 준다 — 엑셀도 그렇게 보인다.
+ */
+function displayText(value: unknown, numFmt: string | undefined): string {
+  if (typeof value === "number" || value instanceof Date) return formatValue(value, numFmt);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.error === "string") return record.error;
+    if ("result" in record) {
+      const result = record.result;
+      if (result && typeof result === "object" && typeof (result as { error?: unknown }).error === "string") {
+        return (result as { error: string }).error;
+      }
+      return displayText(result, numFmt);
+    }
+  }
+  return cellText(value);
+}
+
+/**
+ * 부분 서식 조각을 읽는다. 조각이 하나뿐이거나 모두 같은 서식이면 칸 서식으로 충분해 없다고 본다.
+ * 조각의 빈 항목은 칸 서식을 따른다(엑셀도 그렇다).
+ */
+function readRuns(value: unknown, theme: ThemeColors): FormTextRun[] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const richText = (value as { richText?: unknown }).richText;
+  if (!Array.isArray(richText) || richText.length < 2) return undefined;
+  const runs: FormTextRun[] = richText.map((raw) => {
+    const run = raw as { text?: unknown; font?: Record<string, unknown> };
+    const font = run.font ?? {};
+    const color = excelColor(font.color, theme);
+    return {
+      text: typeof run.text === "string" ? run.text : String(run.text ?? ""),
+      // 조각에 제 서식(rPr)이 있으면 굵기·기울임은 "없으면 보통"이다 — 칸 전체가 굵어도 따라가지 않는다.
+      ...(run.font ? { bold: font.bold === true, italic: font.italic === true } : {}),
+      ...(font.underline ? { underline: true } : {}),
+      ...(typeof font.size === "number" ? { fontSize: font.size } : {}),
+      // 위·아래 첨자("검토의견*" 의 *, 8.3-4)
+      ...(font.vertAlign === "superscript" ? { vertAlign: "super" as const } : {}),
+      ...(font.vertAlign === "subscript" ? { vertAlign: "sub" as const } : {}),
+      ...(color ? { color } : {}),
+    };
+  });
+  const signature = (run: FormTextRun) =>
+    `${run.bold}|${run.italic}|${run.underline}|${run.fontSize}|${run.vertAlign}|${run.color}`;
+  return runs.every((run) => signature(run) === signature(runs[0])) ? undefined : runs;
+}
+
+/** 결과가 빠진 수식 값에 원본의 결과를 붙인다. */
+function withSavedResult(value: unknown, saved: unknown): unknown {
+  if (saved === undefined || !value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (!("formula" in record || "sharedFormula" in record) || record.result !== undefined) return value;
+  return { ...record, result: saved };
+}
+
 function readBorder(side: unknown, theme: ThemeColors): FormBorder | undefined {
   if (!side || typeof side !== "object") return undefined;
   const record = side as { style?: unknown; color?: unknown };
@@ -126,7 +190,20 @@ function readBorders(border: unknown, theme: ThemeColors): FormCellBorders {
   if (right) borders.right = right;
   if (bottom) borders.bottom = bottom;
   if (left) borders.left = left;
+  Object.assign(borders, readDiagonals(record.diagonal, theme));
   return borders;
+}
+
+/** 대각선 테두리 — exceljs 는 `diagonal: { up, down, style, color }` 하나로 준다. */
+function readDiagonals(diagonal: unknown, theme: ThemeColors): Pick<FormCellBorders, "diagonalUp" | "diagonalDown"> {
+  if (!diagonal || typeof diagonal !== "object") return {};
+  const record = diagonal as { up?: unknown; down?: unknown };
+  const line = readBorder(diagonal, theme);
+  if (!line) return {};
+  return {
+    ...(record.up ? { diagonalUp: line } : {}),
+    ...(record.down ? { diagonalDown: line } : {}),
+  };
 }
 
 function readAlign(horizontal: unknown): FormCellStyle["align"] {
@@ -175,6 +252,13 @@ function readStyle(
   const valign = readValign(alignment.vertical);
   if (valign) style.valign = valign;
   if (alignment.wrapText === true) style.wrap = true;
+  // "축소하여 맞춤" — 옆 칸으로 넘기지 않고 글자를 줄인다(QA-4.3-2 "9.4 경영검토"). 줄바꿈이 켜져 있으면 엑셀이 무시한다.
+  else if (alignment.shrinkToFit === true) style.shrink = true;
+  if (typeof alignment.indent === "number" && alignment.indent > 0) style.indent = alignment.indent;
+  // 옆 띠에 세로로 적은 제목(QA-4.3-2 "고객 요구사항") — 빠뜨리면 한 글자씩 접혀 내려간다.
+  const rotation = alignment.textRotation;
+  if (rotation === "vertical") style.textDirection = "stacked";
+  else if (typeof rotation === "number" && Math.abs(rotation) >= 45) style.textDirection = rotation > 0 ? "up" : "down";
 
   return style;
 }
@@ -187,7 +271,7 @@ function isMeaningful(cell: {
 }): boolean {
   if (cellText(cell.value).trim() !== "") return true;
   const borders = readBorders(cell.border, DEFAULT_THEME);
-  if (borders.top || borders.right || borders.bottom || borders.left) return true;
+  if (borders.top || borders.right || borders.bottom || borders.left || borders.diagonalUp || borders.diagonalDown) return true;
   const fill = cell.fill;
   return Boolean(fill && fill.type === "pattern" && fill.pattern !== "none");
 }
@@ -257,6 +341,8 @@ function readMergedBorders(worksheet: any, box: SpanBox, theme: ThemeColors): Fo
   if (left) borders.left = left;
   if (right) borders.right = right;
   if (bottom) borders.bottom = bottom;
+  // 합친 칸의 대각선은 대표 칸(왼쪽 위)에 적힌다.
+  Object.assign(borders, readDiagonals(topLeft.border?.diagonal, theme));
   return borders;
 }
 
@@ -286,6 +372,16 @@ function toBytes(data: unknown): Uint8Array | null {
 }
 
 /** 바이트 뭉치를 `<img src>` 에 바로 넣을 수 있는 data: URL 로 만든다. 못 만들면 빈 문자열. */
+/** EMF 바이트 → SVG data: URL. 못 그리면 빈 문자열. */
+function emfToSvgUrl(data: unknown): string {
+  const bytes = toBytes(data);
+  if (!bytes) return "";
+  const svg = emfToSvg(bytes);
+  if (!svg) return "";
+  const utf8 = new TextEncoder().encode(svg);
+  return toDataUrl(utf8, "svg+xml");
+}
+
 function toDataUrl(data: unknown, extension: string): string {
   const bytes = toBytes(data);
   if (!bytes || bytes.length === 0) return "";
@@ -332,14 +428,16 @@ function readImages(
   for (const item of worksheet.getImages() ?? []) {
     try {
       const media = workbook.getImage(Number(item.imageId));
-      // EMF/WMF 는 윈도우 전용 그림 형식이라 브라우저가 못 연다. 넣어 봐야 깨진
-      // 그림이 되고, alt 가 비어 있어 화면에서는 "아무것도 없는 것"으로 보인다.
-      if (["emf", "wmf"].includes(String(media?.extension).toLowerCase())) continue;
+      // EMF/WMF 는 윈도우 전용 그림 형식이라 브라우저가 못 연다. 그림 대신 자리 표시만 남긴다.
+      const extension = String(media?.extension).toLowerCase();
+      const unsupported = extension === "emf" || extension === "wmf" ? (extension as "emf" | "wmf") : undefined;
       // exceljs 판에 따라 바이트가 buffer/data 중 어디에 오는지 갈린다.
       const raw = media?.buffer ?? media?.data;
-      const src = toDataUrl(raw, media?.extension);
+      // EMF 는 그리는 명령을 SVG 로 옮겨 그린다(카메라로 찍은 표 그림 등). 못 옮기면 자리 표시만 남긴다.
+      const emfSvg = unsupported === "emf" ? emfToSvgUrl(raw) : "";
+      const src = emfSvg || (unsupported ? "" : toDataUrl(raw, media?.extension));
       // 못 읽은 그림을 넣으면 화면에 보이지 않는 <img> 만 남아 원인 찾기가 어려워진다.
-      if (!src) continue;
+      if (!src && !unsupported) continue;
 
       const tl = item.range?.tl;
       if (!tl) continue;
@@ -354,12 +452,14 @@ function readImages(
         width = anchorToPx(colWidths, defaultCol, br.nativeCol ?? 0, br.nativeColOff ?? 0) - left;
         height = anchorToPx(rowHeights, defaultRow, br.nativeRow ?? 0, br.nativeRowOff ?? 0) - top;
       } else {
-        width = (item.range?.ext?.width ?? 0) / EMU_PER_PX;
-        height = (item.range?.ext?.height ?? 0) / EMU_PER_PX;
+        // exceljs 는 ext 를 **이미 px 로** 준다(1927411 EMU → 202.35). EMU 로 보고 한 번 더 나누면
+        // 그림이 0.02px 로 줄어 사라졌다(8.11 견본·7.2 카메라의 로고).
+        width = item.range?.ext?.width ?? 0;
+        height = item.range?.ext?.height ?? 0;
       }
       if (!(width > 0) || !(height > 0)) continue;
 
-      images.push({ src, left, top, width, height });
+      images.push({ src: src ?? "", left, top, width, height, ...(unsupported && !emfSvg ? { unsupported } : {}) });
     } catch {
       // 그림 하나를 못 읽는다고 양식 전체를 못 열면 안 된다. 그 그림만 건너뛴다.
     }
@@ -372,6 +472,8 @@ export function parseFormSheet(
   worksheet: any,
   workbook?: any,
   theme: ThemeColors = DEFAULT_THEME,
+  /** 칸 주소 → 원본에 저장된 수식 결과(exceljs 가 버린 0 을 채운다) */
+  formulaResults?: Map<string, unknown>,
 ): FormSheet {
   // 1) 실제로 내용이 있는 범위를 먼저 구한다.
   let maxRow = 0;
@@ -391,6 +493,17 @@ export function parseFormSheet(
     if (!end) continue;
     if (end.row > maxRow) maxRow = end.row;
     if (end.col > maxCol) maxCol = end.col;
+  }
+
+  // 칸에 아무것도 없고 그림만 있는 시트(6.1-2 "리스크 평가기준" 은 표 전체가 그림 한 장)는
+  // 그림이 닿는 칸까지를 범위로 삼는다. 안 그러면 "내용이 없는 시트"로 보고 그림까지 버린다.
+  if (maxRow === 0 || maxCol === 0) {
+    for (const item of typeof worksheet.getImages === "function" ? worksheet.getImages() ?? [] : []) {
+      const corner = item.range?.br ?? item.range?.tl;
+      if (!corner) continue;
+      maxRow = Math.max(maxRow, (corner.nativeRow ?? 0) + 1);
+      maxCol = Math.max(maxCol, (corner.nativeCol ?? 0) + 1);
+    }
   }
 
   /**
@@ -443,6 +556,39 @@ export function parseFormSheet(
     }
   }
 
+  // 2-1) "선택 영역의 가운데로"(centerContinuous) — 병합 없이 오른쪽 빈 칸들에 걸쳐 가운데 맞춘다.
+  //      칸 하나 안에서만 가운데로 두면 머리글 "검사건수" 가 첫 칸에 몰리고 칸이 여덟 개로 쪼개져
+  //      보였다(9.2). 글자 칸 + 오른쪽으로 이어진 빈 centerContinuous 칸을 합친 칸처럼 다룬다.
+  const isSingle = (row: number, col: number) => {
+    const box = boxes.get(masterOf.get(`${row}:${col}`) ?? "");
+    return Boolean(box && box.minRow === box.maxRow && box.minCol === box.maxCol);
+  };
+  const centersAcross = (row: number, col: number) =>
+    worksheet.getCell(row, col).alignment?.horizontal === "centerContinuous";
+  for (let row = 1; row <= maxRow; row++) {
+    for (let col = 1; col <= maxCol; col++) {
+      if (!isSingle(row, col) || !centersAcross(row, col)) continue;
+      if (cellText(worksheet.getCell(row, col).value).trim() === "") continue;
+      let end = col;
+      while (
+        end + 1 <= maxCol &&
+        isSingle(row, end + 1) &&
+        centersAcross(row, end + 1) &&
+        cellText(worksheet.getCell(row, end + 1).value).trim() === ""
+      ) {
+        end += 1;
+      }
+      if (end === col) continue;
+      const masterAddress = masterOf.get(`${row}:${col}`)!;
+      boxes.get(masterAddress)!.maxCol = end;
+      for (let c = col + 1; c <= end; c++) {
+        boxes.delete(masterOf.get(`${row}:${c}`)!);
+        masterOf.set(`${row}:${c}`, masterAddress);
+      }
+      col = end;
+    }
+  }
+
   // 3) 대표 칸만 내보낸다. 병합에 가려진 자리는 표에서 자리를 차지하지 않는다.
   const cells: FormCell[] = [];
   for (let row = 1; row <= maxRow; row++) {
@@ -456,22 +602,46 @@ export function parseFormSheet(
       const rowSpan = box.maxRow - box.minRow + 1;
       const colSpan = box.maxCol - box.minCol + 1;
       const style = readStyle(cell, theme);
+      // 엑셀 "일반" 정렬은 숫자·날짜를 오른쪽에 붙인다(글자는 왼쪽). 정렬을 안 적은 숫자 칸을 왼쪽에
+      // 두면 회계 형식의 "-" 와 금액이 칸 왼쪽에 몰렸다(8.4-2).
+      // 결과가 0 인 수식은 exceljs 가 결과 칸을 아예 빼므로(`{ formula }` 만 온다) 저장된 결과로 본다.
+      const raw = withSavedResult(cell.value, formulaResults?.get(cell.address));
+      const isFormula = !!raw && typeof raw === "object" && ("formula" in raw || "sharedFormula" in raw || "result" in raw);
+      const shown = isFormula ? (raw as { result?: unknown }).result : raw;
+      const numeric = typeof shown === "number" || shown instanceof Date;
+      if (!style.align && numeric) style.align = "right";
+      // 표시 형식에 채우기(`* `, 회계 형식)가 있으면 정렬과 상관없이 칸을 채워 오른쪽에 붙는다 — 가운데
+      // 정렬로 적힌 잔여량 칸의 "-"(8.4-2)가 엑셀에서는 오른쪽에 있다.
+      if (numeric && typeof cell.numFmt === "string" && /(^|[^\\])\*./.test(cell.numFmt)) style.align = "right";
       // 병합된 칸은 바깥 테두리를 모서리 칸들에서 다시 읽는다.
       if (rowSpan > 1 || colSpan > 1) style.borders = readMergedBorders(worksheet, box, theme);
 
       // 엑셀의 잠금 기본값은 "잠김"이다. 푼 칸만 protection.locked === false 로 온다.
       const unlocked = (cell.protection as { locked?: unknown } | undefined)?.locked === false;
+      // 차지한 열이 모두 숨었거나 줄이 모두 숨었으면 그리지 않는 칸이다.
+      const span = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+      const hidden =
+        span(box.minCol, box.maxCol).every((c) => worksheet.getColumn(c).hidden) ||
+        span(box.minRow, box.maxRow).every((r) => worksheet.getRow(r).hidden);
       cells.push({
         key: `${row}:${col}`,
         row,
         col,
         rowSpan,
         colSpan,
-        text: cellText(cell.value),
+        text: displayText(
+          withSavedResult(cell.value, formulaResults?.get(cell.address)),
+          typeof cell.numFmt === "string" ? cell.numFmt : undefined,
+        ),
         // 보호가 안 걸린 시트에서는 잠금 표시를 달지 않는다(전부 고칠 수 있다).
         ...(sheetLocked && !unlocked ? { locked: true } : {}),
         // 수식이 있는 칸 — 줄을 끼울 때 범위가 어긋날 수 있다고 알리는 데 쓴다.
         ...(cell.formula || cell.sharedFormula ? { formula: true } : {}),
+        ...(() => {
+          const runs = readRuns(cell.value, theme);
+          return runs ? { runs } : {};
+        })(),
+        ...(hidden ? { hidden: true } : {}),
         style,
       });
     }
@@ -482,11 +652,12 @@ export function parseFormSheet(
   const defaultRowHeight: number | undefined = worksheet.properties?.defaultRowHeight;
   const colWidths: number[] = [];
   for (let col = 1; col <= maxCol; col++) {
-    colWidths.push(colWidthToPx(worksheet.getColumn(col).width, defaultColWidth));
+    // 숨긴 열·줄은 폭·높이 0 — 엑셀 화면·인쇄에 안 나온다(7.6 문서보안기준안의 "문서양식 NO." 열).
+    colWidths.push(worksheet.getColumn(col).hidden ? 0 : colWidthToPx(worksheet.getColumn(col).width, defaultColWidth));
   }
   const rowHeights: number[] = [];
   for (let row = 1; row <= maxRow; row++) {
-    rowHeights.push(rowHeightToPx(worksheet.getRow(row).height, defaultRowHeight));
+    rowHeights.push(worksheet.getRow(row).hidden ? 0 : rowHeightToPx(worksheet.getRow(row).height, defaultRowHeight));
   }
 
   return {
@@ -496,12 +667,12 @@ export function parseFormSheet(
     colWidths,
     rowHeights,
     cells,
-    // 인쇄 영역 밖에 놓인 그림은 격자 밖으로 계산되므로 여기서 걸러진다.
-    images: withinGrid(
-      readImages(worksheet, workbook, colWidths, rowHeights),
-      colWidths,
-      rowHeights,
-    ),
+    // 인쇄 영역 밖에 놓인 그림은 격자 밖으로 계산되므로 여기서 걸러진다. 인쇄 영역이 없으면
+    // 거르지 않는다 — 표 오른쪽 빈 칸 위에 둔 그림(7.2 카메라의 복사본)까지 버려졌다. 그런 그림은
+    // 나중에 격자를 늘려 자리를 잡는다(coverFloating).
+    images: printArea
+      ? withinGrid(readImages(worksheet, workbook, colWidths, rowHeights), colWidths, rowHeights)
+      : readImages(worksheet, workbook, colWidths, rowHeights),
     // 도형은 exceljs 가 내주지 않아 원본 파일에서 따로 읽는다(parseFormWorkbook).
     shapes: [],
     // 실제로 잘라낸 경우에만 알린다. 인쇄 영역이 내용보다 넓으면 알릴 것이 없다.
@@ -559,6 +730,105 @@ async function readTheme(data: ArrayBuffer): Promise<ThemeColors> {
   }
 }
 
+/**
+ * 수식 칸의 저장된 결과를 원본 압축에서 직접 읽는다(시트 이름 → 칸 주소 → 결과).
+ *
+ * exceljs 는 결과가 **0** 인 수식(`<v>0</v>`)의 결과를 버린다 — 0 이 거짓으로 걸러진다. 그래서 소계·합계의
+ * 0, 0.00 %, 회계 형식의 "-" 가 모두 빈칸으로 보였다(QA-8.6-1 등). 결과가 빠진 칸만 이것으로 채운다.
+ */
+async function readFormulaResults(data: ArrayBuffer): Promise<Map<string, Map<string, unknown>>> {
+  const result = new Map<string, Map<string, unknown>>();
+  const index = readZipIndex(data);
+  const workbookXml = await readZipText(data, index, "xl/workbook.xml");
+  const relsXml = await readZipText(data, index, "xl/_rels/workbook.xml.rels");
+  if (!workbookXml || !relsXml) return result;
+  const targets = new Map<string, string>();
+  for (const rel of relsXml.match(/<Relationship\b[^>]*\/?>/g) ?? []) {
+    const id = /\bId="([^"]+)"/.exec(rel)?.[1];
+    const target = /\bTarget="([^"]+)"/.exec(rel)?.[1];
+    if (id && target) targets.set(id, target);
+  }
+  const unescape = (text: string) =>
+    text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+  for (const sheetTag of workbookXml.match(/<sheet\b[^>]*\/?>/g) ?? []) {
+    const name = /\bname="([^"]*)"/.exec(sheetTag)?.[1];
+    const target = targets.get(/\br:id="([^"]+)"/.exec(sheetTag)?.[1] ?? "");
+    if (!name || !target) continue;
+    const path = target.startsWith("/") ? target.slice(1) : `xl/${target.replace(/^\.\//, "")}`;
+    const xml = await readZipText(data, index, path);
+    if (!xml) continue;
+    const cells = new Map<string, unknown>();
+    for (const match of xml.matchAll(/<c\b([^>]*[^/>])>([\s\S]*?)<\/c>/g)) {
+      const body = match[2];
+      if (!body.includes("<f")) continue;
+      const v = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+      const address = /\br="([A-Z]+\d+)"/.exec(match[1])?.[1];
+      if (v === undefined || !address) continue;
+      const type = /\bt="([^"]+)"/.exec(match[1])?.[1] ?? "n";
+      cells.set(
+        address,
+        type === "e" ? { error: v } : type === "str" ? unescape(v) : type === "b" ? v === "1" : Number(v),
+      );
+    }
+    if (cells.size > 0) result.set(unescape(name), cells);
+  }
+  return result;
+}
+
+/**
+ * 표 아래·오른쪽으로 삐져나간 차트·그림까지 보이도록 빈 줄·열을 덧붙인다.
+ *
+ * 엑셀은 차트를 표 밖 빈 칸 위에 두어도 시트의 일부로 보여 준다. 여기서는 표 크기만큼만 자리를
+ * 잡아, 표 아래에 둔 경영검토 차트 세 개가 통째로 잘려 안 보였다(9.4).
+ */
+/** 표 밖으로 이 만큼(열·줄) 더 실제 크기를 알아 둔다 — 도형·차트가 표 밖에 놓여도 자리가 맞게. */
+const BEYOND_COLS = 80;
+const BEYOND_ROWS = 400;
+
+/** 표의 열 너비·행 높이에 표 밖 열·줄의 실제 크기를 이어 붙인 것(시트는 바꾸지 않는다). */
+function beyondGrid(worksheet: any, sheet: FormSheet): { colWidths: number[]; rowHeights: number[] } {
+  const colWidths = [...sheet.colWidths];
+  const rowHeights = [...sheet.rowHeights];
+  if (!worksheet) return { colWidths, rowHeights };
+  const defaultColWidth: number | undefined = worksheet.properties?.defaultColWidth;
+  const defaultRowHeight: number | undefined = worksheet.properties?.defaultRowHeight;
+  for (let col = colWidths.length + 1; col <= sheet.colCount + BEYOND_COLS; col++) {
+    const column = worksheet.getColumn(col);
+    colWidths.push(column.hidden ? 0 : colWidthToPx(column.width, defaultColWidth));
+  }
+  for (let row = rowHeights.length + 1; row <= sheet.rowCount + BEYOND_ROWS; row++) {
+    const line = worksheet.findRow?.(row);
+    rowHeights.push(line?.hidden ? 0 : rowHeightToPx(line?.height, defaultRowHeight));
+  }
+  return { colWidths, rowHeights };
+}
+
+function coverFloating(sheet: FormSheet, beyond: { colWidths: number[]; rowHeights: number[] }): void {
+  const defaultRow = beyond.rowHeights[beyond.rowHeights.length - 1] ?? rowHeightToPx(undefined, undefined);
+  const defaultCol = beyond.colWidths[beyond.colWidths.length - 1] ?? colWidthToPx(undefined, undefined);
+  if (sheet.rowCount === 0) return;
+  const floating = [...(sheet.charts ?? []), ...sheet.images, ...(sheet.shapes ?? [])];
+  if (floating.length === 0) return;
+  const bottom = Math.max(...floating.map((item) => item.top + item.height));
+  const right = Math.max(...floating.map((item) => item.left + item.width));
+  let height = sheet.rowHeights.reduce((sum, h) => sum + h, 0);
+  while (height < bottom - 0.5) {
+    const next = beyond.rowHeights[sheet.rowHeights.length] ?? defaultRow;
+    sheet.rowHeights.push(next);
+    sheet.rowCount += 1;
+    height += next;
+    if (sheet.rowHeights.length > beyond.rowHeights.length + 50) break;
+  }
+  let width = sheet.colWidths.reduce((sum, w) => sum + w, 0);
+  while (width < right - 0.5) {
+    const next = beyond.colWidths[sheet.colWidths.length] ?? defaultCol;
+    sheet.colWidths.push(next);
+    sheet.colCount += 1;
+    width += next;
+    if (sheet.colWidths.length > beyond.colWidths.length + 50) break;
+  }
+}
+
 /** .xlsx 파일 내용을 시트 목록으로 바꾼다. 시트가 여러 개면 전부 돌려준다. */
 export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]> {
   // 브라우저용 exceljs 는 UMD 번들이라 default 로 감싸질 때와 아닐 때가 갈린다.
@@ -568,19 +838,19 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
   // exceljs 가 버퍼를 소유·이관해 비워 버려도 도형을 읽을 수 있게 복사본을 넘긴다.
   await workbook.xlsx.load(data.slice(0));
   const theme = await readTheme(data);
+  // 결과를 잃은 수식 칸(결과가 0 인 것)은 원본의 결과로 채운다. exceljs 에 되돌려 넣어도 0 은 또 버려져
+  // 따로 넘긴다. 못 읽으면 빈칸으로 둔다 — 양식을 못 여는 것보다 가볍다.
+  const saved = await readFormulaResults(data).catch(() => new Map<string, Map<string, unknown>>());
   const sheets: FormSheet[] = workbook.worksheets.map((worksheet: any) =>
-    parseFormSheet(worksheet, workbook, theme),
+    parseFormSheet(worksheet, workbook, theme, saved.get(worksheet.name)),
   );
 
   // 도형은 exceljs 가 내주지 않으므로 원본 압축을 직접 열어 읽는다.
   // 실패해도 셀·그림은 이미 다 읽었으니 양식은 그대로 열어 준다.
   try {
-    const sizes = new Map(
-      sheets.map((sheet) => [
-        sheet.name,
-        { colWidths: sheet.colWidths, rowHeights: sheet.rowHeights },
-      ]),
-    );
+    // 도형·차트 자리는 표 **밖** 열·줄의 실제 너비·높이로 잰다. 표 크기까지만 알고 그 너머를 기본
+    // 너비(72px)로 보면, 좁은 열(21px)이 33열까지 이어지는 목차 시트의 밑줄이 두 배로 길어졌다(9.4).
+    const sizes = new Map(sheets.map((sheet) => [sheet.name, beyondGrid(workbook.getWorksheet(sheet.name), sheet)]));
     const shapes = await parseWorkbookShapes(
       data,
       sizes,
@@ -588,7 +858,28 @@ export async function parseFormWorkbook(data: ArrayBuffer): Promise<FormSheet[]>
       theme,
     );
     for (const sheet of sheets) {
-      sheet.shapes = withinGrid(shapes.get(sheet.name) ?? [], sheet.colWidths, sheet.rowHeights);
+      // 인쇄 영역이 있을 때만 표 밖 도형을 버린다(그림과 같은 규칙). 없으면 엑셀처럼 시트 어디든 보인다 —
+      // 표가 8줄뿐인 9.4 재검사율 시트에서 표 바로 아래 "목표 : 2% 이내" 상자가 빠졌다.
+      const found = shapes.get(sheet.name) ?? [];
+      // 인쇄 영역이 있으면 그 **영역** 밖 도형만 버린다(표 크기가 아니라). 표가 8줄뿐인 9.4 재검사율
+      // 시트에서 인쇄 영역(36줄) 안 "목표 : 2% 이내" 상자가 표 밖이라고 빠졌다.
+      const area = readPrintArea(workbook.getWorksheet(sheet.name));
+      const beyond = sizes.get(sheet.name)!;
+      sheet.shapes = area
+        ? withinGrid(found, beyond.colWidths.slice(0, area.maxCol), beyond.rowHeights.slice(0, area.maxRow))
+        : found;
+    }
+    // 차트 — 빠뜨리면 경영검토 보고서의 공정·재검측율·NCR 차트 자리가 통째로 비었다(9.4).
+    const charts = await parseWorkbookCharts(
+      data,
+      sizes,
+      { col: colWidthToPx(undefined, undefined), row: rowHeightToPx(undefined, undefined) },
+      theme,
+    );
+    for (const sheet of sheets) {
+      const found = charts.get(sheet.name);
+      if (found) sheet.charts = found;
+      coverFloating(sheet, sizes.get(sheet.name)!);
     }
   } catch {
     // 도형을 못 읽는 것은 양식을 못 여는 것보다 가볍다.

@@ -9,7 +9,7 @@
  * SVG 에 모아 먼저 그리고 상자를 나중에 얹으면, 회색 배경 띠(구역 표시)가 그 위를 지나는
  * 화살표를 덮어 흐름이 끊겨 보인다.
  */
-import { Fragment, useId } from "react";
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { FormShape } from "./types";
 
@@ -32,8 +32,10 @@ function svgRotate(shape: FormShape): string | undefined {
 /** 점선 간격은 선 굵기에 비례해야 굵은 선에서도 점선으로 보인다. */
 function dashArray(shape: FormShape): string | undefined {
   const width = Math.max(MIN_LINE_PX, shape.lineWidth);
+  // 엑셀 선 종류마다 길이·간격(선 굵기의 배수) — sysDot 은 작은 사각 점, sysDash 는 짧은 파선, dash 는 긴 파선.
+  if (shape.dashPattern) return shape.dashPattern.map((n) => n * width).join(" ");
   if (shape.dash === "dashed") return `${width * 3} ${width * 2}`;
-  if (shape.dash === "dotted") return `${width} ${width * 2}`;
+  if (shape.dash === "dotted") return `${width} ${width}`;
   return undefined;
 }
 
@@ -105,7 +107,10 @@ function elbowPoints(shape: FormShape): string {
     [bend, h],
     [w, h],
   ];
+  // 끝에서 한 번 꺾는 연결선(bentConnector2, bend = w)은 마지막 두 점이 겹친다. 길이 0 인 마지막 선분은
+  // 화살촉 방향을 잃어 엉뚱한 쪽을 가리켰다(10.1-1 "No" 화살표가 아래를 향함) — 겹친 점은 뺀다.
   return frame
+    .filter(([x, y], index) => index === 0 || x !== frame[index - 1][0] || y !== frame[index - 1][1])
     .map(([x, y]) => `${left + (flipH ? w - x : x)},${top + (flipV ? h - y : y)}`)
     .join(" ");
 }
@@ -126,32 +131,68 @@ function boxCss(shape: FormShape, outlined: boolean): CSSProperties {
     shape.kind === "ellipse"
       ? "50%"
       : shape.kind === "roundBox"
-        ? Math.min(shape.width, shape.height) * ROUND_RATIO
+        ? Math.min(shape.width, shape.height) * (shape.roundRatio ?? ROUND_RATIO)
         : undefined;
-  const [padTop, padRight, padBottom, padLeft] = shape.inset ?? [2, 4, 2, 4];
+  const [insetTop, insetRight, insetBottom, insetLeft] = shape.inset ?? [2, 4, 2, 4];
+  // 도형마다 글자 영역이 정해져 있다(DrawingML 프리셋의 텍스트 사각형). 마름모는 가운데 절반, 타원은
+  // 사방 14.6% 안쪽 — 틀 전체에 쓰면 "설계검토/검증/실현성 확인"(8.3-1)이 마름모를 가로질러 한 줄이 됐다.
+  const [areaX, areaY] =
+    shape.textFromInner
+      ? [0, 0]
+      : shape.kind === "diamond"
+      ? [shape.width / 4, shape.height / 4]
+      : shape.kind === "ellipse"
+        ? [shape.width * 0.1464, shape.height * 0.1464]
+        : [0, 0];
+  // 여백이 틀보다 크면 틀이 늘어난다(box-sizing) — 틀 안에 들도록 줄인다.
+  const fitX = Math.min(1, Math.max(0, shape.width - 2) / Math.max(1, insetLeft + insetRight + areaX * 2));
+  const fitY = Math.min(1, Math.max(0, shape.height - 2) / Math.max(1, insetTop + insetBottom + areaY * 2));
+  const [padTop, padRight, padBottom, padLeft] = [
+    (insetTop + areaY) * fitY,
+    (insetRight + areaX) * fitX,
+    (insetBottom + areaY) * fitY,
+    (insetLeft + areaX) * fitX,
+  ];
+  // 글자를 세워 두는 도형을 90°·270° 돌렸으면, 돌린 뒤 모습(가로·세로를 바꾼 같은 가운데의 틀)에
+  // 그대로 그린다 — 직사각형을 90° 돌린 것과 같은 자리이고, 글자는 돌지 않는다.
+  const quarter = shape.rotation !== undefined && Math.abs(Math.abs(shape.rotation) % 180 - 90) < 1;
+  const flat = shape.upright && quarter;
+  const frame = flat
+    ? {
+        left: shape.left + shape.width / 2 - shape.height / 2,
+        top: shape.top + shape.height / 2 - shape.width / 2,
+        width: shape.height,
+        height: shape.width,
+      }
+    : { left: shape.left, top: shape.top, width: shape.width, height: shape.height };
   return {
     position: "absolute",
-    left: shape.left,
-    top: shape.top,
-    width: shape.width,
-    height: shape.height,
+    ...frame,
     background: outlined ? "transparent" : (shape.fill ?? "transparent"),
     border:
       !outlined && shape.line
         ? `${Math.max(MIN_LINE_PX, shape.lineWidth)}px ${shape.dash ?? "solid"} ${shape.line}`
         : undefined,
     borderRadius: radius,
+    boxShadow: shape.shadow && !outlined ? `${shape.shadow.dx}px ${shape.shadow.dy}px 0 ${shape.shadow.color}` : undefined,
     // 회전은 도형 가운데를 축으로 돈다. 엑셀도 같은 기준이라 자리가 어긋나지 않는다.
-    transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
+    transform: shape.rotation && !flat ? `rotate(${shape.rotation}deg)` : undefined,
     display: "flex",
     alignItems:
       shape.valign === "top" ? "flex-start" : shape.valign === "bottom" ? "flex-end" : "center",
     justifyContent:
       shape.align === "left" ? "flex-start" : shape.align === "right" ? "flex-end" : "center",
-    padding: `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px`,
+    ...(shape.clipText ? { overflow: "hidden" as const } : {}),
+    // 글자 없는 도형은 여백을 두지 않는다 — 작은 원(8.8-2 구멍)은 여백이 틀보다 커서 옆으로 늘어났다.
+    padding: shape.text ? `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px` : 0,
     boxSizing: "border-box",
   };
 }
+
+/** 도형 글자 크기를 엑셀이 적지 않았을 때(pt) */
+const DEFAULT_SHAPE_FONT_PT = 11;
+/** 화살촉 크기를 잴 때 선 굵기의 하한(px) — 엑셀은 2pt 보다 가는 선도 2pt 로 보고 화살촉을 그린다 */
+const ARROW_MIN_LINE_PX = (2 * 4) / 3;
 
 function textCss(shape: FormShape): CSSProperties {
   const vertical = shape.vertical;
@@ -160,20 +201,148 @@ function textCss(shape: FormShape): CSSProperties {
     width: vertical ? undefined : shape.noWrap ? "max-content" : "100%",
     height: vertical ? "100%" : undefined,
     flexShrink: 0,
-    textAlign: shape.align ?? "center",
-    fontSize: shape.fontSize ? `${shape.fontSize}pt` : undefined,
-    fontFamily: shape.fontFamily ? `"${shape.fontFamily}", "맑은 고딕", sans-serif` : undefined,
+    // DrawingML 의 기본 정렬은 왼쪽이다(가운데는 엑셀이 algn="ctr" 로 적는다). 가운데로 두면
+    // [비고]·[작성방법] 같은 설명 상자가 가운데로 몰렸다(7.6-5·6.3-2).
+    textAlign: shape.align ?? "left",
+    // 크기를 적지 않은 도형도 엑셀 기본(11pt)으로 — 비워 두면 화면 기본 16px 를 물려받아 글자가 9% 커지고,
+    // 조각(run) 크기의 비율 기준도 어긋난다(4.3 견본 상자 글이 세 줄로 넘쳤다).
+    fontSize: `${shape.fontSize ?? DEFAULT_SHAPE_FONT_PT}pt`,
+    fontFamily: shapeFontStack(shape),
+    // 간격을 안 적은 글은 1% 좁힌다 — 엑셀 글자 폭이 브라우저보다 조금 좁아, 딱 맞던 "설계검토 지연건수"
+    // (4.3 견본)가 0.3px 차이로 접혔다. 칸 글자와 같은 보정이다.
+    letterSpacing: shape.letterSpacing ? `${shape.letterSpacing}pt` : "-0.02em",
     fontWeight: shape.bold ? 700 : undefined,
-    color: shape.color,
-    lineHeight: 1.25,
+    fontStyle: shape.italic ? "italic" : undefined,
+    textDecoration: shape.underline ? "underline" : undefined,
+    color: shape.color ?? "#000000",
+    lineHeight: shape.lineSpacing?.pt
+      ? `${shape.lineSpacing.pt}pt`
+      : (shape.lineSpacing?.ratio ?? 1) * singleSpacing(shape.text),
     whiteSpace: shape.noWrap ? "pre" : "pre-wrap",
     // 한글은 어절 단위로 끊어야 "지식관리"가 "지식관"+"리"로 쪼개지지 않는다.
     wordBreak: "keep-all",
     overflowWrap: "break-word",
-    writingMode: vertical ? "vertical-rl" : undefined,
+    // vert = 글줄째 90° 돌림(위→아래), vert270 = 270°(아래→위, 8.7-1 "필요시 문서 개정"), eaVert = 글자를 세워 쌓기.
+    // 한글은 세로쓰기에서도 서 있으므로 vert·vert270 은 sideways 로 글자까지 눕혀야 엑셀과 같다.
+    writingMode: vertical === "eaVert" ? "vertical-rl" : vertical === "vert270" ? "sideways-lr" : vertical ? "sideways-rl" : undefined,
     textOrientation: vertical === "eaVert" ? "upright" : undefined,
-    transform: vertical === "vert270" ? "rotate(180deg)" : undefined,
   };
+}
+
+/**
+ * 말과 바로 붙은 여는 괄호 사이에서는 줄을 바꾸지 않는다(엑셀) — "시정조치요구서 / 발행(필요시)" 가
+ * "시정조치요구서 발행 / (필요시)" 로 접혔다(9.3-1). 보이지 않는 이음표(U+2060)를 끼운다.
+ */
+const keepParen = (text: string) => text.replace(/([^\s(])\(/g, "$1⁠(");
+
+/** 동아시아 글꼴 이름(테마 글꼴 "+mn-ea" 등은 맑은 고딕으로) → 설치된 글꼴 이름들 */
+const EA_LOCAL: Record<string, string[]> = {
+  "맑은 고딕": ["맑은 고딕", "Malgun Gothic"],
+  굴림: ["굴림", "Gulim"],
+  굴림체: ["굴림체", "GulimChe"],
+  돋움: ["돋움", "Dotum"],
+  돋움체: ["돋움체", "DotumChe"],
+  바탕: ["바탕", "Batang"],
+  바탕체: ["바탕체", "BatangChe"],
+  궁서: ["궁서", "Gungsuh"],
+};
+/** 엑셀이 동아시아 글꼴로 그리는 글자 범위 — 한글, 한자, 전각, 그리고 ○□※→ 같은 기호 */
+const EA_RANGE =
+  "U+1100-11FF, U+2010-2027, U+2030-205E, U+2190-23FF, U+2460-27BF, U+2E80-33FF, U+3400-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF";
+const injectedEa = new Set<string>();
+
+/**
+ * 도형 글꼴 묶음. 라틴 글꼴과 동아시아 글꼴이 다르면, 동아시아 글자 범위에만 쓰이는 이름(`XL EA …`)을
+ * 만들어 맨 앞에 둔다 — 엑셀처럼 한글·기호는 동아시아 글꼴, 영문·숫자는 라틴 글꼴로 그려진다.
+ */
+function shapeFontStack(shape: FormShape): string | undefined {
+  const latin = shape.fontFamily && !shape.fontFamily.startsWith("+") ? shape.fontFamily : undefined;
+  const eaRaw = shape.eaFontFamily && !shape.eaFontFamily.startsWith("+") ? shape.eaFontFamily : "맑은 고딕";
+  const locals = EA_LOCAL[eaRaw] ?? [eaRaw];
+  if (!latin || latin === eaRaw) return latin ? `"${latin}", "맑은 고딕", sans-serif` : undefined;
+  const alias = `XL EA ${eaRaw}`;
+  if (typeof document !== "undefined" && !injectedEa.has(alias)) {
+    injectedEa.add(alias);
+    const style = document.createElement("style");
+    const src = locals.map((name) => `local("${name}")`).join(", ");
+    style.textContent =
+      `@font-face{font-family:"${alias}";src:${src};unicode-range:${EA_RANGE};}` +
+      `@font-face{font-family:"${alias}";src:${locals.map((name) => `local("${name} Bold")`).join(", ")}, ${src};unicode-range:${EA_RANGE};font-weight:700;}`;
+    document.head.appendChild(style);
+  }
+  return `"${alias}", "${latin}", "맑은 고딕", sans-serif`;
+}
+
+/**
+ * 도형 글자의 "1줄" 간격(글자 크기의 배수). 엑셀 글상자는 글꼴 높이의 1.2배를 한 줄로 잡는데, 한글은
+ * 동아시아 글꼴(맑은 고딕) 높이로 재서 약 1.6배가 된다 — 7.6-5 설명 상자를 엑셀 PDF 와 재어 보니 그랬고,
+ * 75% 로 적힌 8.2-1 상자들도 1.25 기준으로는 두 줄이 겹쳤다. 한글이 없는 글은 1.25.
+ */
+const singleSpacing = (text: string) => (/[ㄱ-힣]/.test(text) ? 1.6 : 1.25);
+
+/**
+ * 도형 안 글자. 부분 서식이 있으면 조각마다 그린다 — 상자를 그리는 길이 둘(테두리를 SVG 로 그리는
+ * 도형, 그냥 사각형)이라 한쪽에만 두면 다른 쪽은 첫 조각 서식으로 통째로 그려진다(8.13-2 본문이 굵게).
+ * 조각의 굵기·기울임은 "없으면 보통"으로 분명히 준다 — 도형 전체가 굵게 잡혀 있어도 b="0" 조각은 보통이다.
+ */
+function ShapeText({ shape }: { shape: FormShape }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  /*
+   * 상자 밖으로 넘치면 글자를 조금 줄인다(원래 크기의 80% 까지). 브라우저 글꼴이 엑셀보다 조금 넓어,
+   * 엑셀에서 두 줄에 딱 들어가던 글이 세 줄로 접혀 상자 아래로 빠져나왔다(4.3 견본 맨 위 상자, 사용자 신고).
+   * 엑셀처럼 그대로 넘기면 글자가 화살표·옆 상자와 겹친다.
+   */
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const box = element?.parentElement;
+    if (!element || !box || shape.vertical) return;
+    // 원래 크기는 화면 규칙(textCss)의 값 — 비우면 위에서 물려받은 16px 로 돌아간다.
+    const original = String(textCss(shape).fontSize ?? "");
+    const fit = () => {
+      element.style.fontSize = original;
+      // 엑셀은 상자 글을 줄이지 않는다 — 안쪽 여백까지는 넘쳐도 그대로 둔다. **상자 테두리 밖으로**
+      // 나갈 때만 줄인다. 여백 안쪽 기준으로 줄였더니 "부적합보고서 / 발행"·"시정조치 요구서 (원본)"
+      // (10.1-1)이 엑셀보다 작아졌다.
+      const outside = () =>
+        element.offsetHeight > box.clientHeight + 1 || (shape.noWrap === true && element.scrollWidth > box.clientWidth + 1);
+      if (!(box.clientHeight > 0) || !outside()) return;
+      const base = parseFloat(getComputedStyle(element).fontSize);
+      for (let step = 1; step <= 8 && outside(); step += 1) element.style.fontSize = `${base * (1 - step * 0.025)}px`;
+    };
+    fit();
+    // 처음 그릴 때는 표 크기가 아직 안 잡혀(배율 계산 전) 잴 수 없을 때가 있다 — 글꼴이 다 오면 한 번 더 잰다.
+    let alive = true;
+    void document.fonts?.ready.then(() => {
+      if (alive) fit();
+    });
+    const frame = window.requestAnimationFrame(fit);
+    return () => {
+      alive = false;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [shape]);
+  return (
+    <span ref={ref} style={textCss(shape)}>
+      {shape.textRuns
+        ? shape.textRuns.map((run, index) => (
+            <span
+              key={index}
+              style={{
+                // 도형 글자 크기에 대한 비율 — 도형마다 기준 크기가 달라도 조각 사이 비율이 맞는다.
+                fontSize: run.fontSize ? `${run.fontSize / (shape.fontSize ?? DEFAULT_SHAPE_FONT_PT)}em` : undefined,
+                fontWeight: run.bold ? 700 : 400,
+                fontStyle: run.italic ? "italic" : "normal",
+                letterSpacing: run.letterSpacing !== undefined ? `${run.letterSpacing}pt` : "-0.02em",
+                textDecoration: run.underline ? "underline" : undefined,
+                color: run.color,
+              }}
+            >
+              {keepParen(run.text)}
+            </span>
+          ))
+        : keepParen(shape.text)}
+    </span>
+  );
 }
 
 /** 선·윤곽선 하나를 그리는 SVG. 도형마다 따로 둬야 도형 순서대로 쌓인다. */
@@ -185,130 +354,239 @@ function ShapeSvg({ children }: { children: ReactNode }) {
   );
 }
 
-export default function FormShapeLayer({ shapes }: { shapes: FormShape[] }) {
+/** 고친 도형 글자를 시트 값에 담는 키 — 칸 키(`3:2`)와 겹치지 않는다 */
+export const shapeValueKey = (textId: string) => `shape:${textId}`;
+
+export default function FormShapeLayer({
+  shapes: original,
+  values,
+  editable = false,
+  onChangeValue,
+  onCommitValue,
+}: {
+  shapes: FormShape[];
+  /** 이 시트에 적은 값 — `shape:번호` 키에 고친 도형 글자가 있다 */
+  values?: Record<string, string>;
+  /** 도형 글자를 눌러 고칠 수 있나(편집 화면) */
+  editable?: boolean;
+  onChangeValue?: (key: string, value: string) => void;
+  onCommitValue?: (key: string, before: string | undefined, after: string) => void;
+}) {
   // 화살촉 정의(marker)는 문서 전체에서 id 로 참조된다. 시트를 바꿔 가며 그려도
   // 서로 충돌하지 않도록 이 컴포넌트만의 접두사를 붙인다.
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  /*
+   * 순서도 상자 글자도 고칠 수 있다(2026-10-14 사용자 요청: "엑셀 안 그림으로 된 것도 내용 수정").
+   * 고친 글자는 칸 값과 같은 곳에 `shape:번호` 로 담아 저장·서버 올리기·되돌리기를 그대로 탄다.
+   * 고친 상자는 부분 서식 없이 상자 서식 하나로 그린다.
+   */
+  const shapes = useMemo(
+    () =>
+      original.map((shape) => {
+        const edited = shape.textId ? values?.[shapeValueKey(shape.textId)] : undefined;
+        return edited === undefined ? shape : { ...shape, text: edited, textRuns: undefined };
+      }),
+    [original, values],
+  );
+  const [editing, setEditing] = useState<string | null>(null);
+  const startRef = useRef<string | undefined>(undefined);
 
   if (shapes.length === 0) return null;
 
-  const arrowColors = [
-    ...new Set(
-      shapes
-        .filter((shape) => (shape.kind === "line" || shape.kind === "path") && (shape.arrowStart || shape.arrowEnd))
-        .map((shape) => shape.line ?? "#000000"),
-    ),
-  ];
-  const markerOf = (color: string) => `url(#${uid}-arrow-${colorKey(color)})`;
+  /*
+   * 선 끝 모양(화살촉·원형·다이아몬드)을 색·크기마다 하나씩 정의한다. 크기는 엑셀 규칙대로 선 굵기에
+   * 비례하되 가는 선은 2pt 로 보고 잰다 — 0.5pt 선의 "보통" 화살촉이 엑셀에서 6pt 인데, 선 굵기의
+   * 5배로만 그렸더니 3분의 1 크기로 작게 보였다(재점검).
+   */
+  const markers: { id: string; color: string; cap?: "oval" | "diamond" | "open"; width: number; length: number }[] = [];
+  const markerOf = (shape: FormShape, color: string, end: "start" | "end") => {
+    const cap = end === "start" ? shape.startCap : shape.endCap;
+    const [w, len] = (end === "start" ? shape.startArrowSize : shape.endArrowSize) ?? [3, 3];
+    const base = Math.max(shape.lineWidth, ARROW_MIN_LINE_PX);
+    const width = Math.round(base * w * 10) / 10;
+    const length = Math.round(base * len * 10) / 10;
+    const id = `${uid}-${cap ?? "arrow"}-${colorKey(color)}-${width}x${length}`.replace(/\./g, "_");
+    if (!markers.some((marker) => marker.id === id)) markers.push({ id, color, cap, width, length });
+    return `url(#${id})`;
+  };
 
   const text = (shape: FormShape, outlined: boolean) =>
     shape.text ? (
       <div style={boxCss(shape, outlined)}>
-        <span style={textCss(shape)}>{shape.text}</span>
+        <ShapeText shape={shape} />
       </div>
     ) : null;
 
+  // 도형을 먼저 그려야 쓰인 화살촉 정의(markers)가 모인다.
+  const drawn = shapes.map((shape, index) => {
+      const strokeWidth = Math.max(MIN_LINE_PX, shape.lineWidth);
+
+      if (shape.kind === "line") {
+        if (!shape.line) return null;
+        const color = shape.line;
+        const common = {
+          stroke: color,
+          strokeWidth,
+          strokeDasharray: dashArray(shape),
+          markerStart: shape.arrowStart ? markerOf(shape, color, "start") : undefined,
+          markerEnd: shape.arrowEnd ? markerOf(shape, color, "end") : undefined,
+          transform: svgRotate(shape),
+        };
+        return (
+          <ShapeSvg key={index}>
+            {shape.elbow !== undefined ? (
+              <polyline points={elbowPoints(shape)} fill="none" strokeLinejoin="round" {...common} />
+            ) : (
+              <line {...endpoints(shape)} {...common} />
+            )}
+          </ShapeSvg>
+        );
+      }
+
+      if (shape.kind === "path" && shape.paths) {
+        const color = shape.line;
+        return (
+          <Fragment key={index}>
+          <ShapeSvg>
+            {shape.paths.map((path, pathIndex) => (
+              <path
+                key={pathIndex}
+                d={framePath(shape, path.segments)}
+                fill={path.fill ? (shape.fill ?? "none") : "none"}
+                stroke={path.stroke ? (color ?? "none") : "none"}
+                strokeWidth={strokeWidth}
+                strokeDasharray={dashArray(shape)}
+                strokeLinejoin="round"
+                markerStart={color && shape.arrowStart ? markerOf(shape, color, "start") : undefined}
+                markerEnd={color && shape.arrowEnd ? markerOf(shape, color, "end") : undefined}
+                transform={svgRotate(shape)}
+              />
+            ))}
+          </ShapeSvg>
+          {text(shape, true)}
+          </Fragment>
+        );
+      }
+
+      const outline = outlinePath(shape);
+      if (outline) {
+        return (
+          <Fragment key={index}>
+          <ShapeSvg>
+            <path
+              d={outline}
+              fill={shape.fill ?? "none"}
+              stroke={shape.line ?? "none"}
+              strokeWidth={strokeWidth}
+              strokeDasharray={dashArray(shape)}
+              strokeLinejoin="round"
+              transform={svgRotate(shape)}
+            />
+          </ShapeSvg>
+          {text(shape, true)}
+          </Fragment>
+        );
+      }
+
+      return (
+        <div key={index} style={boxCss(shape, false)}>
+          {shape.text && <ShapeText shape={shape} />}
+        </div>
+      );
+    });
+
   return (
     // 도형은 보기용이다. 클릭이 통과해야 도형에 가린 칸도 눌러서 고칠 수 있다.
-    <div className="pointer-events-none absolute inset-0">
-      {arrowColors.length > 0 && (
+    // 칸에서 옆으로 넘친 글(z-index 1)보다 위에 둔다 — 도장("Sample") 아래 글이 도장을 뚫고 보였다(8.11-6).
+    <div className="pointer-events-none absolute inset-0" style={{ zIndex: 2 }}>
+      {markers.length > 0 && (
         <svg className="absolute h-0 w-0" aria-hidden>
           <defs>
-            {arrowColors.map((color) => (
+            {markers.map((marker) => (
               <marker
-                key={color}
-                id={`${uid}-arrow-${colorKey(color)}`}
+                key={marker.id}
+                id={marker.id}
                 viewBox="0 0 10 10"
-                refX="9"
+                preserveAspectRatio="none"
+                // 화살촉은 선 끝이 끝점, 원형·다이아몬드는 한가운데가 끝점이다(엑셀과 같다).
+                refX={marker.cap === "oval" || marker.cap === "diamond" ? 5 : 9.5}
                 refY="5"
-                markerWidth="5"
-                markerHeight="5"
+                markerUnits="userSpaceOnUse"
+                markerWidth={marker.length}
+                markerHeight={marker.width}
                 // start 쪽에 쓰면 저절로 뒤집힌다 — 화살촉 정의를 두 벌 두지 않아도 된다.
                 orient="auto-start-reverse"
               >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
+                {marker.cap === "oval" ? (
+                  <ellipse cx="5" cy="5" rx="5" ry="5" fill={marker.color} />
+                ) : marker.cap === "diamond" ? (
+                  <path d="M 5 0 L 10 5 L 5 10 L 0 5 z" fill={marker.color} />
+                ) : marker.cap === "open" ? (
+                  <path d="M 1 1 L 9.5 5 L 1 9" fill="none" stroke={marker.color} strokeWidth={1.4} />
+                ) : (
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill={marker.color} />
+                )}
               </marker>
             ))}
           </defs>
         </svg>
       )}
 
-      {shapes.map((shape, index) => {
-        const strokeWidth = Math.max(MIN_LINE_PX, shape.lineWidth);
-
-        if (shape.kind === "line") {
-          if (!shape.line) return null;
-          const color = shape.line;
-          const common = {
-            stroke: color,
-            strokeWidth,
-            strokeDasharray: dashArray(shape),
-            markerStart: shape.arrowStart ? markerOf(color) : undefined,
-            markerEnd: shape.arrowEnd ? markerOf(color) : undefined,
-            transform: svgRotate(shape),
+      {drawn}
+      {editable &&
+        shapes.map((shape, index) => {
+          if (!shape.textId || (shape.rotation && !shape.upright)) return null;
+          const key = shapeValueKey(shape.textId);
+          const frame = boxCss(shape, true);
+          const place: CSSProperties = {
+            position: "absolute",
+            left: frame.left,
+            top: frame.top,
+            width: frame.width,
+            height: frame.height,
           };
-          return (
-            <ShapeSvg key={index}>
-              {shape.elbow !== undefined ? (
-                <polyline points={elbowPoints(shape)} fill="none" strokeLinejoin="round" {...common} />
-              ) : (
-                <line {...endpoints(shape)} {...common} />
-              )}
-            </ShapeSvg>
-          );
-        }
-
-        if (shape.kind === "path" && shape.paths) {
-          const color = shape.line;
-          return (
-            <Fragment key={index}>
-            <ShapeSvg>
-              {shape.paths.map((path, pathIndex) => (
-                <path
-                  key={pathIndex}
-                  d={framePath(shape, path.segments)}
-                  fill={path.fill ? (shape.fill ?? "none") : "none"}
-                  stroke={path.stroke ? (color ?? "none") : "none"}
-                  strokeWidth={strokeWidth}
-                  strokeDasharray={dashArray(shape)}
-                  strokeLinejoin="round"
-                  markerStart={color && shape.arrowStart ? markerOf(color) : undefined}
-                  markerEnd={color && shape.arrowEnd ? markerOf(color) : undefined}
-                  transform={svgRotate(shape)}
-                />
-              ))}
-            </ShapeSvg>
-            {text(shape, true)}
-            </Fragment>
-          );
-        }
-
-        const outline = outlinePath(shape);
-        if (outline) {
-          return (
-            <Fragment key={index}>
-            <ShapeSvg>
-              <path
-                d={outline}
-                fill={shape.fill ?? "none"}
-                stroke={shape.line ?? "none"}
-                strokeWidth={strokeWidth}
-                strokeDasharray={dashArray(shape)}
-                strokeLinejoin="round"
-                transform={svgRotate(shape)}
+          if (editing === shape.textId) {
+            return (
+              <textarea
+                key={`edit-${index}`}
+                autoFocus
+                defaultValue={shape.text}
+                onChange={(event) => onChangeValue?.(key, event.target.value)}
+                onBlur={(event) => {
+                  setEditing(null);
+                  if (event.target.value !== (startRef.current ?? original[index].text)) {
+                    onCommitValue?.(key, startRef.current, event.target.value);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") event.currentTarget.blur();
+                }}
+                spellCheck={false}
+                className="pointer-events-auto z-30 resize-none rounded-sm bg-blue-50/95 p-1 outline-none ring-2 ring-blue-400"
+                style={{ ...place, ...textCss(shape), width: frame.width, height: frame.height }}
               />
-            </ShapeSvg>
-            {text(shape, true)}
-            </Fragment>
+            );
+          }
+          return (
+            <div
+              key={`hit-${index}`}
+              role="textbox"
+              tabIndex={0}
+              title="눌러서 글자를 고칩니다"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                startRef.current = values?.[key];
+                setEditing(shape.textId!);
+              }}
+              onFocus={() => {
+                startRef.current = values?.[key];
+                setEditing(shape.textId!);
+              }}
+              className="pointer-events-auto cursor-text rounded-sm hover:bg-blue-400/10 hover:ring-1 hover:ring-blue-300"
+              style={place}
+            />
           );
-        }
-
-        return (
-          <div key={index} style={boxCss(shape, false)}>
-            {shape.text && <span style={textCss(shape)}>{shape.text}</span>}
-          </div>
-        );
-      })}
+        })}
     </div>
   );
 }

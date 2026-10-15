@@ -45,6 +45,8 @@ export interface CustomSheet {
   name: string;
   /** 복사해 온 원본 시트 이름 */
   source: string;
+  /** 더한 때 — 이름에 달이 없는 월별 장을 어느 달 것으로 볼지 정한다 */
+  createdAt?: number;
 }
 
 const DB_NAME = "ipg-forms";
@@ -157,6 +159,18 @@ export interface StoredForm {
   approvalLines: Record<string, Record<string, Assignee>>;
   /** 시트 이름 → (서명 자리 키 → 결재 기록). 결재한 서명 그림을 함께 담는다. */
   approvals: Record<string, Record<string, Approval>>;
+  /**
+   * 시트 이름 → 그 장을 쓰는 부서(품질·공무·공사).
+   *
+   * 품질관리계획서 서식마다 "어느 부서가 썼나"를 남긴다(2026-10-13 사용자 결정). 엑셀 한 권에
+   * 서식이 여러 장(QA-4.3-2·4.3-3…)이라 **장마다** 단다. 나중에 생긴 칸이라 옛 서류는 없다.
+   */
+  sheetDepts?: Record<string, string>;
+  /**
+   * 시트 이름 → 마지막으로 글자를 고친 때. 발송대장처럼 한 장에 줄을 쌓는 서식이 오래 기록되지 않으면
+   * 서류함에 "N일째 기록 없음"을 띄운다(2026-10-15 사용자 결정). 이 칸이 생기기 전에 고친 장은 없다.
+   */
+  sheetEditedAt?: Record<string, number>;
 }
 
 /**
@@ -197,6 +211,16 @@ export interface FormSummary {
   editedCount: number;
   /** 결재칸이 있는 시트들의 결재 상태(홈 화면용). 배포 원본·견본 시트는 없다. */
   approvalSheets: ApprovalSheetSummary[];
+  /** 현장 서류: 작성 중인 장(무언가 적었거나 결재가 걸린 시트). 계획서 서류 현황이 쓴다. */
+  workingSheets: string[];
+  /** 시트 이름 → 그 장을 쓰는 부서 */
+  sheetDepts?: Record<string, string>;
+  /** 시트 이름 → 마지막으로 글자를 고친 때 */
+  sheetEditedAt?: Record<string, number>;
+  /** [시트 추가]로 더한 장 → 바탕 시트(서식 번호를 잇는다) */
+  sheetSources?: Record<string, string>;
+  /** [시트 추가]로 더한 장 → 더한 때 */
+  sheetMadeAt?: Record<string, number>;
 }
 
 /**
@@ -237,6 +261,8 @@ function normalize(raw: StoredForm): StoredForm {
     mergeEdits: raw.mergeEdits ?? {},
     approvalLines: raw.approvalLines ?? {},
     approvals: raw.approvals ?? {},
+    sheetDepts: raw.sheetDepts ?? {},
+    sheetEditedAt: raw.sheetEditedAt ?? {},
     values: restoreBlankedTitles(
       normalizeValues(raw.values, raw.sheets ?? []),
       raw.sheets ?? [],
@@ -430,6 +456,18 @@ export function isTemplateSheet(sheet: FormSheet): boolean {
 }
 
 /**
+ * 작성 중인 장인가 — 글자(칸·도형)를 적은 장, 결재선·결재가 걸린 장.
+ * [시트 추가]로 더하기만 한 빈 장은 아니다 — 무언가 적어야 수시 건수·주기 칸에 잡힌다(2026-10-15 사용자 결정).
+ */
+function isWorkingSheet(form: StoredForm, sheet: FormSheet): boolean {
+  return (
+    Object.keys(form.values[sheet.name] ?? {}).length > 0 ||
+    Object.keys(form.approvalLines[sheet.name] ?? {}).length > 0 ||
+    Object.keys(form.approvals[sheet.name] ?? {}).length > 0
+  );
+}
+
+/**
  * 결재칸이 있는 시트마다 결재선·결재 기록을 요약한다(서명 그림은 뺀다 — 목록이 무거워진다).
  * 결재칸은 저장해 두지 않고 격자에서 다시 찾는다 — 양식을 다시 읽으면 결재칸도 새 격자를 따른다.
  */
@@ -441,14 +479,9 @@ export function approvalSheetsOf(form: StoredForm): ApprovalSheetSummary[] {
     /**
      * **작성 중인 장만** 센다(사용자 판단). 회사 양식에는 지난달 장이 그대로 들어 있어
      * (`QA-4.2-2(25.09)`…), 결재칸이 있다고 다 세면 이미 종이로 끝난 과거 기록이 "결재선 미지정"에
-     * 쌓여 정작 처리할 것이 묻힌다. 앱에서 더한 장, 글자를 적은 장, 이미 결재선·결재가 있는 장만 본다.
+     * 쌓여 정작 처리할 것이 묻힌다. 글자를 적은 장, 이미 결재선·결재가 있는 장만 본다.
      */
-    const working =
-      sheet.custom === true ||
-      Object.keys(form.values[sheet.name] ?? {}).length > 0 ||
-      Object.keys(form.approvalLines[sheet.name] ?? {}).length > 0 ||
-      Object.keys(form.approvals[sheet.name] ?? {}).length > 0;
-    if (!working) continue;
+    if (!isWorkingSheet(form, sheet)) continue;
     const slots = findApprovalBoxes(sheet).flatMap((box) =>
       box.slots.map((slot) => ({ label: slot.label, signKey: slot.signKey })),
     );
@@ -483,16 +516,28 @@ function summarize(form: StoredForm): FormSummary {
     fileSize: form.fileSize ?? form.bytes?.byteLength,
     templateId: form.templateId,
     templateUploadedAt: form.templateUploadedAt,
+    sheetDepts: form.sheetDepts,
+    sheetEditedAt: form.sheetEditedAt,
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
     sheetNames: withCustomSheets(form.sheets, form.customSheets).map((sheet) => sheet.name),
+    sheetSources: Object.fromEntries(form.customSheets.map((item) => [item.name, item.source])),
+    sheetMadeAt: Object.fromEntries(
+      form.customSheets.filter((item) => item.createdAt).map((item) => [item.name, item.createdAt as number]),
+    ),
     // 시트마다 따로 담기므로 전부 더해야 "고친 칸 수"가 된다.
     editedCount: Object.values(form.values).reduce(
       (sum, cells) => sum + Object.keys(cells).length,
       0,
     ),
     approvalSheets: approvalSheetsOf(form),
+    workingSheets:
+      form.kind === "site"
+        ? withCustomSheets(form.sheets, form.customSheets)
+            .filter((sheet) => isWorkingSheet(form, sheet))
+            .map((sheet) => sheet.name)
+        : [],
   };
 }
 
@@ -895,13 +940,34 @@ async function syncShape(id: string): Promise<void> {
     extraRows: saved.extraRows ?? {},
     approvalLines: saved.approvalLines ?? {},
     approvals: saved.approvals ?? {},
+    sheetDepts: saved.sheetDepts ?? {},
+    sheetEditedAt: saved.sheetEditedAt ?? {},
   });
 }
 
-/** 고친 글자만 갱신한다. */
+/** 글자가 바뀐 시트들 — 시트마다 칸 값을 견준다 */
+export function changedSheets(before: FormValues, after: FormValues): string[] {
+  const names = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...names].filter((name) => {
+    const a = before[name] ?? {};
+    const b = after[name] ?? {};
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    return [...keys].some((key) => a[key] !== b[key]);
+  });
+}
+
+/** 고친 글자만 갱신한다. 바뀐 장에는 고친 때를 남긴다(오래 기록 없는 대장 알림). */
 export async function updateFormValues(id: string, values: FormValues): Promise<void> {
-  await patchForm(id, () => ({ values, updatedAt: Date.now() }));
-  void syncPatch(id, { cellValues: values });
+  const now = Date.now();
+  let stamped: Record<string, number> | undefined;
+  await patchForm(id, (form) => {
+    const changed = changedSheets(form.values, values);
+    if (changed.length === 0) return { values, updatedAt: now };
+    stamped = { ...form.sheetEditedAt };
+    for (const name of changed) stamped[name] = now;
+    return { values, sheetEditedAt: stamped, updatedAt: now };
+  });
+  void syncPatch(id, { cellValues: values, ...(stamped ? { sheetEditedAt: stamped } : {}) });
 }
 
 /** meta 칸에서 값 하나를 읽는다. */
@@ -1197,6 +1263,18 @@ export async function setSheetApproval(
   }
 }
 
+/** 그 장을 쓰는 부서를 정한다(비우면 지운다). 서버에도 통째로 보낸다 — 결재와 같은 까닭. */
+export async function setSheetDept(id: string, sheetName: string, dept: string | undefined): Promise<void> {
+  await patchForm(id, (form) => {
+    const sheetDepts = { ...form.sheetDepts };
+    if (dept) sheetDepts[sheetName] = dept;
+    else delete sheetDepts[sheetName];
+    return { sheetDepts, updatedAt: Date.now() };
+  });
+  const saved = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
+  if (saved) void syncPatch(id, { sheetDepts: saved.sheetDepts ?? {} });
+}
+
 /** 이 양식에서 이미 쓰이고 있는 시트 이름(원본 + 더한 것). */
 function usedSheetNames(form: StoredForm): string[] {
   return withCustomSheets(form.sheets, form.customSheets).map((sheet) => sheet.name);
@@ -1226,7 +1304,7 @@ export async function addCustomSheet(id: string, sheet: CustomSheet): Promise<vo
     const blanks = source ? blankValuesFor(form.sheets, source) : {};
 
     return {
-      customSheets: [...form.customSheets, { name, source: sheet.source }],
+      customSheets: [...form.customSheets, { name, source: sheet.source, createdAt: Date.now() }],
       values: Object.keys(blanks).length > 0 ? { ...form.values, [name]: blanks } : form.values,
       updatedAt: Date.now(),
     };
@@ -1270,9 +1348,21 @@ export async function renameCustomSheet(
       approvals[name] = approvals[from];
       delete approvals[from];
     }
+    const sheetDepts = { ...form.sheetDepts };
+    if (sheetDepts[from]) {
+      sheetDepts[name] = sheetDepts[from];
+      delete sheetDepts[from];
+    }
+    const sheetEditedAt = { ...form.sheetEditedAt };
+    if (sheetEditedAt[from]) {
+      sheetEditedAt[name] = sheetEditedAt[from];
+      delete sheetEditedAt[from];
+    }
     return {
       approvalLines,
       approvals,
+      sheetDepts,
+      sheetEditedAt,
       customSheets: form.customSheets.map((item) =>
         item.name === from ? { ...item, name } : item,
       ),
@@ -1295,9 +1385,15 @@ export async function removeCustomSheet(id: string, name: string): Promise<void>
     delete approvalLines[name];
     const approvals = { ...form.approvals };
     delete approvals[name];
+    const sheetDepts = { ...form.sheetDepts };
+    delete sheetDepts[name];
+    const sheetEditedAt = { ...form.sheetEditedAt };
+    delete sheetEditedAt[name];
     return {
       approvalLines,
       approvals,
+      sheetDepts,
+      sheetEditedAt,
       customSheets: form.customSheets.filter((item) => item.name !== name),
       values,
       updatedAt: Date.now(),

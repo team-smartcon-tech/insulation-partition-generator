@@ -35,6 +35,7 @@ import {
   stripSampleAnchors,
 } from "./sheetCopyExport.ts";
 import type { FormValues } from "./types";
+import { applyShapeTextEdits, shapeIdOfKey } from "./shapeTextExport.ts";
 
 const SHEET_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
 /** 관계 파일 경로(`xl/worksheets/sheet1.xml` → `xl/worksheets/_rels/sheet1.xml.rels`) */
@@ -281,14 +282,14 @@ export async function buildFilledWorkbook(
 
   /** 이 시트에 붙은 그림 판(drawing) 파일 경로. 없으면 undefined. */
   async function drawingPathOf(sheetPath: string, sheetXml: string): Promise<string | undefined> {
-    const id = /<drawing[^>]*r:id="([^"]+)"/.exec(sheetXml)?.[1];
+    const id = /<drawing\b[^>]*\br:id="([^"]+)"/.exec(sheetXml)?.[1];
     if (!id) return undefined;
     const relsPath = sheetPath.replace(/([^/]+)$/, "_rels/$1.rels");
     const rels = await readText(relsPath);
     if (!rels) return undefined;
     const target =
-      new RegExp(`<Relationship\b[^>]*\bId="${id}"[^>]*\bTarget="([^"]+)"`).exec(rels)?.[1] ??
-      new RegExp(`<Relationship\b[^>]*\bTarget="([^"]+)"[^>]*\bId="${id}"`).exec(rels)?.[1];
+      new RegExp(`<Relationship\\b[^>]*\\bId="${id}"[^>]*\\bTarget="([^"]+)"`).exec(rels)?.[1] ??
+      new RegExp(`<Relationship\\b[^>]*\\bTarget="([^"]+)"[^>]*\\bId="${id}"`).exec(rels)?.[1];
     return target ? resolvePath(sheetPath, target) : undefined;
   }
 
@@ -446,6 +447,17 @@ export async function buildFilledWorkbook(
     }
 
     let patched = patchSheetXml(base, cells);
+    // 화면에서 고친 순서도 상자 글자(`shape:번호`)를 그림 판에 되돌려 적는다.
+    const shapeEdits: Record<string, string> = {};
+    for (const [key, text] of Object.entries(cells)) {
+      const id = shapeIdOfKey(key);
+      if (id) shapeEdits[id] = text;
+    }
+    if (Object.keys(shapeEdits).length > 0) {
+      const drawingPath = await drawingPathOf(path, patched);
+      const drawingXml = drawingPath ? await readText(drawingPath) : undefined;
+      if (drawingPath && drawingXml) await putText(drawingPath, applyShapeTextEdits(drawingXml, shapeEdits));
+    }
     /*
      * 칸 합치기는 값을 적은 **뒤** 반영한다. 합치면 왼쪽 위 글자만 남으므로, 가려지는 칸에
      * 예전에 적어 둔 글자까지 여기서 함께 지워진다(엑셀에서 합칠 때와 같다).

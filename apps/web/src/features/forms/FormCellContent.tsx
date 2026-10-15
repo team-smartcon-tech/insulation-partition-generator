@@ -9,11 +9,52 @@
  * 상자를 만들고 높이를 재느라 몇 초씩 멈춘다. 평소에는 글자만 있는 가벼운 칸으로 두고,
  * 누르거나 Tab 으로 들어온 칸만 입력 상자로 바꾼다 — 보이는 모습은 같다.
  */
-import { memo, useLayoutEffect, useRef, useState } from "react";
-import type { FormCell } from "./types";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import type { FormCell, FormTextRun } from "./types";
+
+/** 엑셀이 칸 글자 크기를 적지 않았을 때의 크기(pt) — 부분 서식 크기를 칸 크기에 대한 비율로 바꿀 때 쓴다. */
+const DEFAULT_FONT_PT = 11;
+
+/**
+ * 부분 서식 조각들을 그린다. 크기는 칸 글자 크기에 대한 **비율(em)** 로 준다 — 칸이 넘쳐 글자를
+ * 줄일 때(fitToCell) 조각들도 함께 줄어야 한다. 줄 끝 공백은 `displayText` 처럼 걷는다.
+ */
+function RichRuns({ runs, basePt }: { runs: FormTextRun[]; basePt: number }) {
+  // 줄바꿈·공백뿐인 조각은 앞 조각 크기를 따른다 — 제 크기(칸 기본 40pt)로 두면 그 줄만 높아진다.
+  let lastSize: number | undefined;
+  return (
+    <>
+      {runs.map((run, index) => {
+        let text = run.text.replace(/[ \t]+\n/g, "\n");
+        if (index === runs.length - 1) text = text.replace(/\s+$/, "");
+        const blank = text.trim() === "";
+        const size = blank ? (lastSize ?? run.fontSize) : run.fontSize;
+        if (!blank) lastSize = run.fontSize;
+        return (
+          <span
+            key={index}
+            style={{
+              fontWeight: run.bold === true ? 700 : run.bold === false ? 400 : undefined,
+              fontStyle: run.italic === true ? "italic" : run.italic === false ? "normal" : undefined,
+              textDecoration: run.underline ? "underline" : undefined,
+              fontSize: run.vertAlign ? `${((size ?? basePt) / basePt) * 0.7}em` : size ? `${size / basePt}em` : undefined,
+              verticalAlign: run.vertAlign,
+              lineHeight: "normal",
+              color: run.color,
+            }}
+          >
+            {text}
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 /** 글자를 줄여 맞출 때의 하한. 이보다 작아지면 읽을 수 없어 그냥 넘치게 둔다. */
 const MIN_FONT_PX = 7;
+/** "축소하여 맞춤" 칸은 엑셀처럼 더 작게도 줄인다 */
+const MIN_FREE_FONT_PX = 4;
 /** 한 번에 줄이는 폭(px). 작을수록 원본에 가깝지만 재계산이 늘어난다. */
 const SHRINK_STEP_PX = 0.5;
 
@@ -39,17 +80,37 @@ export function displayText(text: string): string {
  * 쓰기와 읽기를 번갈아 하면 브라우저가 그때마다 화면 계산을 다시 해(레이아웃 스래싱)
  * 칸 수에 비례해 느려진다. 읽기만 이어지면 계산은 한 번으로 묶인다.
  */
-function fitToCell(element: HTMLElement | null): void {
-  if (!element) return;
+function fitToCell(
+  element: HTMLElement | null,
+  check: { width: boolean; height: boolean; free?: boolean } = { width: true, height: false },
+): void {
+  if (!element || (!check.width && !check.height)) return;
   if (element.style.fontSize) element.style.fontSize = "";
+  const overflows = () =>
+    (check.width && element.scrollWidth > element.clientWidth) ||
+    // 세로: 엑셀은 같은 글이 줄 높이 안에 들어가는데(줄 간격이 조금 더 좁다) 여기서는 한 줄이
+    // 더 생겨 아랫줄이 잘렸다. 1px 은 반올림 오차로 본다.
+    (check.height && element.scrollHeight > element.clientHeight + 1);
   // 넘치지 않으면 원본 크기 그대로 둔다.
-  if (element.scrollWidth <= element.clientWidth) return;
+  if (!overflows()) return;
 
-  let size = Number.parseFloat(window.getComputedStyle(element).fontSize);
-  while (element.scrollWidth > element.clientWidth && size > MIN_FONT_PX) {
+  const original = Number.parseFloat(window.getComputedStyle(element).fontSize);
+  // 세로로 맞출 때는 원본의 85% 까지만 줄인다 — 많이 넘치는 칸은 엑셀도 잘라 보여 주는 경우라
+  // 그대로 잘리게 둔다(70% 까지 줄였더니 7.1-2·8.10-2 칸이 읽을 수 없게 작아졌다).
+  // 가로로 맞출 때도 80% 까지만 — 엑셀은 "축소하여 맞춤"이 아니면 줄이지 않고 자른다. 브라우저 글꼴이
+  // 조금 넓은 만큼만 메우고 그 너머는 자른다(머리글이 읽을 수 없게 작아졌다, 7.6·8.11·8.12 재점검).
+  // "축소하여 맞춤" 칸(free)은 엑셀처럼 끝까지 줄여 다 보인다("ITP-해당코드-공정약호-일련번호", 8.11-4).
+  // 2026-10-14 재점검: 엑셀은 "축소하여 맞춤"이 아니면 글자를 줄이지 않고 **자른다**. 줄인 칸이 엑셀보다
+  // 작아 보였다(7.1-2·8.10-2·문서보안기준안). 브라우저 글꼴이 조금 넓은 만큼(10%)만 줄이고 나머지는 자른다.
+  const floor = check.free ? MIN_FREE_FONT_PX : Math.max(MIN_FONT_PX, original * 0.9);
+  let size = original;
+  while (overflows() && size > floor) {
     size -= SHRINK_STEP_PX;
     element.style.fontSize = `${size}px`;
   }
+  // 조금 줄여서(글꼴 폭 차이만큼) 들어가면 그대로 두고, 그래도 넘치면 원래 크기로 돌려 엑셀처럼 자른다 —
+  // 넘치는 글을 어설프게 줄이면 엑셀보다 작고 그래도 잘려 보였다(7.1-2 기본서류 칸).
+  if (!check.free && overflows()) element.style.fontSize = "";
 }
 
 interface FormCellContentProps {
@@ -59,10 +120,25 @@ interface FormCellContentProps {
   /** 고친 값. 없으면 엑셀 원본 글자를 쓴다. */
   value: string | undefined;
   /**
+   * 글자가 이 높이(px)를 넘어도 줄을 늘리지 않는다 — 넘친 만큼은 엑셀처럼 잘린다.
+   *
+   * 엑셀은 글자가 넘쳐도 줄 높이를 그대로 두는데, 표는 내용에 맞춰 줄을 늘린다. 그러면
+   * 칸 테두리로 그린 상자가 아래로 밀리고, 줄 높이로 자리를 잡는 도형(화살표·연결선)과
+   * 어긋난다(QA-4.3-2 에서 125px, 사용자 신고). 빈 칸의 자리 잡기용 공백 한 칸도 한 줄
+   * 높이(약 22px)를 차지해, 엑셀의 얇은 간격 줄(6~11px)을 모두 22px 로 키웠다.
+   * 비어 있으면 줄을 늘려도 된다(사용자가 적은 글은 잘리면 안 된다).
+   */
+  maxHeight?: number;
+  /**
    * 옆 칸이 비어 있어 글자를 넘겨도 되는 칸인가(엑셀과 같은 규칙).
    * 넘길 수 있으면 글자를 줄이지 않는다 — 줄이면 원본보다 훨씬 작아져 읽기 어렵다.
    */
   spill?: boolean;
+  /** 넘겨 쓸 수 있는 폭(px, 자기 칸 밖) — 왼쪽·오른쪽. 오른쪽 Infinity 면 끝없이(표 밖 빈 열 위로). */
+  spillLeft?: number;
+  spillRight?: number;
+  /** 엑셀에 적힌 정렬 — 가운데면 칸 가운데를 지키며 양쪽으로, 오른쪽이면 왼쪽으로 넘긴다 */
+  spillAlign?: "left" | "center" | "right";
   /** 셀 키를 함께 넘긴다 — 칸마다 새 함수를 만들면 메모가 소용없어진다. */
   onChange: (cellKey: string, value: string) => void;
   /**
@@ -77,11 +153,54 @@ interface FormCellContentProps {
   onRedo?: () => void;
 }
 
+/**
+ * 세로로 쌓는 글자 — 엑셀처럼 공백은 한 글자 높이(전각 공백), 괄호는 옆으로 누운 세로쓰기 괄호.
+ * 그냥 두면 공백이 좁아 글자가 몰리고("참 석 자", 7.5-4 양식) 괄호가 서 있었다("발행(누구나)", 8.12-1).
+ */
+function stackedText(text: string): string {
+  return text.replace(/ /g, "　").replace(/\(/g, "︵").replace(/\)/g, "︶");
+}
+
+/** 칸의 빈 곳을 눌렀을 때 그 칸 글자 상자에 보내는 신호 이름 */
+export const START_EDIT_EVENT = "form-cell-start-edit";
+
+/** 끝없이 넘길 수 있을 때 잡는 폭(px) — 칸 밖 빈 열 위로 이만큼이면 어떤 글도 다 보인다 */
+const OPEN_SPILL_PX = 2000;
+
+/**
+ * 넘겨 쓰는 글자 상자의 자리. 이어진 빈 칸까지만 보이고 그 너머(글자 있는 칸)에서 엑셀처럼 자른다.
+ * 가운데 정렬은 칸 가운데를 중심으로 양쪽을 똑같이 넓힌 뒤, 넘길 수 없는 쪽만 잘라 낸다.
+ */
+function spillBox(left: number, right: number, align: "left" | "center" | "right"): CSSProperties {
+  const center = align === "center";
+  /*
+   * 넘친 글자는 누르기를 **통과시킨다** — 엑셀처럼 그 아래 빈 칸을 누르면 빈 칸에 적는다. 막으면
+   * 넘친 글자가 덮은 빈 칸은 영영 고칠 수 없었다(QA-4.3-4 분류표 17칸). 제 칸은 칸(td)이 받아서 연다.
+   */
+  // 넘기는 쪽에 맞춰 글자를 붙인다 — 칸의 정렬(A 열 자동 가운데 등)과 달라도 엑셀이 그리는 쪽을 따른다.
+  const pass: CSSProperties = { pointerEvents: "none", textAlign: align };
+  if (!center && left === 0 && right === Infinity) return { ...pass, overflow: "visible", position: "relative", zIndex: 1 };
+  const r = Number.isFinite(right) ? right : OPEN_SPILL_PX;
+  const base: CSSProperties = { ...pass, position: "relative", zIndex: 1, overflow: "hidden" };
+  if (!center) return { ...base, marginLeft: -left, width: `calc(100% + ${left + r}px)` };
+  const half = Math.max(left, r);
+  return {
+    ...base,
+    marginLeft: -half,
+    width: `calc(100% + ${half * 2}px)`,
+    clipPath: `inset(0 ${half - r}px 0 ${half - left}px)`,
+  };
+}
+
 function FormCellContent({
   cell,
   editable,
   value,
   spill = false,
+  spillLeft = 0,
+  spillRight = 0,
+  spillAlign = "left",
+  maxHeight,
   onChange,
   onCommit,
   onRevert,
@@ -94,6 +213,18 @@ function FormCellContent({
   const readonlyRef = useRef<HTMLSpanElement>(null);
   /** 고치기 시작할 때의 값. 되돌리기에 쓴다(없으면 엑셀 원본 글자 그대로였다는 뜻). */
   const startRef = useRef<string | undefined>(undefined);
+
+  // 칸의 빈 곳을 눌렀을 때 표(`FormSheetView`)가 보내는 "고치기 시작" 신호.
+  useEffect(() => {
+    const element = readonlyRef.current;
+    if (!element || !editable || editing) return;
+    const start = () => {
+      startRef.current = value;
+      setEditing(true);
+    };
+    element.addEventListener(START_EDIT_EVENT, start);
+    return () => element.removeEventListener(START_EDIT_EVENT, start);
+  }, [editable, editing, value]);
   const text = value ?? displayText(cell.text);
   const wraps = cell.style.wrap === true;
 
@@ -107,13 +238,24 @@ function FormCellContent({
       element.setSelectionRange(end, end);
     }
     if (!element) {
-      if (!wraps && !spill) fitToCell(readonlyRef.current);
+      // 줄바꿈을 끈 칸은 가로로, 줄 높이가 정해진 칸(원본 글자)은 세로로 넘치면 글자를 줄여 맞춘다.
+      const span = readonlyRef.current;
+      fitToCell(span, {
+        width: !wraps && !spill,
+        // 세로로 넘치는 글도 90% 까지만 줄인다(가로와 같다) — 브라우저 글꼴이 조금 넓어 엑셀에서 한 줄인
+        // 문장이 두 줄로 접히는 만큼만 메운다(9.1-2 "4. 다음은 프로젝트를…"). 그 너머는 엑셀처럼 자른다.
+        height: maxHeight !== undefined,
+        free: cell.style.shrink === true,
+      });
+      // 세로로 넘치는 글은 엑셀처럼 **첫 줄부터** 보이고 아래가 잘린다(가운데 맞춤이어도) — 가운데로 두고
+      // 위아래를 같이 잘랐더니 "인정검사 신청서"(7.1-2)·"지면에서 10cm이상"(8.10-2) 같은 첫 줄이 사라졌다.
+      if (span && maxHeight !== undefined) span.scrollTop = 0;
       return;
     }
     // 글이 길어지면 칸이 함께 늘어나야 잘리지 않는다. textarea 는 스스로 늘지 않는다.
     element.style.height = "auto";
     element.style.height = `${element.scrollHeight}px`;
-    if (!wraps && !spill) fitToCell(element);
+    if (!wraps && !spill) fitToCell(element, { width: true, height: false, free: cell.style.shrink === true });
 
     // 옆으로 넘겨 쓰던 칸은 **누를 때도 글자가 다 보여야 한다.** 칸 너비에 맞추면 긴 줄이
     // 잘려 보여서, 어디를 고치는지 모른 채 지우게 된다. 글자 길이만큼 상자를 넓힌다.
@@ -122,7 +264,7 @@ function FormCellContent({
       const needed = element.scrollWidth + 2;
       element.style.width = `${Math.max(needed, element.parentElement?.clientWidth ?? 0)}px`;
     }
-  }, [text, editing, wraps, spill]);
+  }, [text, editing, wraps, spill, maxHeight]);
 
   if (editable && editing) {
     return (
@@ -186,10 +328,14 @@ function FormCellContent({
       ref={readonlyRef}
       style={{
         // 넘길 수 있는 칸은 옆 칸 위로 글자가 지나가게 둔다(엑셀과 같은 모습).
-        ...(spill ? { overflow: "visible", position: "relative", zIndex: 1 } : {}),
+        ...(spill ? spillBox(spillLeft, spillRight, spillAlign) : {}),
         // 누를 수 있는 자리를 칸 전체로 넓힌다. 글자 높이만큼만 잡으면 줄 높이가 큰 칸에서
         // 아래쪽 빈 곳을 눌러도 아무 일이 없어 "편집이 안 된다"로 보인다.
         ...(editable ? { minHeight: "100%" } : {}),
+        ...(maxHeight !== undefined ? { maxHeight } : {}),
+        // 부분 서식 칸은 줄 높이를 조각들이 정한다(엑셀처럼 그 줄에서 가장 큰 글자 기준). 칸 기본 크기
+        // (40pt)가 줄마다 깔리면 35pt·28pt 두 줄 제목이 크게 벌어졌다(8.6-2 공정표 제목).
+        ...(value === undefined && cell.runs ? { lineHeight: 0 } : {}),
       }}
       className={
         (spill ? "block" : "block overflow-hidden") +
@@ -218,7 +364,18 @@ function FormCellContent({
       }
     >
       {/* 빈 칸도 누를 수 있어야 한다 — 글자가 없으면 높이가 0 이 되어 누를 데가 없다. */}
-      {text === "" ? " " : text}
+      {value === undefined && cell.runs ? (
+        <RichRuns runs={cell.runs} basePt={cell.style.fontSize ?? DEFAULT_FONT_PT} />
+      ) : null}
+      {value === undefined && cell.runs
+        ? null
+        : text === ""
+          ? " "
+          : // 세로 쌓기 글자는 공백도 한 글자 높이를 차지한다(엑셀). 그냥 두면 세로쓰기에서 공백이 좁아
+            // "   참  석  자"(7.5-4 양식)가 칸 위쪽에 몰렸다 — 전각 공백으로 바꿔 같은 높이를 준다.
+            cell.style.textDirection === "stacked"
+            ? stackedText(text)
+            : text}
     </span>
   );
 }

@@ -12,7 +12,7 @@
  */
 import { hexToRgb, hslToRgb, rgbToHex, rgbToHsl, schemeColor, DEFAULT_THEME } from "./colors.ts";
 import type { ThemeColors } from "./colors.ts";
-import type { FormShape, FormShapeKind, FormShapePath } from "./types";
+import type { FormShape, FormShapeKind, FormShapePath, FormTextRun } from "./types";
 import { readZipIndex, readZipText } from "./zip.ts";
 
 /** 엑셀 도면 좌표 단위(EMU) → px. 914400 EMU = 1인치, 화면은 96dpi. */
@@ -229,6 +229,20 @@ function readColor(chunk: string | undefined, ctx: Context): string | undefined 
 }
 
 /** 엑셀 선 모양 → 화면. 종류가 많지만 화면에서 구분되는 것은 실선·파선·점선뿐이다. */
+/** DrawingML 선 종류 → [선, 빈칸, …] (선 굵기의 배수) */
+const DASH_PATTERNS: Record<string, number[]> = {
+  sysDot: [1, 1],
+  sysDash: [3, 1],
+  dot: [1, 3],
+  dash: [4, 3],
+  lgDash: [8, 3],
+  dashDot: [4, 3, 1, 3],
+  lgDashDot: [8, 3, 1, 3],
+  lgDashDotDot: [8, 3, 1, 3, 1, 3],
+  sysDashDot: [3, 1, 1, 1],
+  sysDashDotDot: [3, 1, 1, 1, 1, 1],
+};
+
 function readDash(value: string | undefined): FormShape["dash"] {
   if (!value || value === "solid") return undefined;
   if (value.toLowerCase().includes("dot") && !value.toLowerCase().includes("dash")) return "dotted";
@@ -256,6 +270,64 @@ function readText(txBody: string | undefined): string {
   // 보이지 않는 공백(줄바꿈 없는 공백   등)만 든 도형은 글자 없는 도형이다. 그대로 두면
   // 합치기 규칙이 "글자가 있다"로 보고 건너뛰어, 마름모 위에 글자 상자가 겹쳐 그려진다.
   return text.trim() === "" ? "" : text;
+}
+
+/**
+ * 도형 글자의 부분 서식 조각. 마름모 안 "검토 및 승인" 아래 작은 "(현장소장/건설사업관리)" 처럼
+ * 줄마다 크기·굵기가 다르면, 첫 조각 서식 하나로 그려서는 작은 줄이 커져 도형 밖으로 넘친다(8.7·8.8).
+ */
+/**
+ * 글상자의 기본 글자 서식(`lstStyle` 1단계). 조각에 굵기·기울임을 안 적었으면 이것을 따른다 —
+ * 순서도의 "Yes"·"No" 는 굵게가 여기에만 적혀 있어 보통 굵기로 그려졌다(10.1-1, 10.2-1).
+ */
+function inheritedRunProps(txBody: string | undefined): string | undefined {
+  const lstStyle = txBody ? child(txBody, "lstStyle") : undefined;
+  const level = lstStyle ? child(lstStyle, "lvl1pPr") : undefined;
+  return level ? child(level, "defRPr") : undefined;
+}
+
+/** 조각의 켜고 끄는 서식(b·i) — 조각에 없으면 글상자 기본을 따른다 */
+const flag = (rPr: string | undefined, inherited: string | undefined, name: string) =>
+  (ownAttr(rPr, name) ?? ownAttr(inherited, name)) === "1";
+
+function readTextRuns(txBody: string | undefined, ctx: Context, baseColor?: string): FormTextRun[] | undefined {
+  if (!txBody) return undefined;
+  const inherited = inheritedRunProps(txBody);
+  // 색을 안 적은 조각은 글상자 기본색(없으면 검정)이다 — 비워 두면 도형 글자색(첫 조각의 빨강)을
+  // 물려받아 "- 현장 여건에 맞게 수정"(6.3-2)까지 빨갛게 그려졌다.
+  const fallbackColor = (inherited ? readColor(inherited, ctx) : undefined) ?? baseColor ?? "#000000";
+  const runs: FormTextRun[] = [];
+  const paragraphs = findBlocks(txBody, "p");
+  paragraphs.forEach((paragraph, index) => {
+    for (const piece of childElements(paragraph)) {
+      if (piece.name === "br") {
+        runs.push({ text: "\n" });
+        continue;
+      }
+      if (piece.name !== "r" && piece.name !== "fld") continue;
+      const t = findBlocks(piece.xml, "t")[0] ?? "";
+      const rPr = findBlocks(piece.xml, "rPr")[0] ?? "";
+      const size = Number(ownAttr(rPr, "sz") ?? 0);
+      const color = (rPr ? readColor(rPr, ctx) : undefined) ?? fallbackColor;
+      const underline = ownAttr(rPr, "u");
+      runs.push({
+        text: unescapeXml(t.replace(/^<[^>]*>/, "").replace(/<\/[^>]*>$/, "")),
+        ...(flag(rPr, inherited, "b") ? { bold: true } : {}),
+        ...(flag(rPr, inherited, "i") ? { italic: true } : {}),
+        ...(underline && underline !== "none" ? { underline: true } : {}),
+        ...(size > 0 ? { fontSize: size / 100 } : {}),
+        ...(Number(ownAttr(rPr, "spc")) ? { letterSpacing: Number(ownAttr(rPr, "spc")) / 100 } : {}),
+        ...(color ? { color } : {}),
+      });
+    }
+    if (index < paragraphs.length - 1) runs.push({ text: "\n" });
+  });
+  while (runs.length > 0 && /^\n*$/.test(runs[runs.length - 1].text)) runs.pop();
+  const styled = runs.filter((run) => run.text.trim() !== "");
+  if (styled.length < 2) return undefined;
+  const signature = (run: FormTextRun) =>
+    `${run.bold}|${run.italic}|${run.underline}|${run.fontSize}|${run.letterSpacing}|${run.color}`;
+  return styled.every((run) => signature(run) === signature(styled[0])) ? undefined : runs;
 }
 
 /** 60000분의 1도 → 도. -180~180 으로 좁혀 CSS 회전에 그대로 쓴다. */
@@ -291,7 +363,9 @@ function readAnchor(part: string | undefined): Anchor | null {
 function toPx(sizes: number[], fallback: number, index: number, offsetEmu: number): number {
   let px = 0;
   for (let i = 0; i < index; i++) px += sizes[i] ?? fallback;
-  return px + offsetEmu / EMU_PER_PX;
+  // 칸 크기보다 큰 오프셋은 엑셀이 칸 끝으로 자른다 — 그대로 더하면 8.6→8.10 연결선이 상자 안
+  // 글자까지 15px 더 내려왔다(QA-4.3-2, 행 높이 33px 칸에 48px 오프셋).
+  return px + Math.min(offsetEmu / EMU_PER_PX, sizes[index] ?? fallback);
 }
 
 interface Rect {
@@ -329,6 +403,36 @@ function readLine(style: string | undefined, lineBlock: string, ctx: Context): s
  * 엑셀에서 그냥 그린 네모가 파란색인 이유가 이것이다. 그림자·윤곽선 색을 채움으로 잘못
  * 집지 않도록 `ln`·`effectLst` 는 빼고 본다.
  */
+/**
+ * 문단 줄 간격(`a:lnSpc`) — 고정(spcPts, 100분의 1pt)이거나 배수(spcPct, 1000분의 1%).
+ * 빠뜨리면 7.6-5 [작성방법]·[비고] 상자처럼 13~15pt 로 넉넉히 띄운 글이 가운데로 몰렸다.
+ */
+function readLineSpacing(paragraph: string | undefined): Partial<FormShape> {
+  const pPr = paragraph ? child(paragraph, "pPr") : undefined;
+  const lnSpc = pPr ? child(pPr, "lnSpc") : undefined;
+  if (!lnSpc) return {};
+  const pts = Number(ownAttr(child(lnSpc, "spcPts"), "val"));
+  if (pts > 0) return { lineSpacing: { pt: pts / 100 } };
+  const pct = Number(ownAttr(child(lnSpc, "spcPct"), "val"));
+  return pct > 0 ? { lineSpacing: { ratio: pct / 100000 } } : {};
+}
+
+/** 바깥 그림자. 도형 서식에 바로 적힌 것만 — 확장 영역의 숨긴 그림자(a14:hiddenEffects)는 엑셀도 안 그린다. */
+function readShadow(spPr: string, ctx: Context): Partial<FormShape> {
+  const effects = child(spPr, "effectLst");
+  const shadow = effects ? child(effects, "outerShdw") : undefined;
+  if (!shadow) return {};
+  const dist = Number(ownAttr(shadow, "dist") ?? 0) / EMU_PER_PX;
+  const angle = ((Number(ownAttr(shadow, "dir") ?? 0) / 60000) * Math.PI) / 180;
+  return {
+    shadow: {
+      dx: Math.round(dist * Math.cos(angle) * 10) / 10,
+      dy: Math.round(dist * Math.sin(angle) * 10) / 10,
+      color: readColor(shadow, ctx) ?? "#808080",
+    },
+  };
+}
+
 function readFill(spPr: string, style: string | undefined, ctx: Context): string | undefined {
   const own = childElements(spPr);
   for (const element of own) {
@@ -537,7 +641,26 @@ function readBodyLayout(bodyPr: string | undefined): Partial<FormShape> {
     valign: anchor === "ctr" ? "middle" : anchor === "b" ? "bottom" : "top",
     noWrap: ownAttr(bodyPr, "wrap") === "none" || undefined,
     vertical: vert === "vert" || vert === "vert270" || vert === "eaVert" ? vert : undefined,
+    upright: ownAttr(bodyPr, "upright") === "1" || undefined,
+    // 넘치는 글을 상자에서 자른다(엑셀 "텍스트 오버플로 - 자르기"). 7.6-5 [비고] 마지막 줄을 엑셀은 자른다.
+    clipText: ownAttr(bodyPr, "vertOverflow") === "clip" || undefined,
   };
+}
+
+/** 선 끝 모양 — 화살촉(triangle·stealth·arrow)이 아닌 것만 따로 적는다. */
+function capOf(key: "startCap" | "endCap", type: string | undefined): Partial<FormShape> {
+  // "arrow" 는 속이 빈 V 화살촉(8.8-2 치수선), triangle·stealth 는 채운 화살촉(기본).
+  if (type === "arrow") return { [key]: "open" };
+  return type === "oval" || type === "diamond" ? { [key]: type } : {};
+}
+
+const ARROW_FACTOR: Record<string, number> = { sm: 2, med: 3, lg: 5 };
+
+/** 선 끝 모양의 크기(엑셀 w·len = sm·med·lg). 보통이면 적지 않는다. */
+function arrowSizeOf(key: "startArrowSize" | "endArrowSize", end: string | undefined): Partial<FormShape> {
+  const w = ARROW_FACTOR[ownAttr(end, "w") ?? "med"] ?? 3;
+  const len = ARROW_FACTOR[ownAttr(end, "len") ?? "med"] ?? 3;
+  return w === 3 && len === 3 ? {} : { [key]: [w, len] };
 }
 
 /** 도형 하나(`sp`/`cxnSp`)의 서식을 읽는다. 자리·크기는 부르는 쪽이 정해 넘긴다. */
@@ -570,7 +693,12 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
 
   const lineWidthEmu = Number(ownAttr(lineBlock, "w") ?? 0);
   const paragraphs = txBody ? findBlocks(txBody, "p") : [];
+  // 글자가 있는 첫 조각의 서식 — 앞 공백 조각만 굵게 적힌 " Yes"(6.3)가 통째로 굵게 그려졌다.
+  const textRun = paragraphs
+    .flatMap((p) => findBlocks(p, "r"))
+    .find((run) => (findBlocks(run, "t")[0] ?? "").replace(/<[^>]*>/g, "").trim() !== "");
   const firstRun =
+    (textRun ? findBlocks(textRun, "rPr")[0] : undefined) ??
     paragraphs.map((p) => findBlocks(p, "rPr")[0]).find(Boolean) ??
     (txBody ? findBlocks(txBody, "endParaRPr")[0] ?? findBlocks(txBody, "defRPr")[0] : undefined) ??
     "";
@@ -588,22 +716,55 @@ function buildShape(block: string, rect: Rect, ctx: Context): FormShape {
     flipV: ownAttr(xfrm, "flipV") === "1",
     arrowStart: Boolean(attrOf(lineBlock, "headEnd", "type")?.replace("none", "")),
     arrowEnd: Boolean(attrOf(lineBlock, "tailEnd", "type")?.replace("none", "")),
+    ...capOf("startCap", attrOf(lineBlock, "headEnd", "type")),
+    ...capOf("endCap", attrOf(lineBlock, "tailEnd", "type")),
+    ...arrowSizeOf("startArrowSize", child(lineBlock, "headEnd")),
+    ...arrowSizeOf("endArrowSize", child(lineBlock, "tailEnd")),
     text: readText(txBody),
+    ...(() => {
+      const id = ownAttr(findBlocks(block, "cNvPr")[0], "id");
+      return id && txBody && readText(txBody).trim() !== "" ? { textId: id } : {};
+    })(),
+    ...(() => {
+      const fontRef = style ? findBlocks(style, "fontRef")[0] : undefined;
+      const textRuns = readTextRuns(txBody, ctx, readColor(fontRef, ctx));
+      return textRuns ? { textRuns } : {};
+    })(),
     fill: readFill(spPr, style, ctx),
     line: readLine(style, lineBlock, ctx),
     lineWidth: (lineWidthEmu > 0 ? lineWidthEmu / EMU_PER_PT : DEFAULT_LINE_PT) * PT_TO_PX,
     dash: readDash(attrOf(lineBlock, "prstDash", "val")),
+    ...(() => {
+      const pattern = DASH_PATTERNS[attrOf(lineBlock, "prstDash", "val") ?? ""];
+      return pattern ? { dashPattern: pattern } : {};
+    })(),
     // 회전은 60000분의 1도 단위로 들어온다. 워터마크가 비스듬히 걸려 있는 경우다.
     rotation: rotationDegrees(ownAttr(xfrm, "rot")),
     elbow: elbowRatio(prst, adjust),
+    // 둥근 모서리 크기(짧은 변에 대한 비율). 순서도 "단말"은 양끝이 반원인 알약 모양이다(8.12-1 "종 결").
+    ...(prst === "flowChartTerminator"
+      ? { roundRatio: 0.5 }
+      : prst === "roundRect"
+        ? { roundRatio: Math.min(0.5, (adjust.adj ?? 16667) / 100000) }
+        : {}),
     paths,
     fontSize: sizeHundredths > 0 ? sizeHundredths / 100 : undefined,
+    ...(Number(ownAttr(firstRun, "spc")) ? { letterSpacing: Number(ownAttr(firstRun, "spc")) / 100 } : {}),
     fontFamily: attrOf(firstRun, "latin", "typeface") ?? attrOf(firstRun, "ea", "typeface"),
-    bold: ownAttr(firstRun, "b") === "1",
+    // 한글·기호(○ □ ※ 등)는 동아시아 글꼴로 그린다(엑셀). 라틴 글꼴만 쓰면 Times New Roman 의 작은 ○ 가 나왔다(8.8-2).
+    ...(() => {
+      const ea = attrOf(firstRun, "ea", "typeface") ?? attrOf(inheritedRunProps(txBody), "ea", "typeface");
+      return ea ? { eaFontFamily: ea } : {};
+    })(),
+    bold: flag(firstRun, inheritedRunProps(txBody), "b"),
+    ...((ownAttr(firstRun, "u") ?? ownAttr(inheritedRunProps(txBody), "u") ?? "none") !== "none" ? { underline: true } : {}),
+    ...(flag(firstRun, inheritedRunProps(txBody), "i") ? { italic: true } : {}),
     // 글자 색을 안 적었으면 도형 스타일의 글자 색(fontRef)을 따른다.
     color: readColor(firstRun, ctx) ?? readColor(fontRef, ctx),
     align: algn === "ctr" ? "center" : algn === "r" ? "right" : algn === "l" ? "left" : undefined,
     ...(txBody ? readBodyLayout(child(txBody, "bodyPr")) : {}),
+    ...readLineSpacing(paragraphs[0]),
+    ...readShadow(spPr, ctx),
   };
 }
 
@@ -688,6 +849,29 @@ function unrotatedFrame(block: string, box: Rect): Rect {
   };
 }
 
+/** 그림 테두리만(채우기 없음). 테두리가 없으면 아무것도 없다. */
+function pictureOutline(picXml: string, box: Rect, ctx: Context): FormShape[] {
+  const spPr = child(picXml, "spPr") ?? "";
+  const lineBlock = child(spPr, "ln") ?? "";
+  if (!lineBlock || /<([A-Za-z0-9_]+:)?noFill\s*\/>/.test(lineBlock)) return [];
+  const color = readColor(lineBlock, ctx);
+  if (!color) return [];
+  const widthEmu = Number(ownAttr(lineBlock, "w") ?? 0);
+  return [
+    {
+      kind: "box",
+      ...box,
+      flipH: false,
+      flipV: false,
+      arrowStart: false,
+      arrowEnd: false,
+      text: "",
+      line: color,
+      lineWidth: (widthEmu > 0 ? widthEmu / EMU_PER_PT : DEFAULT_LINE_PT) * PT_TO_PX,
+    },
+  ];
+}
+
 /** 앵커 하나를 화면에 그릴 도형들로 바꾼다. 그룹이면 여러 개가 나온다. */
 function readAnchorShapes(
   anchor: Element,
@@ -698,8 +882,11 @@ function readAnchorShapes(
   ctx: Context,
 ): FormShape[] {
   const parts = childElements(anchor.xml);
-  // 그림(pic)은 exceljs 가 이미 주므로 여기서 다시 담지 않는다 — 두 번 그려진다.
-  const shape = parts.find((part) => part.name === "sp" || part.name === "cxnSp" || part.name === "grpSp");
+  // 그림(pic)은 exceljs 가 이미 주므로 여기서 다시 담지 않는다 — 두 번 그려진다. 다만 그림 **테두리**는
+  // exceljs 가 주지 않아 여기서 테두리만 그린다(7.2 카메라 그림의 검은 테두리).
+  const shape = parts.find(
+    (part) => part.name === "sp" || part.name === "cxnSp" || part.name === "grpSp" || part.name === "pic",
+  );
   if (!shape) return [];
 
   let box: Rect;
@@ -733,6 +920,7 @@ function readAnchorShapes(
   }
 
   if (shape.name === "grpSp") return readGroup(shape.xml, box, ctx);
+  if (shape.name === "pic") return pictureOutline(shape.xml, box, ctx);
   return [buildShape(shape.xml, unrotatedFrame(shape.xml, box), ctx)];
 }
 
@@ -795,13 +983,26 @@ function mergeDecorativeFrames(shapes: FormShape[]): FormShape[] {
     const { shape: inner, index } = insiders[0];
     absorbed.add(index);
     outer.text = inner.text;
+    // 글자는 안쪽 글상자에 있다 — 고친 글자도 그 도형에 적어야 엑셀에서 같은 자리에 보인다.
+    outer.textId = inner.textId;
+    // 글자 자리는 안쪽 글상자가 정한다(아래 여백으로 옮김) — 바깥 도형의 글자 영역(마름모 가운데 절반 등)을
+    // 또 적용하면 겹쳐 좁아진다(10.1-1 마름모 글이 한 글자씩 접혔다).
+    outer.textFromInner = true;
+    // 부분 서식도 함께 옮긴다 — 빠뜨리면 마름모 안 작은 둘째 줄이 첫 줄 크기로 커져 넘친다(8.7·8.8).
+    outer.textRuns = inner.textRuns;
     outer.fontSize = inner.fontSize;
+    outer.letterSpacing = inner.letterSpacing;
+    outer.lineSpacing = inner.lineSpacing;
     outer.fontFamily = inner.fontFamily;
+    outer.eaFontFamily = inner.eaFontFamily;
     outer.bold = inner.bold;
+    outer.italic = inner.italic;
+    outer.underline = inner.underline;
     outer.color = inner.color;
     outer.align = inner.align;
     outer.valign = inner.valign;
     outer.noWrap = inner.noWrap;
+    outer.clipText = inner.clipText;
     outer.vertical = inner.vertical;
     // 글자는 안쪽 상자 자리에 있었다. 바깥 틀 기준 여백으로 옮겨 같은 자리에 둔다.
     const [t, r, b, l] = inner.inset ?? [0, 0, 0, 0];
@@ -926,8 +1127,11 @@ export async function parseWorkbookShapes(
     const shapes: FormShape[] = [];
     for (const anchor of anchorsOf(drawingXml)) {
       for (const shape of readAnchorShapes(anchor, colWidths, rowHeights, defaults.col, defaults.row, ctx)) {
-        // 세로선은 너비가, 가로선은 높이가 0 이다. 둘 다 0 일 때만 버린다.
-        if (shape.width > 0 || shape.height > 0) shapes.push(shape);
+        // 세로선은 너비가, 가로선은 높이가 0 이다. 선은 둘 다 0 일 때만 버린다.
+        // 상자는 한쪽만 0 이어도 버린다 — 높이 0 짜리 글상자("사 내", 9.2)는 엑셀에서 안 보이는데
+        // 여기서는 글자가 표 위에 떠 보였다.
+        const lineLike = shape.kind === "line" || shape.kind === "path";
+        if (lineLike ? shape.width > 0 || shape.height > 0 : shape.width > 0 && shape.height > 0) shapes.push(shape);
       }
     }
     if (shapes.length > 0) result.set(unescapeXml(name), mergeDecorativeFrames(shapes));
@@ -935,3 +1139,7 @@ export async function parseWorkbookShapes(
 
   return result;
 }
+
+/** 차트 읽기(`formCharts.ts`)가 같은 XML 도우미를 쓴다 — 두 벌 두면 한쪽만 고쳐진다. */
+export { anchorsOf, attrOf, child, childElements, findBlocks, ownAttr, readAnchor, readColor, resolvePath, toPx, unescapeXml };
+export type { Context as ShapeContext };

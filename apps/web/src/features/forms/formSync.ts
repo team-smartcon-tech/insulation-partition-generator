@@ -76,7 +76,7 @@ export async function syncSites(sites: FormSite[]): Promise<void> {
   });
 }
 
-/** 코드표를 서버에도 올린다(본사 관리자가 아니면 서버가 거절하고, 화면은 그대로 돌아간다). */
+/** 코드표를 서버에도 올린다(서버에 못 닿으면 화면은 그대로 돌아간다). */
 export async function syncTaxonomies(taxonomies: Taxonomy[]): Promise<void> {
   await enqueue(async () => {
     for (const [index, taxonomy] of taxonomies.entries()) {
@@ -125,7 +125,7 @@ export async function pullTaxonomies(): Promise<Taxonomy[] | null> {
   return result ?? null;
 }
 
-/** 지운 코드표를 서버에서도 지운다(본사 관리자가 아니면 서버가 거절하고, 다음에 열 때 되돌아온다). */
+/** 지운 코드표를 서버에서도 지운다(서버에 못 닿으면 다음에 열 때 되돌아온다). */
 export async function syncTaxonomyDelete(id: string): Promise<void> {
   await enqueue(async () => {
     try {

@@ -11,7 +11,11 @@ export type FormBorderStyle =
   | "thick"
   | "dashed"
   | "dotted"
-  | "double";
+  | "double"
+  /** 엑셀 "가는 점선"(hair) — 가장 가는 점선 */
+  | "hair"
+  /** 엑셀 굵은 파선(mediumDashed 등) */
+  | "mediumDashed";
 
 export interface FormBorder {
   style: FormBorderStyle;
@@ -24,6 +28,10 @@ export interface FormCellBorders {
   right?: FormBorder;
   bottom?: FormBorder;
   left?: FormBorder;
+  /** 왼쪽 위 → 오른쪽 아래 대각선(엑셀 "대각선 테두리"). 일정표의 빗금·머리글 칸 나누기에 쓰인다. */
+  diagonalDown?: FormBorder;
+  /** 왼쪽 아래 → 오른쪽 위 대각선 */
+  diagonalUp?: FormBorder;
 }
 
 export interface FormCellStyle {
@@ -40,6 +48,18 @@ export interface FormCellStyle {
   align?: "left" | "center" | "right";
   valign?: "top" | "middle" | "bottom";
   wrap?: boolean;
+  /** 엑셀 "축소하여 맞춤" — 글자가 길면 옆 칸으로 넘기지 않고 칸 안에 들도록 줄인다 */
+  shrink?: boolean;
+  /**
+   * 들여쓰기 단계(엑셀 "들여쓰기"). 0 이면 없다. 화면에서는 정렬한 쪽에 여백으로 준다.
+   * 빠뜨리면 글자가 왼쪽에 붙어, 글자 아래를 가리키는 선(QA-4.3-4)이 엉뚱한 곳을 가리킨다.
+   */
+  indent?: number;
+  /**
+   * 글자 방향. "up" 은 아래에서 위로(엑셀 +90°), "down" 은 위에서 아래로(엑셀 -90°),
+   * "stacked" 는 글자를 세로로 쌓기(엑셀 "세로 쓰기"). 비스듬한 각도는 다루지 않는다.
+   */
+  textDirection?: "up" | "down" | "stacked";
   borders: FormCellBorders;
 }
 
@@ -64,7 +84,31 @@ export interface FormCell {
    * (견본 190장 중 6개 파일에만 수식이 있다).
    */
   formula?: boolean;
+  /**
+   * 한 칸 안에서 글자마다 서식이 다를 때(엑셀 "부분 서식")의 조각들. 이어 붙이면 `text` 와 같다.
+   * 빠뜨리면 큰 제목 아래 작은 영어 줄이 제목 크기로 커져 줄이 넘치고, 일부만 빨갛던 글이
+   * 검게 보였다(10.1·8.12 등). 서식이 칸 전체에 같으면 없다.
+   */
+  runs?: FormTextRun[];
+  /** 숨긴 열·줄에만 걸친 칸 — 자리(폭·높이 0)만 두고 그리지 않는다. */
+  hidden?: boolean;
   style: FormCellStyle;
+}
+
+/** 부분 서식 조각. 비어 있는 항목은 칸 서식을 따른다. */
+export interface FormTextRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  /** pt */
+  fontSize?: number;
+  /** 글자 사이 간격(pt, 음수면 좁힘) */
+  letterSpacing?: number;
+  /** 위첨자·아래첨자 */
+  vertAlign?: "super" | "sub";
+  /** #RRGGBB */
+  color?: string;
 }
 
 /**
@@ -80,6 +124,62 @@ export interface FormImage {
   top: number;
   width: number;
   height: number;
+  /**
+   * 브라우저가 못 여는 그림 형식(EMF·WMF — 엑셀 "카메라"로 찍은 그림 등). 이때 `src` 는 비어 있고
+   * 화면에는 자리 표시만 한다 — 말없이 빼면 원본에 있던 그림이 왜 없는지 알 수 없다(7.2 카메라).
+   */
+  unsupported?: "emf" | "wmf";
+}
+
+/**
+ * 시트에 얹힌 차트(막대·꺾은선). 엑셀이 차트 안에 **저장해 둔 값**(numCache)으로 다시 그린다 —
+ * 수식을 다시 계산하지 않으므로 원본 엑셀이 저장될 때의 모습과 같다. 3차원 막대는 평면으로 그린다.
+ */
+export interface FormChart {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  title?: string;
+  /** 세로축 제목 */
+  valueTitle?: string;
+  /** 세로축 눈금의 표시 형식(엑셀 numFmt, 예: "0.0%") */
+  valueFormat?: string;
+  /** 세로축 눈금 범위·간격을 엑셀에서 고정해 둔 값(비었으면 값에 맞춰 정한다) */
+  valueMin?: number;
+  valueMax?: number;
+  valueStep?: number;
+  categories: string[];
+  /** 가로축 글자 기울기(도, 시계 방향) */
+  categoryRotation?: number;
+  groups: FormChartGroup[];
+  /**
+   * 범례. null 이면 없다. 엑셀이 자리·크기를 정해 둔 범례(manualLayout, 차트 크기에 대한 비율)는
+   * 그 상자 안에 **들어가는 항목만** 보인다 — 9.4 부적합 차트는 세 계열 중 "NCR 발행건수" 하나만 보인다.
+   */
+  legend?: { pos: "t" | "b" | "l" | "r" | "tr"; box?: { x: number; y: number; w: number; h: number } } | null;
+}
+
+export interface FormChartGroup {
+  type: "bar" | "line";
+  /** 막대 방향: col = 세로 막대, bar = 가로 막대 */
+  direction?: "col" | "bar";
+  grouping: "clustered" | "stacked" | "percentStacked" | "standard";
+  /** 3차원 막대 — 윗면·옆면을 더해 입체로 그린다 */
+  threeD?: boolean;
+  /** 막대 사이 간격(막대 너비에 대한 %, 엑셀 기본 150) */
+  gapWidth?: number;
+  series: {
+    name: string;
+    color?: string;
+    values: (number | null)[];
+    /** 막대 위에 값을 적는다(엑셀 "데이터 레이블 - 값") */
+    showValues?: boolean;
+    /** 값의 표시 형식(차트에 저장된 formatCode) */
+    format?: string;
+    /** 점마다 따로 붙은 표시 형식(있으면 format 보다 앞선다) */
+    pointFormats?: (string | undefined)[];
+  }[];
 }
 
 /**
@@ -122,8 +222,24 @@ export interface FormShape {
   /** 선 끝의 화살촉 */
   arrowStart?: boolean;
   arrowEnd?: boolean;
+  /**
+   * 선 끝 모양이 화살촉이 아닐 때(엑셀 "원형"·"다이아몬드"). 없으면 화살촉이다.
+   * 빠뜨리면 공정표 막대의 시작 점(●)이 거꾸로 된 화살촉으로 그려져 양쪽 화살표처럼 보였다(8.6 공사관리).
+   */
+  startCap?: "oval" | "diamond" | "open";
+  endCap?: "oval" | "diamond" | "open";
+  /** 선 끝 모양의 [너비, 길이] 배수(엑셀 sm=2·med=3·lg=5). 없으면 보통(3, 3) */
+  startArrowSize?: [number, number];
+  endArrowSize?: [number, number];
   /** 도형 안 글자. 줄바꿈은 \n */
   text: string;
+  /**
+   * 글자를 품은 도형의 번호(그림 판의 `cNvPr id`). 화면에서 고친 도형 글자를 `shape:번호` 로 저장하고,
+   * 엑셀로 내려받을 때 이 번호의 도형 글자를 바꾼다. 장식 틀과 합쳐진 글상자는 안쪽 글상자 번호다.
+   */
+  textId?: string;
+  /** 도형 안 글자의 부분 서식 조각(이어 붙이면 `text`). 조각마다 서식이 같으면 없다. */
+  textRuns?: FormTextRun[];
   /** 채움색 #RRGGBB. 없으면 투명 */
   fill?: string;
   /** 선·테두리 색 */
@@ -142,18 +258,44 @@ export interface FormShape {
   /** kind 가 "path" 일 때의 윤곽선 */
   paths?: FormShapePath[];
   fontSize?: number;
+  /**
+   * 글자 사이 간격(pt). 순서도 상자 글은 흔히 좁혀 둔다(spc="-40" = -0.4pt). 빠뜨리면 글이 넓어져
+   * 두 줄짜리가 세 줄로 접혀 상자 밖으로 나온다(4.3 견본).
+   */
+  letterSpacing?: number;
   fontFamily?: string;
+  /** 한글·기호에 쓰는 동아시아 글꼴(엑셀 a:ea). 라틴 글꼴과 다르면 글자 종류에 따라 나눠 쓴다 */
+  eaFontFamily?: string;
   bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
   color?: string;
   align?: "left" | "center" | "right";
   /** 글자의 세로 자리. 엑셀 기본은 위쪽이다(순서도 상자는 보통 가운데로 적혀 있다). */
   valign?: "top" | "middle" | "bottom";
+  /** 글자가 겹쳐 놓인 안쪽 글상자에서 왔다(여백이 이미 그 자리를 나타낸다) */
+  textFromInner?: boolean;
+  /** 점선 무늬(선 굵기의 배수, 선·빈칸 번갈아) — 엑셀 선 종류 그대로 */
+  dashPattern?: number[];
+  /** 넘치는 글을 상자 안에서 자른다(엑셀 vertOverflow="clip") */
+  clipText?: boolean;
+  /** 둥근 사각형의 모서리 반지름(짧은 변에 대한 비율, 0.5 = 알약). 없으면 기본 */
+  roundRatio?: number;
+  /** 줄 간격 — pt 는 고정 간격, ratio 는 글자 크기에 대한 배수(엑셀 "1줄" = 1.2) */
+  lineSpacing?: { pt?: number; ratio?: number };
+  /** 그림자(바깥) — 엑셀 [도형 효과]. 숨겨 둔 그림자(hiddenEffects)는 읽지 않는다 */
+  shadow?: { dx: number; dy: number; color: string };
   /** 글자 안쪽 여백(px) — 위·오른쪽·아래·왼쪽. 여백이 달라지면 줄 바뀌는 자리가 달라진다. */
   inset?: [number, number, number, number];
   /** 틀 너비에 맞춰 줄을 바꾸지 않는다(짧은 라벨이 틀보다 길게 삐져나오는 경우) */
   noWrap?: boolean;
   /** 세로 글자. vert = 시계방향으로 누움, vert270 = 반시계, eaVert = 글자는 서고 줄만 세로 */
   vertical?: "vert" | "vert270" | "eaVert";
+  /**
+   * 도형을 돌려도 글자는 돌리지 않는다(엑셀 "텍스트 회전 안 함", bodyPr upright). 이때 글자는 돌린 뒤의
+   * 모습(가로·세로가 바뀐 틀) 안에 세로 쓰기만 건다 — 두 번 돌려 글자가 좁은 틀에 쌓였다(8.7 "필요시 문서 개정").
+   */
+  upright?: boolean;
 }
 
 export interface FormSheet {
@@ -170,6 +312,8 @@ export interface FormSheet {
   images: FormImage[];
   /** 격자 위에 떠 있는 도형(순서도 등). 없으면 빈 배열 */
   shapes: FormShape[];
+  /** 격자 위에 떠 있는 차트. 옛 저장본에는 없다. */
+  charts?: FormChart[];
   /**
    * 엑셀에 지정된 인쇄 영역(`A1:N29`). 이만큼만 옮겼다는 뜻이라 화면에 알려 준다 —
    * 안 그러면 원본에 있던 줄이 왜 없는지 알 방법이 없다. 지정이 없으면 undefined.

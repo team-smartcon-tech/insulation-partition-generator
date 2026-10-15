@@ -1,0 +1,207 @@
+/**
+ * 품질관리계획서 서식의 **작성 주기**와 주기별 진척.
+ *
+ * 서식은 한 번 쓰고 끝나는 것만 있는 게 아니다 — 월간 공정표·보관상태 점검은 매달, 품질목표 운영
+ * 현황은 분기마다, 내부심사는 해마다 쓴다(2026-10-15 사용자 요청). 그래서 서식마다 주기를 정하고,
+ * 착공일부터 오늘까지 "써야 했던 횟수 중 몇 번 썼나"를 센다.
+ *
+ * 주기는 **현장마다 다르다** — 현장마다 품질관리계획서를 따로 승인받기 때문이다. 회사 기본값은 부산
+ * 장안 계획서(P0453C-PQP-01 개정 2) 각 절 "업무절차"의 문구("매월", "월 1회 이상 순회점검",
+ * "매 분기별 모니터링", "연 1회 이상")로 정했고, 현장은 자기 계획서에 맞게 바꾼다(`QmpSiteSettings`).
+ */
+
+export type QmpCycle = "weekly" | "monthly" | "quarterly" | "half" | "yearly" | "once" | "completion" | "adhoc";
+
+/** 주기를 정해 횟수를 세는 것들 */
+export const PERIODIC: QmpCycle[] = ["weekly", "monthly", "quarterly", "half", "yearly"];
+
+export const CYCLE_LABEL: Record<QmpCycle, string> = {
+  weekly: "주간",
+  monthly: "월간",
+  quarterly: "분기",
+  half: "반기",
+  yearly: "연간",
+  once: "한 번",
+  completion: "준공 때",
+  adhoc: "수시",
+};
+
+/** 설정 창에서 고르는 순서 */
+export const CYCLE_ORDER: QmpCycle[] = ["once", "adhoc", "weekly", "monthly", "quarterly", "half", "yearly", "completion"];
+
+/**
+ * 회사 기본 주기. 여기 없는 서식(참고 문서 제외)은 "한 번"(현장 초기에 쓰고 바뀔 때 고친다)이다.
+ * 근거는 부산 장안 계획서의 절·항 번호.
+ */
+export const DEFAULT_CYCLES: Record<string, QmpCycle> = {
+  // 정해진 주기
+  "8.6-3": "weekly", // 8.6.4.4 주간 예정공정표
+  "8.6-2": "monthly", // 8.6.4.4 월간 예정공정표
+  "8.10-4": "monthly", // 8.10.5.2 월 1회 이상 순회점검
+  "8.11-7": "monthly", // 8.11.6.4 매월 품질검사 실적보고서
+  "7.2-2": "monthly", // 7.2.5.8 매월초 익월 교정대상 파악
+  "6.2-3": "quarterly", // 양식 제목 "품질목표 운영 현황 (1분기)"
+  "8.1-2": "quarterly", // 8.1.5.1 매 분기별 모니터링
+  "8.11-8": "quarterly", // 8.11.6.4 분기별 기성청구 시
+  "4.2-2": "quarterly", // 양식의 "분기별 실시건수" 칸(계획서는 "계획된 주기")
+  "7.4-3": "yearly", // 7.4.5.2 연도별 교육훈련 계획표
+  "9.1-2": "yearly", // 9.1.5.1 년 1회 이상
+  "9.2-1": "yearly", // 9.2.5.2 매년 12월
+  "9.3-2": "yearly", // 9.3.5.1 매년 1월
+  "9.3-3": "yearly", // 9.3.4.2 연 1회 이상
+  "9.3-4": "yearly",
+  "9.4-2": "yearly", // 9.4.4.1 연 1회 이상
+  "6.3-2": "yearly", // 6.3.5.1 최소 연 1회 모니터링
+  // 준공 때
+  "8.13-1": "completion",
+  "8.13-2": "completion",
+  // 일이 생길 때마다(대장·요청서·보고서)
+  ...Object.fromEntries(
+    [
+      "4.3-3", "6.1-3", "6.1-4", "7.1-3", "7.2-3", "7.3-2", "7.4-4", "7.4-5", "7.4-6", "7.5-2", "7.5-3", "7.5-4",
+      "7.6-2", "7.6-3", "7.6-4", "8.1-3", "8.2-2", "8.2-3", "8.3-3", "8.3-4", "8.3-5", "8.4-3", "8.4-4", "8.4-5",
+      "8.4-6", "8.6-5", "8.6-6", "8.6-7", "8.6-8", "8.7-2", "8.7-3", "8.8-2", "8.9-2", "8.11-3", "8.11-4", "8.11-5",
+      "8.11-6", "8.11-9", "8.11-10", "8.12-2", "8.12-3", "8.12-4", "8.12-5", "10.1-2", "10.1-3", "10.1-4", "10.2-2",
+    ].map((code) => [code, "adhoc" as QmpCycle]),
+  ),
+};
+
+/** 현장별 작성 일정 — 서버 `form_sites.qmp_settings` 에 통째로 담는다 */
+export interface QmpSiteSettings {
+  /** 착공일(YYYY-MM-DD). 주기 서식은 이날부터 센다. 없으면 주기 진척을 세지 않는다. */
+  startDate?: string;
+  /** 회사 기본값과 다른 주기만 */
+  cycles?: Record<string, QmpCycle>;
+  /** 이 현장 계획서가 적용 제외한 절(예: "8.3", "8.9") */
+  excluded?: string[];
+  /**
+   * 수시 서식: 마지막 기록 뒤 며칠이 지나면 "N일째 기록 없음" 알림을 띄우나. 기본과 다른 서식만,
+   * 0 이면 알림 끔(민원대장처럼 일이 없으면 비는 게 정상인 서식).
+   */
+  alertDays?: Record<string, number>;
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
+/** 수시 서식 알림 기본 — 한 달 */
+export const DEFAULT_ALERT_DAYS = 30;
+/** 설정 창에서 고르는 알림 날수(0 = 끔) */
+export const ALERT_DAY_CHOICES = [7, 14, 30, 60, 90, 0];
+
+export function alertDaysOf(code: string, settings?: QmpSiteSettings): number {
+  return settings?.alertDays?.[code] ?? DEFAULT_ALERT_DAYS;
+}
+
+export function cycleOf(code: string, settings?: QmpSiteSettings): QmpCycle {
+  return settings?.cycles?.[code] ?? DEFAULT_CYCLES[code] ?? "once";
+}
+
+// ── 기간 ────────────────────────────────────────────────────────────────────
+
+export interface QmpPeriod {
+  key: string;
+  label: string;
+  /** 기간 첫날(로컬 자정 ms) */
+  from: number;
+}
+
+/** "2025-04-01" → 로컬 날짜. 형식이 틀리면 null */
+export function parseDay(text: string | undefined): Date | null {
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text?.trim() ?? "");
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** 그 날짜가 든 기간의 첫날 */
+function periodStart(cycle: QmpCycle, date: Date): Date {
+  const y = date.getFullYear();
+  const m = date.getMonth();
+  switch (cycle) {
+    case "weekly": {
+      // 월요일부터 한 주
+      const back = (date.getDay() + 6) % 7;
+      return new Date(y, m, date.getDate() - back);
+    }
+    case "monthly":
+      return new Date(y, m, 1);
+    case "quarterly":
+      return new Date(y, m - (m % 3), 1);
+    case "half":
+      return new Date(y, m < 6 ? 0 : 6, 1);
+    default:
+      return new Date(y, 0, 1);
+  }
+}
+
+function nextStart(cycle: QmpCycle, start: Date): Date {
+  const y = start.getFullYear();
+  const m = start.getMonth();
+  switch (cycle) {
+    case "weekly":
+      return new Date(y, m, start.getDate() + 7);
+    case "monthly":
+      return new Date(y, m + 1, 1);
+    case "quarterly":
+      return new Date(y, m + 3, 1);
+    case "half":
+      return new Date(y, m + 6, 1);
+    default:
+      return new Date(y + 1, 0, 1);
+  }
+}
+
+function describe(cycle: QmpCycle, start: Date): { key: string; label: string } {
+  const y = start.getFullYear();
+  const m = start.getMonth();
+  switch (cycle) {
+    case "weekly":
+      return { key: `${y}-${pad(m + 1)}-${pad(start.getDate())}`, label: `${m + 1}/${start.getDate()} 주` };
+    case "monthly":
+      return { key: `${y}-${pad(m + 1)}`, label: `${y}년 ${m + 1}월` };
+    case "quarterly":
+      return { key: `${y}-Q${m / 3 + 1}`, label: `${y}년 ${m / 3 + 1}분기` };
+    case "half":
+      return { key: `${y}-H${m < 6 ? 1 : 2}`, label: `${y}년 ${m < 6 ? "상" : "하"}반기` };
+    default:
+      return { key: `${y}`, label: `${y}년` };
+  }
+}
+
+/** 그 날짜가 든 기간의 열쇠 */
+export function periodKeyOf(cycle: QmpCycle, date: Date): string {
+  return describe(cycle, periodStart(cycle, date)).key;
+}
+
+/** 착공일이 든 기간부터 오늘이 든 기간까지(오늘 기간 포함) */
+export function periodsBetween(cycle: QmpCycle, start: Date, today: Date): QmpPeriod[] {
+  if (!PERIODIC.includes(cycle) || start.getTime() > today.getTime()) return [];
+  const list: QmpPeriod[] = [];
+  const last = periodStart(cycle, today).getTime();
+  for (let at = periodStart(cycle, start); at.getTime() <= last && list.length < 600; at = nextStart(cycle, at)) {
+    list.push({ ...describe(cycle, at), from: at.getTime() });
+  }
+  return list;
+}
+
+/**
+ * 시트 이름에 적힌 때. 월별 장은 이름에 달을 적는다 — `QA-4.2-2(25.09)`, `2026-07`, `26.07`,
+ * `2026.7`, `2026년 7월`, 주간 장은 `2026-07-13`. 못 읽으면 null(그때는 만든 날로 본다).
+ */
+export function sheetDate(sheetName: string): Date | null {
+  const name = sheetName.replace(/^QA[\s_-]*\d+\.\d+\.?[\s_-]+\d+/i, " ");
+  const full = /(20\d{2})[.\-/년\s]+(\d{1,2})[.\-/월\s]+(\d{1,2})(?!\d)/.exec(name);
+  if (full) {
+    const date = new Date(Number(full[1]), Number(full[2]) - 1, Number(full[3]));
+    if (date.getMonth() === Number(full[2]) - 1) return date;
+  }
+  const month = /(?:^|[^\d])((?:20)?\d{2})\s*[.\-/년]\s*(\d{1,2})(?:\s*월)?(?!\d)/.exec(name);
+  if (month) {
+    const year = month[1].length === 2 ? 2000 + Number(month[1]) : Number(month[1]);
+    const m = Number(month[2]);
+    if (m >= 1 && m <= 12 && year >= 2000 && year < 2100) return new Date(year, m - 1, 1);
+  }
+  return null;
+}

@@ -350,19 +350,30 @@ forms.post("/sites", async (c) => {
       sortOrder?: number;
       members?: unknown;
       lineDefaults?: unknown;
+      qmpSettings?: unknown;
     };
     const name = String(body.name ?? "").trim();
     if (!name) return c.json({ error: "현장 이름을 적어 주세요." }, 400);
 
     const user = currentUser(c);
-    const res = await supabaseRest(c.env, "POST", "/form_sites", {
+    const row: Record<string, unknown> = {
       ...(uuidOrNull(body.id) ? { id: uuidOrNull(body.id) } : {}),
       name,
       sort_order: Number.isFinite(body.sortOrder) ? Number(body.sortOrder) : 0,
       members: Array.isArray(body.members) ? body.members : [],
       line_defaults: body.lineDefaults && typeof body.lineDefaults === "object" ? body.lineDefaults : {},
       created_by: user.id,
-    });
+    };
+    if (body.qmpSettings && typeof body.qmpSettings === "object") row.qmp_settings = body.qmpSettings;
+    let res = await supabaseRest(c.env, "POST", "/form_sites", row);
+    // 계획서 설정 칸(`qmp_settings`, 2026-10-15)은 운영 표에 나중에 더한다. 칸이 아직 없으면 그것만 빼고 저장한다.
+    if (!res.ok && "qmp_settings" in row) {
+      const text = await res.clone().text();
+      if (/qmp_settings/.test(text)) {
+        const { qmp_settings: _skipped, ...rest } = row;
+        res = await supabaseRest(c.env, "POST", "/form_sites", rest);
+      }
+    }
     // 같은 이름의 현장이 이미 있으면 그것을 돌려준다 — 두 개가 생기면 서류가 갈린다.
     if (res.status === 409) {
       const found = await supabaseRest(c.env, "GET", `/form_sites?name=eq.${encodeURIComponent(name)}&select=*`);
@@ -384,19 +395,30 @@ forms.post("/sites", async (c) => {
  */
 forms.patch("/sites/:id", async (c) => {
   try {
-    const body = (await c.req.json()) as { name?: string; members?: unknown; lineDefaults?: unknown; sortOrder?: number };
+    const body = (await c.req.json()) as {
+      name?: string;
+      members?: unknown;
+      lineDefaults?: unknown;
+      sortOrder?: number;
+      qmpSettings?: unknown;
+    };
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (body.qmpSettings !== undefined) patch.qmp_settings = body.qmpSettings ?? {};
     if (body.name !== undefined) patch.name = String(body.name).trim();
     if (body.members !== undefined) patch.members = Array.isArray(body.members) ? body.members : [];
     if (body.lineDefaults !== undefined) patch.line_defaults = body.lineDefaults ?? {};
     if (body.sortOrder !== undefined) patch.sort_order = Number(body.sortOrder) || 0;
 
-    const res = await supabaseRest(
-      c.env,
-      "PATCH",
-      `/form_sites?id=eq.${encodeURIComponent(c.req.param("id"))}`,
-      patch,
-    );
+    const target = `/form_sites?id=eq.${encodeURIComponent(c.req.param("id"))}`;
+    let res = await supabaseRest(c.env, "PATCH", target, patch);
+    // 계획서 설정 칸이 아직 없는 운영 표에서도 다른 저장은 되게 그 칸만 빼고 다시 보낸다.
+    if (!res.ok && "qmp_settings" in patch) {
+      const text = await res.clone().text();
+      if (/qmp_settings/.test(text)) {
+        const { qmp_settings: _skipped, ...rest } = patch;
+        res = await supabaseRest(c.env, "PATCH", target, rest);
+      }
+    }
     if (!res.ok) throw new Error(await res.text());
     const site = await firstRow(res);
     if (!site) return c.json({ error: "그 현장을 찾지 못했습니다." }, 404);
@@ -422,12 +444,14 @@ forms.get("/taxonomy", async (c) => {
 });
 
 /**
- * PUT /api/forms/taxonomy — 코드표 올리기(본사 관리자만).
+ * PUT /api/forms/taxonomy — 코드표 올리기(로그인한 누구나).
  * 바꾸기 전 것은 이력에 쌓아 둔다 — 잘못 올렸을 때 되돌릴 수 있어야 한다.
+ *
+ * 예전에는 등급(최고·시스템 관리자)만 됐다. 본사 관리자 명단에 든 사람도 막혀 불편하다고
+ * 사용자가 제약을 없앴다(2026-10-13). 누가 바꿨는지는 이력의 `replaced_by` 에 남는다.
  */
 forms.put("/taxonomy", async (c) => {
   const user = currentUser(c);
-  if (!isAdmin(user)) return c.json({ error: "코드표는 본사 관리자만 바꿀 수 있습니다." }, 403);
   try {
     const body = (await c.req.json()) as {
       id?: string;
@@ -508,7 +532,7 @@ forms.put("/taxonomy", async (c) => {
 });
 
 /**
- * DELETE /api/forms/taxonomy/:id — 코드표 지우기(본사 관리자만).
+ * DELETE /api/forms/taxonomy/:id — 코드표 지우기(로그인한 누구나 — 위 PUT 과 같은 이유).
  *
  * 화면이 서버 코드표를 받아 오므로, 서버에서 지우지 않으면 다음에 열 때 되살아난다.
  * 지우기 전 것은 이력에 쌓는다. 그 코드표의 서류는 지우지 않는다 — 외래키가 코드표 번호만
@@ -516,7 +540,6 @@ forms.put("/taxonomy", async (c) => {
  */
 forms.delete("/taxonomy/:id", async (c) => {
   const user = currentUser(c);
-  if (!isAdmin(user)) return c.json({ error: "코드표는 본사 관리자만 지울 수 있습니다." }, 403);
   const id = c.req.param("id");
   try {
     const before = await supabaseRest(c.env, "GET", `/form_taxonomy?id=eq.${encodeURIComponent(id)}&select=*`);
@@ -707,6 +730,8 @@ forms.patch("/docs/:id", async (c) => {
     if (body.extraRows !== undefined) patch.extra_rows = body.extraRows;
     if (body.approvalLines !== undefined) patch.approval_lines = body.approvalLines;
     if (body.approvals !== undefined) patch.approvals = body.approvals;
+    if (body.sheetDepts !== undefined) patch.sheet_depts = body.sheetDepts;
+    if (body.sheetEditedAt !== undefined) patch.sheet_edited_at = body.sheetEditedAt;
     if (body.sheets !== undefined) patch.sheets = body.sheets;
     if (body.parserVersion !== undefined) patch.parser_version = Number(body.parserVersion);
     if (body.taxonomyId !== undefined) patch.taxonomy_id = body.taxonomyId;
@@ -727,12 +752,21 @@ forms.patch("/docs/:id", async (c) => {
       }
     }
 
-    const res = await supabaseRest(
-      c.env,
-      "PATCH",
-      `/form_documents?id=eq.${encodeURIComponent(c.req.param("id"))}`,
-      patch,
-    );
+    const target = `/form_documents?id=eq.${encodeURIComponent(c.req.param("id"))}`;
+    let res = await supabaseRest(c.env, "PATCH", target, patch);
+    /*
+     * 작성 부서(`sheet_depts`, 2026-10-13)·장마다 고친 때(`sheet_edited_at`, 2026-10-15) 칸은 운영 표에
+     * 나중에 더한다. 칸이 아직 없는 서버에 이 판이 먼저 올라가도 **다른 저장은 막히지 않게** 없는 칸만
+     * 빼고 다시 보낸다.
+     */
+    const optional = ["sheet_depts", "sheet_edited_at"];
+    for (let tries = 0; !res.ok && tries < optional.length; tries += 1) {
+      const text = await res.text();
+      const missing = optional.find((name) => name in patch && text.includes(name));
+      if (!missing) throw new Error(text);
+      delete patch[missing];
+      res = await supabaseRest(c.env, "PATCH", target, patch);
+    }
     if (!res.ok) throw new Error(await res.text());
     const doc = await firstRow(res);
     if (!doc) return c.json({ error: "그 서류를 찾지 못했습니다." }, 404);

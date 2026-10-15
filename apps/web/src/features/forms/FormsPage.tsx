@@ -64,6 +64,7 @@ import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
 import HomeDashboard, { SitesAudit } from "./HomeDashboard";
 import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
+import AddSheetDialog from "./AddSheetDialog";
 import DropUploadDialog from "./DropUploadDialog";
 import AttachmentPanel from "./AttachmentPanel";
 import ServerSyncBanner from "./ServerSyncBanner";
@@ -72,6 +73,8 @@ import FeedbackPage from "./FeedbackPage";
 import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
 import ScrollTopButton from "./ScrollTopButton";
+import QmpBoard from "./QmpBoard";
+import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -147,6 +150,7 @@ import {
   saveSites,
   saveTaxonomies,
   setSheetApproval,
+  setSheetDept,
   setExtraRows,
   setFormCode,
   touchForm,
@@ -268,6 +272,14 @@ const SCALES: { value: FormScale; label: string }[] = [
 const LAST_SITE_KEY = "ipg-forms:last-site";
 /** 마지막으로 보던 곳(배포 양식함 / 현장 서류함) */
 const SPACE_KEY = "ipg-forms:space";
+/**
+ * 서류함을 코드표(현장 문서트리)로 보여 줄까.
+ *
+ * 2026-10-13 사용자 결정: 지금 보여 줄 것은 품질관리계획서 기반 서류 통일화이고, 현장 문서트리는
+ * 제출 양식의 "확장 가능성"에 말로만 적는다. 그래서 두 서류함 모두 계획서 구조(`QmpBoard`)로 보이고,
+ * 코드표 화면은 지우지 않고 여기서 꺼 둔다. 다시 보이려면 true 로.
+ */
+const SHOW_CODE_TREE = false;
 /** 왼쪽 메뉴를 접어 두었나 */
 const NAV_COLLAPSED_KEY = "ipg-forms:nav-collapsed";
 /** 열어 둔 서류 탭 */
@@ -295,6 +307,8 @@ function scrollToViewer(tries = 30) {
 
 export default function FormsPage() {
   const [state, setState] = useState<LoadState>({ status: "idle" });
+  /** [시트 추가] 창이 열려 있나 */
+  const [addingSheet, setAddingSheet] = useState(false);
   const [forms, setForms] = useState<FormSummary[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   // 다른 장으로 넘어가면 고른 범위를 놓는다 — 그 장에는 없는 자리라 엉뚱한 칸이 합쳐진다.
@@ -448,7 +462,7 @@ export default function FormsPage() {
     const { list, next } = closeOpenDoc(openDocs, id);
     rememberOpenDocs(list);
     if (state.status !== "ready" || state.id !== id) return;
-    if (next) await openStored(next.id);
+    if (next) await openDocAt(next.id);
     else setState({ status: "idle" });
   }
 
@@ -1727,7 +1741,11 @@ export default function FormsPage() {
    * 같은 원본으로 이미 만든 서류가 있으면 한 번 묻는다. 월별로 여러 부 만드는 일이 흔해
    * 막지는 않지만, 모르고 두 번 누르면 같은 서류가 둘 생긴다.
    */
-  async function handleWrite(templateId: string, targetSiteId: string | undefined) {
+  async function handleWrite(
+    templateId: string,
+    targetSiteId: string | undefined,
+    qmp?: { code: string; dept: QmpDept },
+  ) {
     const target = sites.find((site) => site.id === targetSiteId);
     if (!target) {
       setStorageWarning("작성할 현장을 먼저 골라 주세요.");
@@ -1748,10 +1766,17 @@ export default function FormsPage() {
     }
     try {
       const copy = await copyTemplateToSite(templateId, target.id);
+      // 품질관리계획서 서류 현황에서 눌렀으면 그 서식 장에 쓰는 부서를 단다.
+      // 지난달 장(`QA-4.2-2(25.09)`)보다 번호만 있는 장을 고른다 — 새로 쓰는 장은 그쪽이다.
+      const codes = sheetCodesOf({ sheetNames: copy.sheets.map((item) => item.name), title: copy.title, fileName: copy.fileName });
+      const qmpSheets = qmp ? copy.sheets.filter((item) => codes.get(item.name) === qmp.code) : [];
+      const qmpSheet = (qmpSheets.find((item) => /^\s*QA-[\d.-]+\s*$/i.test(item.name)) ?? qmpSheets[0])?.name;
+      if (qmp && qmpSheet) await setSheetDept(copy.id, qmpSheet, qmp.dept);
       selectSite(target.id);
       setSpace("site");
       await refreshList();
-      await openStored(copy.id);
+      await openStored(copy.id, qmpSheet);
+      scrollToViewer();
       setSaveState("saved");
       setStorageWarning(`“${target.name}” 서류함에 “${copy.title}”을(를) 만들었습니다. 여기서 작성하세요.`);
     } catch (error) {
@@ -1963,20 +1988,20 @@ export default function FormsPage() {
     void refreshList();
   }
 
-  async function handleAddSheet() {
+  /**
+   * [시트 추가] — 바탕 시트를 작성자가 고른다(2026-10-14 사용자 요청). 처음엔 **견본**을 골라 둔다 —
+   * 직전 시트를 복사하면 지난달 내용이 그대로 딸려 온다. 어느 시트든 견본 표시("Sample")는 빠진다.
+   */
+  function handleAddSheet() {
     if (state.status !== "ready" || !sheet) return;
-    // 지금 보는 시트가 아니라 **빈 양식(견본)** 을 복사한다. 직전 시트를 복사하면
-    // 지난달 내용이 그대로 딸려 온다.
-    const source = template ?? sheet;
-    const name = window
-      .prompt(
-        `“${source.name}” 시트의 양식으로 새 장을 만듭니다.\n표·머리글은 그대로 두고 채워 넣은 내용은 비웁니다.\n\n새 시트 이름을 적어 주세요. (예: 2026-07)`,
-        "",
-      )
-      ?.trim();
-    if (!name) return;
+    setAddingSheet(true);
+  }
+
+  async function createSheet(source: string, name: string) {
+    if (state.status !== "ready") return;
+    setAddingSheet(false);
     try {
-      await addCustomSheet(state.id, { name, source: source.name });
+      await addCustomSheet(state.id, { name, source });
       await reloadSheets(name);
     } catch (error) {
       setStorageWarning(error instanceof Error ? error.message : "시트를 더하지 못했습니다.");
@@ -2298,7 +2323,9 @@ export default function FormsPage() {
           <OpenDocTabs
             docs={openDocs}
             activeId={state.status === "ready" ? state.id : null}
-            onOpen={(id) => void handleOpen(id)}
+            // 탭에는 배포 양식·다른 현장 서류도 섞여 있다. 지금 서류함에서만 열면 화면에 펼쳐지지 않아
+            // "눌러도 안 열린다"(2026-10-13 사용자 보고) — 그 서류가 있는 서류함·현장으로 옮겨서 연다.
+            onOpen={(id) => void openDocAt(id)}
             onClose={(id) => void closeDocTab(id)}
           />
         )}
@@ -2358,6 +2385,72 @@ export default function FormsPage() {
               audit={homeAudit}
               onOpen={(id) => selectSite(id)}
               onAdd={() => void handleAddSite()}
+            />
+          ) : !SHOW_CODE_TREE && space === "library" ? (
+            <QmpBoard
+              mode="library"
+              title="배포 양식함"
+              states={qmpLibraryStates(templates)}
+              others={templates
+                .filter((form) => !hasQmpSheet(form))
+                .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
+              onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
+              onUpload={() => handleUpload()}
+              busy={state.status === "loading"}
+            />
+          ) : !SHOW_CODE_TREE && space === "site" ? (
+            <QmpBoard
+              mode="site"
+              title={`${writeSite?.name ?? "현장"} 서류함`}
+              states={qmpStates(siteForms, { settings: writeSite?.qmp })}
+              siteName={writeSite?.name}
+              settings={writeSite?.qmp}
+              onSaveSettings={(qmp) => {
+                if (!writeSite) return;
+                const next = updateSite(sites, writeSite.id, { qmp });
+                void saveSites(next)
+                  .then(() => setSites(next))
+                  .catch((error) =>
+                    setStorageWarning(error instanceof Error ? `작성 일정을 저장하지 못했습니다: ${error.message}` : "작성 일정을 저장하지 못했습니다."),
+                  );
+              }}
+              others={siteForms
+                .filter((form) => !hasQmpSheet(form))
+                .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
+              onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
+              canWrite={(code) => Boolean(templateForCode(templates, code))}
+              onWrite={(code, dept, existing) => {
+                // 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 한 부 더 만들지 않고 그것을 연다.
+                if (existing) {
+                  void (async () => {
+                    if (existing.sheetName) await setSheetDept(existing.docId, existing.sheetName, dept);
+                    await refreshList();
+                    await openDocAt(existing.docId, existing.sheetName);
+                  })();
+                  return;
+                }
+                const template = templateForCode(templates, code);
+                if (template) void handleWrite(template.id, siteId, { code, dept });
+              }}
+              onSetDept={(docId, sheetName, dept) => {
+                void setSheetDept(docId, sheetName, dept).then(() => refreshList());
+              }}
+              toolbarExtra={importButton}
+              importCount={templatesToImport(templates, siteForms).length}
+              busy={slotWriting}
+              onImportAll={() => {
+                const ids = templatesToImport(templates, siteForms);
+                if (ids.length === 0) return;
+                if (
+                  !window.confirm(
+                    `“${writeSite?.name ?? "현장"}” 서류함에 아직 없는 서식의 배포 양식 ${ids.length}종을 한 번에 만듭니다.\n` +
+                      "이미 만든 서류는 그대로 둡니다. 진행할까요?",
+                  )
+                ) {
+                  return;
+                }
+                void handleWriteMany(ids);
+              }}
             />
           ) : taxonomies.length > 0 ? (
             <FormTree
@@ -2546,6 +2639,14 @@ export default function FormsPage() {
           />
         )}
 
+        {addingSheet && state.status === "ready" && (
+          <AddSheetDialog
+            sheets={state.sheets.filter((item) => !item.custom).map((item) => item.name)}
+            initial={(template ?? sheet)?.name ?? ""}
+            onCancel={() => setAddingSheet(false)}
+            onConfirm={(source, name) => void createSheet(source, name)}
+          />
+        )}
         {slotWrite && (
           <SlotWriteDialog
             slotLabel={slotWrite.slotLabel}
@@ -2902,8 +3003,8 @@ export default function FormsPage() {
               {!readOnly && (
               <button
                 type="button"
-                onClick={() => void handleAddSheet()}
-                title={`“${(template ?? sheet).name}” 시트의 양식으로 새 장을 만듭니다. 표·머리글은 그대로, 채워 넣은 내용과 견본 표시는 비워집니다.`}
+                onClick={() => handleAddSheet()}
+                title="바탕으로 쓸 시트를 골라 새 장을 만듭니다. 표·머리글은 그대로, 채워 넣은 내용과 견본 표시는 비워집니다."
                 className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-dashed ring-slate-300 transition hover:bg-slate-50"
               >
                 <Plus size={13} /> 시트 추가

@@ -22,6 +22,7 @@ interface SiteRow {
   sort_order?: number;
   members?: unknown;
   line_defaults?: unknown;
+  qmp_settings?: unknown;
   created_at?: string;
 }
 
@@ -89,6 +90,10 @@ const toSite = (row: SiteRow): FormSite => ({
   lineDefaults:
     row.line_defaults && typeof row.line_defaults === "object"
       ? (row.line_defaults as FormSite["lineDefaults"])
+      : undefined,
+  qmp:
+    row.qmp_settings && typeof row.qmp_settings === "object" && Object.keys(row.qmp_settings).length > 0
+      ? (row.qmp_settings as FormSite["qmp"])
       : undefined,
 });
 
@@ -170,6 +175,8 @@ export async function pushSite(site: Pick<FormSite, "name"> & Partial<FormSite>)
       name: site.name,
       members: site.members ?? [],
       lineDefaults: site.lineDefaults ?? {},
+      // 작성 일정(qmp_settings)은 정한 현장만 보낸다 — 안 보내면 서버 값을 건드리지 않는다.
+      ...(site.qmp ? { qmpSettings: site.qmp } : {}),
     }),
   });
   return toSite(row);
@@ -192,7 +199,7 @@ export async function fetchTaxonomies(): Promise<Taxonomy[]> {
 }
 
 /**
- * 코드표 한 벌을 서버에 올린다. **본사 관리자만** 된다(서버가 거절한다).
+ * 코드표 한 벌을 서버에 올린다. 로그인한 누구나 된다(2026-10-13 제약을 없앴다).
  * 바뀌기 전 것은 서버가 이력에 쌓아 두므로, 잘못 올려도 되돌릴 수 있다.
  */
 export async function pushTaxonomy(taxonomy: Taxonomy, sortOrder = 0): Promise<Taxonomy> {
@@ -210,7 +217,7 @@ export async function pushTaxonomy(taxonomy: Taxonomy, sortOrder = 0): Promise<T
   return toTaxonomy(row);
 }
 
-/** 코드표 한 벌을 서버에서 지운다. **본사 관리자만** 된다. 그 코드표의 서류는 "코드 없는 서류"가 된다. */
+/** 코드표 한 벌을 서버에서 지운다. 로그인한 누구나 된다. 그 코드표의 서류는 "코드 없는 서류"가 된다. */
 export const deleteTaxonomy = (id: string) =>
   api<{ ok: true }>(`/taxonomy/${encodeURIComponent(id)}`, { method: "DELETE" });
 
@@ -330,6 +337,10 @@ export async function patchDoc(
     extraRows?: unknown;
     approvalLines?: unknown;
     approvals?: unknown;
+    /** 시트 이름 → 그 장을 쓰는 부서 */
+    sheetDepts?: unknown;
+    /** 시트 이름 → 마지막으로 글자를 고친 때 */
+    sheetEditedAt?: unknown;
     sheets?: unknown;
     parserVersion?: number;
     taxonomyId?: string | null;
