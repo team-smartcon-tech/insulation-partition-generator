@@ -447,10 +447,12 @@ export function isTemplateSheet(sheet: FormSheet): boolean {
   return words.some((word) => name.includes(word));
 }
 
-/** 작성 중인 장인가 — 앱에서 더한 장, 글자를 적은 장, 결재선·결재가 걸린 장. */
+/**
+ * 작성 중인 장인가 — 글자(칸·도형)를 적은 장, 결재선·결재가 걸린 장.
+ * [시트 추가]로 더하기만 한 빈 장은 아니다 — 무언가 적어야 수시 건수·주기 칸에 잡힌다(2026-10-15 사용자 결정).
+ */
 function isWorkingSheet(form: StoredForm, sheet: FormSheet): boolean {
   return (
-    sheet.custom === true ||
     Object.keys(form.values[sheet.name] ?? {}).length > 0 ||
     Object.keys(form.approvalLines[sheet.name] ?? {}).length > 0 ||
     Object.keys(form.approvals[sheet.name] ?? {}).length > 0
@@ -469,7 +471,7 @@ export function approvalSheetsOf(form: StoredForm): ApprovalSheetSummary[] {
     /**
      * **작성 중인 장만** 센다(사용자 판단). 회사 양식에는 지난달 장이 그대로 들어 있어
      * (`QA-4.2-2(25.09)`…), 결재칸이 있다고 다 세면 이미 종이로 끝난 과거 기록이 "결재선 미지정"에
-     * 쌓여 정작 처리할 것이 묻힌다. 앱에서 더한 장, 글자를 적은 장, 이미 결재선·결재가 있는 장만 본다.
+     * 쌓여 정작 처리할 것이 묻힌다. 글자를 적은 장, 이미 결재선·결재가 있는 장만 본다.
      */
     if (!isWorkingSheet(form, sheet)) continue;
     const slots = findApprovalBoxes(sheet).flatMap((box) =>

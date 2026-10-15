@@ -66,7 +66,7 @@ export const DEFAULT_CYCLES: Record<string, QmpCycle> = {
   ),
 };
 
-/** 현장별 계획서 설정 — 서버 `form_sites.qmp_settings` 에 통째로 담는다 */
+/** 현장별 작성 기준 — 서버 `form_sites.qmp_settings` 에 통째로 담는다 */
 export interface QmpSiteSettings {
   /** 착공일(YYYY-MM-DD). 주기 서식은 이날부터 센다. 없으면 주기 진척을 세지 않는다. */
   startDate?: string;

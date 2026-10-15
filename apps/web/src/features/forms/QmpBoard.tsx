@@ -58,7 +58,7 @@ interface Props {
   busy?: boolean;
   /** 도구 줄 오른쪽에 더 붙일 것(현장 서류함의 "배포 양식에서 가져오기" 등) */
   toolbarExtra?: ReactNode;
-  /** 현장 서류함: 이 현장 계획서 설정(착공일·작성 주기·적용 제외)과 저장 */
+  /** 현장 서류함: 이 현장 작성 기준(착공일·작성 주기·적용 제외)과 저장 */
   siteName?: string;
   settings?: QmpSiteSettings;
   onSaveSettings?: (next: QmpSiteSettings) => void;
@@ -208,7 +208,7 @@ export default function QmpBoard({
                 </>
               ) : (
                 <span className="text-amber-700">
-                  [계획서 설정]에서 착공일을 정하면 월간·분기·연간 서식이 몇 번 중 몇 번 작성됐는지 보입니다.
+                  [작성 기준]에서 착공일을 정하면 월간·분기·연간 서식이 몇 번 중 몇 번 작성됐는지 보입니다.
                 </span>
               )}
             </p>
@@ -241,10 +241,10 @@ export default function QmpBoard({
             <button
               type="button"
               onClick={() => setSettingsOpen(true)}
-              title="이 현장 품질관리계획서에 맞게 착공일·서식별 작성 주기·적용 제외 절을 정합니다"
+              title="이 현장에서 무엇을 언제 써야 하는지 정합니다 — 착공일, 서식마다 작성 주기, 이 현장에 해당 없는 절. 진척(%)은 이 기준으로 셉니다"
               className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 ring-1 ring-slate-300 transition hover:bg-slate-50"
             >
-              <Settings2 size={13} /> 계획서 설정
+              <Settings2 size={13} /> 작성 기준
             </button>
           )}
           {toolbarExtra}
@@ -646,7 +646,7 @@ function FormRow({
   ) : (
     <span
       className="rounded bg-slate-50 px-1.5 py-0.5 text-[11px] tabular-nums text-slate-500 ring-1 ring-slate-200"
-      title={periodic ? "[계획서 설정]에서 착공일을 정하면 몇 번 중 몇 번 썼는지 셉니다" : "일이 생길 때마다 쓰는 서식 — 쓴 장 수"}
+      title={periodic ? "[작성 기준]에서 착공일을 정하면 몇 번 중 몇 번 썼는지 셉니다" : "일이 생길 때마다 쓰는 서식 — 쓴 장 수"}
     >
       {CYCLE_LABEL[cycle]}
       {cycle === "adhoc" ? ` · ${state?.count ?? 0}건` : ""}

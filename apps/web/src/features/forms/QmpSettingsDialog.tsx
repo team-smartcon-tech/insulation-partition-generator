@@ -1,6 +1,7 @@
 /**
- * [계획서 설정] — 현장마다 품질관리계획서에 맞게 착공일·서식별 작성 주기·적용 제외 절을 정한다
+ * [작성 기준] — 이 현장에서 무엇을 언제 써야 하는지: 착공일·서식별 작성 주기·적용 제외 절을 정한다
  * (2026-10-15 사용자 결정: 현장마다 계획서가 달라 주기도 다르다, 그 현장 사람 누구나 바꾼다).
+ * 이름은 "계획서 설정"이었다 — 계획서 파일을 고치는 것처럼 읽혀 바꿨다(같은 날 사용자 요청).
  *
  * 회사 기본값(`DEFAULT_CYCLES`)과 다른 주기만 저장한다 — 기본값이 나중에 바뀌어도 현장이 일부러
  * 바꾼 것만 남는다.
@@ -75,10 +76,11 @@ export default function QmpSettingsDialog({
           <Settings2 size={20} className="mt-0.5 text-blue-600" aria-hidden />
           <div className="min-w-0 flex-1">
             <h2 id="qmp-settings-title" className="text-base font-bold text-slate-900">
-              {siteName} 계획서 설정
+              {siteName} 작성 기준
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              이 현장 품질관리계획서에 맞게 정합니다. 주기 서식은 착공일부터 오늘까지 써야 했던 횟수와 비교해 진척을 셉니다.
+              이 현장에서 무엇을 언제 써야 하는지 품질관리계획서대로 정합니다. 진척(%)은 이 기준으로 셉니다 — 월간·분기·연간
+              서식은 착공일부터 오늘까지 써야 했던 횟수와 비교합니다.
             </p>
           </div>
           <button type="button" onClick={onCancel} aria-label="닫기" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100">

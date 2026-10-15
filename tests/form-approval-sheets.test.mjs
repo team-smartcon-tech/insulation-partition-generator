@@ -34,14 +34,17 @@ test('손대지 않은 과거 시트는 세지 않는다 — 견본도 제외', 
   assert.deepEqual(approvalSheetsOf(form()).map((s) => s.sheetName), []);
 });
 
-test('글자를 적은 장, 앱에서 더한 장, 결재선·결재가 있는 장만 센다', () => {
+test('글자를 적은 장, 결재선·결재가 있는 장만 센다', () => {
   assert.deepEqual(
     approvalSheetsOf(form({ values: { 'QA-4.2-2(25.12)': { '3:1': '적음' } } })).map((s) => s.sheetName),
     ['QA-4.2-2(25.12)'],
   );
+  const added = { customSheets: [{ name: '26.09', source: 'QA-4.2-2(25.09)' }] };
+  assert.deepEqual(approvalSheetsOf(form(added)).map((s) => s.sheetName), [], '더하기만 한 빈 장은 아직 세지 않는다');
   assert.deepEqual(
-    approvalSheetsOf(form({ customSheets: [{ name: '26.09', source: 'QA-4.2-2(25.09)' }] })).map((s) => s.sheetName),
+    approvalSheetsOf(form({ ...added, values: { '26.09': { '3:1': '적음' } } })).map((s) => s.sheetName),
     ['26.09'],
+    '더한 장에 무언가 적으면 센다',
   );
   assert.deepEqual(
     approvalSheetsOf(form({ approvalLines: { 'QA-4.2-2(25.09)': { '2:1': { name: '이상영', position: '대리', role: '' } } } })).map((s) => s.sheetName),

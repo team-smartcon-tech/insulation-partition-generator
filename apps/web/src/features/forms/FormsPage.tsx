@@ -2411,7 +2411,7 @@ export default function FormsPage() {
                 void saveSites(next)
                   .then(() => setSites(next))
                   .catch((error) =>
-                    setStorageWarning(error instanceof Error ? `계획서 설정을 저장하지 못했습니다: ${error.message}` : "계획서 설정을 저장하지 못했습니다."),
+                    setStorageWarning(error instanceof Error ? `작성 기준을 저장하지 못했습니다: ${error.message}` : "작성 기준을 저장하지 못했습니다."),
                   );
               }}
               others={siteForms

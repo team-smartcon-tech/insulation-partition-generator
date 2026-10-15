@@ -20,7 +20,7 @@ export interface FormSite {
   members?: SiteMember[];
   /** 이 현장의 기본 결재선(칸 이름 → 사람들). 다음 서류에 미리 채운다. */
   lineDefaults?: LineDefaults;
-  /** 이 현장 품질관리계획서 설정 — 착공일·서식별 작성 주기·적용 제외 절 */
+  /** 이 현장 작성 기준(품질관리계획서에 맞춘다) — 착공일·서식별 작성 주기·적용 제외 절 */
   qmp?: QmpSiteSettings;
 }
 

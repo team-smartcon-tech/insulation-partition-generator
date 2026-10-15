@@ -175,7 +175,7 @@ export async function pushSite(site: Pick<FormSite, "name"> & Partial<FormSite>)
       name: site.name,
       members: site.members ?? [],
       lineDefaults: site.lineDefaults ?? {},
-      // 계획서 설정은 설정한 현장만 보낸다 — 안 보내면 서버 값을 건드리지 않는다.
+      // 작성 기준(qmp_settings)은 정한 현장만 보낸다 — 안 보내면 서버 값을 건드리지 않는다.
       ...(site.qmp ? { qmpSettings: site.qmp } : {}),
     }),
   });
