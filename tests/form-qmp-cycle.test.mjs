@@ -42,6 +42,19 @@ test('시트 이름에서 달 읽기', () => {
 test('[시트 추가]로 더한 장은 원본 시트의 서식 번호를 잇는다', () => {
   const codes = sheetCodesOf({ sheetNames: ['QA-8.10-4', '2026-07'], sheetSources: { '2026-07': 'QA-8.10-4' } });
   assert.equal(codes.get('2026-07'), '8.10-4');
+  // 견본을 바탕으로 더한 장은 바로 앞 서식 시트의 번호(회사 양식은 서식 뒤에 견본을 둔다)
+  const fromSample = sheetCodesOf({
+    sheetNames: ['QA-10.1-2', '견본', 'QA-10.1-3', '견본 (2)', '추가1', '추가2'],
+    sheetSources: { 추가1: '견본', 추가2: '견본 (2)' },
+  });
+  assert.equal(fromSample.get('추가1'), '10.1-2');
+  assert.equal(fromSample.get('추가2'), '10.1-3');
+  assert.equal(fromSample.has('견본'), false, '견본 자체는 서식으로 세지 않는다');
+});
+
+test('수시 서식: 견본으로 더한 장마다 건수가 는다', () => {
+  const doc = { id: 'd', sheetNames: ['QA-10.1-2', '견본', '1차', '2차'], sheetSources: { '1차': '견본', '2차': '견본' }, workingSheets: ['1차', '2차'] };
+  assert.equal(qmpStates([doc], { settings: {} }).get('10.1-2').count, 2);
 });
 
 test('월간 서식: 빠진 달을 세고, 지금 달은 아직 안 써도 빠짐이 아니다', () => {

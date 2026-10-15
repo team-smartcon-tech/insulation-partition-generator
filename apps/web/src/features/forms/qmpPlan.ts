@@ -284,10 +284,25 @@ export function sheetCodesOf(doc: QmpNamed): Map<string, string> {
     const code = qaCodeOf(name);
     if (code) codes.set(name, code);
   }
+  /**
+   * 번호 없는 원본 시트(견본)는 **바로 앞 서식 시트**의 견본이다 — 회사 양식은 `QA-10.1-2, 견본,
+   * QA-10.1-3, 견본 (2)` 처럼 서식 바로 뒤에 견본을 둔다. [시트 추가]는 견본을 바탕으로 고르는 게
+   * 기본이라, 이걸 모르면 더한 장이 어느 서식 것인지 몰라 "수시 · 0건"에서 늘지 않았다(사용자 신고).
+   */
+  const codeOfSource = (source: string): string | undefined => {
+    const own = codes.get(source) ?? qaCodeOf(source) ?? undefined;
+    if (own) return own;
+    const at = doc.sheetNames.indexOf(source);
+    for (let i = at - 1; i >= 0; i -= 1) {
+      const before = codes.get(doc.sheetNames[i]);
+      if (before) return before;
+    }
+    return undefined;
+  };
   // 더한 장은 원본 시트의 번호를 잇는다.
   for (const name of doc.sheetNames) {
     const source = doc.sheetSources?.[name];
-    const code = !codes.has(name) && source ? codes.get(source) ?? qaCodeOf(source) : undefined;
+    const code = !codes.has(name) && source ? codeOfSource(source) : undefined;
     if (code) codes.set(name, code);
   }
   if (codes.size > 0) return codes;
