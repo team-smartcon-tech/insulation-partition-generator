@@ -27,6 +27,7 @@ import {
 } from "./sheetMerges.ts";
 import { baseFileName, planLegacyForm, siteCopyFields, type FormKind } from "./library.ts";
 import { syncDelete, syncPatch, syncSites, syncTaxonomies, syncUpload } from "./formSync.ts";
+import { fetchDocBytes } from "./formServer.ts";
 import { findApprovalBoxes } from "./approval.ts";
 import { changedAfterApproval, type Approval, type Assignee } from "./approvalLine.ts";
 import type { ApprovalSheetSummary } from "./homeStats.ts";
@@ -171,6 +172,16 @@ export interface StoredForm {
    * 서류함에 "N일째 기록 없음"을 띄운다(2026-10-15 사용자 결정). 이 칸이 생기기 전에 고친 장은 없다.
    */
   sheetEditedAt?: Record<string, number>;
+  /**
+   * 서버에서 받아 온 서류인가(2026-10-15). 다른 사람이 처음 열어도 같은 서류가 보이도록 서버에서
+   * 받아 온다(`formPull.ts`). 서버에서 지워지면 브라우저에서도 지운다.
+   */
+  fromServer?: boolean;
+  /**
+   * 원본 파일을 아직 안 받았다. 서류가 수백 건(150MB 넘게)이라 목록·격자만 먼저 받고, 엑셀 원본은
+   * 그 서류를 열거나 복사할 때 받는다(`ensureBytes`).
+   */
+  remoteBytes?: boolean;
 }
 
 /**
@@ -621,13 +632,20 @@ export async function listForms(): Promise<FormSummary[]> {
 export async function getForm(id: string): Promise<LoadedForm | null> {
   const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(id));
   if (!raw) return null;
-  const form = normalize(raw);
+  let form = normalize(raw);
+  let bytesError: string | undefined;
+  try {
+    form = await ensureBytes(form);
+  } catch (error) {
+    bytesError = `서버에서 엑셀 원본을 받지 못했습니다(${error instanceof Error ? error.message : String(error)}). 인터넷 연결을 확인하고 다시 열어 주세요.`;
+  }
   // 화면에는 원본 시트 + 사용자가 더한 시트를 함께 넘긴다. 저장소에는 원본만 담긴다.
   const expand = (f: StoredForm): LoadedForm => ({
     ...f,
     sheets: withCustomSheets(f.sheets, f.customSheets),
   });
 
+  if (bytesError) return { ...expand(form), upgradeError: bytesError };
   // 첨부(한글 등)는 엑셀이 아니라 다시 읽을 것이 없다.
   if (form.attachment) return expand(form);
   if (form.parserVersion === PARSER_VERSION) return expand(form);
@@ -656,6 +674,49 @@ export async function getForm(id: string): Promise<LoadedForm | null> {
       }`,
     };
   }
+}
+
+/**
+ * 서버에서 받아 온 서류의 엑셀 원본을 아직 안 받았으면 받아 저장한다.
+ * 받는 사이 다른 저장(글자 고치기)이 있었을 수 있어, 받은 뒤 다시 읽어 원본만 채운다.
+ */
+async function ensureBytes(form: StoredForm): Promise<StoredForm> {
+  if (!form.remoteBytes) return form;
+  const bytes = await fetchDocBytes(form.id);
+  const current = await run<StoredForm | undefined>("readonly", (store) => store.get(form.id));
+  const next: StoredForm = {
+    ...normalize(current ?? form),
+    bytes,
+    remoteBytes: undefined,
+    fileSize: form.fileSize ?? bytes.byteLength,
+  };
+  await run("readwrite", (store) => store.put(next));
+  return next;
+}
+
+/** 이 화면에서 지운 서류 — 서버에서 받아 오는 중에 되살리지 않게 */
+const deletedHere = new Set<string>();
+export const wasDeletedHere = (id: string) => deletedHere.has(id);
+
+/**
+ * 서버에서 받아 온 서류를 브라우저에 넣는다(서버로 다시 올리지 않는다).
+ * 이미 있는 서류면 `fields` 만 덮는다 — 원본 파일·줄 끼우기·즐겨찾기처럼 서버에 없는 것은 지킨다.
+ */
+export async function storeServerForm(form: StoredForm, fields: Partial<StoredForm>): Promise<"added" | "updated" | "skipped"> {
+  if (deletedHere.has(form.id)) return "skipped";
+  const current = await run<StoredForm | undefined>("readonly", (store) => store.get(form.id));
+  if (deletedHere.has(form.id)) return "skipped";
+  const next: StoredForm = current ? { ...normalize(current), ...fields } : form;
+  await run("readwrite", (store) => store.put(next));
+  return current ? "updated" : "added";
+}
+
+/** 서버에서 받아 왔는데 서버에서 지워진 서류를 브라우저에서도 지운다. 지운 수를 돌려준다. */
+export async function pruneServerForms(serverIds: Set<string>): Promise<number> {
+  const forms = await run<StoredForm[]>("readonly", (store) => store.getAll());
+  const gone = forms.filter((form) => form.fromServer && !serverIds.has(form.id));
+  for (const form of gone) await run("readwrite", (store) => store.delete(form.id));
+  return gone.length;
 }
 
 /** 새로 올린 엑셀을 저장한다. 저장한 내용을 그대로 돌려준다. */
@@ -776,7 +837,8 @@ async function patchForm(
 export async function copyTemplateToSite(templateId: string, siteId: string): Promise<StoredForm> {
   const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(templateId));
   if (!raw) throw new Error("그 배포 양식은 이미 지워졌습니다.");
-  const template = normalize(raw);
+  // 서버에서 받아 온 양식은 원본 파일을 이때 받는다 — 빈 파일로 사본을 만들면 안 된다.
+  const template = await ensureBytes(normalize(raw));
   if (template.kind !== "template") throw new Error("배포 양식이 아니라 복사할 수 없습니다.");
 
   const now = Date.now();
@@ -784,6 +846,8 @@ export async function copyTemplateToSite(templateId: string, siteId: string): Pr
     ...template,
     ...siteCopyFields(template, siteId),
     id: crypto.randomUUID(),
+    // 새 사본은 이 브라우저가 만든 것이다 — 서버에서 받아 온 표시를 물려받으면 올라가기 전에 지워질 수 있다.
+    fromServer: undefined,
     favorite: false,
     uploadedAt: now,
     updatedAt: now,
@@ -849,13 +913,14 @@ export async function copyTemplateToSlot(
 ): Promise<StoredForm> {
   const raw = await run<StoredForm | undefined>("readonly", (store) => store.get(templateId));
   if (!raw) throw new Error("그 배포 양식은 이미 지워졌습니다.");
-  const template = normalize(raw);
+  const template = await ensureBytes(normalize(raw));
   if (template.kind !== "template") throw new Error("배포 양식이 아니라 배포할 수 없습니다.");
 
   const now = Date.now();
   const copy: StoredForm = {
     ...template,
     id: crypto.randomUUID(),
+    fromServer: undefined,
     taxonomyId: slot.taxonomyId,
     code: slot.code,
     favorite: false,
@@ -1451,6 +1516,7 @@ export async function touchForm(id: string): Promise<void> {
 
 /** 한 건을 지운다. 되돌릴 수 없으므로 화면에서 먼저 확인을 받는다. */
 export async function deleteForm(id: string): Promise<void> {
+  deletedHere.add(id);
   await run("readwrite", (store) => store.delete(id));
   if (readLastOpenedId() === id) writeLastOpenedId(null);
   // 서버에 올라가 있던 것이면 거기서도 지운다. 없으면 서버가 404 를 주고 조용히 넘어간다.

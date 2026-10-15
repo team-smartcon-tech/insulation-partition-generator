@@ -38,6 +38,7 @@ import {
   TableCellsSplit,
   Trash2,
   TriangleAlert,
+  Loader2,
   PenLine,
   UserRound,
   Users,
@@ -161,6 +162,7 @@ import {
   type FormSummary,
 } from "./formStore";
 import { pullSites, pullTaxonomies, syncTaxonomyDelete } from "./formSync";
+import { pullDocs } from "./formPull";
 import type { FormSheet, FormValues } from "./types";
 import {
   addGroup,
@@ -319,6 +321,8 @@ export default function FormsPage() {
   const [values, setValues] = useState<FormValues>({});
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
+  /** 서버 서류를 받아 오는 중(몇 건 중 몇 건) */
+  const [pullProgress, setPullProgress] = useState<{ done: number; total: number } | null>(null);
   /** 코드표 목록 — 1차 분류(공무관련·품질관련 …)마다 한 벌 */
   const [taxonomies, setTaxonomies] = useState<Taxonomy[]>([]);
   // 코드표 편집 모드 — 켜면 목록에 더하기·고치기·지우기 버튼이 붙는다.
@@ -647,6 +651,7 @@ export default function FormsPage() {
         })
         .catch(() => {});
 
+      let startSiteId: string | undefined;
       // 현장 목록. 한 번도 만든 적이 없으면 첫 현장을 만들어 준다 — 빈 선택 상태를
       // 보여 주면 "어디에 올라가는지" 모른 채 올리게 된다.
       try {
@@ -672,7 +677,8 @@ export default function FormsPage() {
             }
           })();
           const docSiteIds = (await listForms().catch(() => [])).map((form) => form.siteId);
-          setSiteId(pickStartSite(list, remembered, docSiteIds));
+          startSiteId = pickStartSite(list, remembered, docSiteIds);
+          setSiteId(startSiteId);
         }
 
         // 구분이 생기기 전에 올린 서류를 배포 양식 / 현장 서류로 나눈다(처음 한 번만 할 일이 있다).
@@ -684,6 +690,27 @@ export default function FormsPage() {
         // 현장을 못 읽어도 서류는 보여야 한다.
       }
       const list = await refreshList();
+      /*
+       * 서버 서류를 뒤에서 받아 온다 — 다른 사람이 올린 배포 양식·현장 서류(2026-10-15 사용자 요청).
+       * 브라우저 것을 먼저 보여 주고, 받는 동안 몇 건마다 목록을 다시 읽는다.
+       */
+      void (async () => {
+        try {
+          const pulled = await pullDocs(startSiteId, (done, total) => {
+            if (cancelled) return;
+            setPullProgress(done < total ? { done, total } : null);
+            if (done % 10 === 0 || done === total) void refreshList();
+          });
+          if (!cancelled && pulled.added + pulled.updated + pulled.removed > 0) void refreshList();
+          if (!cancelled && pulled.failed > 0) {
+            setStorageWarning(`서버 서류 ${pulled.failed}건을 받아 오지 못했습니다. 새로고침하면 다시 받아 옵니다.`);
+          }
+        } catch (error) {
+          console.warn("[스마트폼] 서버 서류 목록을 받아 오지 못했습니다(브라우저에 있는 것만 보입니다):", error);
+        } finally {
+          if (!cancelled) setPullProgress(null);
+        }
+      })();
       const lastId = readLastOpenedId();
       if (!lastId || cancelled) return;
       /*
@@ -2343,6 +2370,13 @@ export default function FormsPage() {
         <ScrollTopButton />
 
         <ServerSyncBanner localCount={forms.length} />
+
+        {pullProgress && (
+          <p className="mb-4 flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2 text-xs text-blue-800" role="status">
+            <Loader2 size={13} className="animate-spin" aria-hidden />
+            서버에서 서류를 받아 오는 중 {pullProgress.done} / {pullProgress.total} — 다 받기 전에도 쓸 수 있습니다.
+          </p>
+        )}
 
         {storageWarning && (
           <p className="mb-6 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
