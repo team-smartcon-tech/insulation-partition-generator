@@ -166,6 +166,11 @@ export interface StoredForm {
    * 서식이 여러 장(QA-4.3-2·4.3-3…)이라 **장마다** 단다. 나중에 생긴 칸이라 옛 서류는 없다.
    */
   sheetDepts?: Record<string, string>;
+  /**
+   * 시트 이름 → 마지막으로 글자를 고친 때. 발송대장처럼 한 장에 줄을 쌓는 서식이 오래 기록되지 않으면
+   * 서류함에 "N일째 기록 없음"을 띄운다(2026-10-15 사용자 결정). 이 칸이 생기기 전에 고친 장은 없다.
+   */
+  sheetEditedAt?: Record<string, number>;
 }
 
 /**
@@ -210,6 +215,8 @@ export interface FormSummary {
   workingSheets: string[];
   /** 시트 이름 → 그 장을 쓰는 부서 */
   sheetDepts?: Record<string, string>;
+  /** 시트 이름 → 마지막으로 글자를 고친 때 */
+  sheetEditedAt?: Record<string, number>;
   /** [시트 추가]로 더한 장 → 바탕 시트(서식 번호를 잇는다) */
   sheetSources?: Record<string, string>;
   /** [시트 추가]로 더한 장 → 더한 때 */
@@ -255,6 +262,7 @@ function normalize(raw: StoredForm): StoredForm {
     approvalLines: raw.approvalLines ?? {},
     approvals: raw.approvals ?? {},
     sheetDepts: raw.sheetDepts ?? {},
+    sheetEditedAt: raw.sheetEditedAt ?? {},
     values: restoreBlankedTitles(
       normalizeValues(raw.values, raw.sheets ?? []),
       raw.sheets ?? [],
@@ -509,6 +517,7 @@ function summarize(form: StoredForm): FormSummary {
     templateId: form.templateId,
     templateUploadedAt: form.templateUploadedAt,
     sheetDepts: form.sheetDepts,
+    sheetEditedAt: form.sheetEditedAt,
     uploadedAt: form.uploadedAt,
     updatedAt: form.updatedAt,
     openedAt: form.openedAt,
@@ -931,13 +940,34 @@ async function syncShape(id: string): Promise<void> {
     extraRows: saved.extraRows ?? {},
     approvalLines: saved.approvalLines ?? {},
     approvals: saved.approvals ?? {},
+    sheetDepts: saved.sheetDepts ?? {},
+    sheetEditedAt: saved.sheetEditedAt ?? {},
   });
 }
 
-/** 고친 글자만 갱신한다. */
+/** 글자가 바뀐 시트들 — 시트마다 칸 값을 견준다 */
+export function changedSheets(before: FormValues, after: FormValues): string[] {
+  const names = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...names].filter((name) => {
+    const a = before[name] ?? {};
+    const b = after[name] ?? {};
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    return [...keys].some((key) => a[key] !== b[key]);
+  });
+}
+
+/** 고친 글자만 갱신한다. 바뀐 장에는 고친 때를 남긴다(오래 기록 없는 대장 알림). */
 export async function updateFormValues(id: string, values: FormValues): Promise<void> {
-  await patchForm(id, () => ({ values, updatedAt: Date.now() }));
-  void syncPatch(id, { cellValues: values });
+  const now = Date.now();
+  let stamped: Record<string, number> | undefined;
+  await patchForm(id, (form) => {
+    const changed = changedSheets(form.values, values);
+    if (changed.length === 0) return { values, updatedAt: now };
+    stamped = { ...form.sheetEditedAt };
+    for (const name of changed) stamped[name] = now;
+    return { values, sheetEditedAt: stamped, updatedAt: now };
+  });
+  void syncPatch(id, { cellValues: values, ...(stamped ? { sheetEditedAt: stamped } : {}) });
 }
 
 /** meta 칸에서 값 하나를 읽는다. */
@@ -1323,10 +1353,16 @@ export async function renameCustomSheet(
       sheetDepts[name] = sheetDepts[from];
       delete sheetDepts[from];
     }
+    const sheetEditedAt = { ...form.sheetEditedAt };
+    if (sheetEditedAt[from]) {
+      sheetEditedAt[name] = sheetEditedAt[from];
+      delete sheetEditedAt[from];
+    }
     return {
       approvalLines,
       approvals,
       sheetDepts,
+      sheetEditedAt,
       customSheets: form.customSheets.map((item) =>
         item.name === from ? { ...item, name } : item,
       ),
@@ -1351,10 +1387,13 @@ export async function removeCustomSheet(id: string, name: string): Promise<void>
     delete approvals[name];
     const sheetDepts = { ...form.sheetDepts };
     delete sheetDepts[name];
+    const sheetEditedAt = { ...form.sheetEditedAt };
+    delete sheetEditedAt[name];
     return {
       approvalLines,
       approvals,
       sheetDepts,
+      sheetEditedAt,
       customSheets: form.customSheets.filter((item) => item.name !== name),
       values,
       updatedAt: Date.now(),

@@ -157,6 +157,7 @@ export async function migrateLocalToServer(
       if (Object.keys(full.approvalLines ?? {}).length > 0) written.approvalLines = full.approvalLines;
       if (Object.keys(full.approvals ?? {}).length > 0) written.approvals = full.approvals;
       if (Object.keys(full.sheetDepts ?? {}).length > 0) written.sheetDepts = full.sheetDepts;
+      if (Object.keys(full.sheetEditedAt ?? {}).length > 0) written.sheetEditedAt = full.sheetEditedAt;
       if (Object.keys(written).length > 0) await patchDoc(full.id, written);
 
       result.docs += 1;

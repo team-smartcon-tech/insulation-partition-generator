@@ -13,7 +13,7 @@
  * 배포 양식에서 만든 현장 서류가 저절로 맞물린다.
  */
 
-import { PERIODIC, cycleOf, parseDay, periodKeyOf, periodsBetween, sheetDate, type QmpCycle, type QmpSiteSettings } from "./qmpCycle.ts";
+import { PERIODIC, alertDaysOf, cycleOf, parseDay, periodKeyOf, periodsBetween, sheetDate, type QmpCycle, type QmpSiteSettings } from "./qmpCycle.ts";
 
 export type QmpDept = "품질" | "공무" | "공사";
 export const QMP_DEPTS: QmpDept[] = ["품질", "공무", "공사"];
@@ -343,6 +343,10 @@ export interface QmpDoc extends QmpNamed {
   uploadedAt?: number;
   /** [시트 추가]로 더한 장 → 더한 때 */
   sheetMadeAt?: Record<string, number>;
+  /** 시트 이름 → 마지막으로 글자를 고친 때(없으면 서류를 마지막으로 저장한 때로 본다) */
+  sheetEditedAt?: Record<string, number>;
+  /** 서류를 마지막으로 저장한 때 */
+  updatedAt?: number;
 }
 
 export interface QmpFormState {
@@ -363,6 +367,10 @@ export interface QmpFormState {
   due?: number;
   /** 수시 서식: 쓴 장 수 */
   count?: number;
+  /** 수시 서식: 마지막으로 기록한 때 */
+  lastAt?: number;
+  /** 수시 서식: 마지막 기록 뒤 알림 날수를 넘겼으면 지난 날수 — 불 색·%와는 상관없는 알림이다 */
+  quietDays?: number;
   /** 이 현장 계획서가 적용 제외한 절의 서식 — 세지 않는다 */
   excluded?: boolean;
   /** 준공 때 쓰는 서식인데 아직 안 썼다 — 때가 아니므로 세지 않는다 */
@@ -388,7 +396,7 @@ export function qmpStates(
 ): Map<string, QmpFormState> {
   const result = new Map<string, QmpFormState>();
   /** 서식마다 쓴 장들(주기 진척을 셀 때 쓴다) */
-  const instances = new Map<string, { state: QmpFormState; at: number }[]>();
+  const instances = new Map<string, { state: QmpFormState; at: number; editedAt: number }[]>();
   const offer = (code: string, next: QmpFormState) => {
     const current = result.get(code);
     if (
@@ -427,7 +435,8 @@ export function qmpStates(
       offer(code, full);
       if (state.status !== "none") {
         const at = sheetDate(sheetName)?.getTime() ?? doc.sheetMadeAt?.[sheetName] ?? doc.uploadedAt ?? 0;
-        instances.set(code, [...(instances.get(code) ?? []), { state: full, at }]);
+        const editedAt = doc.sheetEditedAt?.[sheetName] ?? doc.updatedAt ?? at;
+        instances.set(code, [...(instances.get(code) ?? []), { state: full, at, editedAt }]);
       }
     }
   }
@@ -445,7 +454,7 @@ export function qmpStates(
  */
 function applyCycles(
   result: Map<string, QmpFormState>,
-  instances: Map<string, { state: QmpFormState; at: number }[]>,
+  instances: Map<string, { state: QmpFormState; at: number; editedAt: number }[]>,
   settings: QmpSiteSettings | undefined,
   today: Date,
 ) {
@@ -459,7 +468,18 @@ function applyCycles(
       const list = instances.get(form.code) ?? [];
       let next: QmpFormState = { ...base, cycle };
       if (excluded.has(sec.no)) next = { ...next, excluded: true };
-      else if (cycle === "adhoc") next = { ...next, count: list.length };
+      else if (cycle === "adhoc") {
+        // 발송대장처럼 한 장에 줄을 쌓는 서식은 장이 늘지 않는다 — 건수 대신 마지막 기록 뒤 날수로 알린다.
+        const lastAt = list.length > 0 ? Math.max(...list.map((item) => item.editedAt)) : undefined;
+        const limit = alertDaysOf(form.code, settings);
+        const days = lastAt ? Math.floor((today.getTime() - lastAt) / 86_400_000) : 0;
+        next = {
+          ...next,
+          count: list.length,
+          ...(lastAt ? { lastAt } : {}),
+          ...(lastAt && limit > 0 && days >= limit ? { quietDays: days } : {}),
+        };
+      }
       else if (cycle === "completion" && base.status === "none") next = { ...next, notYet: true };
       else if (PERIODIC.includes(cycle) && start) {
         const periods = periodsBetween(cycle, start, today);

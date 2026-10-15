@@ -674,6 +674,14 @@ function FormRow({
         <span className={"min-w-0 flex-1 truncate " + (dim || state?.excluded ? "text-slate-400" : "text-slate-600")}>{name}</span>
       )}
       {cycleTag}
+      {state?.quietDays !== undefined && (
+        <span
+          className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] tabular-nums text-amber-800 ring-1 ring-amber-200"
+          title={`마지막 기록 ${state.lastAt ? formatDate(state.lastAt) : ""} — 일이 있었는데 안 적었는지 확인해 보세요. 알림 날수는 [작성 일정]에서 바꾸거나 끌 수 있습니다`}
+        >
+          {state.quietDays}일째 기록 없음
+        </span>
+      )}
       {library ? (
         status === "none" ? (
           <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-slate-400">

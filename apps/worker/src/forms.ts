@@ -731,6 +731,7 @@ forms.patch("/docs/:id", async (c) => {
     if (body.approvalLines !== undefined) patch.approval_lines = body.approvalLines;
     if (body.approvals !== undefined) patch.approvals = body.approvals;
     if (body.sheetDepts !== undefined) patch.sheet_depts = body.sheetDepts;
+    if (body.sheetEditedAt !== undefined) patch.sheet_edited_at = body.sheetEditedAt;
     if (body.sheets !== undefined) patch.sheets = body.sheets;
     if (body.parserVersion !== undefined) patch.parser_version = Number(body.parserVersion);
     if (body.taxonomyId !== undefined) patch.taxonomy_id = body.taxonomyId;
@@ -754,14 +755,17 @@ forms.patch("/docs/:id", async (c) => {
     const target = `/form_documents?id=eq.${encodeURIComponent(c.req.param("id"))}`;
     let res = await supabaseRest(c.env, "PATCH", target, patch);
     /*
-     * 작성 부서 칸(`sheet_depts`, 2026-10-13)은 운영 표에 나중에 더한다. 칸이 아직 없는 서버에
-     * 이 판이 먼저 올라가도 **다른 저장은 막히지 않게** 그 칸만 빼고 다시 보낸다.
+     * 작성 부서(`sheet_depts`, 2026-10-13)·장마다 고친 때(`sheet_edited_at`, 2026-10-15) 칸은 운영 표에
+     * 나중에 더한다. 칸이 아직 없는 서버에 이 판이 먼저 올라가도 **다른 저장은 막히지 않게** 없는 칸만
+     * 빼고 다시 보낸다.
      */
-    if (!res.ok && "sheet_depts" in patch) {
+    const optional = ["sheet_depts", "sheet_edited_at"];
+    for (let tries = 0; !res.ok && tries < optional.length; tries += 1) {
       const text = await res.text();
-      if (!/sheet_depts/.test(text)) throw new Error(text);
-      const { sheet_depts: _skipped, ...rest } = patch;
-      res = await supabaseRest(c.env, "PATCH", target, rest);
+      const missing = optional.find((name) => name in patch && text.includes(name));
+      if (!missing) throw new Error(text);
+      delete patch[missing];
+      res = await supabaseRest(c.env, "PATCH", target, patch);
     }
     if (!res.ok) throw new Error(await res.text());
     const doc = await firstRow(res);

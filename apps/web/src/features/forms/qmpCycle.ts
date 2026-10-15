@@ -74,8 +74,22 @@ export interface QmpSiteSettings {
   cycles?: Record<string, QmpCycle>;
   /** 이 현장 계획서가 적용 제외한 절(예: "8.3", "8.9") */
   excluded?: string[];
+  /**
+   * 수시 서식: 마지막 기록 뒤 며칠이 지나면 "N일째 기록 없음" 알림을 띄우나. 기본과 다른 서식만,
+   * 0 이면 알림 끔(민원대장처럼 일이 없으면 비는 게 정상인 서식).
+   */
+  alertDays?: Record<string, number>;
   updatedAt?: number;
   updatedBy?: string;
+}
+
+/** 수시 서식 알림 기본 — 한 달 */
+export const DEFAULT_ALERT_DAYS = 30;
+/** 설정 창에서 고르는 알림 날수(0 = 끔) */
+export const ALERT_DAY_CHOICES = [7, 14, 30, 60, 90, 0];
+
+export function alertDaysOf(code: string, settings?: QmpSiteSettings): number {
+  return settings?.alertDays?.[code] ?? DEFAULT_ALERT_DAYS;
 }
 
 export function cycleOf(code: string, settings?: QmpSiteSettings): QmpCycle {

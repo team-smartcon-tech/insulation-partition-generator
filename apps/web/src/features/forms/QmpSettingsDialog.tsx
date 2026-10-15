@@ -11,7 +11,7 @@
 import { useMemo, useState } from "react";
 import { CalendarClock, Check, RotateCcw, X } from "lucide-react";
 import { QMP_SECTIONS } from "./qmpPlan";
-import { CYCLE_LABEL, CYCLE_ORDER, DEFAULT_CYCLES, cycleOf, parseDay, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
+import { ALERT_DAY_CHOICES, CYCLE_LABEL, CYCLE_ORDER, DEFAULT_ALERT_DAYS, DEFAULT_CYCLES, alertDaysOf, cycleOf, parseDay, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
 
 /**
  * 계획서에서 읽어 둔 착공일 — 설정이 비어 있을 때 미리 채워 둔다(저장은 사람이 누른다).
@@ -34,6 +34,8 @@ export default function QmpSettingsDialog({
   const [startDate, setStartDate] = useState(settings?.startDate ?? suggested ?? "");
   const [cycles, setCycles] = useState<Record<string, QmpCycle>>(settings?.cycles ?? {});
   const [excluded, setExcluded] = useState<string[]>(settings?.excluded ?? []);
+  /** 수시 서식의 "N일째 기록 없음" 알림 날수 — 기본(30일)과 다른 것만 */
+  const [alertDays, setAlertDays] = useState<Record<string, number>>(settings?.alertDays ?? {});
   const draft: QmpSiteSettings = { cycles };
   const validStart = startDate === "" || parseDay(startDate) !== null;
 
@@ -70,6 +72,7 @@ export default function QmpSettingsDialog({
             ...(startDate ? { startDate } : {}),
             ...(changedCount > 0 ? { cycles } : {}),
             ...(excluded.length > 0 ? { excluded } : {}),
+            ...(Object.keys(alertDays).length > 0 ? { alertDays } : {}),
             updatedAt: Date.now(),
           });
         }}
@@ -170,6 +173,32 @@ export default function QmpSettingsDialog({
                                   </option>
                                 ))}
                               </select>
+                              {value === "adhoc" && (
+                                <select
+                                  value={alertDaysOf(form.code, { alertDays })}
+                                  onChange={(event) => {
+                                    const days = Number(event.target.value);
+                                    setAlertDays((prev) => {
+                                      const next = { ...prev };
+                                      if (days === DEFAULT_ALERT_DAYS) delete next[form.code];
+                                      else next[form.code] = days;
+                                      return next;
+                                    });
+                                  }}
+                                  aria-label={`QA-${form.code} 기록 없음 알림`}
+                                  title="마지막 기록 뒤 이만큼 지나면 서류함에 'N일째 기록 없음'을 띄웁니다. 일이 없으면 비는 게 정상인 서식은 끄세요"
+                                  className={
+                                    "rounded border px-1.5 py-0.5 text-xs " +
+                                    (form.code in alertDays ? "border-blue-400 bg-blue-50 text-blue-800" : "border-slate-300 text-slate-500")
+                                  }
+                                >
+                                  {ALERT_DAY_CHOICES.map((days) => (
+                                    <option key={days} value={days}>
+                                      {days === 0 ? "알림 끔" : `${days}일 알림`}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
                             </li>
                           );
                         })}

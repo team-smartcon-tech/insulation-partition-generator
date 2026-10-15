@@ -339,6 +339,8 @@ export async function patchDoc(
     approvals?: unknown;
     /** 시트 이름 → 그 장을 쓰는 부서 */
     sheetDepts?: unknown;
+    /** 시트 이름 → 마지막으로 글자를 고친 때 */
+    sheetEditedAt?: unknown;
     sheets?: unknown;
     parserVersion?: number;
     taxonomyId?: string | null;

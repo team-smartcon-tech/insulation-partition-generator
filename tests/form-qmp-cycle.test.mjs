@@ -94,3 +94,24 @@ test('수시는 건수, 준공 때는 세지 않고, 적용 제외 절도 세지
   // 8.13 두 장 + 8.3 의 현장 서식(참고 제외) 네 장이 빠진다
   assert.equal(plain.total - all.total, 6);
 });
+
+test('수시 서식: 마지막 기록 뒤 알림 날수를 넘기면 "N일째 기록 없음" — 불 색·%는 그대로', () => {
+  const today = day(2026, 10, 15);
+  // 발송대장 — 한 장에 줄을 쌓는다. 그 장을 마지막으로 고친 때로 센다(서류 전체 저장 때가 아니라).
+  const doc = {
+    id: 'l',
+    sheetNames: ['QA-7.5-2', 'QA-7.5-3'],
+    workingSheets: ['QA-7.5-2', 'QA-7.5-3'],
+    sheetEditedAt: { 'QA-7.5-3': day(2026, 9, 1).getTime() },
+    updatedAt: day(2026, 10, 14).getTime(),
+  };
+  const states = qmpStates([doc], { settings: {}, today });
+  assert.equal(states.get('7.5-3').quietDays, 44);
+  assert.equal(states.get('7.5-3').status, 'done', '알림이 있어도 불은 초록');
+  // 고친 때가 없는 장은 서류를 마지막으로 저장한 때로 본다
+  assert.equal(states.get('7.5-2').quietDays, undefined);
+  // 현장이 알림을 끄거나 늘리면 없다
+  assert.equal(qmpStates([doc], { settings: { alertDays: { '7.5-3': 0 } }, today }).get('7.5-3').quietDays, undefined);
+  assert.equal(qmpStates([doc], { settings: { alertDays: { '7.5-3': 60 } }, today }).get('7.5-3').quietDays, undefined);
+  assert.equal(qmpTally(states, null).done, qmpTally(qmpStates([doc], { settings: { alertDays: { '7.5-3': 0 } }, today }), null).done);
+});
