@@ -579,16 +579,21 @@ export function writesSection(sec: QmpSection, dept: QmpDept): boolean {
 /**
  * 부서 하나(또는 전체)의 신호등 집계.
  * 기준 문서는 현장이 쓰지 않으므로 빼고 센다. 배포 양식함은 기준 문서도 양식이라 함께 센다.
+ *
+ * 부서 탭은 **그 부서가 주관(●)인 절만** 센다(2026-10-16 사용자 결정). 협조(○) 부서는 주관 부서에 내용을
+ * 주고 서류는 주관이 한 부로 쓴다 — 협조까지 세면 서류 하나가 세 부서 탭에 다 "작성됨"으로 잡혔다.
+ * 협조 절은 탭에 "협조"로 보이기만 한다. 배포 양식함(`countHelp`)은 양식이 있나만 보므로 협조 절도 센다.
  */
 export function qmpTally(
   states: Map<string, QmpFormState>,
   dept: QmpDept | null,
   chapter: string | null = null,
   includeReference = false,
+  countHelp = false,
 ): { done: number; doing: number; none: number; total: number } {
   const tally = { done: 0, doing: 0, none: 0, total: 0 };
   for (const sec of QMP_SECTIONS) {
-    if (dept && !writesSection(sec, dept)) continue;
+    if (dept && !(countHelp ? writesSection(sec, dept) : sec.lead === dept)) continue;
     if (chapter && chapterOf(sec.no) !== chapter) continue;
     for (const form of sec.forms) {
       if (form.reference && !includeReference) continue;

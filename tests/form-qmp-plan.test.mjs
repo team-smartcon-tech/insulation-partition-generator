@@ -83,16 +83,20 @@ test('[작성하기]는 그 서식 시트가 든 배포 양식 중 가장 최근
   assert.equal(templateForCode(templates, '8.6-1'), undefined);
 });
 
-test('집계는 기준 문서(PROCESS 등)를 세지 않고, 부서는 주관·협조 모두 그 부서 몫으로 센다', () => {
-  const tracked = (dept) =>
-    QMP_SECTIONS.filter((s) => !dept || s.lead === dept || s.help.includes(dept))
+test('집계는 기준 문서(PROCESS 등)를 세지 않고, 부서 탭은 주관 절만 센다(협조는 표시만)', () => {
+  const tracked = (dept, help = false) =>
+    QMP_SECTIONS.filter((s) => !dept || s.lead === dept || (help && s.help.includes(dept)))
       .flatMap((s) => s.forms)
       .filter((f) => !f.reference).length;
   const empty = new Map();
   assert.equal(qmpTally(empty, null).total, tracked(null));
+  // 공사가 주관인 절은 8.1·8.6 — 서식 열한 장
+  assert.equal(qmpTally(empty, '공사').total, 11);
   assert.equal(qmpTally(empty, '공사').total, tracked('공사'));
-  // 공사가 주관인 8.1·8.6 열한 장에 협조 절(4.3 프로세스 관리 등)이 더해진다
-  assert.ok(qmpTally(empty, '공사').total > 11);
+  // 배포 양식함은 협조 절도 센다
+  assert.equal(qmpTally(empty, '공사', null, false, true).total, tracked('공사', true));
+  // 세 부서의 주관 몫을 더하면 전체와 같다 — 서식 하나가 두 탭에 겹쳐 세지지 않는다
+  assert.equal(['품질', '공무', '공사'].reduce((sum, d) => sum + qmpTally(empty, d).total, 0), qmpTally(empty, null).total);
   const s43 = QMP_SECTIONS.find((s) => s.no === '4.3');
   assert.ok(writesSection(s43, '공사') && writesSection(s43, '품질'));
   assert.equal(writesSection(QMP_SECTIONS.find((s) => s.no === '4.2'), '공사'), false);
