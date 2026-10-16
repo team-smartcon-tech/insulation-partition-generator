@@ -73,6 +73,7 @@ import ReviewPage from "./ReviewPage";
 import FeedbackPage from "./FeedbackPage";
 import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
+import SamplePeek, { isSampleSheet } from "./SamplePeek";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
 import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
@@ -227,6 +228,13 @@ type LoadState =
  */
 const DOC_SPACES: ReadonlySet<Space> = new Set<Space>(["home", "library", "site"]);
 
+/**
+ * 시범 운영: 모든 직원에게 [배포 양식함]·[본사 점검]까지 다섯 탭을 다 보인다(2026-10-16 사용자 결정 —
+ * "어차피 시범 자료라 모든 직원한테"). 본사 관리자 명단 관리·의견 답변은 여전히 본사만 한다.
+ * 정식 운영 때 false 로 되돌리면 본사만 보인다.
+ */
+const PILOT_ALL_TABS = true;
+
 /** 등급만으로 본사가 되는 사람. 명단(`form_admins`)으로도 될 수 있고, 그 판단은 서버가 한다. */
 const HQ_ROLES = new Set(["super_admin", "system_admin"]);
 
@@ -321,6 +329,8 @@ export default function FormsPage() {
   const [values, setValues] = useState<FormValues>({});
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
+  /** 떠 있는 창으로 띄운 견본 시트(번호) */
+  const [samplePeek, setSamplePeek] = useState<number | null>(null);
   /** 서버 서류를 받아 오는 중(몇 건 중 몇 건) */
   const [pullProgress, setPullProgress] = useState<{ done: number; total: number } | null>(null);
   /** 코드표 목록 — 1차 분류(공무관련·품질관련 …)마다 한 벌 */
@@ -386,6 +396,11 @@ export default function FormsPage() {
    * 그 판단은 서버가 한다(`GET /api/forms/me`). 서버에 못 닿으면 등급만 보고 판단한다.
    */
   const isHq = useHqAdmin(user?.role);
+  /** 탭을 보일 사람 — 시범 운영 동안은 모든 직원(`PILOT_ALL_TABS`) */
+  const showHqTabs = isHq || PILOT_ALL_TABS;
+  // 다른 서류를 열면 떠 있던 견본 창은 닫는다(그 서류의 견본이 아니다).
+  const openedDocId = state.status === "ready" ? state.id : null;
+  useEffect(() => setSamplePeek(null), [openedDocId]);
   /**
    * 본사가 아닌 것으로 밝혀지면 본사 전용 화면에서 빠져나온다.
    *
@@ -393,8 +408,8 @@ export default function FormsPage() {
    * 다만 본사였다가 명단에서 빠진 뒤 다시 열었을 때를 위해 둔다.
    */
   useEffect(() => {
-    setSpaceState((current) => (HQ_ONLY.has(current) && !isHq ? "site" : current));
-  }, [isHq]);
+    setSpaceState((current) => (HQ_ONLY.has(current) && !showHqTabs ? "site" : current));
+  }, [showHqTabs]);
   const mySignature = useSignature(user?.id);
   /** 결재선 지정 창이 열려 있나 */
   const [lineDialogOpen, setLineDialogOpen] = useState(false);
@@ -504,7 +519,7 @@ export default function FormsPage() {
 
   function setSpace(next: Space) {
     // 본사 전용 화면은 본사만. 화면에서 단추를 감추지만, 다른 길로 들어오는 것도 여기서 막는다.
-    if (HQ_ONLY.has(next) && !isHq) return;
+    if (HQ_ONLY.has(next) && !showHqTabs) return;
     setSpaceState(next);
     // 다른 곳으로 옮기면 코드표 편집은 끈다 — 편집 도구는 배포 양식함에만 있다.
     if (next === "site") setEditingTaxonomy(false);
@@ -2314,14 +2329,14 @@ export default function FormsPage() {
           )
         }
         /* 넓은 화면에서는 왼쪽 메뉴가 있으니 위 탭은 좁은 화면에서만 보인다. */
-        subbar={<SpaceTabs space={space} onChange={setSpace} isHq={isHq} />}
+        subbar={<SpaceTabs space={space} onChange={setSpace} isHq={showHqTabs} />}
       />
 
       <div className="flex w-full items-start">
         <SpaceSidebar
           space={space}
           onChange={setSpace}
-          isHq={isHq}
+          isHq={showHqTabs}
           collapsed={navCollapsed}
           onToggleCollapsed={toggleNav}
         />
@@ -2394,7 +2409,7 @@ export default function FormsPage() {
         <div className="mb-6">
           {/* 본사 점검은 **서버를 직접 본다** — 다른 사람이 올린 것을 보는 일이라 브라우저 사본으로는 못 한다. */}
           {space === "review" ? (
-            <ReviewPage />
+            <ReviewPage admin={isHq} />
           ) : /* 의견은 **모든 직원**이 본다 — 본사 점검 옆에 둔다(2026-09-30 사용자 결정). */
           space === "feedback" ? (
             <FeedbackPage admin={isHq} myEmail={user?.email} />
@@ -3021,18 +3036,30 @@ export default function FormsPage() {
             </div>
 
             <div className="mb-4 flex flex-wrap items-center gap-2">
-              {state.sheets.map((item, index) => (
+              {state.sheets.map((item, index) => {
+                const sample = isSampleSheet(item) && index !== activeSheet;
+                return (
                 <button
                   key={item.name}
                   type="button"
-                  onClick={() => setActiveSheet(index)}
-                  title={item.custom ? "앱에서 더한 시트입니다." : "원본 엑셀의 시트입니다."}
+                  // 견본은 옮겨 가지 않고 떠 있는 창으로 띄운다 — 작성 중인 시트를 보면서 쓰게(2026-10-16 사용자 요청).
+                  onClick={() => (sample ? setSamplePeek(index) : setActiveSheet(index))}
+                  title={
+                    sample
+                      ? "견본을 떠 있는 창으로 띄웁니다. 작성 중인 시트는 그대로 두고 보면서 쓸 수 있습니다."
+                      : item.custom
+                        ? "앱에서 더한 시트입니다."
+                        : "원본 엑셀의 시트입니다."
+                  }
                   className={
                     index === activeSheet
                       ? "rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
-                      : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
+                      : sample
+                        ? "inline-flex items-center gap-1 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
+                        : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
                   }
                 >
+                  {sample && <BookOpen size={12} aria-hidden />}
                   {item.name}
                   {/* 원본 엑셀에 없던 장은 표시해 둔다 — 이름 바꾸기·지우기가 여기에만 된다. */}
                   {item.custom && (
@@ -3041,7 +3068,8 @@ export default function FormsPage() {
                     </span>
                   )}
                 </button>
-              ))}
+                );
+              })}
 
               {!readOnly && (
               <button
@@ -3251,6 +3279,18 @@ export default function FormsPage() {
               </div>
             )}
 
+            {samplePeek !== null && state.sheets[samplePeek] && isSampleSheet(state.sheets[samplePeek]) && (
+              <SamplePeek
+                key={`${state.id}:${state.sheets[samplePeek].name}`}
+                sheet={state.sheets[samplePeek]}
+                values={values[state.sheets[samplePeek].name]}
+                onClose={() => setSamplePeek(null)}
+                onGoTo={() => {
+                  setActiveSheet(samplePeek);
+                  setSamplePeek(null);
+                }}
+              />
+            )}
             <FormSheetView
               sheet={sheet}
               editable={canEdit}

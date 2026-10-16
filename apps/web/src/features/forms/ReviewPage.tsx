@@ -57,7 +57,7 @@ const STATUS = {
 type Slot = { taxonomyId: string; code: string } | { taxonomyId: ""; code: "" };
 const slotKey = (taxonomyId: string, code: string) => `${taxonomyId}:${code}`;
 
-export default function ReviewPage() {
+export default function ReviewPage({ admin = true }: { admin?: boolean } = {}) {
   const [sites, setSites] = useState<FormSite[]>([]);
   const [taxonomies, setTaxonomies] = useState<Taxonomy[]>([]);
   const [docs, setDocs] = useState<DocRow[]>([]);
@@ -395,7 +395,8 @@ export default function ReviewPage() {
         </div>
       )}
 
-      <AdminList />
+      {/* 명단을 바꾸는 것은 본사만 — 시범 운영으로 이 탭이 모두에게 보여도 명단은 본사에게만 보인다. */}
+      {admin && <AdminList />}
     </section>
   );
 }
