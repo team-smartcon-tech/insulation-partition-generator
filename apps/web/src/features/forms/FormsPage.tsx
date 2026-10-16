@@ -1360,7 +1360,7 @@ export default function FormsPage() {
    */
   async function openDocAt(formId: string, sheetName?: string, code?: string) {
     // 계획서 화면에서 서식을 눌렀으면 그 서식 시트만 탭에 보인다. 위쪽 열린 서류 탭으로 돌아와도
-    // 그 서식을 기억해 둔다 — [전체 시트 보기]를 누르기 전까지.
+    // 그 서식을 기억해 둔다.
     if (code) focusMemo.current.set(formId, code);
     const focusCode = code ?? focusMemo.current.get(formId);
     setSheetFocus(focusCode ? { docId: formId, code: focusCode } : null);
@@ -3065,7 +3065,7 @@ export default function FormsPage() {
             <div className="mb-4 flex flex-wrap items-center gap-2">
               {focusNames && (
                 <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-800" title="품질관리계획서 화면에서 연 서식의 시트만 보입니다">
-                  QA-{sheetFocus?.code} 시트만
+                  QA-{sheetFocus?.code}
                 </span>
               )}
               {state.sheets.map((item, index) => {
@@ -3104,20 +3104,6 @@ export default function FormsPage() {
                 </button>
                 );
               })}
-
-              {focusNames && state.sheets.length > focusNames.size && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (sheetFocus) focusMemo.current.delete(sheetFocus.docId);
-                    setSheetFocus(null);
-                  }}
-                  title="이 엑셀의 다른 서식 시트까지 모두 보입니다"
-                  className="rounded-lg px-2.5 py-1.5 text-xs text-slate-500 ring-1 ring-slate-300 transition hover:bg-slate-50"
-                >
-                  전체 시트 보기 ({state.sheets.length}장)
-                </button>
-              )}
 
               {!readOnly && (
               <button

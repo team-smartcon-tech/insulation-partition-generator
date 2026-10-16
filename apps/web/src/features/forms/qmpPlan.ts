@@ -323,15 +323,21 @@ export function sheetCodesOf(doc: QmpNamed): Map<string, string> {
   return codes;
 }
 
-/** 견본(채워 둔 예시) 시트 이름 */
-const SAMPLE_NAME = /견본|샘플|sample/i;
+/**
+ * 바로 앞 서식에 딸린 시트 이름 — 견본(채워 둔 예시)과 참고 자료.
+ * 7.6 엑셀의 "문서보안기준안(참고)"는 QA-7.6-5 목록표의 보안등급을 정할 때 보는 표라 7.6-5 와 함께 보인다
+ * (2026-10-16 사용자 결정).
+ */
+const ATTACHED_NAME = /견본|샘플|sample|참고/i;
 
 /**
- * 그 서식 번호에 딸린 시트 — 서식 시트, 그 바로 뒤의 견본, [시트 추가]로 더한 장.
+ * 그 서식 번호에 딸린 시트 — 서식 시트, 그 바로 뒤의 견본·참고 시트, [시트 추가]로 더한 장.
  *
  * 회사 양식 엑셀은 절마다 한 권이라(10.2 에 QA-10.2-1·10.2-2·견본…) 서식 하나를 열어도 모든 시트가
  * 탭에 떠서 같은 파일이 열린 것처럼 보였다(2026-10-16 사용자 신고). 계획서 화면에서 서식을 열면 이것만
  * 탭에 보인다. 그 서식이 없으면 빈 배열(그때는 전부 보인다).
+ * 어느 서식에도 딸리지 않은 시트(빈 Sheet1·Sheet8, 7.2 의 "카메라")는 서식 화면에서 보이지 않는다
+ * — 사용자가 "지워 버려"라고 정했다.
  */
 export function sheetsOfCode(doc: QmpNamed, code: string): string[] {
   const codes = sheetCodesOf(doc);
@@ -343,7 +349,7 @@ export function sheetsOfCode(doc: QmpNamed, code: string): string[] {
     if (own) {
       if (!added) lastCode = own;
       if (own === code) result.push(name);
-    } else if (!added && SAMPLE_NAME.test(name) && lastCode === code) {
+    } else if (!added && ATTACHED_NAME.test(name) && lastCode === code) {
       result.push(name);
     }
   }

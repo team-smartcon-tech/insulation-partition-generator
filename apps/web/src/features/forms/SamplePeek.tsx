@@ -9,10 +9,13 @@ import { ArrowRightToLine, BookOpen, X } from "lucide-react";
 import FormSheetView from "./FormSheetView";
 import type { FormCellValues, FormSheet } from "./types";
 
-/** 견본(채워 둔 예시) 시트인가 — 이름에 견본·샘플·sample. "양식"은 빈 서식 자체라 아니다. */
+/**
+ * 떠 있는 창으로 볼 시트인가 — 견본(채워 둔 예시)과 참고 자료(문서보안기준안(참고) 등).
+ * "양식"은 빈 서식 자체라 아니다.
+ */
 export function isSampleSheet(sheet: FormSheet): boolean {
   if (sheet.custom) return false;
-  return /견본|샘플|sample/i.test(sheet.name);
+  return /견본|샘플|sample|참고/i.test(sheet.name);
 }
 
 export default function SamplePeek({
@@ -75,7 +78,7 @@ export default function SamplePeek({
       >
         <BookOpen size={15} className="shrink-0 text-amber-700" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">
-          {/견본/.test(sheet.name) ? sheet.name : `견본 · ${sheet.name}`}
+          {/견본|참고/.test(sheet.name) ? sheet.name : `견본 · ${sheet.name}`}
           <span className="ml-2 text-xs font-normal text-slate-500">보면서 작성하세요</span>
         </span>
         <button

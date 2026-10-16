@@ -193,4 +193,8 @@ test('서식 번호에 딸린 시트만 — 서식 시트, 바로 뒤 견본, �
   assert.deepEqual(sheetsOfCode(doc, '10.1-3'), ['QA-10.1-3']);
   assert.deepEqual(sheetsOfCode(doc, '9.9-9'), []);
   assert.deepEqual(sheetsOfCode({ sheetNames: ['QA-7.5-4', 'QA-7.5-4(양식)'] }, '7.5-4'), ['QA-7.5-4', 'QA-7.5-4(양식)']);
+  // 참고 시트는 바로 앞 서식과 함께, 어느 서식에도 안 딸린 빈 시트는 빠진다
+  const docs76 = { sheetNames: ['QA-7.6-4', 'QA-7.6-5', '문서보안기준안(참고)'] };
+  assert.deepEqual(sheetsOfCode(docs76, '7.6-5'), ['QA-7.6-5', '문서보안기준안(참고)']);
+  assert.deepEqual(sheetsOfCode({ sheetNames: ['QA-6.2-3', '견본 (2)', 'Sheet1'] }, '6.2-3'), ['QA-6.2-3', '견본 (2)']);
 });
