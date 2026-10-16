@@ -39,7 +39,7 @@ interface Props {
   /** 계획서 서식이 아닌 서류(시트 이름에 QA 번호가 없는 것) — 숨기지 않고 맨 아래에 모은다 */
   others: { id: string; title: string }[];
   /** 서류(또는 배포 양식)를 그 시트로 연다 */
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   /**
    * 현장 서류함: 그 서식을 쓴다 — 쓰는 부서와 함께. 이미 이 현장에 그 서식이 든 서류가 있으면
    * 그것을 열고(`existing`), 없으면 배포 양식으로 새로 만든다.
@@ -135,7 +135,8 @@ export default function QmpBoard({
     else setPicking({ code, name, change: false });
   };
 
-  const tally = (d: QmpDept | null, ch: string | null = null) => qmpTally(states, d, ch, withRefs);
+  /** 부서 탭은 그 부서가 주관인 절만 센다 — 배포 양식함은 협조 절도(양식이 있나만 본다). */
+  const tally = (d: QmpDept | null, ch: string | null = null) => qmpTally(states, d, ch, withRefs, library);
   const overall = tally(null);
   /** 진행률 막대는 고른 부서 탭을 따른다 — "우리 부서는 얼마나 했나" 가 바로 보이게. */
   const current = tally(dept);
@@ -400,6 +401,8 @@ export default function QmpBoard({
                   {inChapter.map((sec) => {
                     const secTally = { done: 0, doing: 0, total: 0 };
                     const secExcluded = !library && (settings?.excluded ?? []).includes(sec.no);
+                    /** 고른 부서가 협조(○)인 절 — 보이기만 하고 그 부서 진행률에는 세지 않는다 */
+                    const helpOnly = !library && dept !== null && sec.lead !== dept;
                     for (const form of sec.forms) {
                       if (!withRefs && form.reference) continue;
                       const formState = states.get(form.code);
@@ -415,13 +418,21 @@ export default function QmpBoard({
                           <ChevronDown size={15} aria-hidden className="text-slate-400" />
                           <span className="tabular-nums">{sec.no}</span>
                           {sec.title}
-                          <span className="font-normal tabular-nums text-slate-500">
+                          <span className={"font-normal tabular-nums " + (helpOnly ? "text-slate-400" : "text-slate-500")}>
                             {secTally.total === 0 ? "–" : `${secTally.done}/${secTally.total}`}
                           </span>
                           <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700">
                             {!library && !secExcluded && <Lamp status={lampOf(secTally)} size={8} />}
                             작성 {[`${sec.lead}(주관)`, ...sec.help].join(" · ")}
                           </span>
+                          {helpOnly && (
+                            <span
+                              className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600"
+                              title={`${dept}는 협조 부서입니다 — ${sec.lead}(주관)에 내용을 주고, 서류는 ${sec.lead}가 작성합니다. ${dept} 진행률에는 세지 않습니다.`}
+                            >
+                              {dept} 협조 · 진행률에서 제외
+                            </span>
+                          )}
                           {secExcluded && (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
                               이 현장 적용 제외
@@ -608,7 +619,7 @@ function FormRow({
   reference: boolean;
   library: boolean;
   state: QmpFormState | undefined;
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   onWrite?: () => void;
   onChangeDept?: () => void;
   canWrite?: (code: string) => boolean;
@@ -664,7 +675,7 @@ function FormRow({
       {state?.docId ? (
         <button
           type="button"
-          onClick={() => onOpen(state.docId!, state.sheetName)}
+          onClick={() => onOpen(state.docId!, state.sheetName, code)}
           title={library ? `${name} — 배포 양식 열기` : `${name} — 이 현장 서류 열기`}
           className={"min-w-0 flex-1 truncate text-left hover:text-blue-700 hover:underline " + (dim || state.excluded ? "text-slate-400" : "text-slate-600")}
         >
@@ -735,7 +746,7 @@ function FormRow({
         </span>
       )}
       </div>
-      {open && periods && cycle && <PeriodDots cycle={cycle} periods={periods} onOpen={onOpen} onWrite={onWrite} />}
+      {open && periods && cycle && <PeriodDots cycle={cycle} periods={periods} onOpen={(docId, sheetName) => onOpen(docId, sheetName, code)} onWrite={onWrite} />}
     </li>
   );
 }
@@ -749,7 +760,7 @@ function PeriodDots({
 }: {
   cycle: QmpCycle;
   periods: NonNullable<QmpFormState["periods"]>;
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   onWrite?: () => void;
 }) {
   const years = new Map<string, typeof periods>();
