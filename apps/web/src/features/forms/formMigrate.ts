@@ -47,7 +47,8 @@ export interface MigrateResult {
 export async function pendingUploads(): Promise<string[]> {
   const [local, onServer] = await Promise.all([listForms(), fetchDocs()]);
   const have = new Set(onServer.map((doc) => doc.id));
-  return local.filter((form) => !have.has(form.id)).map((form) => form.id);
+  // 서버에 있던 서류가 서버에서 사라졌으면 다른 곳에서 지운 것이다 — 다시 올리면 지운 서류가 되살아난다.
+  return local.filter((form) => !have.has(form.id) && !form.fromServer).map((form) => form.id);
 }
 
 /**
@@ -113,7 +114,7 @@ export async function migrateLocalToServer(
   );
   report("서류", 0, forms.length);
   for (const [index, summary] of forms.entries()) {
-    if (existing.has(summary.id)) {
+    if (existing.has(summary.id) || summary.fromServer) {
       result.skipped += 1;
       report("서류", index + 1, forms.length);
       continue;

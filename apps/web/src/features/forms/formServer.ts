@@ -242,6 +242,8 @@ export interface DocRow {
   extra_rows?: unknown;
   approval_lines?: unknown;
   approvals?: unknown;
+  sheet_depts?: unknown;
+  sheet_edited_at?: unknown;
   template_id: string | null;
   template_uploaded_at: string | null;
   batch_id: string | null;
