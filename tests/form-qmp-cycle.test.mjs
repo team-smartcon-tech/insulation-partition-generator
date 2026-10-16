@@ -9,7 +9,9 @@ const day = (y, m, d) => new Date(y, m - 1, d);
 
 test('회사 기본 주기와 현장 설정', () => {
   assert.equal(cycleOf('8.10-4'), 'monthly');
-  assert.equal(cycleOf('8.6-3'), 'weekly');
+  // 주간·3개월 공정표는 스마트우미 공정 화면에서 쓴다 — 세지 않고 링크만
+  assert.equal(cycleOf('8.6-3'), 'external');
+  assert.equal(cycleOf('8.6-2'), 'external');
   assert.equal(cycleOf('9.4-2'), 'yearly');
   assert.equal(cycleOf('10.1-2'), 'adhoc');
   assert.equal(cycleOf('5.2-1'), 'once');
@@ -91,8 +93,8 @@ test('수시는 건수, 준공 때는 세지 않고, 적용 제외 절도 세지
   assert.equal(states.get('8.3-3').excluded, true);
   const all = qmpTally(states, null);
   const plain = qmpTally(qmpStates(docs), null);
-  // 8.13 두 장 + 8.3 의 현장 서식(참고 제외) 네 장이 빠진다
-  assert.equal(plain.total - all.total, 6);
+  // 8.13 두 장 + 8.3 의 현장 서식(참고 제외) 네 장 + 외부 작성(8.6-2·8.6-3) 두 장이 빠진다
+  assert.equal(plain.total - all.total, 8);
 });
 
 test('수시 서식: 마지막 기록 뒤 알림 날수를 넘기면 "N일째 기록 없음" — 불 색·%는 그대로', () => {
@@ -114,4 +116,17 @@ test('수시 서식: 마지막 기록 뒤 알림 날수를 넘기면 "N일째 �
   assert.equal(qmpStates([doc], { settings: { alertDays: { '7.5-3': 0 } }, today }).get('7.5-3').quietDays, undefined);
   assert.equal(qmpStates([doc], { settings: { alertDays: { '7.5-3': 60 } }, today }).get('7.5-3').quietDays, undefined);
   assert.equal(qmpTally(states, null).done, qmpTally(qmpStates([doc], { settings: { alertDays: { '7.5-3': 0 } }, today }), null).done);
+});
+
+test('외부 작성 서식은 세지 않고, 현장 주소가 있으면 링크를 단다', async () => {
+  const { externalLinkOf, isWebLink } = await import('../apps/web/src/features/forms/qmpCycle.ts');
+  const states = qmpStates([], { settings: { startDate: '2026-01-01' }, today: day(2026, 10, 15) });
+  assert.equal(states.get('8.6-3').external, true);
+  const withExternal = qmpTally(states, '공사').total;
+  const counted = qmpTally(qmpStates([], { settings: { startDate: '2026-01-01', cycles: { '8.6-3': 'weekly', '8.6-2': 'monthly' } }, today: day(2026, 10, 15) }), '공사').total;
+  assert.equal(counted - withExternal, 2);
+  assert.match(externalLinkOf('8.6-3', undefined, '부산장안(B1)'), /^https:\/\/sw\.smartwoomi\.com\/process\//);
+  assert.equal(externalLinkOf('8.6-3', { externalLinks: { '8.6-3': 'https://a.b/c' } }, '부산장안(B1)'), 'https://a.b/c');
+  assert.equal(externalLinkOf('8.6-3', undefined, '다른 현장'), undefined);
+  assert.equal(isWebLink('sw.smartwoomi.com'), false);
 });

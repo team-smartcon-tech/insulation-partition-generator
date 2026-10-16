@@ -14,9 +14,9 @@
  * 절 제목 옆("주관 품질 · 협조 공무·공사")에 보인다. 불은 서식마다 하나다.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { CalendarClock, Check, ChevronDown, Download, FilePenLine, FileSpreadsheet, Search, Upload, X } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, Download, ExternalLink, FilePenLine, FileSpreadsheet, Search, Upload, X } from "lucide-react";
 import QmpSettingsDialog from "./QmpSettingsDialog";
-import { CYCLE_LABEL, PERIODIC, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
+import { CYCLE_LABEL, PERIODIC, externalLinkOf, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
 import {
   QMP_CHAPTERS,
   QMP_DEPTS,
@@ -404,7 +404,7 @@ export default function QmpBoard({
                     for (const form of sec.forms) {
                       if (!withRefs && form.reference) continue;
                       const formState = states.get(form.code);
-                      if (formState?.excluded || formState?.notYet) continue;
+                      if (formState?.excluded || formState?.notYet || formState?.external) continue;
                       const status = formState?.status ?? "none";
                       if (status === "done") secTally.done += 1;
                       if (status === "doing") secTally.doing += 1;
@@ -445,6 +445,7 @@ export default function QmpBoard({
                                 onSetDept ? () => setPicking({ code: form.code, name: form.name, change: true }) : undefined
                               }
                               canWrite={canWrite}
+                              externalLink={externalLinkOf(form.code, settings, siteName)}
                             />
                           ))}
                         </ul>
@@ -604,6 +605,7 @@ function FormRow({
   onWrite,
   onChangeDept,
   canWrite,
+  externalLink,
 }: {
   code: string;
   name: string;
@@ -614,6 +616,8 @@ function FormRow({
   onWrite?: () => void;
   onChangeDept?: () => void;
   canWrite?: (code: string) => boolean;
+  /** 외부 작성 서식: 그 시스템 화면 주소 */
+  externalLink?: string;
 }) {
   const status = state?.status ?? "none";
   const dim = reference && !library;
@@ -636,7 +640,7 @@ function FormRow({
   /** 지난 기간 가운데 비어 있는 수(지금 기간은 빼고) */
   const missed = periods ? periods.slice(0, -1).filter((period) => period.status === "none").length : 0;
   /** 주기 표시 — 누르면 기간별 칸이 펼쳐진다 */
-  const cycleTag = !cycle || cycle === "once" || state?.excluded || state?.notYet ? null : periodic && periods ? (
+  const cycleTag = !cycle || cycle === "once" || cycle === "external" || state?.excluded || state?.notYet ? null : periodic && periods ? (
     <button
       type="button"
       onClick={() => setOpen((on) => !on)}
@@ -700,6 +704,25 @@ function FormRow({
         <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] text-slate-500">참고</span>
       ) : state?.excluded ? (
         <span className="shrink-0 text-xs text-slate-400">적용 제외</span>
+      ) : state?.external ? (
+        externalLink ? (
+          <a
+            href={externalLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="다른 사내 시스템(스마트우미 공정)에서 작성하는 서식입니다 — 눌러서 그 화면을 엽니다. 진행률에는 세지 않습니다."
+            className="inline-flex shrink-0 items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-100"
+          >
+            외부 작성 <ExternalLink size={11} aria-hidden />
+          </a>
+        ) : (
+          <span
+            className="shrink-0 rounded bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200"
+            title="다른 사내 시스템에서 작성하는 서식입니다. [작성 일정]에서 그 화면 주소를 넣으면 바로 가는 링크가 생깁니다."
+          >
+            외부 작성
+          </span>
+        )
       ) : state?.notYet ? (
         <span className="shrink-0 text-xs text-slate-400" title="준공 때 쓰는 서식입니다 — 그 전에는 세지 않습니다">
           준공 때 작성

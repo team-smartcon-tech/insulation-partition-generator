@@ -11,7 +11,20 @@
 import { useMemo, useState } from "react";
 import { CalendarClock, Check, RotateCcw, X } from "lucide-react";
 import { QMP_SECTIONS } from "./qmpPlan";
-import { ALERT_DAY_CHOICES, CYCLE_LABEL, CYCLE_ORDER, DEFAULT_ALERT_DAYS, DEFAULT_CYCLES, alertDaysOf, cycleOf, parseDay, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
+import {
+  ALERT_DAY_CHOICES,
+  CYCLE_LABEL,
+  CYCLE_ORDER,
+  DEFAULT_ALERT_DAYS,
+  DEFAULT_CYCLES,
+  alertDaysOf,
+  cycleOf,
+  externalLinkOf,
+  isWebLink,
+  parseDay,
+  type QmpCycle,
+  type QmpSiteSettings,
+} from "./qmpCycle";
 
 /**
  * 계획서에서 읽어 둔 착공일 — 설정이 비어 있을 때 미리 채워 둔다(저장은 사람이 누른다).
@@ -36,6 +49,8 @@ export default function QmpSettingsDialog({
   const [excluded, setExcluded] = useState<string[]>(settings?.excluded ?? []);
   /** 수시 서식의 "N일째 기록 없음" 알림 날수 — 기본(30일)과 다른 것만 */
   const [alertDays, setAlertDays] = useState<Record<string, number>>(settings?.alertDays ?? {});
+  /** "외부 작성" 서식의 그 시스템 화면 주소 — 미리 알고 있는 현장 주소와 다른 것만 담는다 */
+  const [externalLinks, setExternalLinks] = useState<Record<string, string>>(settings?.externalLinks ?? {});
   const draft: QmpSiteSettings = { cycles };
   const validStart = startDate === "" || parseDay(startDate) !== null;
 
@@ -73,6 +88,11 @@ export default function QmpSettingsDialog({
             ...(changedCount > 0 ? { cycles } : {}),
             ...(excluded.length > 0 ? { excluded } : {}),
             ...(Object.keys(alertDays).length > 0 ? { alertDays } : {}),
+            ...(() => {
+              // 주소가 아닌 것(빈칸·오타)은 저장하지 않는다 — 깨진 링크가 서류함에 걸린다.
+              const links = Object.fromEntries(Object.entries(externalLinks).filter(([, url]) => isWebLink(url)));
+              return Object.keys(links).length > 0 ? { externalLinks: links } : {};
+            })(),
             updatedAt: Date.now(),
           });
         }}
@@ -152,7 +172,7 @@ export default function QmpSettingsDialog({
                           const value = cycleOf(form.code, draft);
                           const changed = form.code in cycles;
                           return (
-                            <li key={form.code} className="flex h-8 items-center gap-2 text-xs">
+                            <li key={form.code} className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 py-1 text-xs">
                               <span className="w-14 shrink-0 tabular-nums text-slate-400">QA-{form.code}</span>
                               <span className="min-w-0 flex-1 truncate text-slate-700" title={form.name}>
                                 {form.name}
@@ -198,6 +218,24 @@ export default function QmpSettingsDialog({
                                     </option>
                                   ))}
                                 </select>
+                              )}
+                              {value === "external" && (
+                                <input
+                                  type="url"
+                                  value={externalLinks[form.code] ?? externalLinkOf(form.code, undefined, siteName) ?? ""}
+                                  onChange={(event) =>
+                                    setExternalLinks((prev) => ({ ...prev, [form.code]: event.target.value.trim() }))
+                                  }
+                                  placeholder="그 시스템에서 이 현장 화면 주소(https://…)"
+                                  aria-label={`QA-${form.code} 외부 작성 화면 주소`}
+                                  title="서류함에서 '외부 작성'을 누르면 이 주소가 새 창으로 열립니다"
+                                  className={
+                                    "basis-full rounded border px-2 py-1 text-xs text-slate-700 " +
+                                    (externalLinks[form.code] && !isWebLink(externalLinks[form.code])
+                                      ? "border-rose-400 bg-rose-50"
+                                      : "border-slate-300")
+                                  }
+                                />
                               )}
                             </li>
                           );

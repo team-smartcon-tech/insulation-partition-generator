@@ -408,6 +408,8 @@ export interface QmpFormState {
   excluded?: boolean;
   /** 준공 때 쓰는 서식인데 아직 안 썼다 — 때가 아니므로 세지 않는다 */
   notYet?: boolean;
+  /** 다른 사내 시스템에서 작성하는 서식 — 세지 않고 그 화면으로 가는 링크만 단다 */
+  external?: boolean;
 }
 
 const RANK: Record<QmpStatus, number> = { none: 0, doing: 1, done: 2 };
@@ -513,6 +515,7 @@ function applyCycles(
           ...(lastAt && limit > 0 && days >= limit ? { quietDays: days } : {}),
         };
       }
+      else if (cycle === "external") next = { ...next, external: true };
       else if (cycle === "completion" && base.status === "none") next = { ...next, notYet: true };
       else if (PERIODIC.includes(cycle) && start) {
         const periods = periodsBetween(cycle, start, today);
@@ -599,7 +602,7 @@ export function qmpTally(
       if (form.reference && !includeReference) continue;
       const state = states.get(form.code);
       // 적용 제외 절, 아직 때가 아닌 준공 서식은 세지 않는다.
-      if (state?.excluded || state?.notYet) continue;
+      if (state?.excluded || state?.notYet || state?.external) continue;
       tally[state?.status ?? "none"] += 1;
       tally.total += 1;
     }

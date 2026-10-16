@@ -10,7 +10,17 @@
  * "매 분기별 모니터링", "연 1회 이상")로 정했고, 현장은 자기 계획서에 맞게 바꾼다(`QmpSiteSettings`).
  */
 
-export type QmpCycle = "weekly" | "monthly" | "quarterly" | "half" | "yearly" | "once" | "completion" | "adhoc";
+export type QmpCycle =
+  | "weekly"
+  | "monthly"
+  | "quarterly"
+  | "half"
+  | "yearly"
+  | "once"
+  | "completion"
+  | "adhoc"
+  /** 다른 사내 시스템에서 작성한다(주간·3개월 공정표 → 스마트우미 공정 화면). 진척을 세지 않고 링크만 단다. */
+  | "external";
 
 /** 주기를 정해 횟수를 세는 것들 */
 export const PERIODIC: QmpCycle[] = ["weekly", "monthly", "quarterly", "half", "yearly"];
@@ -24,19 +34,22 @@ export const CYCLE_LABEL: Record<QmpCycle, string> = {
   once: "한 번",
   completion: "준공 때",
   adhoc: "수시",
+  external: "외부 작성",
 };
 
 /** 설정 창에서 고르는 순서 */
-export const CYCLE_ORDER: QmpCycle[] = ["once", "adhoc", "weekly", "monthly", "quarterly", "half", "yearly", "completion"];
+export const CYCLE_ORDER: QmpCycle[] = ["once", "adhoc", "weekly", "monthly", "quarterly", "half", "yearly", "completion", "external"];
 
 /**
  * 회사 기본 주기. 여기 없는 서식(참고 문서 제외)은 "한 번"(현장 초기에 쓰고 바뀔 때 고친다)이다.
  * 근거는 부산 장안 계획서의 절·항 번호.
  */
 export const DEFAULT_CYCLES: Record<string, QmpCycle> = {
+  // 다른 시스템에서 작성 — 주간·3개월 공정표는 스마트우미 공정 화면에서 쓴다(2026-10-16 사용자).
+  // 계획서 8.6.4.4 로는 주간·월간이지만 여기서는 세지 않고 그 화면으로 가는 링크만 단다.
+  "8.6-3": "external",
+  "8.6-2": "external",
   // 정해진 주기
-  "8.6-3": "weekly", // 8.6.4.4 주간 예정공정표
-  "8.6-2": "monthly", // 8.6.4.4 월간 예정공정표
   "8.10-4": "monthly", // 8.10.5.2 월 1회 이상 순회점검
   "8.11-7": "monthly", // 8.11.6.4 매월 품질검사 실적보고서
   "7.2-2": "monthly", // 7.2.5.8 매월초 익월 교정대상 파악
@@ -79,6 +92,8 @@ export interface QmpSiteSettings {
    * 0 이면 알림 끔(민원대장처럼 일이 없으면 비는 게 정상인 서식).
    */
   alertDays?: Record<string, number>;
+  /** "외부 작성" 서식: 그 시스템에서 이 현장 화면으로 가는 주소(서식 번호 → 주소) */
+  externalLinks?: Record<string, string>;
   updatedAt?: number;
   updatedBy?: string;
 }
@@ -90,6 +105,27 @@ export const ALERT_DAY_CHOICES = [7, 14, 30, 60, 90, 0];
 
 export function alertDaysOf(code: string, settings?: QmpSiteSettings): number {
   return settings?.alertDays?.[code] ?? DEFAULT_ALERT_DAYS;
+}
+
+/**
+ * 이 현장에서 미리 알고 있는 외부 작성 주소 — 설정에 없을 때 쓴다.
+ * 부산장안(B1): 사용자가 알려 준 스마트우미 공정 화면(주간). 주소의 cd7603f0… 는 스마트덱 현장 번호다.
+ */
+const KNOWN_EXTERNAL: [RegExp, string][] = [
+  [
+    /장안/,
+    "https://sw.smartwoomi.com/process/frame/auto_cd7603f0-ed9e-4b12-a150-90813ce35d9d_%EA%B3%A8%EC%A1%B0_1774230094168/weekly",
+  ],
+];
+
+/** 외부 작성 서식의 주소 — 현장 설정 → 미리 알고 있는 현장 주소 순. 없으면 undefined */
+export function externalLinkOf(code: string, settings: QmpSiteSettings | undefined, siteName: string | undefined): string | undefined {
+  return settings?.externalLinks?.[code] || KNOWN_EXTERNAL.find(([re]) => re.test(siteName ?? ""))?.[1];
+}
+
+/** 주소로 쓸 수 있나(http·https 만) */
+export function isWebLink(text: string | undefined): boolean {
+  return /^https?:\/\/\S+$/i.test(text?.trim() ?? "");
 }
 
 export function cycleOf(code: string, settings?: QmpSiteSettings): QmpCycle {
