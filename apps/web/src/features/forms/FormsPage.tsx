@@ -76,7 +76,7 @@ import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTa
 import SamplePeek, { isSampleSheet } from "./SamplePeek";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
-import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
+import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, sheetsOfCode, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -329,6 +329,10 @@ export default function FormsPage() {
   const [values, setValues] = useState<FormValues>({});
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
+  /** 계획서 화면에서 연 서식 — 그 서식 시트만 탭에 보인다(`sheetsOfCode`) */
+  const [sheetFocus, setSheetFocus] = useState<{ docId: string; code: string } | null>(null);
+  /** 서류마다 마지막으로 집중해 본 서식 */
+  const focusMemo = useRef(new Map<string, string>());
   /** 떠 있는 창으로 띄운 견본 시트(번호) */
   const [samplePeek, setSamplePeek] = useState<number | null>(null);
   /** 서버 서류를 받아 오는 중(몇 건 중 몇 건) */
@@ -1354,7 +1358,12 @@ export default function FormsPage() {
   /**
    * 홈에서 서류를 누르면 — 그 서류의 현장·양식함으로 옮기고, 그 시트를 펴서 보여 준다.
    */
-  async function openDocAt(formId: string, sheetName?: string) {
+  async function openDocAt(formId: string, sheetName?: string, code?: string) {
+    // 계획서 화면에서 서식을 눌렀으면 그 서식 시트만 탭에 보인다. 위쪽 열린 서류 탭으로 돌아와도
+    // 그 서식을 기억해 둔다 — [전체 시트 보기]를 누르기 전까지.
+    if (code) focusMemo.current.set(formId, code);
+    const focusCode = code ?? focusMemo.current.get(formId);
+    setSheetFocus(focusCode ? { docId: formId, code: focusCode } : null);
     const target = forms.find((form) => form.id === formId);
     if (!target) {
       setStorageWarning("그 서류를 찾지 못했습니다(지워졌을 수 있습니다).");
@@ -1827,6 +1836,8 @@ export default function FormsPage() {
       setSpace("site");
       await refreshList();
       await openStored(copy.id, qmpSheet);
+      if (qmp && qmpSheet) focusMemo.current.set(copy.id, qmp.code);
+      setSheetFocus(qmp && qmpSheet ? { docId: copy.id, code: qmp.code } : null);
       scrollToViewer();
       setSaveState("saved");
       setStorageWarning(`“${target.name}” 서류함에 “${copy.title}”을(를) 만들었습니다. 여기서 작성하세요.`);
@@ -2266,6 +2277,22 @@ export default function FormsPage() {
   const docSite = sites.find((site) => site.id === (openedSummary?.siteId ?? siteId));
   // 새 장을 만들 때 복사해 올 빈 양식. 없으면 지금 보는 시트를 쓴다.
   const template = state.status === "ready" ? findTemplateSheet(state.sheets) : undefined;
+  /** 탭에 보일 시트 이름(계획서 화면에서 서식을 열었을 때만). null 이면 전부 */
+  const focusNames = (() => {
+    if (state.status !== "ready" || !sheetFocus || sheetFocus.docId !== state.id) return null;
+    const names = sheetsOfCode(
+      {
+        sheetNames: state.sheets.map((item) => item.name),
+        title: state.title,
+        fileName: state.fileName,
+        sheetSources: openedSummary?.sheetSources,
+      },
+      sheetFocus.code,
+    );
+    return names.length > 0 ? new Set(names) : null;
+  })();
+  /** 집중해 보는 서식의 견본 — [시트 추가]의 바탕으로 먼저 골라 둔다 */
+  const focusTemplate = focusNames ? state.status === "ready" ? state.sheets.find((item) => focusNames.has(item.name) && isSampleSheet(item)) : undefined : undefined;
   // 고친 글자는 시트마다 따로 담긴다. 화면에는 지금 보는 시트 것만 넘긴다.
   const sheetValues = sheet ? (values[sheet.name] ?? {}) : {};
   const editedCount = Object.keys(sheetValues).length;
@@ -2452,7 +2479,7 @@ export default function FormsPage() {
               others={templates
                 .filter((form) => !hasQmpSheet(form))
                 .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
-              onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
+              onOpen={(docId, sheetName, code) => void openDocAt(docId, sheetName, code)}
               onUpload={() => handleUpload()}
               busy={state.status === "loading"}
             />
@@ -2475,7 +2502,7 @@ export default function FormsPage() {
               others={siteForms
                 .filter((form) => !hasQmpSheet(form))
                 .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
-              onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
+              onOpen={(docId, sheetName, code) => void openDocAt(docId, sheetName, code)}
               canWrite={(code) => Boolean(templateForCode(templates, code))}
               onWrite={(code, dept, existing) => {
                 // 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 한 부 더 만들지 않고 그것을 연다.
@@ -2483,7 +2510,7 @@ export default function FormsPage() {
                   void (async () => {
                     if (existing.sheetName) await setSheetDept(existing.docId, existing.sheetName, dept);
                     await refreshList();
-                    await openDocAt(existing.docId, existing.sheetName);
+                    await openDocAt(existing.docId, existing.sheetName, code);
                   })();
                   return;
                 }
@@ -2699,8 +2726,8 @@ export default function FormsPage() {
 
         {addingSheet && state.status === "ready" && (
           <AddSheetDialog
-            sheets={state.sheets.filter((item) => !item.custom).map((item) => item.name)}
-            initial={(template ?? sheet)?.name ?? ""}
+            sheets={state.sheets.filter((item) => !item.custom && (!focusNames || focusNames.has(item.name))).map((item) => item.name)}
+            initial={(focusNames ? (focusTemplate ?? sheet) : (template ?? sheet))?.name ?? ""}
             onCancel={() => setAddingSheet(false)}
             onConfirm={(source, name) => void createSheet(source, name)}
           />
@@ -3036,7 +3063,14 @@ export default function FormsPage() {
             </div>
 
             <div className="mb-4 flex flex-wrap items-center gap-2">
+              {focusNames && (
+                <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-800" title="품질관리계획서 화면에서 연 서식의 시트만 보입니다">
+                  QA-{sheetFocus?.code} 시트만
+                </span>
+              )}
               {state.sheets.map((item, index) => {
+                // 계획서 화면에서 연 서식이면 그 서식 시트만 — 지금 보고 있는 장은 늘 보인다.
+                if (focusNames && !focusNames.has(item.name) && index !== activeSheet) return null;
                 const sample = isSampleSheet(item) && index !== activeSheet;
                 return (
                 <button
@@ -3070,6 +3104,20 @@ export default function FormsPage() {
                 </button>
                 );
               })}
+
+              {focusNames && state.sheets.length > focusNames.size && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (sheetFocus) focusMemo.current.delete(sheetFocus.docId);
+                    setSheetFocus(null);
+                  }}
+                  title="이 엑셀의 다른 서식 시트까지 모두 보입니다"
+                  className="rounded-lg px-2.5 py-1.5 text-xs text-slate-500 ring-1 ring-slate-300 transition hover:bg-slate-50"
+                >
+                  전체 시트 보기 ({state.sheets.length}장)
+                </button>
+              )}
 
               {!readOnly && (
               <button

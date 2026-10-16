@@ -181,3 +181,16 @@ test('시트에 QA 번호가 없으면 서류 이름의 절 번호로 — 9.4 �
   // 절 번호가 없는 이름
   assert.equal(sheetCodesOf({ title: '회의록', sheetNames: ['Sheet1'] }).size, 0);
 });
+
+test('서식 번호에 딸린 시트만 — 서식 시트, 바로 뒤 견본, 더한 장', async () => {
+  const { sheetsOfCode } = await import('../apps/web/src/features/forms/qmpPlan.ts');
+  const doc = {
+    sheetNames: ['QA-10.1-1', 'QA-10.1-2', '견본', 'QA-10.1-3', 'QA-10.1-4', '견본 (2)', 'Sheet1', '2026-07'],
+    sheetSources: { '2026-07': '견본 (2)' },
+  };
+  assert.deepEqual(sheetsOfCode(doc, '10.1-2'), ['QA-10.1-2', '견본']);
+  assert.deepEqual(sheetsOfCode(doc, '10.1-4'), ['QA-10.1-4', '견본 (2)', '2026-07']);
+  assert.deepEqual(sheetsOfCode(doc, '10.1-3'), ['QA-10.1-3']);
+  assert.deepEqual(sheetsOfCode(doc, '9.9-9'), []);
+  assert.deepEqual(sheetsOfCode({ sheetNames: ['QA-7.5-4', 'QA-7.5-4(양식)'] }, '7.5-4'), ['QA-7.5-4', 'QA-7.5-4(양식)']);
+});

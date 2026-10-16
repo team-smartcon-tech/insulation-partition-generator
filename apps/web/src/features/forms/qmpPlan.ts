@@ -323,6 +323,33 @@ export function sheetCodesOf(doc: QmpNamed): Map<string, string> {
   return codes;
 }
 
+/** 견본(채워 둔 예시) 시트 이름 */
+const SAMPLE_NAME = /견본|샘플|sample/i;
+
+/**
+ * 그 서식 번호에 딸린 시트 — 서식 시트, 그 바로 뒤의 견본, [시트 추가]로 더한 장.
+ *
+ * 회사 양식 엑셀은 절마다 한 권이라(10.2 에 QA-10.2-1·10.2-2·견본…) 서식 하나를 열어도 모든 시트가
+ * 탭에 떠서 같은 파일이 열린 것처럼 보였다(2026-10-16 사용자 신고). 계획서 화면에서 서식을 열면 이것만
+ * 탭에 보인다. 그 서식이 없으면 빈 배열(그때는 전부 보인다).
+ */
+export function sheetsOfCode(doc: QmpNamed, code: string): string[] {
+  const codes = sheetCodesOf(doc);
+  const result: string[] = [];
+  let lastCode: string | undefined;
+  for (const name of doc.sheetNames) {
+    const own = codes.get(name);
+    const added = doc.sheetSources?.[name] !== undefined;
+    if (own) {
+      if (!added) lastCode = own;
+      if (own === code) result.push(name);
+    } else if (!added && SAMPLE_NAME.test(name) && lastCode === code) {
+      result.push(name);
+    }
+  }
+  return result;
+}
+
 /** 서식 한 장의 상태 */
 export type QmpStatus = "done" | "doing" | "none";
 

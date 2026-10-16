@@ -39,7 +39,7 @@ interface Props {
   /** 계획서 서식이 아닌 서류(시트 이름에 QA 번호가 없는 것) — 숨기지 않고 맨 아래에 모은다 */
   others: { id: string; title: string }[];
   /** 서류(또는 배포 양식)를 그 시트로 연다 */
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   /**
    * 현장 서류함: 그 서식을 쓴다 — 쓰는 부서와 함께. 이미 이 현장에 그 서식이 든 서류가 있으면
    * 그것을 열고(`existing`), 없으면 배포 양식으로 새로 만든다.
@@ -608,7 +608,7 @@ function FormRow({
   reference: boolean;
   library: boolean;
   state: QmpFormState | undefined;
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   onWrite?: () => void;
   onChangeDept?: () => void;
   canWrite?: (code: string) => boolean;
@@ -664,7 +664,7 @@ function FormRow({
       {state?.docId ? (
         <button
           type="button"
-          onClick={() => onOpen(state.docId!, state.sheetName)}
+          onClick={() => onOpen(state.docId!, state.sheetName, code)}
           title={library ? `${name} — 배포 양식 열기` : `${name} — 이 현장 서류 열기`}
           className={"min-w-0 flex-1 truncate text-left hover:text-blue-700 hover:underline " + (dim || state.excluded ? "text-slate-400" : "text-slate-600")}
         >
@@ -735,7 +735,7 @@ function FormRow({
         </span>
       )}
       </div>
-      {open && periods && cycle && <PeriodDots cycle={cycle} periods={periods} onOpen={onOpen} onWrite={onWrite} />}
+      {open && periods && cycle && <PeriodDots cycle={cycle} periods={periods} onOpen={(docId, sheetName) => onOpen(docId, sheetName, code)} onWrite={onWrite} />}
     </li>
   );
 }
@@ -749,7 +749,7 @@ function PeriodDots({
 }: {
   cycle: QmpCycle;
   periods: NonNullable<QmpFormState["periods"]>;
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   onWrite?: () => void;
 }) {
   const years = new Map<string, typeof periods>();
