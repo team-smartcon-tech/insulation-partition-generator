@@ -65,11 +65,12 @@ export const TOOLS: ToolDef[] = [
   {
     id: "forms",
     name: "스마트폼(Smart Forms)",
-    description: "우미건설 사내 서식을 한곳에. 필요한 양식을 찾고, 그 자리에서 채우세요.",
+    // 2026-10-17 사용자 결정: 이름은 그대로, 설명은 지금 모습(품질관리계획서 서류 작성·이행 관리)에 맞춘다.
+    description: "본사 표준 서식으로 현장 서류를 쓰고, 품질관리계획서대로 누가·언제·무엇을 썼는지 한눈에.",
     path: "/tools/forms",
     icon: FileSpreadsheet,
     status: "available",
-    tags: ["엑셀", "양식", "문서"],
+    tags: ["품질관리계획서", "현장 서류", "결재"],
     // 맨 뒤 — sortLast 도구끼리는 TOOLS 순서를 따르므로 TC/HOIST 다음에 온다
     sortLast: true,
   },
