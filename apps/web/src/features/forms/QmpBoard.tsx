@@ -9,8 +9,9 @@
  * - **배포 양식함**: 서식마다 회사 양식이 올라와 있는지. 빠진 것을 본사가 바로 찾는다.
  *
  * 생김새는 기존 서류함(`FormTree.tsx`)을 따른다 — 흰 카드, 서류철 탭, 왼쪽 목록, 한 줄짜리 행.
- * 부서 탭은 주관·협조를 가리지 않고 **그 부서가 쓰는 절**을 모두 보인다. 불은 서식마다 하나다
- * (누가 썼든 서류가 있으면 켜진다) — 부서마다 불을 달면 서식 한 장에 불이 셋 붙어 흐려진다.
+ * 부서 탭은 **그 부서가 주관(●)인 절만** 보이고 센다(2026-10-16 사용자 결정). 협조(○)는 주관에 내용을 주고
+ * 서류는 주관이 한 부로 쓴다 — 협조 절까지 보이고 세면 서류 하나가 세 탭에 다 잡혀 헷갈렸다. 누가 협조하는지는
+ * 절 제목 옆("주관 품질 · 협조 공무·공사")에 보인다. 불은 서식마다 하나다.
  */
 import { useMemo, useState, type ReactNode } from "react";
 import { CalendarClock, Check, ChevronDown, Download, FilePenLine, FileSpreadsheet, Search, Upload, X } from "lucide-react";
@@ -25,7 +26,6 @@ import {
   qmpTally,
   sectionOfCode,
   writersOf,
-  writesSection,
   type QmpDept,
   type QmpFormState,
   type QmpStatus,
@@ -135,8 +135,8 @@ export default function QmpBoard({
     else setPicking({ code, name, change: false });
   };
 
-  /** 부서 탭은 그 부서가 주관인 절만 센다 — 배포 양식함은 협조 절도(양식이 있나만 본다). */
-  const tally = (d: QmpDept | null, ch: string | null = null) => qmpTally(states, d, ch, withRefs, library);
+  /** 부서 탭은 그 부서가 주관인 절만 보이고 센다(2026-10-16 사용자 결정 — 협조까지 보이면 헷갈린다). */
+  const tally = (d: QmpDept | null, ch: string | null = null) => qmpTally(states, d, ch, withRefs);
   const overall = tally(null);
   /** 진행률 막대는 고른 부서 탭을 따른다 — "우리 부서는 얼마나 했나" 가 바로 보이게. */
   const current = tally(dept);
@@ -149,7 +149,7 @@ export default function QmpBoard({
 
   const sections = useMemo(
     () =>
-      QMP_SECTIONS.filter((sec) => (!dept || writesSection(sec, dept)) && (!chapter || chapterOf(sec.no) === chapter))
+      QMP_SECTIONS.filter((sec) => (!dept || sec.lead === dept) && (!chapter || chapterOf(sec.no) === chapter))
         .map((sec) => ({
           ...sec,
           forms: sec.forms.filter((form) => {
@@ -198,7 +198,7 @@ export default function QmpBoard({
           <p className="mt-2 text-xs text-slate-500">
             {library
               ? "품질관리계획서 서식별로 회사 양식이 올라와 있는지 봅니다. 양식 엑셀의 시트 이름(QA-7.2-2 등)으로 저절로 제자리를 찾습니다."
-              : "품질관리계획서 절마다 작성 부서(첨부 QA-6.3-2)가 서류를 작성해 결재까지 마치면 초록불이 켜집니다."}
+              : "품질관리계획서 절마다 주관 부서(첨부 QA-6.3-2)가 서류를 작성해 결재까지 마치면 초록불이 켜집니다. 부서 탭에는 그 부서가 주관인 서식만 보입니다."}
           </p>
           {!library && onSaveSettings && (
             <p className="mt-1 text-xs text-slate-500">
@@ -401,8 +401,6 @@ export default function QmpBoard({
                   {inChapter.map((sec) => {
                     const secTally = { done: 0, doing: 0, total: 0 };
                     const secExcluded = !library && (settings?.excluded ?? []).includes(sec.no);
-                    /** 고른 부서가 협조(○)인 절 — 보이기만 하고 그 부서 진행률에는 세지 않는다 */
-                    const helpOnly = !library && dept !== null && sec.lead !== dept;
                     for (const form of sec.forms) {
                       if (!withRefs && form.reference) continue;
                       const formState = states.get(form.code);
@@ -418,21 +416,14 @@ export default function QmpBoard({
                           <ChevronDown size={15} aria-hidden className="text-slate-400" />
                           <span className="tabular-nums">{sec.no}</span>
                           {sec.title}
-                          <span className={"font-normal tabular-nums " + (helpOnly ? "text-slate-400" : "text-slate-500")}>
+                          <span className="font-normal tabular-nums text-slate-500">
                             {secTally.total === 0 ? "–" : `${secTally.done}/${secTally.total}`}
                           </span>
                           <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700">
                             {!library && !secExcluded && <Lamp status={lampOf(secTally)} size={8} />}
-                            작성 {[`${sec.lead}(주관)`, ...sec.help].join(" · ")}
+                            주관 {sec.lead}
+                            {sec.help.length > 0 && <span className="text-blue-500"> · 협조 {sec.help.join("·")}</span>}
                           </span>
-                          {helpOnly && (
-                            <span
-                              className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-600"
-                              title={`${dept}는 협조 부서입니다 — ${sec.lead}(주관)에 내용을 주고, 서류는 ${sec.lead}가 작성합니다. ${dept} 진행률에는 세지 않습니다.`}
-                            >
-                              {dept} 협조 · 진행률에서 제외
-                            </span>
-                          )}
                           {secExcluded && (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
                               이 현장 적용 제외
