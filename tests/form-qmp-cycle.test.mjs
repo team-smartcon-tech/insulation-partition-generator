@@ -125,7 +125,9 @@ test('외부 작성 서식은 세지 않고, 현장 주소가 있으면 링크�
   const withExternal = qmpTally(states, '공사').total;
   const counted = qmpTally(qmpStates([], { settings: { startDate: '2026-01-01', cycles: { '8.6-3': 'weekly', '8.6-2': 'monthly' } }, today: day(2026, 10, 15) }), '공사').total;
   assert.equal(counted - withExternal, 2);
-  assert.match(externalLinkOf('8.6-3', undefined, '부산장안(B1)'), /^https:\/\/sw\.smartwoomi\.com\/process\//);
+  assert.ok(externalLinkOf('8.6-3', undefined, '부산장안(B1)').endsWith('/weekly'));
+  assert.ok(externalLinkOf('8.6-2', undefined, '부산장안(B1)').endsWith('/monthly'));
+  assert.ok(externalLinkOf('8.6-2', undefined, '부산장안(B1)').startsWith('https://sw.smartwoomi.com/process/'));
   assert.equal(externalLinkOf('8.6-3', { externalLinks: { '8.6-3': 'https://a.b/c' } }, '부산장안(B1)'), 'https://a.b/c');
   assert.equal(externalLinkOf('8.6-3', undefined, '다른 현장'), undefined);
   assert.equal(isWebLink('sw.smartwoomi.com'), false);

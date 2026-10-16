@@ -108,19 +108,24 @@ export function alertDaysOf(code: string, settings?: QmpSiteSettings): number {
 }
 
 /**
- * 이 현장에서 미리 알고 있는 외부 작성 주소 — 설정에 없을 때 쓴다.
- * 부산장안(B1): 사용자가 알려 준 스마트우미 공정 화면(주간). 주소의 cd7603f0… 는 스마트덱 현장 번호다.
+ * 이 현장에서 미리 알고 있는 외부 작성 주소(서식 번호 → 주소) — 설정에 없을 때 쓴다.
+ * 부산장안(B1): 사용자가 알려 준 스마트우미 공정 화면. 주소의 cd7603f0… 는 스마트덱 현장 번호다.
  */
-const KNOWN_EXTERNAL: [RegExp, string][] = [
+const BUSAN_PROCESS =
+  "https://sw.smartwoomi.com/process/frame/auto_cd7603f0-ed9e-4b12-a150-90813ce35d9d_%EA%B3%A8%EC%A1%B0_1774230094168";
+const KNOWN_EXTERNAL: [RegExp, Record<string, string>][] = [
   [
     /장안/,
-    "https://sw.smartwoomi.com/process/frame/auto_cd7603f0-ed9e-4b12-a150-90813ce35d9d_%EA%B3%A8%EC%A1%B0_1774230094168/weekly",
+    {
+      "8.6-2": `${BUSAN_PROCESS}/monthly`, // 3개월 공정표
+      "8.6-3": `${BUSAN_PROCESS}/weekly`, // 주간 공정표
+    },
   ],
 ];
 
 /** 외부 작성 서식의 주소 — 현장 설정 → 미리 알고 있는 현장 주소 순. 없으면 undefined */
 export function externalLinkOf(code: string, settings: QmpSiteSettings | undefined, siteName: string | undefined): string | undefined {
-  return settings?.externalLinks?.[code] || KNOWN_EXTERNAL.find(([re]) => re.test(siteName ?? ""))?.[1];
+  return settings?.externalLinks?.[code] || KNOWN_EXTERNAL.find(([re]) => re.test(siteName ?? ""))?.[1][code];
 }
 
 /** 주소로 쓸 수 있나(http·https 만) */
