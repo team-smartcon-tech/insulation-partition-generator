@@ -95,8 +95,8 @@ test('수시는 건수, 준공 때는 세지 않고, 적용 제외 절도 세지
   assert.equal(states.get('8.3-3').excluded, true);
   const all = qmpTally(states, null);
   const plain = qmpTally(qmpStates(docs), null);
-  // 8.13 두 장 + 8.3 의 현장 서식(참고 제외) 네 장이 빠진다(외부 작성도 센다)
-  assert.equal(plain.total - all.total, 6);
+  // 8.13 두 장 + 8.3 의 현장 서식(참고 제외) 네 장 + 주기 외부 작성(8.6-2·8.6-3) 두 장이 빠진다
+  assert.equal(plain.total - all.total, 8);
 });
 
 test('수시 서식: 마지막 기록 뒤 알림 날수를 넘기면 "N일째 기록 없음" — 불 색·%는 그대로', () => {
@@ -141,7 +141,10 @@ test('외부 작성 서식: 링크·표시, 올린 결과(PDF)로 그 주가 채
   assert.equal(weekly.external, true);
   assert.deepEqual(weekly.periods.map((p) => [p.key, p.status]), [['2026-09-28', 'none'], ['2026-10-05', 'done'], ['2026-10-12', 'none']]);
   assert.deepEqual(states.get('8.6-2').periods.map((p) => [p.key, p.status]), [['2026-09', 'done'], ['2026-10', 'none']]);
-  // 외부 작성도 진행률에 센다
-  assert.equal(qmpTally(states, '공사').total, 11);
+  // 주기 외부 작성(주간·3개월 공정표)은 두 번 일이라 진행률에서 뺀다 — 한 번 쓰는 품질방침(5.1-2)은 센다
+  assert.equal(weekly.uncounted, true);
+  assert.equal(qmpTally(states, '공사').total, 9);
+  assert.equal(states.get('5.1-2').uncounted, undefined);
+  assert.equal(states.get('5.1-2').external, true);
   assert.equal(resultTitle('8.6-3', '주간 공정표', { key: '2026-10-12', label: '10/12 주' }), 'QA-8.6-3 주간 공정표 (2026-10-12 주)');
 });

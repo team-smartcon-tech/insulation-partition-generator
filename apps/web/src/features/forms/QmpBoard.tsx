@@ -407,7 +407,7 @@ export default function QmpBoard({
                     for (const form of sec.forms) {
                       if (!withRefs && form.reference) continue;
                       const formState = states.get(form.code);
-                      if (formState?.excluded || formState?.notYet) continue;
+                      if (formState?.excluded || formState?.notYet || formState?.uncounted) continue;
                       const status = formState?.status ?? "none";
                       if (status === "done") secTally.done += 1;
                       if (status === "doing") secTally.doing += 1;
@@ -649,7 +649,8 @@ function FormRow({
   const periodic = cycle !== undefined && PERIODIC.includes(cycle);
   const periods = state?.periods;
   /** 지난 기간 가운데 비어 있는 수(지금 기간은 빼고) */
-  const missed = periods ? periods.slice(0, -1).filter((period) => period.status === "none").length : 0;
+  // 진행률에 안 세는 서식(주기 외부 작성)은 빠진 주를 빨갛게 알리지 않는다 — 올리기는 필요할 때만.
+  const missed = periods && !state?.uncounted ? periods.slice(0, -1).filter((period) => period.status === "none").length : 0;
   /** 주기 표시 — 누르면 기간별 칸이 펼쳐진다 */
   const cycleTag = !cycle || cycle === "once" || cycle === "external" || state?.excluded || state?.notYet ? null : periodic && periods ? (
     <button
@@ -698,7 +699,11 @@ function FormRow({
               href={externalLink}
               target="_blank"
               rel="noopener noreferrer"
-              title="다른 사내 시스템에서 작성하는 서식입니다 — 눌러서 그 화면을 엽니다"
+              title={
+                state.uncounted
+                  ? "다른 사내 시스템에서 주기적으로 작성하는 서식입니다 — 눌러서 그 화면을 엽니다. 두 번 일이라 진행률에는 세지 않습니다(증빙이 필요할 때만 결과를 올리세요)."
+                  : "다른 사내 시스템에서 작성하는 서식입니다 — 눌러서 그 화면을 엽니다. 결과(PDF)를 올리면 작성된 것으로 셉니다."
+              }
               className="inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-100"
             >
               외부 작성 <ExternalLink size={11} aria-hidden />
@@ -718,7 +723,7 @@ function FormRow({
               title="그 시스템에서 뽑은 결과(PDF)를 올립니다. 올리면 그 주·그 달이 작성된 것으로 셉니다."
               className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-50"
             >
-              <Upload size={11} aria-hidden /> 결과 올리기
+              <Upload size={11} aria-hidden /> 올리기
             </button>
           )}
         </span>
@@ -747,6 +752,9 @@ function FormRow({
         <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] text-slate-500">참고</span>
       ) : state?.excluded ? (
         <span className="shrink-0 text-xs text-slate-400">적용 제외</span>
+      ) : state?.uncounted ? (
+        // 진행률에 안 센다 — 줄이 붐비지 않게 따로 표시하지 않고, 외부 작성 표시에 마우스를 올리면 알려 준다.
+        <span className="sr-only">진행률 제외</span>
       ) : state?.notYet ? (
         <span className="shrink-0 text-xs text-slate-400" title="준공 때 쓰는 서식입니다 — 그 전에는 세지 않습니다">
           준공 때 작성

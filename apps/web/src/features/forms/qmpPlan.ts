@@ -421,6 +421,11 @@ export interface QmpFormState {
   notYet?: boolean;
   /** 다른 사내 시스템에서 작성하는 서식 — 그 화면 링크와 [결과 올리기]를 단다. 올린 결과로 센다. */
   external?: boolean;
+  /**
+   * 진행률에 세지 않는다 — 주기(주간·월간…) 외부 작성 서식. 매주 다른 시스템에 쓰고 PDF 를 또 올리면 두 번
+   * 일이라(2026-10-17 사용자 결정) 링크와 [결과 올리기](필요할 때만)만 둔다. 한 번 쓰는 외부 서식은 센다.
+   */
+  uncounted?: boolean;
 }
 
 const RANK: Record<QmpStatus, number> = { none: 0, doing: 1, done: 2 };
@@ -558,6 +563,7 @@ function applyCycles(
               : "none";
         next = { ...next, status, periods: rows, written, due: rows.length };
       }
+      if (next.external && PERIODIC.includes(cycle)) next = { ...next, uncounted: true };
       result.set(form.code, next);
     }
   }
@@ -614,7 +620,7 @@ export function qmpTally(
       if (form.reference && !includeReference) continue;
       const state = states.get(form.code);
       // 적용 제외 절, 아직 때가 아닌 준공 서식은 세지 않는다.
-      if (state?.excluded || state?.notYet) continue;
+      if (state?.excluded || state?.notYet || state?.uncounted) continue;
       tally[state?.status ?? "none"] += 1;
       tally.total += 1;
     }
