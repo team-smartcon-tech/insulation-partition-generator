@@ -75,6 +75,7 @@ import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
 import SamplePeek, { isSampleSheet } from "./SamplePeek";
 import ResultUploadDialog from "./ResultUploadDialog";
+import { SHEET_LINKS, applySheetLink } from "./formLinks";
 import { cycleOf, externalLinkOf } from "./qmpCycle";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
@@ -459,6 +460,16 @@ export default function FormsPage() {
 
   /** 지금 보고 있는 시트 이름 — 되돌리기 기록에 어느 시트인지 적어 두려고 들고 있다. */
   const sheetNameRef = useRef<string>("");
+  /**
+   * 서식 잇기(`formLinks.ts`)에 필요한 것 — 이 서류의 시트들과 서식 번호, 시트마다 끼운·더한 줄 수.
+   * 칸 하나를 고칠 때마다 쓰므로 렌더마다 갈아 끼운다.
+   */
+  const linkContextRef = useRef<{
+    sheets: FormSheet[];
+    codes: Map<string, string>;
+    rowInserts: Record<string, number[]>;
+    extraRows: Record<string, number>;
+  } | null>(null);
 
   /** 방금 저장소에서 읽어 온 값. 이것과 같으면 저장할 게 없다. */
   const justLoadedRef = useRef<{ id: string; values: FormValues } | null>(null);
@@ -1631,6 +1642,31 @@ export default function FormsPage() {
       historyRef.current.past.push({ sheet: sheetName, key: cellKey, before, after });
       // 새로 고치면 "다시하기"로 돌아갈 길은 사라진다(글쓰기 프로그램과 같은 규칙).
       historyRef.current.future = [];
+
+      /*
+       * 서식 잇기 — 6.1-3 평가표에서 "대응계획 유무: 유"인 줄을 6.1-4 대응계획서에 옮겨 쓴다(사용자 요청).
+       * 같은 서류(엑셀 한 권) 안의 대응계획서 시트에 채운다. 견본·참고 시트는 대상이 아니다.
+       */
+      const context = linkContextRef.current;
+      const code = context?.codes.get(sheetName);
+      const link = code ? SHEET_LINKS.find((item) => item.from === code) : undefined;
+      if (!context || !link) return;
+      const targets = context.sheets.filter((item) => context.codes.get(item.name) === link.to && !isSampleSheet(item));
+      const target = targets.find((item) => item.name.trim() === `QA-${link.to}`) ?? targets[0];
+      if (!target) return;
+      const lastRow =
+        target.rowCount + (context.rowInserts[target.name]?.length ?? 0) + (context.extraRows[target.name] ?? 0);
+      setValues((prev) => {
+        const result = applySheetLink(link, prev[sheetName] ?? {}, prev[target.name] ?? {}, lastRow);
+        if (result.overflow > 0) {
+          setStorageWarning(
+            `${link.label}(${target.name})에 빈 줄이 모자라 ${result.overflow}건을 옮기지 못했습니다. 그 시트에 줄을 더한 뒤 다시 고쳐 주세요.`,
+          );
+        } else if (result.changed > 0) {
+          setStorageWarning(`“유”로 적은 줄을 ${link.label}(${target.name})에 옮겨 적었습니다. 조치계획·담당자는 그 시트에서 적으세요.`);
+        }
+        return result.changed > 0 ? { ...prev, [target.name]: result.values } : prev;
+      });
     },
     [],
   );
@@ -2336,6 +2372,21 @@ export default function FormsPage() {
   useEffect(() => {
     sheetNameRef.current = sheet?.name ?? "";
   }, [sheet]);
+  // 서식 잇기에 쓸 이 서류의 시트·서식 번호
+  linkContextRef.current =
+    state.status === "ready"
+      ? {
+          sheets: state.sheets,
+          codes: sheetCodesOf({
+            sheetNames: state.sheets.map((item) => item.name),
+            title: state.title,
+            fileName: state.fileName,
+            sheetSources: openedSummary?.sheetSources,
+          }),
+          rowInserts,
+          extraRows,
+        }
+      : null;
 
   // Ctrl+Z 되돌리기 / Ctrl+Y·Ctrl+Shift+Z 다시하기.
   useEffect(() => {
