@@ -748,6 +748,8 @@ export async function saveForm(input: {
   batchId?: string;
   /** 엑셀이 아니라 파일째 보관하는 첨부(한글 등). 이때 `sheets` 는 빈 배열이다. */
   attachment?: boolean;
+  /** 보기 이름(없으면 파일 이름에서 확장자를 뗀 것) — [결과 올리기]는 서식 번호로 시작하게 짓는다 */
+  title?: string;
 }): Promise<StoredForm> {
   const now = Date.now();
   const form: StoredForm = {
@@ -757,7 +759,7 @@ export async function saveForm(input: {
     // 그것을 소유·이관해 비워 버렸을 때 "원본이 빈" 양식이 저장된다.
     // 파일 이름에서 확장자만 뗀다. 보기 이름은 나중에 바꿀 수 있다.
     // 보기 이름에서는 확장자를 뗀다 — 한글(.hwp)도 마찬가지다.
-    title: baseFileName(input.fileName),
+    title: input.title?.trim() || baseFileName(input.fileName),
     category: input.category || UNCATEGORIZED,
     code: input.code,
     taxonomyId: input.taxonomyId,

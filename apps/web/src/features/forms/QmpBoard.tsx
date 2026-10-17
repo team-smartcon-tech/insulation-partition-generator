@@ -45,6 +45,8 @@ interface Props {
    * 그것을 열고(`existing`), 없으면 배포 양식으로 새로 만든다.
    */
   onWrite?: (code: string, dept: QmpDept, existing?: { docId: string; sheetName?: string }) => void;
+  /** 현장 서류함: 외부 작성 서식의 결과(PDF 등)를 올린다 — 주기 서식은 그 기간(`periodKey`)으로 */
+  onUploadResult?: (code: string, name: string, periodKey?: string, periods?: QmpFormState["periods"]) => void;
   /** 현장 서류함: 이미 정한 작성 부서를 바꾼다 */
   onSetDept?: (docId: string, sheetName: string, dept: QmpDept) => void;
   /** 현장 서류함: 그 서식이 든 배포 양식이 있나 */
@@ -98,6 +100,7 @@ export default function QmpBoard({
   onOpen,
   onWrite,
   onSetDept,
+  onUploadResult,
   canWrite,
   onUpload,
   importCount = 0,
@@ -404,7 +407,7 @@ export default function QmpBoard({
                     for (const form of sec.forms) {
                       if (!withRefs && form.reference) continue;
                       const formState = states.get(form.code);
-                      if (formState?.excluded || formState?.notYet || formState?.external) continue;
+                      if (formState?.excluded || formState?.notYet) continue;
                       const status = formState?.status ?? "none";
                       if (status === "done") secTally.done += 1;
                       if (status === "doing") secTally.doing += 1;
@@ -446,6 +449,11 @@ export default function QmpBoard({
                               }
                               canWrite={canWrite}
                               externalLink={externalLinkOf(form.code, settings, siteName)}
+                              onUploadResult={
+                                onUploadResult
+                                  ? (periodKey) => onUploadResult(form.code, form.name, periodKey, states.get(form.code)?.periods)
+                                  : undefined
+                              }
                             />
                           ))}
                         </ul>
@@ -606,6 +614,7 @@ function FormRow({
   onChangeDept,
   canWrite,
   externalLink,
+  onUploadResult,
 }: {
   code: string;
   name: string;
@@ -618,6 +627,8 @@ function FormRow({
   canWrite?: (code: string) => boolean;
   /** 외부 작성 서식: 그 시스템 화면 주소 */
   externalLink?: string;
+  /** 외부 작성 서식: 결과 올리기(주기 서식은 그 기간) */
+  onUploadResult?: (periodKey?: string) => void;
 }) {
   const status = state?.status ?? "none";
   const dim = reference && !library;
@@ -680,6 +691,38 @@ function FormRow({
         <span className={"min-w-0 flex-1 truncate " + (dim || state?.excluded ? "text-slate-400" : "text-slate-600")}>{name}</span>
       )}
       {cycleTag}
+      {!library && state?.external && !state.excluded && (
+        <span className="inline-flex shrink-0 items-center gap-1">
+          {externalLink ? (
+            <a
+              href={externalLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="다른 사내 시스템에서 작성하는 서식입니다 — 눌러서 그 화면을 엽니다"
+              className="inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-100"
+            >
+              외부 작성 <ExternalLink size={11} aria-hidden />
+            </a>
+          ) : (
+            <span
+              className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-indigo-200"
+              title="다른 사내 시스템에서 작성하는 서식입니다. [작성 일정]에서 그 화면 주소를 넣으면 바로 가는 링크가 생깁니다."
+            >
+              외부 작성
+            </span>
+          )}
+          {onUploadResult && (status !== "none" || periodic) && (
+            <button
+              type="button"
+              onClick={() => onUploadResult()}
+              title="그 시스템에서 뽑은 결과(PDF)를 올립니다. 올리면 그 주·그 달이 작성된 것으로 셉니다."
+              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-50"
+            >
+              <Upload size={11} aria-hidden /> 결과 올리기
+            </button>
+          )}
+        </span>
+      )}
       {state?.quietDays !== undefined && (
         <span
           className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] tabular-nums text-amber-800 ring-1 ring-amber-200"
@@ -704,25 +747,6 @@ function FormRow({
         <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] text-slate-500">참고</span>
       ) : state?.excluded ? (
         <span className="shrink-0 text-xs text-slate-400">적용 제외</span>
-      ) : state?.external ? (
-        externalLink ? (
-          <a
-            href={externalLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="다른 사내 시스템(스마트우미 공정)에서 작성하는 서식입니다 — 눌러서 그 화면을 엽니다. 진행률에는 세지 않습니다."
-            className="inline-flex shrink-0 items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-100"
-          >
-            외부 작성 <ExternalLink size={11} aria-hidden />
-          </a>
-        ) : (
-          <span
-            className="shrink-0 rounded bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-500 ring-1 ring-slate-200"
-            title="다른 사내 시스템에서 작성하는 서식입니다. [작성 일정]에서 그 화면 주소를 넣으면 바로 가는 링크가 생깁니다."
-          >
-            외부 작성
-          </span>
-        )
       ) : state?.notYet ? (
         <span className="shrink-0 text-xs text-slate-400" title="준공 때 쓰는 서식입니다 — 그 전에는 세지 않습니다">
           준공 때 작성
@@ -743,8 +767,19 @@ function FormRow({
         <span className="inline-flex shrink-0 items-center gap-2 text-xs">
           {deptTag}
           <Lamp status="none" />
-          {/* 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 새로 만들지 않고 그것을 연다. */}
-          {state?.docId || canWrite?.(code) ? (
+          {/* 외부 작성 서식은 그 시스템에서 쓰고 결과만 올린다. */}
+          {state?.external && onUploadResult ? (
+            periodic ? null : (
+              <button
+                type="button"
+                onClick={() => onUploadResult()}
+                className="rounded px-1.5 py-0.5 text-indigo-700 transition hover:bg-indigo-50"
+              >
+                결과 올리기
+              </button>
+            )
+          ) : /* 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 새로 만들지 않고 그것을 연다. */
+          state?.docId || canWrite?.(code) ? (
             <button
               type="button"
               onClick={() => onWrite?.()}
@@ -760,7 +795,14 @@ function FormRow({
         </span>
       )}
       </div>
-      {open && periods && cycle && <PeriodDots cycle={cycle} periods={periods} onOpen={(docId, sheetName) => onOpen(docId, sheetName, code)} onWrite={onWrite} />}
+      {open && periods && cycle && <PeriodDots
+          cycle={cycle}
+          periods={periods}
+          onOpen={(docId, sheetName) => onOpen(docId, sheetName, code)}
+          // 외부 작성 서식은 빈 칸을 누르면 그 주·그 달 결과를 올린다.
+          onWrite={state?.external && onUploadResult ? undefined : onWrite}
+          onFill={state?.external && onUploadResult ? (periodKey) => onUploadResult(periodKey) : undefined}
+        />}
     </li>
   );
 }
@@ -771,11 +813,14 @@ function PeriodDots({
   periods,
   onOpen,
   onWrite,
+  onFill,
 }: {
   cycle: QmpCycle;
   periods: NonNullable<QmpFormState["periods"]>;
   onOpen: (docId: string, sheetName?: string, code?: string) => void;
   onWrite?: () => void;
+  /** 빈 기간을 눌렀을 때 그 기간으로 채운다(외부 작성 결과 올리기) */
+  onFill?: (periodKey: string) => void;
 }) {
   const years = new Map<string, typeof periods>();
   for (const period of periods) {
@@ -820,7 +865,7 @@ function PeriodDots({
                   type="button"
                   title={`${period.label} — ${label}${period.docId ? " (눌러서 열기)" : ""}`}
                   aria-label={`${period.label} ${label}`}
-                  onClick={() => (period.docId ? onOpen(period.docId, period.sheetName) : onWrite?.())}
+                  onClick={() => (period.docId ? onOpen(period.docId, period.sheetName) : onFill ? onFill(period.key) : onWrite?.())}
                   className={"h-3.5 w-3.5 rounded-full transition hover:scale-125 " + look}
                 />
               );

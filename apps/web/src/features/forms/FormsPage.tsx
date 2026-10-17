@@ -74,9 +74,11 @@ import FeedbackPage from "./FeedbackPage";
 import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
 import SamplePeek, { isSampleSheet } from "./SamplePeek";
+import ResultUploadDialog from "./ResultUploadDialog";
+import { cycleOf, externalLinkOf } from "./qmpCycle";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
-import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, sheetsOfCode, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
+import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, sheetsOfCode, qmpStates, templateForCode, templatesToImport, type QmpDept, type QmpFormState } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -333,6 +335,13 @@ export default function FormsPage() {
   const [sheetFocus, setSheetFocus] = useState<{ docId: string; code: string } | null>(null);
   /** 서류마다 마지막으로 집중해 본 서식 */
   const focusMemo = useRef(new Map<string, string>());
+  /** [결과 올리기] 창 — 외부 작성 서식의 결과(PDF)를 올린다 */
+  const [resultUpload, setResultUpload] = useState<{
+    code: string;
+    name: string;
+    periodKey?: string;
+    periods?: QmpFormState["periods"];
+  } | null>(null);
   /** 떠 있는 창으로 띄운 견본 시트(번호) */
   const [samplePeek, setSamplePeek] = useState<number | null>(null);
   /** 서버 서류를 받아 오는 중(몇 건 중 몇 건) */
@@ -2054,6 +2063,21 @@ export default function FormsPage() {
    * [시트 추가] — 바탕 시트를 작성자가 고른다(2026-10-14 사용자 요청). 처음엔 **견본**을 골라 둔다 —
    * 직전 시트를 복사하면 지난달 내용이 그대로 딸려 온다. 어느 시트든 견본 표시("Sample")는 빠진다.
    */
+  /** [결과 올리기] — 고른 파일을 이 현장 서류(첨부)로 저장한다. 이름이 서식 번호로 시작해 그 서식에 붙는다. */
+  async function handleResultUpload(file: File, title: string) {
+    const target = writeSite;
+    setResultUpload(null);
+    if (!target) return;
+    try {
+      const bytes = await file.arrayBuffer();
+      await saveForm({ fileName: file.name, bytes, sheets: [], kind: "site", siteId: target.id, attachment: true, title });
+      await refreshList();
+      setStorageWarning(`“${title}”을(를) 올렸습니다. ${target.name} 서류함에 남고 그 서식이 작성된 것으로 셉니다.`);
+    } catch (error) {
+      setStorageWarning(error instanceof Error ? `결과를 올리지 못했습니다: ${error.message}` : "결과를 올리지 못했습니다.");
+    }
+  }
+
   function handleAddSheet() {
     if (state.status !== "ready" || !sheet) return;
     setAddingSheet(true);
@@ -2517,6 +2541,7 @@ export default function FormsPage() {
                 const template = templateForCode(templates, code);
                 if (template) void handleWrite(template.id, siteId, { code, dept });
               }}
+              onUploadResult={(code, name, periodKey, periods) => setResultUpload({ code, name, periodKey, periods })}
               onSetDept={(docId, sheetName, dept) => {
                 void setSheetDept(docId, sheetName, dept).then(() => refreshList());
               }}
@@ -2730,6 +2755,18 @@ export default function FormsPage() {
             initial={(focusNames ? (focusTemplate ?? sheet) : (template ?? sheet))?.name ?? ""}
             onCancel={() => setAddingSheet(false)}
             onConfirm={(source, name) => void createSheet(source, name)}
+          />
+        )}
+        {resultUpload && (
+          <ResultUploadDialog
+            code={resultUpload.code}
+            name={resultUpload.name}
+            cycle={cycleOf(resultUpload.code, writeSite?.qmp)}
+            periods={resultUpload.periods}
+            initialKey={resultUpload.periodKey}
+            link={externalLinkOf(resultUpload.code, writeSite?.qmp, writeSite?.name)}
+            onCancel={() => setResultUpload(null)}
+            onConfirm={(file, title) => void handleResultUpload(file, title)}
           />
         )}
         {slotWrite && (

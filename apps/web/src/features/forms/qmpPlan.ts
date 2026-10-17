@@ -13,7 +13,7 @@
  * 배포 양식에서 만든 현장 서류가 저절로 맞물린다.
  */
 
-import { PERIODIC, alertDaysOf, cycleOf, parseDay, periodKeyOf, periodsBetween, sheetDate, type QmpCycle, type QmpSiteSettings } from "./qmpCycle.ts";
+import { PERIODIC, alertDaysOf, cycleOf, isExternal, parseDay, periodKeyOf, periodsBetween, sheetDate, type QmpCycle, type QmpSiteSettings } from "./qmpCycle.ts";
 
 export type QmpDept = "품질" | "공무" | "공사";
 export const QMP_DEPTS: QmpDept[] = ["품질", "공무", "공사"];
@@ -267,6 +267,8 @@ export interface QmpNamed {
    * 원본 시트의 번호로 같은 서식의 다음 장임을 안다(월별 서식의 달마다 장).
    */
   sheetSources?: Record<string, string>;
+  /** 파일째 보관하는 첨부(PDF 등) — 시트가 없다 */
+  attachment?: boolean;
 }
 
 /**
@@ -306,6 +308,15 @@ export function sheetCodesOf(doc: QmpNamed): Map<string, string> {
     if (code) codes.set(name, code);
   }
   if (codes.size > 0) return codes;
+
+  /*
+   * [결과 올리기]로 올린 외부 작성 결과(PDF 등)는 시트가 없다. 이름을 "QA-8.6-3 주간 공정표 (2026-10-12 주)"처럼
+   * 서식 번호로 시작하게 지어 두므로, 이름의 번호로 그 서식에 붙인다(이름 자체를 장 하나로 친다).
+   */
+  if (doc.attachment && doc.sheetNames.length === 0 && doc.title) {
+    const code = qaCodeOf(doc.title);
+    if (code) return new Map([[doc.title, code]]);
+  }
 
   const label = `${doc.title ?? ""} ${doc.fileName ?? ""}`;
   const match = /(?:^|[^\d.])(\d{1,2})\.(\d{1,2})(?![\d.-])/.exec(label);
@@ -408,7 +419,7 @@ export interface QmpFormState {
   excluded?: boolean;
   /** 준공 때 쓰는 서식인데 아직 안 썼다 — 때가 아니므로 세지 않는다 */
   notYet?: boolean;
-  /** 다른 사내 시스템에서 작성하는 서식 — 세지 않고 그 화면으로 가는 링크만 단다 */
+  /** 다른 사내 시스템에서 작성하는 서식 — 그 화면 링크와 [결과 올리기]를 단다. 올린 결과로 센다. */
   external?: boolean;
 }
 
@@ -458,7 +469,9 @@ export function qmpStates(
           ? { status: "done", finishedAt: Math.max(...times.map((at) => at ?? 0)) }
           : { status: "doing" };
       } else {
-        state = { status: working.has(sheetName) ? "done" : "none" };
+        // 올린 외부 작성 결과(시트 없는 첨부)는 올린 것으로 끝이다.
+        const uploaded = doc.attachment === true && doc.sheetNames.length === 0;
+        state = { status: working.has(sheetName) || uploaded ? "done" : "none" };
       }
       const dept = doc.sheetDepts?.[sheetName];
       const full: QmpFormState = {
@@ -501,7 +514,7 @@ function applyCycles(
       const base: QmpFormState = result.get(form.code) ?? { status: "none" };
       const cycle = cycleOf(form.code, settings);
       const list = instances.get(form.code) ?? [];
-      let next: QmpFormState = { ...base, cycle };
+      let next: QmpFormState = { ...base, cycle, ...(isExternal(form.code, settings) ? { external: true } : {}) };
       if (excluded.has(sec.no)) next = { ...next, excluded: true };
       else if (cycle === "adhoc") {
         // 발송대장처럼 한 장에 줄을 쌓는 서식은 장이 늘지 않는다 — 건수 대신 마지막 기록 뒤 날수로 알린다.
@@ -515,7 +528,6 @@ function applyCycles(
           ...(lastAt && limit > 0 && days >= limit ? { quietDays: days } : {}),
         };
       }
-      else if (cycle === "external") next = { ...next, external: true };
       else if (cycle === "completion" && base.status === "none") next = { ...next, notYet: true };
       else if (PERIODIC.includes(cycle) && start) {
         const periods = periodsBetween(cycle, start, today);
@@ -602,7 +614,7 @@ export function qmpTally(
       if (form.reference && !includeReference) continue;
       const state = states.get(form.code);
       // 적용 제외 절, 아직 때가 아닌 준공 서식은 세지 않는다.
-      if (state?.excluded || state?.notYet || state?.external) continue;
+      if (state?.excluded || state?.notYet) continue;
       tally[state?.status ?? "none"] += 1;
       tally.total += 1;
     }

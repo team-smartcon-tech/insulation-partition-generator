@@ -137,6 +137,12 @@ export async function pullDocs(
         if (outcome === "added") result.added += 1;
         if (outcome === "updated") result.updated += 1;
       } catch (error) {
+        // 목록을 받은 뒤 그사이 누가 지웠다(404) — 실패가 아니다. 다음에 열 때 목록에서도 빠진다.
+        if ((error as { status?: number }).status === 404) {
+          done += 1;
+          onProgress?.(done, todo.length);
+          continue;
+        }
         result.failed += 1;
         console.warn(`[스마트폼] 서버 서류 “${row.title}”을(를) 받아 오지 못했습니다:`, error);
       }

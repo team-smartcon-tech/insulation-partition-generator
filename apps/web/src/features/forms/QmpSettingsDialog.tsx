@@ -19,7 +19,9 @@ import {
   DEFAULT_CYCLES,
   alertDaysOf,
   cycleOf,
+  DEFAULT_EXTERNAL,
   externalLinkOf,
+  isExternal,
   isWebLink,
   parseDay,
   type QmpCycle,
@@ -51,6 +53,8 @@ export default function QmpSettingsDialog({
   const [alertDays, setAlertDays] = useState<Record<string, number>>(settings?.alertDays ?? {});
   /** "외부 작성" 서식의 그 시스템 화면 주소 — 미리 알고 있는 현장 주소와 다른 것만 담는다 */
   const [externalLinks, setExternalLinks] = useState<Record<string, string>>(settings?.externalLinks ?? {});
+  /** 회사 기본과 다르게 정한 "외부 작성" 여부 */
+  const [externalForms, setExternalForms] = useState<Record<string, boolean>>(settings?.externalForms ?? {});
   const draft: QmpSiteSettings = { cycles };
   const validStart = startDate === "" || parseDay(startDate) !== null;
 
@@ -88,6 +92,7 @@ export default function QmpSettingsDialog({
             ...(changedCount > 0 ? { cycles } : {}),
             ...(excluded.length > 0 ? { excluded } : {}),
             ...(Object.keys(alertDays).length > 0 ? { alertDays } : {}),
+            ...(Object.keys(externalForms).length > 0 ? { externalForms } : {}),
             ...(() => {
               // 주소가 아닌 것(빈칸·오타)은 저장하지 않는다 — 깨진 링크가 서류함에 걸린다.
               const links = Object.fromEntries(Object.entries(externalLinks).filter(([, url]) => isWebLink(url)));
@@ -219,7 +224,29 @@ export default function QmpSettingsDialog({
                                   ))}
                                 </select>
                               )}
-                              {value === "external" && (
+                              <label
+                                className={
+                                  "inline-flex items-center gap-1 rounded px-1 " +
+                                  (form.code in externalForms ? "bg-blue-50 text-blue-800" : "text-slate-500")
+                                }
+                                title="다른 사내 시스템에서 작성하고 결과(PDF)를 [결과 올리기]로 올리는 서식"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isExternal(form.code, { externalForms })}
+                                  onChange={(event) => {
+                                    const on = event.target.checked;
+                                    setExternalForms((prev) => {
+                                      const next = { ...prev };
+                                      if (on === DEFAULT_EXTERNAL.includes(form.code)) delete next[form.code];
+                                      else next[form.code] = on;
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                외부 작성
+                              </label>
+                              {isExternal(form.code, { externalForms }) && (
                                 <input
                                   type="url"
                                   value={externalLinks[form.code] ?? externalLinkOf(form.code, undefined, siteName) ?? ""}

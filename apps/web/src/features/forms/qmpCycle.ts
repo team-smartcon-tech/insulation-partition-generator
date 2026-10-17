@@ -19,7 +19,10 @@ export type QmpCycle =
   | "once"
   | "completion"
   | "adhoc"
-  /** 다른 사내 시스템에서 작성한다(주간·3개월 공정표 → 스마트우미 공정 화면). 진척을 세지 않고 링크만 단다. */
+  /**
+   * 옛 값 — 처음엔 "외부 작성"을 주기로 두었다. 지금은 주기와 따로(`isExternal`) 두고 결과를 올려 센다.
+   * 이미 저장된 설정에 남아 있을 수 있어 읽기만 한다(`cycleOf` 가 기본 주기로 바꿔 읽는다).
+   */
   | "external";
 
 /** 주기를 정해 횟수를 세는 것들 */
@@ -38,18 +41,16 @@ export const CYCLE_LABEL: Record<QmpCycle, string> = {
 };
 
 /** 설정 창에서 고르는 순서 */
-export const CYCLE_ORDER: QmpCycle[] = ["once", "adhoc", "weekly", "monthly", "quarterly", "half", "yearly", "completion", "external"];
+export const CYCLE_ORDER: QmpCycle[] = ["once", "adhoc", "weekly", "monthly", "quarterly", "half", "yearly", "completion"];
 
 /**
  * 회사 기본 주기. 여기 없는 서식(참고 문서 제외)은 "한 번"(현장 초기에 쓰고 바뀔 때 고친다)이다.
  * 근거는 부산 장안 계획서의 절·항 번호.
  */
 export const DEFAULT_CYCLES: Record<string, QmpCycle> = {
-  // 다른 시스템에서 작성 — 주간·3개월 공정표는 스마트우미 공정 화면에서 쓴다(2026-10-16 사용자).
-  // 계획서 8.6.4.4 로는 주간·월간이지만 여기서는 세지 않고 그 화면으로 가는 링크만 단다.
-  "8.6-3": "external",
-  "8.6-2": "external",
   // 정해진 주기
+  "8.6-3": "weekly", // 8.6.4.4 주간 예정공정표 — 스마트우미 공정 화면에서 작성(외부 작성)
+  "8.6-2": "monthly", // 8.6.4.4 월간 예정공정표(3개월 공정표) — 외부 작성
   "8.10-4": "monthly", // 8.10.5.2 월 1회 이상 순회점검
   "8.11-7": "monthly", // 8.11.6.4 매월 품질검사 실적보고서
   "7.2-2": "monthly", // 7.2.5.8 매월초 익월 교정대상 파악
@@ -92,6 +93,8 @@ export interface QmpSiteSettings {
    * 0 이면 알림 끔(민원대장처럼 일이 없으면 비는 게 정상인 서식).
    */
   alertDays?: Record<string, number>;
+  /** 회사 기본(`DEFAULT_EXTERNAL`)과 다르게 정한 "외부 작성" 여부(서식 번호 → 참/거짓) */
+  externalForms?: Record<string, boolean>;
   /** "외부 작성" 서식: 그 시스템에서 이 현장 화면으로 가는 주소(서식 번호 → 주소) */
   externalLinks?: Record<string, string>;
   updatedAt?: number;
@@ -134,7 +137,24 @@ export function isWebLink(text: string | undefined): boolean {
 }
 
 export function cycleOf(code: string, settings?: QmpSiteSettings): QmpCycle {
-  return settings?.cycles?.[code] ?? DEFAULT_CYCLES[code] ?? "once";
+  const chosen = settings?.cycles?.[code];
+  if (chosen && chosen !== "external") return chosen;
+  return DEFAULT_CYCLES[code] ?? "once";
+}
+
+/**
+ * 다른 사내 시스템에서 작성하는 서식(회사 기본). 그 시스템에서 뽑은 결과(PDF)를 [결과 올리기]로 올리면
+ * 그 주·그 달이 채워진다(2026-10-17 사용자 결정 — 증빙이 서류함에 남고 본사 점검·심사에 쓴다).
+ * - 8.6-2 3개월 공정표, 8.6-3 주간 공정표: 스마트우미 공정 화면
+ * - 5.1-2 현장 품질방침 및 목표
+ */
+export const DEFAULT_EXTERNAL = ["8.6-2", "8.6-3", "5.1-2"];
+
+/** 이 현장에서 외부 작성 서식인가 */
+export function isExternal(code: string, settings?: QmpSiteSettings): boolean {
+  const chosen = settings?.externalForms?.[code];
+  if (chosen !== undefined) return chosen;
+  return settings?.cycles?.[code] === "external" || DEFAULT_EXTERNAL.includes(code);
 }
 
 // ── 기간 ────────────────────────────────────────────────────────────────────
@@ -245,4 +265,26 @@ export function sheetDate(sheetName: string): Date | null {
     if (m >= 1 && m <= 12 && year >= 2000 && year < 2100) return new Date(year, m - 1, 1);
   }
   return null;
+}
+
+// ── [결과 올리기] 이름 ─────────────────────────────────────────────────────
+
+/**
+ * 기간 열쇠 → 이름에 넣을 글자. `sheetDate` 가 날짜(달)를 다시 읽을 수 있게 적는다.
+ * 주 "2026-10-12" → "2026-10-12 주", 달 "2026-10", 분기 "2026-Q3" → "2026-07 · 3분기" …
+ */
+export function periodText(key: string, label: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key)) return `${key} 주`;
+  if (/^\d{4}-\d{2}$/.test(key)) return key;
+  const quarter = /^(\d{4})-Q(\d)$/.exec(key);
+  if (quarter) return `${quarter[1]}-${String((Number(quarter[2]) - 1) * 3 + 1).padStart(2, "0")} · ${label}`;
+  const half = /^(\d{4})-H(\d)$/.exec(key);
+  if (half) return `${half[1]}-${half[2] === "1" ? "01" : "07"} · ${label}`;
+  if (/^\d{4}$/.test(key)) return `${key}-01 · ${label}`;
+  return label;
+}
+
+/** 올릴 서류의 이름 — 서식 번호로 시작해야 그 서식에 붙는다 */
+export function resultTitle(code: string, name: string, period?: { key: string; label: string }): string {
+  return `QA-${code} ${name}${period ? ` (${periodText(period.key, period.label)})` : ""}`;
 }

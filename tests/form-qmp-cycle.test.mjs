@@ -9,9 +9,11 @@ const day = (y, m, d) => new Date(y, m - 1, d);
 
 test('회사 기본 주기와 현장 설정', () => {
   assert.equal(cycleOf('8.10-4'), 'monthly');
-  // 주간·3개월 공정표는 스마트우미 공정 화면에서 쓴다 — 세지 않고 링크만
-  assert.equal(cycleOf('8.6-3'), 'external');
-  assert.equal(cycleOf('8.6-2'), 'external');
+  // 주간·3개월 공정표는 외부(스마트우미 공정 화면)에서 쓰지만 주기대로 센다 — 결과를 올려 채운다
+  assert.equal(cycleOf('8.6-3'), 'weekly');
+  assert.equal(cycleOf('8.6-2'), 'monthly');
+  // 옛 설정의 "external" 주기는 기본 주기로 읽는다
+  assert.equal(cycleOf('8.6-3', { cycles: { '8.6-3': 'external' } }), 'weekly');
   assert.equal(cycleOf('9.4-2'), 'yearly');
   assert.equal(cycleOf('10.1-2'), 'adhoc');
   assert.equal(cycleOf('5.2-1'), 'once');
@@ -93,8 +95,8 @@ test('수시는 건수, 준공 때는 세지 않고, 적용 제외 절도 세지
   assert.equal(states.get('8.3-3').excluded, true);
   const all = qmpTally(states, null);
   const plain = qmpTally(qmpStates(docs), null);
-  // 8.13 두 장 + 8.3 의 현장 서식(참고 제외) 네 장 + 외부 작성(8.6-2·8.6-3) 두 장이 빠진다
-  assert.equal(plain.total - all.total, 8);
+  // 8.13 두 장 + 8.3 의 현장 서식(참고 제외) 네 장이 빠진다(외부 작성도 센다)
+  assert.equal(plain.total - all.total, 6);
 });
 
 test('수시 서식: 마지막 기록 뒤 알림 날수를 넘기면 "N일째 기록 없음" — 불 색·%는 그대로', () => {
@@ -118,17 +120,28 @@ test('수시 서식: 마지막 기록 뒤 알림 날수를 넘기면 "N일째 �
   assert.equal(qmpTally(states, null).done, qmpTally(qmpStates([doc], { settings: { alertDays: { '7.5-3': 0 } }, today }), null).done);
 });
 
-test('외부 작성 서식은 세지 않고, 현장 주소가 있으면 링크를 단다', async () => {
-  const { externalLinkOf, isWebLink } = await import('../apps/web/src/features/forms/qmpCycle.ts');
-  const states = qmpStates([], { settings: { startDate: '2026-01-01' }, today: day(2026, 10, 15) });
-  assert.equal(states.get('8.6-3').external, true);
-  const withExternal = qmpTally(states, '공사').total;
-  const counted = qmpTally(qmpStates([], { settings: { startDate: '2026-01-01', cycles: { '8.6-3': 'weekly', '8.6-2': 'monthly' } }, today: day(2026, 10, 15) }), '공사').total;
-  assert.equal(counted - withExternal, 2);
+test('외부 작성 서식: 링크·표시, 올린 결과(PDF)로 그 주가 채워진다', async () => {
+  const { externalLinkOf, isWebLink, isExternal } = await import('../apps/web/src/features/forms/qmpCycle.ts');
+  const { resultTitle } = await import('../apps/web/src/features/forms/qmpCycle.ts');
+  assert.equal(isExternal('8.6-3'), true);
+  assert.equal(isExternal('5.1-2'), true);
+  assert.equal(isExternal('8.6-3', { externalForms: { '8.6-3': false } }), false);
+  assert.equal(isExternal('4.2-2', { externalForms: { '4.2-2': true } }), true);
   assert.ok(externalLinkOf('8.6-3', undefined, '부산장안(B1)').endsWith('/weekly'));
   assert.ok(externalLinkOf('8.6-2', undefined, '부산장안(B1)').endsWith('/monthly'));
-  assert.ok(externalLinkOf('8.6-2', undefined, '부산장안(B1)').startsWith('https://sw.smartwoomi.com/process/'));
   assert.equal(externalLinkOf('8.6-3', { externalLinks: { '8.6-3': 'https://a.b/c' } }, '부산장안(B1)'), 'https://a.b/c');
   assert.equal(externalLinkOf('8.6-3', undefined, '다른 현장'), undefined);
   assert.equal(isWebLink('sw.smartwoomi.com'), false);
+
+  // [결과 올리기]로 올린 PDF — 시트 없는 첨부, 이름이 서식 번호로 시작
+  const pdf = { id: 'p', sheetNames: [], attachment: true, title: 'QA-8.6-3 주간 공정표 (2026-10-05 주)', uploadedAt: day(2026, 10, 16).getTime() };
+  const monthly = { id: 'm', sheetNames: [], attachment: true, title: 'QA-8.6-2 3개월 공정표 (2026-09)', uploadedAt: day(2026, 10, 16).getTime() };
+  const states = qmpStates([pdf, monthly], { settings: { startDate: '2026-09-28' }, today: day(2026, 10, 15) });
+  const weekly = states.get('8.6-3');
+  assert.equal(weekly.external, true);
+  assert.deepEqual(weekly.periods.map((p) => [p.key, p.status]), [['2026-09-28', 'none'], ['2026-10-05', 'done'], ['2026-10-12', 'none']]);
+  assert.deepEqual(states.get('8.6-2').periods.map((p) => [p.key, p.status]), [['2026-09', 'done'], ['2026-10', 'none']]);
+  // 외부 작성도 진행률에 센다
+  assert.equal(qmpTally(states, '공사').total, 11);
+  assert.equal(resultTitle('8.6-3', '주간 공정표', { key: '2026-10-12', label: '10/12 주' }), 'QA-8.6-3 주간 공정표 (2026-10-12 주)');
 });
