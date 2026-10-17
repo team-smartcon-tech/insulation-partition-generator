@@ -160,8 +160,19 @@ export function applyMergesToSheetXml(xml: string, edits: MergeEdits | undefined
  * 원래 서식을 고치면 그 서식을 쓰는 **다른 칸들까지 전부** 가운데로 가 버린다.
  */
 
-/** `<xf …/>` 하나를 가운데 맞춤으로 바꾼 것. 나머지(글꼴·테두리·세로 맞춤)는 그대로 둔다. */
-function centeredXf(xf: string): string {
+/** 속성 하나를 바꾸거나 더한다. 값이 없으면 그대로 둔다. */
+function setAttr(attrs: string, name: string, value: string | undefined): string {
+  if (value === undefined) return attrs;
+  const has = new RegExp(`\\b${name}="[^"]*"`);
+  return has.test(attrs) ? attrs.replace(has, `${name}="${value}"`) : `${attrs} ${name}="${value}"`;
+}
+
+/**
+ * `<xf …/>` 하나의 맞춤을 바꾼 것. 준 것(가로·세로)만 바꾸고 나머지(글꼴·테두리·줄바꿈)는 그대로 둔다.
+ * 엑셀의 세로 "가운데"는 `center` 로 적는다(화면 값은 `middle`).
+ */
+function alignedXf(xf: string, horizontal?: string, vertical?: string): string {
+  const v = vertical === "middle" ? "center" : vertical;
   // 1) 여는 태그에 "맞춤을 적용한다"고 알린다. 없으면 엑셀이 맞춤을 무시한다.
   let out = xf.replace(/^<xf\b([^>]*?)(\/?)>/, (whole, attrs: string, slash: string) => {
     const next = /\bapplyAlignment=/.test(attrs) ? attrs.replace(/\bapplyAlignment="[^"]*"/, 'applyAlignment="1"') : `${attrs} applyAlignment="1"`;
@@ -170,16 +181,16 @@ function centeredXf(xf: string): string {
 
   if (/<alignment\b/.test(out)) {
     return out.replace(/<alignment\b([^>]*?)(\/?)>/, (whole, attrs: string, slash: string) => {
-      const next = /\bhorizontal=/.test(attrs)
-        ? attrs.replace(/\bhorizontal="[^"]*"/, 'horizontal="center"')
-        : `${attrs} horizontal="center"`;
-      return `<alignment${next}${slash}>`;
+      return `<alignment${setAttr(setAttr(attrs, "horizontal", horizontal), "vertical", v)}${slash}>`;
     });
   }
   // 맞춤이 없던 서식이면 새로 붙인다. 닫힌 형태(`<xf …/>`)는 내용을 담을 수 있게 편다.
   if (out.endsWith("/>")) out = `${out.slice(0, -2)}></xf>`;
-  return out.replace("</xf>", '<alignment horizontal="center"/></xf>');
+  return out.replace("</xf>", `<alignment${setAttr(setAttr("", "horizontal", horizontal), "vertical", v)}/></xf>`);
 }
+
+/** `<xf …/>` 하나를 가운데 맞춤으로 바꾼 것. 나머지(글꼴·테두리·세로 맞춤)는 그대로 둔다. */
+const centeredXf = (xf: string) => alignedXf(xf, "center");
 
 /** 시트 XML 에서 한 칸의 서식 번호를 읽는다(없으면 0). */
 const styleIdOf = (sheetXml: string, ref: string): number | null => {
@@ -194,6 +205,48 @@ function setStyleId(sheetXml: string, ref: string, id: number): string {
   return sheetXml.replace(new RegExp(`<c\\b[^>]*?\\br="${ref}"[^>]*?(?:/>|>)`), (tag) =>
     /\bs="\d+"/.test(tag) ? tag.replace(/\bs="\d+"/, `s="${id}"`) : tag.replace(/^<c\b/, `<c s="${id}"`),
   );
+}
+
+/** 화면에서 바꾼 칸 맞춤 하나(`cellAlign.ts`) */
+export interface CellAlignEdit {
+  row: number;
+  col: number;
+  h?: string;
+  v?: string;
+}
+
+/**
+ * 화면에서 바꾼 칸 맞춤을 엑셀 서식에 적는다. 칸마다 원래 서식에 맞춤만 바꾼 서식 번호를 준다 —
+ * 원래 서식을 고치면 같은 서식을 쓰는 다른 칸까지 바뀐다. 같은 모양의 서식은 다시 쓴다.
+ * 칸 자체가 파일에 없으면(글자를 안 적은 빈칸) 건너뛴다 — 맞출 글자가 없다.
+ */
+export function alignCells(
+  sheetXml: string,
+  stylesXml: string,
+  edits: CellAlignEdit[],
+): { sheet: string; styles: string } {
+  if (edits.length === 0) return { sheet: sheetXml, styles: stylesXml };
+  const block = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml);
+  if (!block) return { sheet: sheetXml, styles: stylesXml };
+  const entries: string[] = block[1].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g) ?? [];
+  if (entries.length === 0) return { sheet: sheetXml, styles: stylesXml };
+
+  let sheet = sheetXml;
+  for (const edit of edits) {
+    if (!edit.h && !edit.v) continue;
+    const ref = `${columnName(edit.col)}${edit.row}`;
+    const current = styleIdOf(sheet, ref);
+    if (current === null) continue;
+    const aligned = alignedXf(entries[current] ?? entries[0], edit.h, edit.v);
+    let id = entries.indexOf(aligned);
+    if (id < 0) {
+      entries.push(aligned);
+      id = entries.length - 1;
+    }
+    sheet = setStyleId(sheet, ref, id);
+  }
+  const styles = stylesXml.replace(block[0], `<cellXfs count="${entries.length}">${entries.join("")}</cellXfs>`);
+  return { sheet, styles };
 }
 
 /**

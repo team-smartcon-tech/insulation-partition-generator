@@ -14,6 +14,12 @@ import { useAuth } from "@/features/auth/AuthContext";
 import SignatureDialog, { useSignature } from "@/features/profile/SignatureDialog";
 import { writeSignature } from "@/features/profile/signature";
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  AlignVerticalJustifyStart,
   ArrowRight,
   BookOpen,
   House,
@@ -76,6 +82,7 @@ import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTa
 import SamplePeek, { isSampleSheet } from "./SamplePeek";
 import ResultUploadDialog from "./ResultUploadDialog";
 import { SHEET_LINKS, applySheetLink } from "./formLinks";
+import { allAligned, setAlign, withAlignOverrides, type CellAlign, type HAlign, type VAlign } from "./cellAlign";
 import { cycleOf, externalLinkOf } from "./qmpCycle";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
@@ -237,6 +244,23 @@ const DOC_SPACES: ReadonlySet<Space> = new Set<Space>(["home", "library", "site"
  * 정식 운영 때 false 로 되돌리면 본사만 보인다.
  */
 const PILOT_ALL_TABS = true;
+
+/** 맞춤 단추 — 엑셀 [맞춤] 묶음과 같은 순서 */
+const ALIGN_BUTTONS: {
+  vertical: { value: VAlign; label: string; Icon: typeof AlignLeft }[];
+  horizontal: { value: HAlign; label: string; Icon: typeof AlignLeft }[];
+} = {
+  vertical: [
+    { value: "top", label: "위쪽 맞춤", Icon: AlignVerticalJustifyStart },
+    { value: "middle", label: "가운데 맞춤(세로)", Icon: AlignVerticalJustifyCenter },
+    { value: "bottom", label: "아래쪽 맞춤", Icon: AlignVerticalJustifyEnd },
+  ],
+  horizontal: [
+    { value: "left", label: "왼쪽 맞춤", Icon: AlignLeft },
+    { value: "center", label: "가운데 맞춤", Icon: AlignCenter },
+    { value: "right", label: "오른쪽 맞춤", Icon: AlignRight },
+  ],
+};
 
 /** 등급만으로 본사가 되는 사람. 명단(`form_admins`)으로도 될 수 있고, 그 판단은 서버가 한다. */
 const HQ_ROLES = new Set(["super_admin", "system_admin"]);
@@ -2114,6 +2138,17 @@ export default function FormsPage() {
     }
   }
 
+  /** 고른 칸의 맞춤을 바꾼다 — 칸 값처럼 저장되고 Ctrl+Z 로 되돌린다 */
+  function changeAlign(patch: CellAlign) {
+    if (!sheet || selectedCells.length === 0) return;
+    const sheetName = sheet.name;
+    const result = setAlign(values[sheetName], selectedCells, patch);
+    if (result.changes.length === 0) return;
+    for (const [key, before, after] of result.changes) historyRef.current.past.push({ sheet: sheetName, key, before, after });
+    historyRef.current.future = [];
+    setValues((prev) => ({ ...prev, [sheetName]: { ...(prev[sheetName] ?? {}), ...Object.fromEntries(result.changes.map(([key, , after]) => [key, after])) } }));
+  }
+
   function handleAddSheet() {
     if (state.status !== "ready" || !sheet) return;
     setAddingSheet(true);
@@ -2260,8 +2295,23 @@ export default function FormsPage() {
    * 마지막에 아래로 더한 줄을 잇는다.
    */
   const sheet = baseSheet
-    ? withExtraRows(withMerges(withInsertedRows(baseSheet, sheetInserts), sheetMergeEdits), extraRowCount)
+    ? withAlignOverrides(
+        withExtraRows(withMerges(withInsertedRows(baseSheet, sheetInserts), sheetMergeEdits), extraRowCount),
+        values[baseSheet.name],
+      )
     : null;
+  /** 고른 범위의 칸들(맞춤 바꾸기 대상) — 합친 칸은 왼쪽 위 칸 하나로 친다 */
+  const selectedCells =
+    sheet && selection
+      ? sheet.cells.filter(
+          (cell) =>
+            !cell.hidden &&
+            cell.row >= selection.top &&
+            cell.row <= selection.bottom &&
+            cell.col >= selection.left &&
+            cell.col <= selection.right,
+        )
+      : [];
   /** 고른 범위의 왼쪽 위가 **합쳐진 칸**인가 — 그때만 [병합 해제]를 누를 수 있다. */
   const mergedAtSelection =
     !!sheet &&
@@ -3393,6 +3443,43 @@ export default function FormsPage() {
                 >
                   <TableCellsSplit size={14} /> 병합 해제
                 </button>
+                {/* 맞춤 — 엑셀 [맞춤]처럼 위·가운데·아래, 왼쪽·가운데·오른쪽 */}
+                <span className="ml-1 inline-flex items-center rounded-lg ring-1 ring-slate-300" role="group" aria-label="세로 맞춤">
+                  {ALIGN_BUTTONS.vertical.map(({ value, label, Icon }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={selectedCells.length === 0}
+                      onClick={() => changeAlign({ v: value })}
+                      title={`${label} — 고른 칸의 글자를 ${label}으로`}
+                      aria-pressed={allAligned(selectedCells, { v: value })}
+                      className={
+                        "p-1.5 transition first:rounded-l-lg last:rounded-r-lg disabled:cursor-not-allowed disabled:text-slate-300 " +
+                        (allAligned(selectedCells, { v: value }) ? "bg-slate-200 text-slate-900" : "text-slate-600 hover:bg-slate-50")
+                      }
+                    >
+                      <Icon size={14} />
+                    </button>
+                  ))}
+                </span>
+                <span className="inline-flex items-center rounded-lg ring-1 ring-slate-300" role="group" aria-label="가로 맞춤">
+                  {ALIGN_BUTTONS.horizontal.map(({ value, label, Icon }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={selectedCells.length === 0}
+                      onClick={() => changeAlign({ h: value })}
+                      title={`${label} — 고른 칸의 글자를 ${label}으로`}
+                      aria-pressed={allAligned(selectedCells, { h: value })}
+                      className={
+                        "p-1.5 transition first:rounded-l-lg last:rounded-r-lg disabled:cursor-not-allowed disabled:text-slate-300 " +
+                        (allAligned(selectedCells, { h: value }) ? "bg-slate-200 text-slate-900" : "text-slate-600 hover:bg-slate-50")
+                      }
+                    >
+                      <Icon size={14} />
+                    </button>
+                  ))}
+                </span>
                 <span>
                   {selection
                     ? `고른 범위 ${selection.bottom - selection.top + 1}줄 × ${selection.right - selection.left + 1}칸`
