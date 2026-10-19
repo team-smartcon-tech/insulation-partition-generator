@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="스마트폼 심볼">
+  <title>스마트폼 — 심볼</title>
+  <defs>
+    <linearGradient id="sfm-warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F79236"/><stop offset="1" stop-color="#EC6A16"/>
+    </linearGradient>
+  </defs>
+  <!-- 32px 에서도 읽히게 — 서식 한 장 + 신호등 세 개만 남긴다 -->
+  <rect width="512" height="512" rx="112" fill="#0D1B2A"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 104h140l60 60v232a16 16 0 0 1-16 16H160a16 16 0 0 1-16-16V120a16 16 0 0 1 16-16z" stroke-width="22"/>
+    <path d="M300 104v44a16 16 0 0 0 16 16h44" stroke-width="22"/>
+  </g>
+  <circle cx="200" cy="232" r="20" fill="#22C55E"/>
+  <rect x="236" y="222" width="84" height="20" rx="10" fill="#FFFFFF" opacity="0.7"/>
+  <circle cx="200" cy="296" r="20" fill="url(#sfm-warm)"/>
+  <rect x="236" y="286" width="64" height="20" rx="10" fill="#FFFFFF" opacity="0.7"/>
+  <circle cx="200" cy="360" r="17" fill="none" stroke="#FFFFFF" stroke-width="8" opacity="0.8"/>
+  <rect x="236" y="350" width="76" height="20" rx="10" fill="#FFFFFF" opacity="0.45"/>
+</svg>

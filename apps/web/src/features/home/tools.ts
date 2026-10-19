@@ -69,6 +69,9 @@ export const TOOLS: ToolDef[] = [
     description: "본사 표준 서식으로 현장 서류를 쓰고, 품질관리계획서대로 누가·언제·무엇을 썼는지 한눈에.",
     path: "/tools/forms",
     icon: FileSpreadsheet,
+    // 다른 카드처럼 대표 이미지(16:10 흰 바탕 로고)와 심볼 — 2026-10-19 사용자 요청
+    thumbnail: "/brand/logo-smart-forms.svg",
+    logo: "/brand/mark-smart-forms.svg",
     status: "available",
     tags: ["품질관리계획서", "현장 서류", "결재"],
     // 맨 뒤 — sortLast 도구끼리는 TOOLS 순서를 따르므로 TC/HOIST 다음에 온다
