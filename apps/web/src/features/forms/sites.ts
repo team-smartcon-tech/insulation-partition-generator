@@ -141,7 +141,8 @@ export function mergeServerSites(
       id: remote.id,
       members: mine.members ?? remote.members,
       lineDefaults: mine.lineDefaults ?? remote.lineDefaults,
-      qmp: mine.qmp ?? remote.qmp,
+      // 작성 일정은 나중에 정한 쪽 — 다른 PC 에서 고친 것이 받아 와지고, 옛 것이 서버를 덮지 않게.
+      qmp: (mine.qmp?.updatedAt ?? 0) >= (remote.qmp?.updatedAt ?? 0) ? (mine.qmp ?? remote.qmp) : remote.qmp,
       onServer: true,
     };
   });
