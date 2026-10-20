@@ -761,8 +761,8 @@ function RailItem({
         ) : null}
       </span>
       <span className="flex items-baseline gap-[3px] whitespace-nowrap leading-none">
-        <span className="ipg-num text-[9.5px] font-bold opacity-55">{step.no}</span>
-        <span className="text-[10.5px] font-semibold">{step.label}</span>
+        <span className="ipg-num text-[11px] font-bold opacity-55">{step.no}</span>
+        <span className="text-[12px] font-semibold">{step.label}</span>
       </span>
     </button>
   );
@@ -799,7 +799,7 @@ function RailButton({
       style={{ background: active ? "rgba(255,255,255,.10)" : undefined }}
     >
       <Icon className={cn("h-[18px] w-[18px]", spin && "animate-spin")} strokeWidth={1.8} />
-      <span className="whitespace-nowrap text-[10.5px] font-semibold leading-none">{label}</span>
+      <span className="whitespace-nowrap text-[12px] font-semibold leading-none">{label}</span>
     </button>
   );
 }
@@ -939,7 +939,7 @@ function CountRow({
           style={{ fontSize: "13.5px", color: count > 0 ? "var(--ipg-d-ink)" : "var(--ipg-d-ink-3)" }}
         >
           {count}
-          <span className="ml-0.5 text-[11px] font-medium" style={{ color: "var(--ipg-d-ink-3)" }}>
+          <span className="ml-0.5 text-[12.5px] font-medium" style={{ color: "var(--ipg-d-ink-3)" }}>
             {unit}
           </span>
         </span>
@@ -949,7 +949,7 @@ function CountRow({
             onClick={onAction}
             disabled={count === 0}
             className={cn(
-              "flex items-center gap-1 rounded-[var(--ipg-r-sm)] px-1.5 py-[3px] text-[10.5px] font-bold transition-colors",
+              "flex items-center gap-1 rounded-[var(--ipg-r-sm)] px-1.5 py-[3px] text-[12px] font-bold transition-colors",
               count === 0 && "cursor-not-allowed opacity-40"
             )}
             style={{

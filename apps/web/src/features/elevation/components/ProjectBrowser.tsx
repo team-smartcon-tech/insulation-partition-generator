@@ -186,7 +186,7 @@ export default function ProjectBrowser({
   };
 
   return (
-    <div className="ipg-ui fixed inset-0 z-[90] flex items-center justify-center bg-[#050d16]/70 p-4 backdrop-blur-sm">
+    <div className="ipg-ui ipg-studio fixed inset-0 z-[90] flex items-center justify-center bg-[#050d16]/70 p-4 backdrop-blur-sm">
       <div
         className="flex h-[min(92vh,900px)] w-[min(1480px,96vw)] flex-col overflow-hidden rounded-[18px] bg-white"
         style={{ boxShadow: "0 40px 120px -24px rgba(3,15,35,.75)" }}
@@ -209,7 +209,7 @@ export default function ProjectBrowser({
           <div className="relative flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               {/* 브레드크럼 — 현재 어느 단계인지 항상 보이게 */}
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-white/65">
+              <div className="flex items-center gap-1.5 text-[12.5px] font-semibold tracking-wide text-white/65">
                 <button
                   type="button"
                   onClick={() => setOpenSiteId(null)}
@@ -236,7 +236,7 @@ export default function ProjectBrowser({
                     : openedSite?.name ?? "세부 프로젝트"
                   : "현장 프로젝트"}
               </h2>
-              <p className="mt-0.5 text-[12px] text-white/70">
+              <p className="mt-0.5 text-[13px] text-white/70">
                 {openSiteId
                   ? "세부 프로젝트를 열면 최신 REV 도면과 설정이 그대로 복원됩니다."
                   : "현장을 고르면 그 안의 세부 프로젝트를 골라 작업을 이어갑니다."}
@@ -250,14 +250,14 @@ export default function ProjectBrowser({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={openSiteId ? "세부 프로젝트 검색" : "현장 · 세부 프로젝트 검색"}
-                  className="h-10 w-[240px] rounded-xl border border-white/25 bg-white/12 pl-9 pr-3 text-[13px] text-white outline-none backdrop-blur transition-colors placeholder:text-white/50 focus:border-white/60 focus:bg-white/20"
+                  className="h-10 w-[240px] rounded-xl border border-white/25 bg-white/12 pl-9 pr-3 text-[14px] text-white outline-none backdrop-blur transition-colors placeholder:text-white/50 focus:border-white/60 focus:bg-white/20"
                 />
               </div>
               {openSiteId ? (
                 <button
                   type="button"
                   onClick={() => addProject(openSiteId === UNASSIGNED ? null : openSiteId)}
-                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[13px] font-bold text-[var(--ipg-accent-deep)] transition-transform hover:-translate-y-0.5"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[14px] font-bold text-[var(--ipg-accent-deep)] transition-transform hover:-translate-y-0.5"
                 >
                   <FolderPlus className="h-4 w-4" />
                   세부 프로젝트 추가
@@ -266,7 +266,7 @@ export default function ProjectBrowser({
                 <button
                   type="button"
                   onClick={() => setSiteForm({ id: null, name: "", thumb: null })}
-                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[13px] font-bold text-[var(--ipg-accent-deep)] transition-transform hover:-translate-y-0.5"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[14px] font-bold text-[var(--ipg-accent-deep)] transition-transform hover:-translate-y-0.5"
                 >
                   <Plus className="h-4 w-4" />
                   현장 추가
@@ -288,7 +288,7 @@ export default function ProjectBrowser({
         <div className="ipg-scroll flex-1 overflow-auto px-6 py-5" style={{ background: "var(--ipg-panel-sub)" }}>
           {/* 현장 목록을 못 읽는 상황(마이그레이션 전 등) — 기존 프로젝트는 미분류로 계속 열 수 있다 */}
           {sitesError && (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13.5px] text-amber-800">
               현장 목록을 불러오지 못했습니다 — 저장된 프로젝트는 아래 <b>미분류</b>에서 그대로 열 수
               있습니다.
               <span className="ml-1 text-amber-700/80">
@@ -315,12 +315,12 @@ export default function ProjectBrowser({
                 <button
                   type="button"
                   onClick={() => setOpenSiteId(null)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12.5px] font-semibold text-slate-600 transition-colors hover:bg-slate-100"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[13.5px] font-semibold text-slate-600 transition-colors hover:bg-slate-100"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   현장 목록
                 </button>
-                <span className="text-[12.5px] text-slate-400">
+                <span className="text-[13.5px] text-slate-400">
                   세부 프로젝트 {siteProjects.length}
                 </span>
               </div>
@@ -436,7 +436,7 @@ export default function ProjectBrowser({
                       </div>
                       <div className="p-4">
                         <div className="text-[15px] font-bold text-slate-700">미분류</div>
-                        <div className="mt-1 text-[12.5px] text-slate-400">
+                        <div className="mt-1 text-[13.5px] text-slate-400">
                           현장에 넣지 않은 세부 프로젝트 {unassigned.length}개
                         </div>
                       </div>
@@ -508,7 +508,7 @@ function SiteCard({
             </div>
           )}
           {hasActive && (
-            <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/92 px-2.5 py-1 text-[11px] font-bold text-[var(--ipg-accent-deep)] shadow-sm">
+            <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/92 px-2.5 py-1 text-[12.5px] font-bold text-[var(--ipg-accent-deep)] shadow-sm">
               <Check className="h-3 w-3" />열림
             </span>
           )}
@@ -517,7 +517,7 @@ function SiteCard({
           <div className="truncate text-[16px] font-bold tracking-tight text-slate-900">
             {site.name}
           </div>
-          <div className="mt-1.5 flex items-center gap-2 text-[12.5px] text-slate-500">
+          <div className="mt-1.5 flex items-center gap-2 text-[13.5px] text-slate-500">
             <span className="ipg-num font-semibold text-slate-600">세부 {stat.projectCount}</span>
             <span className="text-slate-300">·</span>
             <span className="ipg-num">REV {stat.revTotal}</span>
@@ -571,12 +571,12 @@ function ProjectCard({
           <div className="flex items-center gap-2">
             <span className="truncate text-[15px] font-bold text-slate-900">{project.name}</span>
             {active && (
-              <span className="shrink-0 rounded-full bg-[#0a63b8]/10 px-2 py-0.5 text-[10.5px] font-bold text-[var(--ipg-accent-deep)]">
+              <span className="shrink-0 rounded-full bg-[#0a63b8]/10 px-2 py-0.5 text-[12px] font-bold text-[var(--ipg-accent-deep)]">
                 열림
               </span>
             )}
           </div>
-          <div className="mt-1 flex items-center gap-2 text-[12px] text-slate-500">
+          <div className="mt-1 flex items-center gap-2 text-[13px] text-slate-500">
             <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">
               REV {project.latest_rev_no}
             </span>
@@ -589,7 +589,7 @@ function ProjectCard({
         <button
           type="button"
           onClick={() => onOpen(null)}
-          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-3 text-[12.5px] font-bold text-white transition-all hover:brightness-110"
+          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-3 text-[13.5px] font-bold text-white transition-all hover:brightness-110"
         >
           열기
           {project.latest_rev_no > 0 && (
@@ -616,11 +616,11 @@ function ProjectCard({
 
       {/* 현장 이동 — 잘못 들어간 프로젝트를 카드에서 바로 옮긴다 */}
       <div className="flex items-center gap-2 border-t border-slate-100 px-3 py-2">
-        <span className="text-[11.5px] font-semibold text-slate-400">현장</span>
+        <span className="text-[13px] font-semibold text-slate-400">현장</span>
         <select
           value={project.site_id ?? ""}
           onChange={(e) => onMove(e.target.value || null)}
-          className="h-7 flex-1 rounded border border-slate-200 bg-white px-1.5 text-[12px] text-slate-700 outline-none focus:border-[var(--ipg-accent)]"
+          className="h-7 flex-1 rounded border border-slate-200 bg-white px-1.5 text-[13px] text-slate-700 outline-none focus:border-[var(--ipg-accent)]"
         >
           <option value="">미분류</option>
           {sites.map((s) => (
@@ -649,7 +649,7 @@ function RevisionList({
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 border-t border-slate-100 px-4 py-3 text-[12px] text-slate-400">
+      <div className="flex items-center gap-2 border-t border-slate-100 px-4 py-3 text-[13px] text-slate-400">
         <Loader2 className="h-3.5 w-3.5 animate-spin" /> REV 불러오는 중…
       </div>
     );
@@ -657,7 +657,7 @@ function RevisionList({
   const revisions = data?.revisions ?? [];
   if (revisions.length === 0) {
     return (
-      <div className="border-t border-slate-100 px-4 py-3 text-[12px] text-slate-400">
+      <div className="border-t border-slate-100 px-4 py-3 text-[13px] text-slate-400">
         저장된 REV가 없습니다.
       </div>
     );
@@ -665,7 +665,7 @@ function RevisionList({
   return (
     <div className="max-h-52 divide-y divide-slate-100 overflow-auto border-t border-slate-100 bg-slate-50/60">
       {revisions.map((r) => (
-        <div key={r.id} className="flex items-center gap-2 px-3 py-1.5 text-[12px]">
+        <div key={r.id} className="flex items-center gap-2 px-3 py-1.5 text-[13px]">
           <span className="w-12 shrink-0 font-bold text-slate-700">REV {r.rev_no}</span>
           <span className="shrink-0 tabular-nums text-slate-400">
             {new Date(r.created_at).toLocaleString("ko-KR", {
@@ -730,7 +730,7 @@ function SiteForm({
 
   return (
     <div className="mb-5 rounded-xl border border-[var(--ipg-accent)]/25 bg-white p-4 shadow-sm">
-      <div className="mb-3 text-[13.5px] font-bold text-slate-800">
+      <div className="mb-3 text-[14.5px] font-bold text-slate-800">
         {form.id ? "현장 정보 수정" : "새 현장 추가"}
       </div>
       <div className="flex flex-wrap items-end gap-4">
@@ -743,7 +743,7 @@ function SiteForm({
           {previewUrl ? (
             <img src={previewUrl} alt="미리보기" className="h-full w-full object-cover" />
           ) : (
-            <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-[11.5px] text-slate-400">
+            <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-[13px] text-slate-400">
               <ImagePlus className="h-5 w-5" />
               조감도 이미지
             </span>
@@ -762,7 +762,7 @@ function SiteForm({
         />
 
         <div className="min-w-[220px] flex-1">
-          <label className="mb-1 block text-[11.5px] font-semibold text-slate-500">현장명</label>
+          <label className="mb-1 block text-[13px] font-semibold text-slate-500">현장명</label>
           <input
             autoFocus
             value={form.name}
@@ -772,7 +772,7 @@ function SiteForm({
               if (e.key === "Escape") onCancel();
             }}
             placeholder="예: 화성남양 2차"
-            className="h-10 w-full rounded-lg border border-slate-300 px-3 text-[13.5px] outline-none focus:border-[var(--ipg-accent)]"
+            className="h-10 w-full rounded-lg border border-slate-300 px-3 text-[14.5px] outline-none focus:border-[var(--ipg-accent)]"
           />
         </div>
 
@@ -781,7 +781,7 @@ function SiteForm({
             type="button"
             onClick={onSubmit}
             disabled={busy}
-            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-5 text-[13px] font-bold text-white transition-all hover:brightness-110 disabled:opacity-60"
+            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-5 text-[14px] font-bold text-white transition-all hover:brightness-110 disabled:opacity-60"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
             저장
@@ -789,7 +789,7 @@ function SiteForm({
           <button
             type="button"
             onClick={onCancel}
-            className="h-10 rounded-lg border border-slate-300 px-4 text-[13px] font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+            className="h-10 rounded-lg border border-slate-300 px-4 text-[14px] font-semibold text-slate-600 transition-colors hover:bg-slate-50"
           >
             취소
           </button>
@@ -856,12 +856,12 @@ function EmptyState({
     <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/70 px-6 py-20 text-center">
       <Icon className="h-12 w-12 text-slate-300" strokeWidth={1.4} />
       <div className="mt-4 text-[15px] font-bold text-slate-700">{title}</div>
-      <p className="mt-1.5 max-w-md text-[13px] leading-relaxed text-slate-400">{desc}</p>
+      <p className="mt-1.5 max-w-md text-[14px] leading-relaxed text-slate-400">{desc}</p>
       {actionLabel && onAction && (
         <button
           type="button"
           onClick={onAction}
-          className="mt-5 inline-flex h-10 items-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-5 text-[13px] font-bold text-white transition-all hover:brightness-110"
+          className="mt-5 inline-flex h-10 items-center gap-1.5 rounded-lg bg-[var(--ipg-accent-deep)] px-5 text-[14px] font-bold text-white transition-all hover:brightness-110"
         >
           <Plus className="h-4 w-4" />
           {actionLabel}

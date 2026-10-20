@@ -4208,7 +4208,7 @@ export default function ElevationGeneratorPage() {
                     onClick={() => setPreviewGroup(g.key)}
                     title={`${g.label} 층고 편집 · 화면 전개도를 이 층고로 표시`}
                     className={cn(
-                      "flex-1 rounded border px-1 py-[2px] text-[10px] font-medium transition-colors",
+                      "flex-1 rounded border px-1 py-[2px] text-[11.5px] font-medium transition-colors",
                       previewGroup === g.key
                         ? "border-[#7fb3e0] bg-[#cfe3f7] text-[#0a4a86]"
                         : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
@@ -4236,7 +4236,7 @@ export default function ElevationGeneratorPage() {
                 </div>
                 <label
                   className={cn(
-                    "flex items-center gap-1 whitespace-nowrap text-[10px]",
+                    "flex items-center gap-1 whitespace-nowrap text-[11.5px]",
                     hasGroupHeights
                       ? "cursor-pointer text-slate-600"
                       : "cursor-not-allowed text-slate-400"
@@ -4277,7 +4277,7 @@ export default function ElevationGeneratorPage() {
                       onClick={() => setSelectedPresetId(pr.id)}
                       title={`${pr.label} · ${pr.width}×${pr.height}${pr.sill ? ` ↑${pr.sill}` : ""}`}
                       className={cn(
-                        "flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-[3px] text-[10.5px] font-medium transition-colors",
+                        "flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-[3px] text-[12px] font-medium transition-colors",
                         on
                           ? "border-[#7fb3e0] bg-[#cfe3f7] text-[#0a4a86]"
                           : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
@@ -4305,7 +4305,7 @@ export default function ElevationGeneratorPage() {
                       ["SILL", preset.sill ?? 0, (v: number) => updatePreset(preset.id, { sill: v })],
                     ] as const
                   ).map(([lab, val, on]) => (
-                    <div key={lab} className={stacked ? "w-full" : "w-[62px]"}>
+                    <div key={lab} className={stacked ? "w-full" : "w-[76px]"}>
                       <div className="ipg-label mb-[2px]">
                         {lab}
                       </div>
@@ -4319,7 +4319,7 @@ export default function ElevationGeneratorPage() {
 
   const layerControlNode = (
             <div className="flex flex-col gap-1 pt-0.5">
-              <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+              <label className="flex items-center gap-1.5 text-[12.5px] text-slate-600">
                 <input
                   type="checkbox"
                   checked={showText}
@@ -4335,7 +4335,7 @@ export default function ElevationGeneratorPage() {
                   ev.target.value = "";
                 }}
                 disabled={!parsed}
-                className="h-6 w-[124px] rounded border border-slate-300 bg-white px-1.5 text-[11px] text-slate-700 disabled:opacity-40"
+                className="h-6 w-[124px] rounded border border-slate-300 bg-white px-1.5 text-[12.5px] text-slate-700 disabled:opacity-40"
               >
                 <option value="">
                   도면층 {parsed?.layers.length ?? 0}개 · 켜기/끄기
@@ -4353,7 +4353,7 @@ export default function ElevationGeneratorPage() {
     <>
       {/* 전체화면 스튜디오 오버레이 — 사이드바/상단 네비를 덮고 몰입형으로 (AutoCAD 스타일) */}
       <div
-        className="ipg-ui fixed inset-0 z-[60] flex flex-col overflow-hidden"
+        className="ipg-ui ipg-studio fixed inset-0 z-[60] flex flex-col overflow-hidden"
         style={{ background: "var(--ipg-shell)" }}
       >
         {/* ── AutoCAD 스타일 리본 (타이틀바 · 탭 · 패널) ── */}
@@ -4442,14 +4442,14 @@ export default function ElevationGeneratorPage() {
           <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-2">
             <div className="max-h-56 divide-y divide-slate-100 overflow-auto rounded-md border border-slate-200">
               {activeProjectData.revisions.length === 0 && (
-                <div className="px-3 py-2 text-[12px] text-slate-400">
+                <div className="px-3 py-2 text-[13px] text-slate-400">
                   저장된 REV가 없습니다.
                 </div>
               )}
               {activeProjectData.revisions.map(r => (
                 <div
                   key={r.id}
-                  className="flex items-center gap-2 px-3 py-1.5 text-[12px]"
+                  className="flex items-center gap-2 px-3 py-1.5 text-[13px]"
                 >
                   <span className="w-14 shrink-0 font-semibold text-slate-700">
                     REV {r.rev_no}
@@ -4497,7 +4497,7 @@ export default function ElevationGeneratorPage() {
 
         {/* 초안 복원 안내 — 새로고침/화면 이동으로 잃었던 작업을 되살렸을 때만 */}
         {draftRestoredAt && (
-          <div className="mx-2 mt-1 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11.5px] text-amber-900">
+          <div className="mx-2 mt-1 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[13px] text-amber-900">
             <Info className="h-3.5 w-3.5 shrink-0 text-amber-600" />
             <span>
               직전 작업을 복원했습니다
@@ -4645,7 +4645,7 @@ export default function ElevationGeneratorPage() {
                           ? "DXF 파일을 업로드하세요"
                           : "이어서 할 프로젝트를 고르세요"}
                       </p>
-                      <p className="mt-1 text-[12px] text-slate-400">
+                      <p className="mt-1 text-[13px] text-slate-400">
                         {activeProjectId
                           ? "상단 DXF 업로드 버튼으로 평면 도면을 불러옵니다"
                           : "저장해 둔 현장·세부 프로젝트를 열거나, 새 도면으로 시작합니다"}
@@ -4655,7 +4655,7 @@ export default function ElevationGeneratorPage() {
                     <button
                       type="button"
                       onClick={() => setBrowserOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#0a63b8] px-4 py-2 text-[12.5px] font-bold text-white transition-colors hover:bg-[#0a4f92]"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#0a63b8] px-4 py-2 text-[13.5px] font-bold text-white transition-colors hover:bg-[#0a4f92]"
                     >
                       <FolderOpen className="w-4 h-4" />
                       프로젝트 열기
@@ -4665,7 +4665,7 @@ export default function ElevationGeneratorPage() {
               )}
               {isParsing && (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-200 bg-black/30">
-                  <div className="text-[13px] font-semibold animate-pulse">
+                  <div className="text-[14px] font-semibold animate-pulse">
                     DXF 파싱 중…
                   </div>
                 </div>
@@ -4673,24 +4673,24 @@ export default function ElevationGeneratorPage() {
               {parseError && (
                 <div className="absolute inset-0 flex items-center justify-center p-6">
                   <div className="max-w-md rounded-xl bg-white border border-rose-200 shadow-lg p-4">
-                    <div className="flex items-center gap-2 text-rose-700 font-bold text-[13px] mb-1">
+                    <div className="flex items-center gap-2 text-rose-700 font-bold text-[14px] mb-1">
                       <FileWarning className="w-4 h-4" />
                       파싱 실패
                     </div>
-                    <p className="text-[12px] text-slate-700 break-words">
+                    <p className="text-[13px] text-slate-700 break-words">
                       {parseError}
                     </p>
                   </div>
                 </div>
               )}
               {parsed && (
-                <div className="absolute left-3 bottom-3 px-2.5 py-1.5 rounded-md bg-black/55 text-slate-100 text-[10.5px] font-mono tabular-nums backdrop-blur-sm">
+                <div className="absolute left-3 bottom-3 px-2.5 py-1.5 rounded-md bg-black/55 text-slate-100 text-[12px] font-mono tabular-nums backdrop-blur-sm">
                   {fileName} · ENT {parsed.entities.length} · ZOOM{" "}
                   {scale.toFixed(3)}x · 입면 {walls.length}
                 </div>
               )}
               {mode !== "view" && (
-                <div className="absolute right-3 top-3 px-2.5 py-1.5 rounded-md bg-amber-500/90 text-white text-[11px] font-bold shadow">
+                <div className="absolute right-3 top-3 px-2.5 py-1.5 rounded-md bg-amber-500/90 text-white text-[12.5px] font-bold shadow">
                   {mode === "trace" &&
                     `트레이싱 — Enter/더블클릭 확정 (입면 ${walls.length + 1})`}
                   {mode === "place" &&
@@ -4774,27 +4774,23 @@ export default function ElevationGeneratorPage() {
                 boxShadow: "0 24px 60px -20px rgba(0,0,0,.6)",
               }}
             >
+              {/* 섹션 머리 — 중립 바 · ▾ · 굵은 제목 · 흐린 설명 (CAD 패널 톤) */}
               <div
-                className="relative flex items-center gap-2 border-b border-slate-200 px-3 py-2"
-                style={{ backgroundColor: DLG_META[dlg].accent + "26" }}
+                className="flex h-10 shrink-0 items-center gap-2 border-b border-slate-200 pl-2.5 pr-2"
+                style={{ backgroundColor: "var(--ipg-surface-2)" }}
               >
-                <span
-                  className="absolute left-0 top-0 h-full w-[3px]"
-                  style={{ backgroundColor: DLG_META[dlg].accent }}
-                />
-                <div className="min-w-0">
-                  <div className="truncate text-[12.5px] font-bold leading-tight text-slate-800">
-                    {DLG_TITLE[dlg]}
-                  </div>
-                  <div className="truncate text-[10.5px] leading-tight text-slate-500">
-                    {DLG_META[dlg].desc}
-                  </div>
-                </div>
-                <div className="ml-auto flex items-center gap-1">
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <span className="shrink-0 text-[14px] font-bold text-slate-800">
+                  {DLG_TITLE[dlg]}
+                </span>
+                <span className="min-w-0 truncate text-[12.5px] text-slate-400">
+                  {DLG_META[dlg].desc}
+                </span>
+                <div className="ml-auto flex shrink-0 items-center gap-1">
                   <button
                     type="button"
                     onClick={() => setDockWide(v => !v)}
-                    className="rounded border border-slate-300 bg-white px-1.5 py-[3px] text-[10.5px] font-medium text-slate-600 hover:bg-slate-100"
+                    className="rounded-[3px] border border-slate-300 px-1.5 py-[2px] text-[11.5px] font-medium text-slate-600 hover:bg-slate-100"
                     title={dockWide ? "패널 좁게" : "패널 넓게"}
                   >
                     {dockWide ? "좁게" : "넓게"}
@@ -4813,7 +4809,7 @@ export default function ElevationGeneratorPage() {
             {/* 단열재 나누기도 (추가 기능) */}
             {dlg === "insul" && (
             <>
-            <div className="px-3 py-2 text-[11.5px] space-y-2">
+            <div className="px-3 py-2 text-[13px] space-y-2">
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -4886,7 +4882,7 @@ export default function ElevationGeneratorPage() {
 
                   <div className="flex flex-col gap-1.5">
                   {placement === "min-waste" && (
-                    <p className="text-[10.5px] leading-snug text-slate-500">
+                    <p className="text-[12px] leading-snug text-slate-500">
                       물량 최소: 조각 배치(1P·2P)는 시공성 우선과 같고, 2P 시작 위치를
                       벽 면마다 판수가 가장 적게 드는 쪽으로 고릅니다.
                     </p>
@@ -4937,7 +4933,7 @@ export default function ElevationGeneratorPage() {
                     }
                   />
                   <div className="flex flex-col gap-1">
-                    <span className="text-[9.5px] text-slate-400 font-semibold uppercase shrink-0">
+                    <span className="text-[11px] text-slate-400 font-semibold uppercase shrink-0">
                       겹 방향
                     </span>
                     <div className="inline-flex rounded-md border border-slate-200 overflow-hidden w-fit">
@@ -4945,7 +4941,7 @@ export default function ElevationGeneratorPage() {
                         type="button"
                         onClick={() => setPlyInward(true)}
                         className={cn(
-                          "px-2 py-1 text-[10.5px]",
+                          "px-2 py-1 text-[12px]",
                           plyInward
                             ? "bg-[#004791] text-white"
                             : "bg-white text-slate-600"
@@ -4957,7 +4953,7 @@ export default function ElevationGeneratorPage() {
                         type="button"
                         onClick={() => setPlyInward(false)}
                         className={cn(
-                          "px-2 py-1 text-[10.5px]",
+                          "px-2 py-1 text-[12px]",
                           !plyInward
                             ? "bg-[#004791] text-white"
                             : "bg-white text-slate-600"
@@ -4974,7 +4970,7 @@ export default function ElevationGeneratorPage() {
                     {exposurePresets.map((p, pi) => (
                       <div
                         key={p.exposure}
-                        className="flex items-center gap-1 text-[10.5px]"
+                        className="flex items-center gap-1 text-[12px]"
                       >
                         <span
                           className="w-2.5 h-2.5 rounded-sm shrink-0"
@@ -4991,7 +4987,7 @@ export default function ElevationGeneratorPage() {
                           }
                           className="flex-1 min-w-0 border border-slate-300 rounded px-1 h-6 bg-white text-slate-700"
                         />
-                        <span className="w-8 text-right text-[11px] text-slate-400 tabular-nums">
+                        <span className="w-8 text-right text-[12.5px] text-slate-400 tabular-nums">
                           {p.ply1 + p.ply2}T
                         </span>
                         <input
@@ -5027,7 +5023,7 @@ export default function ElevationGeneratorPage() {
                       </div>
                     ))}
                   </div>
-                  <p className="col-span-2 text-[10px] text-slate-400 leading-relaxed">
+                  <p className="col-span-2 text-[11.5px] text-slate-400 leading-relaxed">
                     <b>구조선 1개</b>만 트레이싱하면 <b>1P·2P가 자동 생성</b>됩니다.
                     입면 목록에서 <b>변(S#)별 노출타입</b>(직접/간접외기)을 지정하면
                     두께(예 140T=1P90/2P50, 100T=1P50/2P50)가 반영됩니다. V(▽)=꺾임.
@@ -5036,7 +5032,7 @@ export default function ElevationGeneratorPage() {
                   </p>
                   {/* CSV 내보내기는 리본 [출력] 탭 > '물량' 그룹으로 이동했다
                       (설정 패널에는 계산 옵션만 남긴다) */}
-                  <p className="col-span-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500">
+                  <p className="col-span-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-[12.5px] text-slate-500">
                     물량 표·현장식 산출서 CSV 는 상단 <b className="text-slate-600">[출력]</b> 탭 &gt;{" "}
                     <b className="text-slate-600">물량</b> 그룹에서 내보냅니다.
                   </p>
@@ -5050,7 +5046,7 @@ export default function ElevationGeneratorPage() {
             {/* 동·타입 설정 (동·타입·세대수 매트릭스 → 현장식 산출서 구동) */}
             {dlg === "types" && (
             <>
-              <div className="px-2 py-2 space-y-2.5 text-[11px]">
+              <div className="px-2 py-2 space-y-2.5 text-[12.5px]">
                 {/* 동 목록 */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
@@ -5068,7 +5064,7 @@ export default function ElevationGeneratorPage() {
                             (e.target as HTMLInputElement).value = "";
                           }
                         }}
-                        className="w-24 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 text-[10.5px]"
+                        className="w-24 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 text-[12px]"
                       />
                       <button
                         type="button"
@@ -5088,7 +5084,7 @@ export default function ElevationGeneratorPage() {
                         <input
                           value={b.name}
                           onChange={e => renameBuilding(b.id, e.target.value)}
-                          className="w-14 bg-transparent text-slate-800 text-[10.5px] outline-none"
+                          className="w-14 bg-transparent text-slate-800 text-[12px] outline-none"
                         />
                         <button
                           type="button"
@@ -5100,7 +5096,7 @@ export default function ElevationGeneratorPage() {
                       </span>
                     ))}
                     {typeMatrix.buildings.length === 0 && (
-                      <span className="text-slate-500 text-[10px]">
+                      <span className="text-slate-500 text-[11.5px]">
                         범위(401~405) 입력 후 Enter 또는 '+동'
                       </span>
                     )}
@@ -5130,7 +5126,7 @@ export default function ElevationGeneratorPage() {
                         <input
                           value={t.name}
                           onChange={e => renameType(t.id, e.target.value)}
-                          className="w-24 bg-transparent text-slate-800 text-[10.5px] outline-none"
+                          className="w-24 bg-transparent text-slate-800 text-[12px] outline-none"
                         />
                         <button
                           type="button"
@@ -5142,7 +5138,7 @@ export default function ElevationGeneratorPage() {
                       </span>
                     ))}
                     {typeMatrix.types.length === 0 && (
-                      <span className="text-slate-500 text-[10px]">
+                      <span className="text-slate-500 text-[11.5px]">
                         '+타입'으로 단위세대 타입 추가
                       </span>
                     )}
@@ -5164,7 +5160,7 @@ export default function ElevationGeneratorPage() {
                           머리글과 본문의 열 폭·좌우 여백이 같은 값이어야 줄이 맞는다.
                           (기존엔 머리글 '입면' 이 w-9, 본문 태그가 w-12 라 한 칸씩 밀려 있었다) */}
                       <div className="ipg-matrix">
-                        <div className="ipg-matrix-head sticky top-0 z-10 flex items-center gap-1 px-2 py-1 text-[9.5px] font-bold">
+                        <div className="ipg-matrix-head sticky top-0 z-10 flex items-center gap-1 px-2 py-1 text-[11px] font-bold">
                           {/* 본문 행 맨 앞 체크박스 폭만큼 밀어야 '타입' 이 이름 열과 맞는다 */}
                           <span className="w-3.5 shrink-0" />
                           <span className="min-w-0 flex-1">타입</span>
@@ -5178,11 +5174,11 @@ export default function ElevationGeneratorPage() {
                         {typeMatrix.buildings.map(b => (
                           <div key={b.id} className="ipg-matrix-group">
                             <div className="ipg-matrix-bldg flex items-center gap-1 px-2 py-1">
-                              <span className="shrink-0 text-[10.5px] font-bold text-[#004791]">
+                              <span className="shrink-0 text-[12px] font-bold text-[#004791]">
                                 {b.name}
                               </span>
                               {/* 이 동만 층고가 다를 때 예외 입력 — 비우면 전역 층고를 따른다 */}
-                              <span className="ml-auto shrink-0 text-[11px] text-slate-400">
+                              <span className="ml-auto shrink-0 text-[12.5px] text-slate-400">
                                 층고예외
                               </span>
                               {FLOOR_GROUPS.map(g => (
@@ -5201,7 +5197,7 @@ export default function ElevationGeneratorPage() {
                                     )
                                   }
                                   title={`${b.name} ${g.label} 층고(mm) — 비우면 전역 ${groupHeightValue(g.key)}mm`}
-                                  className="w-14 shrink-0 border border-slate-300 rounded px-1 h-5 bg-white text-center text-slate-700 tabular-nums text-[9.5px] placeholder:text-slate-300"
+                                  className="w-14 shrink-0 border border-slate-300 rounded px-1 h-5 bg-white text-center text-slate-700 tabular-nums text-[11px] placeholder:text-slate-300"
                                 />
                               ))}
                               {/* 입면 열 자리맞춤 */}
@@ -5234,7 +5230,7 @@ export default function ElevationGeneratorPage() {
                                   />
                                   <span
                                     className={cn(
-                                      "min-w-0 flex-1 truncate text-[10.5px]",
+                                      "min-w-0 flex-1 truncate text-[12px]",
                                       on ? "text-slate-700" : "text-slate-400"
                                     )}
                                   >
@@ -5254,7 +5250,7 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:outline-none"
+                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[12.5px] focus:outline-none"
                                       />
                                       <input
                                         type="number"
@@ -5268,7 +5264,7 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:outline-none"
+                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[12.5px] focus:outline-none"
                                       />
                                       <input
                                         type="number"
@@ -5282,11 +5278,11 @@ export default function ElevationGeneratorPage() {
                                             Number(e.target.value) || 0
                                           )
                                         }
-                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[11px] focus:outline-none"
+                                        className="w-14 shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-center text-slate-800 tabular-nums text-[12.5px] focus:outline-none"
                                       />
                                       <span
                                         className={cn(
-                                          "w-12 shrink-0 text-right text-[9px]",
+                                          "w-12 shrink-0 text-right text-[10.5px]",
                                           srcTag === "미작성(0)"
                                             ? "text-amber-600"
                                             : "text-slate-400"
@@ -5299,7 +5295,7 @@ export default function ElevationGeneratorPage() {
                                   ) : (
                                     <>
                                       {/* 숫자 3열 폭(3×w-14 + gap 2칸)만큼 비우고 열을 유지한다 */}
-                                      <span className="w-[11rem] shrink-0 text-center text-[9px] text-slate-400">
+                                      <span className="w-[11rem] shrink-0 text-center text-[10.5px] text-slate-400">
                                         미배분
                                       </span>
                                       <span className="w-12 shrink-0" />
@@ -5313,10 +5309,10 @@ export default function ElevationGeneratorPage() {
                       </div>
                       {/* 설명 벽은 접어 둔다 — 필요할 때만 펴서 읽게 */}
                       <details className="rounded border border-slate-200 bg-slate-50/70">
-                        <summary className="cursor-pointer select-none px-2 py-1 text-[10px] font-semibold text-slate-500 hover:text-slate-700">
+                        <summary className="cursor-pointer select-none px-2 py-1 text-[11.5px] font-semibold text-slate-500 hover:text-slate-700">
                           이 표는 어떻게 계산되나요?
                         </summary>
-                        <div className="space-y-1 px-2 pb-2 text-[10px] leading-relaxed text-slate-500">
+                        <div className="space-y-1 px-2 pb-2 text-[11.5px] leading-relaxed text-slate-500">
                           <p>
                             <b className="text-slate-600">체크</b> = 그 동에 그 타입이 있다는 뜻.
                             물량은 <b className="text-slate-600">타입 대표 입면 1세대 × 세대수</b> 로
@@ -5341,7 +5337,7 @@ export default function ElevationGeneratorPage() {
                 {/* 도면 옆에 도킹돼 있어 입면을 편집하면서 평면/전개를 그대로 볼 수 있다.
                     항목이 많으면 헤더의 [넓게] 로 패널 폭을 키운다. */}
           {walls.length === 0 && (
-            <p className="px-2 py-3 text-[11px] text-slate-400 text-center">
+            <p className="px-2 py-3 text-[12.5px] text-slate-400 text-center">
               "트레이싱" 모드로 외벽을 그리세요.
             </p>
           )}
@@ -5353,7 +5349,7 @@ export default function ElevationGeneratorPage() {
               <div
                 key={w.id}
                 className={cn(
-                  "rounded-md border text-[11px]",
+                  "rounded-md border text-[12.5px]",
                   active
                     ? "border-[#004791] bg-[#004791]/8"
                     : "border-slate-200 bg-slate-50 text-slate-700"
@@ -5369,7 +5365,7 @@ export default function ElevationGeneratorPage() {
                     style={{ backgroundColor: col }}
                   />
                   <b className="flex-1 truncate">{w.name}</b>
-                  <span className="font-mono text-[10px] text-slate-500">
+                  <span className="font-mono text-[11.5px] text-slate-500">
                     {((cum?.total ?? 0) / 1000).toFixed(2)}m
                   </span>
                 </button>
@@ -5383,7 +5379,7 @@ export default function ElevationGeneratorPage() {
                           onChange={ev =>
                             updateChain(w.id, { name: ev.target.value })
                           }
-                          className="text-[11px] border border-slate-300 rounded px-1.5 py-0.5 w-full h-6 bg-white text-slate-800"
+                          className="text-[12.5px] border border-slate-300 rounded px-1.5 py-0.5 w-full h-6 bg-white text-slate-800"
                         />
                       }
                     />
@@ -5397,7 +5393,7 @@ export default function ElevationGeneratorPage() {
                               typeId: ev.target.value || undefined,
                             })
                           }
-                          className="text-[11px] border border-slate-300 rounded px-1 w-full h-6 bg-white text-slate-800"
+                          className="text-[12.5px] border border-slate-300 rounded px-1 w-full h-6 bg-white text-slate-800"
                         >
                           <option value="">— 타입 선택 —</option>
                           {typeMatrix.types.map(t => (
@@ -5418,7 +5414,7 @@ export default function ElevationGeneratorPage() {
                               buildingId: ev.target.value || undefined,
                             })
                           }
-                          className="text-[11px] border border-slate-300 rounded px-1 w-full h-6 bg-white text-slate-800"
+                          className="text-[12.5px] border border-slate-300 rounded px-1 w-full h-6 bg-white text-slate-800"
                         >
                           <option value="">대표 (동 공용)</option>
                           {typeMatrix.buildings.map(b => (
@@ -5430,7 +5426,7 @@ export default function ElevationGeneratorPage() {
                       }
                     />
                     {typeMatrix.types.length === 0 && (
-                      <p className="col-span-2 text-[9.5px] text-amber-600">
+                      <p className="col-span-2 text-[11px] text-amber-600">
                         먼저 <b>동·타입 설정</b>에서 타입을 만들면 여기서 선택할 수 있습니다.
                       </p>
                     )}
@@ -5441,14 +5437,14 @@ export default function ElevationGeneratorPage() {
                         <div className="ipg-label">
                           층고 (층 그룹)
                         </div>
-                        <div className="text-[10.5px] text-slate-700 tabular-nums">
+                        <div className="text-[12px] text-slate-700 tabular-nums">
                           {FLOOR_GROUPS.map(
                             g =>
                               `${g.label} ${Math.round(floorHeightFor(w, g.key))}`
                           ).join(" · ")}
                           mm
                         </div>
-                        <div className="text-[11.5px] text-slate-500">
+                        <div className="text-[13px] text-slate-500">
                           리본 '설정 &gt; 층고'에서 변경 · 동별 예외는 '동·타입 설정'
                         </div>
                       </div>
@@ -5473,7 +5469,7 @@ export default function ElevationGeneratorPage() {
                         <button
                           type="button"
                           onClick={() => createPly2From(w)}
-                          className="flex-1 px-2 py-1 rounded-md bg-[#004791] text-white text-[10.5px] font-semibold hover:bg-[#003a78]"
+                          className="flex-1 px-2 py-1 rounded-md bg-[#004791] text-white text-[12px] font-semibold hover:bg-[#003a78]"
                         >
                           {w.points2P
                             ? "2P 선 재생성 (안쪽 오프셋)"
@@ -5485,7 +5481,7 @@ export default function ElevationGeneratorPage() {
                               type="button"
                               onClick={() => flipPly2Side(w)}
                               title="2P 오프셋이 바깥으로 나갔으면 눌러 안쪽으로 반전"
-                              className="px-2 py-1 rounded-md border border-amber-300 text-amber-700 text-[10.5px] hover:bg-amber-50 whitespace-nowrap"
+                              className="px-2 py-1 rounded-md border border-amber-300 text-amber-700 text-[12px] hover:bg-amber-50 whitespace-nowrap"
                             >
                               방향 반전
                             </button>
@@ -5494,7 +5490,7 @@ export default function ElevationGeneratorPage() {
                               onClick={() =>
                                 updateChain(w.id, { points2P: undefined })
                               }
-                              className="px-2 py-1 rounded-md border border-rose-200 text-rose-600 text-[10.5px] hover:bg-rose-50"
+                              className="px-2 py-1 rounded-md border border-rose-200 text-rose-600 text-[12px] hover:bg-rose-50"
                             >
                               2P 삭제
                             </button>
@@ -5539,14 +5535,14 @@ export default function ElevationGeneratorPage() {
                         };
                         return (
                           <div className="col-span-2 flex flex-col gap-1">
-                            <span className="text-[9.5px] text-slate-400 font-semibold tracking-wide uppercase">
+                            <span className="text-[11px] text-slate-400 font-semibold tracking-wide uppercase">
                               세그먼트별 단열 (변마다 노출/두께 · 1P·2P 자동)
                             </span>
                             <div className="max-h-40 overflow-auto rounded border border-slate-200 divide-y divide-slate-200">
                               {segs.map((s, i) => (
                                 <div
                                   key={i}
-                                  className="flex items-center gap-1 px-1.5 py-1 text-[10.5px]"
+                                  className="flex items-center gap-1 px-1.5 py-1 text-[12px]"
                                 >
                                   <button
                                     type="button"
@@ -5614,7 +5610,7 @@ export default function ElevationGeneratorPage() {
                                 </div>
                               ))}
                             </div>
-                            <span className="text-[11.5px] text-slate-500">
+                            <span className="text-[13px] text-slate-500">
                               S# = 변 · 우측 두 칸 = 1P/2P 두께(mm). 커스텀은 직접 입력.
                             </span>
                           </div>
@@ -5623,7 +5619,7 @@ export default function ElevationGeneratorPage() {
                     <button
                       type="button"
                       onClick={() => handleExportDxfFor(w.id)}
-                      className="col-span-1 px-1.5 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 text-[10.5px] flex items-center justify-center gap-1"
+                      className="col-span-1 px-1.5 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 text-[12px] flex items-center justify-center gap-1"
                     >
                       <Download className="w-3 h-3" />
                       DXF
@@ -5631,7 +5627,7 @@ export default function ElevationGeneratorPage() {
                     <button
                       type="button"
                       onClick={() => handleExportSvgFor(w.id)}
-                      className="col-span-1 px-1.5 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 text-[10.5px] flex items-center justify-center gap-1"
+                      className="col-span-1 px-1.5 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 text-[12px] flex items-center justify-center gap-1"
                     >
                       <Download className="w-3 h-3" />
                       SVG
@@ -5639,7 +5635,7 @@ export default function ElevationGeneratorPage() {
                     <button
                       type="button"
                       onClick={() => deleteChain(w.id)}
-                      className="col-span-2 px-1.5 py-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 text-[10.5px] flex items-center justify-center gap-1"
+                      className="col-span-2 px-1.5 py-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 text-[12px] flex items-center justify-center gap-1"
                     >
                       <Trash2 className="w-3 h-3" />
                       이 입면 삭제
@@ -5653,7 +5649,7 @@ export default function ElevationGeneratorPage() {
             <button
               type="button"
               onClick={startNewChain}
-              className="w-full mt-1 px-2 py-1.5 rounded-md border border-dashed border-slate-300 text-slate-500 hover:bg-slate-100 text-[11px] flex items-center justify-center gap-1"
+              className="w-full mt-1 px-2 py-1.5 rounded-md border border-dashed border-slate-300 text-slate-500 hover:bg-slate-100 text-[12.5px] flex items-center justify-center gap-1"
             >
               <Plus className="w-3 h-3" />
               새 입면 트레이싱
@@ -5673,7 +5669,7 @@ export default function ElevationGeneratorPage() {
             <Section icon={Layers} title={`오프닝 (${openings.length})`} accent="#059669">
             <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1 min-h-0">
               {openings.length === 0 && (
-                <p className="px-2 py-3 text-[11px] text-slate-400 text-center">
+                <p className="px-2 py-3 text-[12.5px] text-slate-400 text-center">
                   입면을 트레이싱한 뒤 벽 위를 클릭하세요.
                 </p>
               )}
@@ -5685,7 +5681,7 @@ export default function ElevationGeneratorPage() {
                   <div
                     key={op.id}
                     className={cn(
-                      "rounded-md border text-[11px]",
+                      "rounded-md border text-[12.5px]",
                       active
                         ? "border-[#004791] bg-[#004791]/8"
                         : "border-slate-200 bg-slate-50 text-slate-700"
@@ -5709,7 +5705,7 @@ export default function ElevationGeneratorPage() {
                         </b>
                         {owner && (
                           <span
-                            className="text-[9.5px] px-1 rounded"
+                            className="text-[11px] px-1 rounded"
                             style={{
                               color: chainColor(ownerIdx),
                               backgroundColor: chainColor(ownerIdx) + "22",
@@ -5719,7 +5715,7 @@ export default function ElevationGeneratorPage() {
                           </span>
                         )}
                       </span>
-                      <span className="font-mono text-[10px] text-slate-500">
+                      <span className="font-mono text-[11.5px] text-slate-500">
                         {op.width}×{op.height}
                       </span>
                     </button>
@@ -5735,7 +5731,7 @@ export default function ElevationGeneratorPage() {
                                   kind: ev.target.value as OpeningKind,
                                 })
                               }
-                              className="text-[11px] border border-slate-300 rounded px-1.5 py-1 w-full bg-white text-slate-800"
+                              className="text-[12.5px] border border-slate-300 rounded px-1.5 py-1 w-full bg-white text-slate-800"
                             >
                               <option value="window">창문</option>
                               <option value="door">문</option>
@@ -5807,7 +5803,7 @@ export default function ElevationGeneratorPage() {
                         <button
                           type="button"
                           onClick={() => deleteOpening(op.id)}
-                          className="self-end px-2 py-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] flex items-center justify-center gap-1"
+                          className="self-end px-2 py-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 text-[12.5px] flex items-center justify-center gap-1"
                         >
                           <Trash2 className="w-3 h-3" />
                           삭제
@@ -5826,10 +5822,10 @@ export default function ElevationGeneratorPage() {
               <div className="p-1">
                 <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
                   <Layers className="h-4 w-4 text-slate-500" />
-                  <h2 className="text-[13px] font-bold text-slate-700">
+                  <h2 className="text-[14px] font-bold text-slate-700">
                     도면층 ({parsed?.layers.length ?? 0})
                   </h2>
-                  <label className="ml-auto flex items-center gap-1 text-[11px] text-slate-500">
+                  <label className="ml-auto flex items-center gap-1 text-[12.5px] text-slate-500">
                     <input
                       type="checkbox"
                       checked={showText}
@@ -5846,7 +5842,7 @@ export default function ElevationGeneratorPage() {
                       <label
                         key={layer}
                         className={cn(
-                          "flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-[11.5px] hover:bg-slate-100",
+                          "flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-[13px] hover:bg-slate-100",
                           hidden && "text-slate-400"
                         )}
                       >
@@ -5866,7 +5862,7 @@ export default function ElevationGeneratorPage() {
                     );
                   })}
                   {!parsed && (
-                    <p className="px-2 py-6 text-center text-[12px] text-slate-400">
+                    <p className="px-2 py-6 text-center text-[13px] text-slate-400">
                       DXF 를 업로드하면 도면층이 표시됩니다.
                     </p>
                   )}
@@ -5893,7 +5889,7 @@ export default function ElevationGeneratorPage() {
                       type="button"
                       onClick={() => setSelectedPresetId(p.id)}
                       className={cn(
-                        "w-full text-left px-2 py-1.5 text-[11px] flex items-center justify-between gap-2 transition-colors",
+                        "w-full text-left px-2 py-1.5 text-[12.5px] flex items-center justify-between gap-2 transition-colors",
                         active
                           ? "bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white"
                           : "hover:bg-slate-100"
@@ -5914,7 +5910,7 @@ export default function ElevationGeneratorPage() {
                       </span>
                       <span
                         className={cn(
-                          "font-mono text-[10px]",
+                          "font-mono text-[11.5px]",
                           active ? "text-blue-100" : "text-slate-500"
                         )}
                       >
@@ -5968,7 +5964,7 @@ export default function ElevationGeneratorPage() {
             </div>
 
             <div className="px-3 py-1.5 border-t border-slate-200 space-y-1.5">
-              <label className="flex items-center gap-2 text-[11px] cursor-pointer">
+              <label className="flex items-center gap-2 text-[12.5px] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={autoExtract}
@@ -5994,7 +5990,7 @@ export default function ElevationGeneratorPage() {
                       />
                     }
                   />
-                  <p className="mt-1 text-[10px] text-slate-400 leading-tight">
+                  <p className="mt-1 text-[11.5px] text-slate-400 leading-tight">
                     평면도의 창호 라벨(예: 18×11.8)을 클릭하면 폭/높이는 자동
                     인식되고, sill 만 위 값으로 적용됩니다.
                   </p>
@@ -6014,7 +6010,7 @@ export default function ElevationGeneratorPage() {
             (밝은 배경 기준으로 쓰여 있어 다크 셸에서 거의 안 보이던 것을 고침) */}
         {selectedOpening && (
           <div
-            className="ipg-num flex shrink-0 items-center gap-2 px-3 py-1.5 text-[11.5px] text-white/60"
+            className="ipg-num flex shrink-0 items-center gap-2 px-3 py-1.5 text-[13px] text-white/60"
             style={{ background: "var(--ipg-rail)", borderTop: "1px solid rgba(255,255,255,.08)" }}
           >
             <Info className="h-3.5 w-3.5 shrink-0 text-white/35" />
@@ -6072,7 +6068,7 @@ export default function ElevationGeneratorPage() {
         {/* ── 실 경계 수기 보정 툴바 (편집 모드에서만) ── */}
         {roomEdit && (
           <div className="pointer-events-none fixed inset-x-0 bottom-8 z-[74] flex justify-center">
-            <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-[12px] shadow-2xl backdrop-blur">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-[13px] shadow-2xl backdrop-blur">
               <span className="flex items-center gap-1.5 font-semibold text-sky-700">
                 <span className="flex h-2 w-2 animate-pulse rounded-full bg-sky-500" />
                 실 보정 중
@@ -6220,13 +6216,13 @@ export default function ElevationGeneratorPage() {
                 />
                 <div className="relative flex items-start justify-between">
                   <div>
-                    <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/60">
+                    <div className="text-[11.5px] font-bold uppercase tracking-[0.24em] text-white/60">
                       How to use
                     </div>
                     <h2 className="mt-1 text-[19px] font-extrabold text-white">
                       단열 Layout — 사용법
                     </h2>
-                    <p className="mt-1 text-[12.5px] text-white/70">
+                    <p className="mt-1 text-[13.5px] text-white/70">
                       아래 순서대로 진행하면 도면 업로드부터 산출·저장까지 완료됩니다.
                     </p>
                   </div>
@@ -6279,12 +6275,12 @@ export default function ElevationGeneratorPage() {
                     },
                   ].map((s, i) => (
                     <li key={i} className="flex gap-3.5">
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#004791]/8 text-[13px] font-extrabold text-[#0a63b8]">
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#004791]/8 text-[14px] font-extrabold text-[#0a63b8]">
                         {i + 1}
                       </span>
                       <div>
                         <div className="text-[14px] font-bold text-slate-800">{s.t}</div>
-                        <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-500">
+                        <p className="mt-0.5 text-[13.5px] leading-relaxed text-slate-500">
                           {s.d}
                         </p>
                       </div>
@@ -6295,13 +6291,13 @@ export default function ElevationGeneratorPage() {
 
               {/* 푸터 */}
               <div className="shrink-0 flex items-center justify-between border-t border-slate-200 px-6 py-3.5">
-                <span className="text-[11.5px] text-slate-400">
+                <span className="text-[13px] text-slate-400">
                   언제든 상단 <HelpCircle className="inline w-3.5 h-3.5 -mt-0.5" /> 버튼으로 다시 볼 수 있습니다.
                 </span>
                 <button
                   type="button"
                   onClick={closeHelp}
-                  className="rounded-lg bg-gradient-to-b from-[#1478d6] to-[#0a5cad] px-5 py-2 text-[13px] font-semibold text-white shadow-sm shadow-blue-900/20 hover:from-[#1a80e0] hover:to-[#0a63b8] transition-colors"
+                  className="rounded-lg bg-gradient-to-b from-[#1478d6] to-[#0a5cad] px-5 py-2 text-[14px] font-semibold text-white shadow-sm shadow-blue-900/20 hover:from-[#1a80e0] hover:to-[#0a63b8] transition-colors"
                 >
                   시작하기
                 </button>
@@ -6354,7 +6350,7 @@ export default function ElevationGeneratorPage() {
                             ? "버림 조각 (폐기)"
                             : `절단판 ${groupNo} — 재단 상세`}
                       </h2>
-                      <p className="mt-0.5 text-[11.5px] text-slate-400">
+                      <p className="mt-0.5 text-[13px] text-slate-400">
                         {sh.chainName} · {sh.ply}P · 온장 {L}×{H}mm
                       </p>
                     </div>
@@ -6370,13 +6366,13 @@ export default function ElevationGeneratorPage() {
 
                   <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
                     {label === "온장" && (
-                      <p className="text-[13px] leading-relaxed text-slate-600">
+                      <p className="text-[14px] leading-relaxed text-slate-600">
                         정척 온장 그대로 시공하는 판입니다 — 규격{" "}
                         <b className="tabular-nums">{L}×{H}mm</b>, 절단 없음.
                       </p>
                     )}
                     {label === "버림" && (
-                      <p className="text-[13px] leading-relaxed text-slate-600">
+                      <p className="text-[14px] leading-relaxed text-slate-600">
                         버림 기준 폭보다 좁아 <b>폐기 처리</b>된 자투리(
                         <b className="tabular-nums">
                           {Math.round(cell.w)}×{Math.round(cell.h)}mm
@@ -6423,14 +6419,14 @@ export default function ElevationGeneratorPage() {
                               );
                             })}
                           </svg>
-                          <p className="mt-1.5 text-[10.5px] text-slate-400">
+                          <p className="mt-1.5 text-[12px] text-slate-400">
                             회색 = 잔재(자투리) · 파랑 = 재단 조각 · 진한 파랑 = 선택한 조각
                           </p>
                         </div>
 
                         {/* 조각 목록 */}
                         <div className="mt-3 overflow-hidden rounded-lg border border-slate-200">
-                          <table className="w-full text-[12px]">
+                          <table className="w-full text-[13px]">
                             <thead>
                               <tr className="bg-slate-50 text-slate-500">
                                 <th className="px-3 py-1.5 text-left font-semibold">조각</th>
@@ -6466,7 +6462,7 @@ export default function ElevationGeneratorPage() {
                             </tbody>
                           </table>
                         </div>
-                        <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+                        <p className="mt-2 text-[12.5px] leading-relaxed text-slate-400">
                           온장 1판에서 위 조각들을 함께 재단합니다. (두께가 같은 조각끼리만 한 판에서 재단)
                         </p>
                       </>
@@ -6543,7 +6539,7 @@ function SectionHeader({
       <span className="flex items-center justify-center w-[22px] h-[22px] rounded-md bg-[#004791]/10 text-[#004791] shrink-0">
         <Icon className="w-3.5 h-3.5" />
       </span>
-      <h2 className="text-[12.5px] font-bold text-slate-700 tracking-tight">{title}</h2>
+      <h2 className="text-[13.5px] font-bold text-slate-700 tracking-tight">{title}</h2>
     </div>
   );
 }
@@ -6592,7 +6588,7 @@ function Section({
         >
           <Icon className="w-3.5 h-3.5" />
         </span>
-        <h2 className="relative text-[12.5px] font-bold text-slate-700 tracking-tight flex-1 min-w-0">
+        <h2 className="relative text-[13.5px] font-bold text-slate-700 tracking-tight flex-1 min-w-0">
           {title}
         </h2>
         {right}
@@ -6627,7 +6623,7 @@ function ModeButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "px-2 py-2 rounded-lg border text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all",
+        "px-2 py-2 rounded-lg border text-[12.5px] font-semibold flex items-center justify-center gap-1.5 transition-all",
         active
           ? "bg-gradient-to-b from-[#1478d6] to-[#0a5cad] text-white border-[#2a86e0] shadow-md shadow-blue-900/20 ring-1 ring-blue-400/30"
           : "bg-white text-slate-600 border-slate-300 hover:bg-slate-100 hover:border-slate-400",
@@ -6731,10 +6727,10 @@ function NumberInput({
             if (next !== value) onChange(next);
           }
         }}
-        className="w-full bg-transparent outline-none text-[11px] tabular-nums text-slate-800 placeholder:text-slate-400"
+        className="w-full bg-transparent outline-none text-[12.5px] tabular-nums text-slate-800 placeholder:text-slate-400"
       />
       {suffix && (
-        <span className="text-[10px] text-slate-400 flex-shrink-0">{suffix}</span>
+        <span className="text-[11.5px] text-slate-400 flex-shrink-0">{suffix}</span>
       )}
     </div>
   );
@@ -6749,7 +6745,7 @@ function LabelInput({
 }) {
   return (
     <label className="flex flex-col gap-0.5">
-      <span className="text-[9.5px] text-slate-400 font-semibold tracking-wide uppercase">
+      <span className="text-[11px] text-slate-400 font-semibold tracking-wide uppercase">
         {label}
       </span>
       {control}

@@ -165,6 +165,58 @@
   --ipg-d-emerald: #4fd6a8;
 }
 
+/* ── 단열 Layout 타이포·모양 (.ipg-studio) ──
+   CAD 도구 톤에 맞춰 본문은 Pretendard 13px 안팎, 숫자·명령줄은 고정폭으로.
+   글자색은 푸른 기를 뺀 중립 회색, 칩·버튼 모서리는 각지게.
+   TC/HOIST 등 같은 토큰을 쓰는 다른 도구에 번지지 않도록 이 클래스 아래에서만 덮어쓴다. */
+.ipg-studio {
+  font-family: "Pretendard", "Pretendard Variable", "SUIT Variable", system-ui, sans-serif;
+  --ipg-mono: "JetBrains Mono", "D2Coding", ui-monospace, Consolas, monospace;
+
+  --ipg-t-xs: 12px;
+  --ipg-t-sm: 13px;
+  --ipg-t-md: 13.5px;
+  --ipg-t-lg: 15px;
+
+  --ipg-r-sm: 3px;
+  --ipg-r-md: 4px;
+  --ipg-r-lg: 6px;
+
+  --ipg-d-ink: #eceef1;
+  --ipg-d-ink-2: #d4d8dd;
+  --ipg-d-ink-3: #9aa3ad;
+}
+/* 표면 — 푸른 남색 대신 중립 그레이 다크 (캔버스만 남색으로 남긴다) */
+.ipg-studio {
+  --ipg-shell: #111418;
+  --ipg-rail: #15181d;
+  --ipg-surface-1: #191d23;
+  --ipg-surface-2: #20252c;
+  --ipg-surface-3: #101317;
+  --ipg-d-line: rgba(255, 255, 255, 0.1);
+  --ipg-d-line-strong: rgba(255, 255, 255, 0.22);
+}
+/* 패널 라벨 — 대문자·자간 없이 평범하게 (CAD 패널은 라벨을 소리치지 않는다) */
+.ipg-studio .ipg-label,
+.ipg-studio .ipg-dark .uppercase {
+  text-transform: none;
+  letter-spacing: normal;
+}
+/* 다크 패널 안 입력칸·버튼 모서리 — 각지게 */
+.ipg-studio .ipg-dark input:not([type="checkbox"]):not([type="radio"]),
+.ipg-studio .ipg-dark select,
+.ipg-studio .ipg-dark textarea,
+.ipg-studio .ipg-dark .rounded,
+.ipg-studio .ipg-dark .rounded-md,
+.ipg-studio .ipg-dark .rounded-lg {
+  border-radius: 3px;
+}
+
+.ipg-studio .ipg-num,
+.ipg-studio .font-mono {
+  font-family: var(--ipg-mono);
+}
+
 /* 섹션 라벨 — 대문자 + 자간. 폼에서 "무슨 칸인지" 를 조용히 알려준다. */
 .ipg-label {
   font-size: var(--ipg-t-xs);
@@ -494,4 +546,10 @@
   :where(h1, h2, h3, h4, h5, p, span, div, label, button, summary, li, td, th,
     b, strong, small, em, a, dt, dd, figcaption) {
   color: inherit;
+}
+/* 위 안전망은 레이어 밖이라 Tailwind 유틸(@layer utilities)보다 항상 이긴다.
+   그래서 파란 바탕에 text-white 를 준 선택 버튼(예: 겹 방향 '바깥')까지 글자가 상속색으로
+   떨어져 안 보였다. 흰 글자는 명시적으로 지킨다. */
+.ipg-dark .text-white {
+  color: #fff;
 }

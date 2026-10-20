@@ -180,7 +180,7 @@ function BigBtn({
       title={title ?? label}
       className={cn(
         "flex w-[54px] shrink-0 flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 transition-colors",
-        "text-[10px] font-medium leading-tight",
+        "text-[11.5px] font-medium leading-tight",
         active
           ? "bg-[var(--ipg-accent-soft)] text-[var(--ipg-accent-deep)] ring-1 ring-[var(--ipg-accent-line)]"
           : "text-[var(--ipg-ink)] hover:bg-[var(--ipg-panel-sub)]",
@@ -228,7 +228,7 @@ function SmallBtn({
       disabled={disabled}
       title={title ?? label}
       className={cn(
-        "flex h-[20px] items-center gap-1.5 rounded px-1.5 text-[10.5px] font-medium transition-colors",
+        "flex h-[20px] items-center gap-1.5 rounded px-1.5 text-[12px] font-medium transition-colors",
         active
           ? "bg-[var(--ipg-accent-soft)] text-[var(--ipg-accent-deep)] ring-1 ring-[var(--ipg-accent-line)]"
           : "text-[var(--ipg-ink)] hover:bg-[var(--ipg-panel-sub)]",
@@ -296,7 +296,7 @@ function FileBigBtn({
   return (
     <label
       title={title ?? label}
-      className="flex w-[54px] shrink-0 cursor-pointer flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 text-[10px] font-medium leading-tight text-[var(--ipg-ink)] transition-colors hover:bg-[var(--ipg-panel-sub)]"
+      className="flex w-[54px] shrink-0 cursor-pointer flex-col items-center gap-0.5 rounded px-0.5 pb-1 pt-1.5 text-[11.5px] font-medium leading-tight text-[var(--ipg-ink)] transition-colors hover:bg-[var(--ipg-panel-sub)]"
     >
       <Icon
         className={cn("h-[20px] w-[20px]", tone === "primary" && "text-[#0a63b8]")}
@@ -391,10 +391,10 @@ export default function CadRibbon(p: CadRibbonProps) {
         </div>
 
         <div className="flex flex-1 items-center justify-center gap-2 truncate px-4">
-          <span className="text-[12px] font-bold tracking-tight text-white/90">
+          <span className="text-[13px] font-bold tracking-tight text-white/90">
             단열 Layout
           </span>
-          <span className="truncate rounded-full bg-white/12 px-2.5 py-0.5 text-[11.5px] font-medium text-white/85 ring-1 ring-white/15">
+          <span className="truncate rounded-full bg-white/12 px-2.5 py-0.5 text-[13px] font-medium text-white/85 ring-1 ring-white/15">
             {docTitle}
           </span>
         </div>
@@ -417,7 +417,7 @@ export default function CadRibbon(p: CadRibbonProps) {
         </button>
         <label
           title="이 도구를 열 때 자동으로 전체화면으로 전환합니다"
-          className="mr-1 flex cursor-pointer select-none items-center gap-1 rounded px-1.5 py-1 text-[10.5px] text-white/60 transition-colors hover:bg-white/10 hover:text-white/90"
+          className="mr-1 flex cursor-pointer select-none items-center gap-1 rounded px-1.5 py-1 text-[12px] text-white/60 transition-colors hover:bg-white/10 hover:text-white/90"
         >
           <input
             type="checkbox"
@@ -455,7 +455,7 @@ export default function CadRibbon(p: CadRibbonProps) {
             type="button"
             onClick={() => setTab(t)}
             className={cn(
-              "relative rounded-t-lg px-3.5 py-1.5 text-[12px] font-semibold transition-colors",
+              "relative rounded-t-lg px-3.5 py-1.5 text-[13px] font-semibold transition-colors",
               tab === t
                 ? "bg-white text-[var(--ipg-accent-deep)] shadow-[0_-1px_0_var(--ipg-line)_inset]"
                 : "text-slate-500 hover:bg-white/60 hover:text-slate-700"
@@ -613,7 +613,7 @@ export default function CadRibbon(p: CadRibbonProps) {
 
             <Group title="설정" wide>
               <div className="flex flex-col gap-1 pt-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                <span className="text-[11.5px] font-semibold uppercase tracking-wider text-slate-500">
                   층고 (층 그룹별)
                 </span>
                 <div className="w-[200px]">{p.floorHeightInput}</div>
@@ -653,7 +653,7 @@ export default function CadRibbon(p: CadRibbonProps) {
               />
             </Group>
             <Group title="현재 도면" wide>
-              <div className="flex flex-col justify-center gap-1 pt-1 text-[11px]">
+              <div className="flex flex-col justify-center gap-1 pt-1 text-[12.5px]">
                 <div className="flex items-center gap-1.5 text-slate-600">
                   <FolderOpen className="h-3.5 w-3.5 text-slate-400" />
                   <span className="max-w-[240px] truncate">
@@ -661,7 +661,7 @@ export default function CadRibbon(p: CadRibbonProps) {
                   </span>
                 </div>
                 {p.reusedRev && (
-                  <span className="text-[10.5px] text-slate-400">
+                  <span className="text-[12px] text-slate-400">
                     불러온 REV · DXF 재사용
                   </span>
                 )}
@@ -838,11 +838,11 @@ export default function CadRibbon(p: CadRibbonProps) {
               <div className="flex flex-col gap-1 pt-1">
                 {/* 지금 열려 있는 문서 — 리본에서 바로 확인 */}
                 <div className="min-w-[200px] rounded border border-slate-200 bg-white px-2 py-1 leading-tight">
-                  <div className="text-[10px] font-semibold text-slate-400">현재 문서</div>
-                  <div className="truncate text-[12px] font-bold text-slate-700">
+                  <div className="text-[11.5px] font-semibold text-slate-400">현재 문서</div>
+                  <div className="truncate text-[13px] font-bold text-slate-700">
                     {p.activeProjectName ?? "선택 없음"}
                   </div>
-                  <div className="truncate text-[10.5px] text-slate-400">
+                  <div className="truncate text-[12px] text-slate-400">
                     {p.activeProjectName
                       ? `${p.activeSiteName ?? "미분류"} · REV ${p.activeRevNo ?? 0}`
                       : "프로젝트를 열면 저장·REV 를 쓸 수 있습니다"}
