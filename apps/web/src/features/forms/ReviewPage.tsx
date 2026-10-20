@@ -45,7 +45,7 @@ import { fileKind, fileSizeText } from "./library";
 import FormSheetView from "./FormSheetView";
 import type { FormSheet } from "./types";
 import type { FormSite } from "./sites";
-import { QMP_CHAPTERS, QMP_SECTIONS, chapterOf, sheetCodesOf, type QmpNamed } from "./qmpPlan";
+import { QMP_CHAPTERS, QMP_SECTIONS, chapterOf, sheetCodesOf, sheetsOfCode, type QmpNamed } from "./qmpPlan";
 import { listForms } from "./formStore";
 import { PULLED_EVENT } from "./formPull";
 
@@ -429,7 +429,32 @@ export default function ReviewPage({ admin = true }: { admin?: boolean } = {}) {
                   })}
                 </ul>
 
-                {opened && <FileReview doc={opened} bytes={openedBytes} busy={busy} sheetIndex={sheetIndex} onSheet={setSheetIndex} onDownload={() => void download(opened)} onDecide={(status) => void decide(opened, status)} />}
+                {opened && (
+                  <FileReview
+                    doc={opened}
+                    bytes={openedBytes}
+                    busy={busy}
+                    sheetIndex={sheetIndex}
+                    onSheet={setSheetIndex}
+                    onDownload={() => void download(opened)}
+                    onDecide={(status) => void decide(opened, status)}
+                    onlySheets={
+                      slot && slot !== OTHERS
+                        ? new Set(
+                            sheetsOfCode(
+                              {
+                                sheetNames: ((Array.isArray(opened.sheets) ? opened.sheets : []) as FormSheet[]).map((item) => item.name),
+                                sheetSources: named.get(opened.id)?.sheetSources,
+                                title: opened.title,
+                                fileName: opened.file_name,
+                              },
+                              slot,
+                            ),
+                          )
+                        : undefined
+                    }
+                  />
+                )}
               </>
             )}
           </div>
@@ -561,12 +586,15 @@ function FileReview({
   onSheet,
   onDownload,
   onDecide,
+  onlySheets,
 }: {
   doc: DocRow;
   bytes: ArrayBuffer | null;
   busy: boolean;
   sheetIndex: number;
   onSheet: (index: number) => void;
+  /** 고른 서식의 시트만 탭에 — 엑셀 한 권에 서식이 여럿이다(현장 서류함과 같다). 없으면 전부 */
+  onlySheets?: Set<string>;
   onDownload: () => void;
   onDecide: (status: "ok" | "fix") => void;
 }) {
@@ -643,7 +671,7 @@ function FileReview({
         <div className="p-4">
           {sheets.length > 1 && (
             <div className="mb-3 flex flex-wrap gap-1.5">
-              {sheets.map((item, index) => (
+              {sheets.map((item, index) => onlySheets && onlySheets.size > 0 && !onlySheets.has(item.name) && index !== sheetIndex ? null : (
                 <button
                   key={item.name}
                   type="button"
