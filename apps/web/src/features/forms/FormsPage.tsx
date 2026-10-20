@@ -720,13 +720,21 @@ export default function FormsPage() {
       try {
         let list = await loadSites();
         // 서버 현장 목록을 먼저 받는다 — 처음 여는 사람에게 "우리 현장" 대신 실제 현장이 보이게.
-        // 서버가 늦으면(4초) 기다리지 않고 브라우저 것을 쓴다.
-        const pulled = await Promise.race([
-          pullSites().catch(() => null),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
-        ]);
+        // 브라우저에 현장이 있으면 서버가 늦을 때(4초) 기다리지 않고 브라우저 것을 쓴다. 현장이 하나도 없는
+        // 처음 여는 PC 는 서버 답을 끝까지 기다린다.
+        const pulled =
+          list.length === 0
+            ? await pullSites().catch(() => null)
+            : await Promise.race([
+                pullSites().catch(() => null),
+                new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+              ]);
         if (pulled && pulled.length > 0) list = pulled;
-        if (list.length === 0) {
+        /*
+         * 첫 현장("우리 현장")은 **서버가 현장이 하나도 없다고 답했을 때만** 만든다. 서버가 늦거나 안 닿아
+         * 비어 보이는 것만으로 만들면, 그 현장이 서버에까지 올라가 모든 사람에게 보였다(2026-10-20 사용자 신고).
+         */
+        if (list.length === 0 && pulled !== null && pulled.length === 0) {
           list = addSite([], FIRST_SITE_NAME, () => crypto.randomUUID());
           await saveSites(list);
         }
