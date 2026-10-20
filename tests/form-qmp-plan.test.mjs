@@ -83,16 +83,20 @@ test('[작성하기]는 그 서식 시트가 든 배포 양식 중 가장 최근
   assert.equal(templateForCode(templates, '8.6-1'), undefined);
 });
 
-test('집계는 기준 문서(PROCESS 등)를 세지 않고, 부서는 주관·협조 모두 그 부서 몫으로 센다', () => {
-  const tracked = (dept) =>
-    QMP_SECTIONS.filter((s) => !dept || s.lead === dept || s.help.includes(dept))
+test('집계는 기준 문서(PROCESS 등)를 세지 않고, 부서 탭은 주관 절만 센다(협조는 표시만)', () => {
+  const tracked = (dept, help = false) =>
+    QMP_SECTIONS.filter((s) => !dept || s.lead === dept || (help && s.help.includes(dept)))
       .flatMap((s) => s.forms)
       .filter((f) => !f.reference).length;
   const empty = new Map();
   assert.equal(qmpTally(empty, null).total, tracked(null));
+  // 공사가 주관인 절은 8.1·8.6 — 서식 열한 장
+  assert.equal(qmpTally(empty, '공사').total, 11);
   assert.equal(qmpTally(empty, '공사').total, tracked('공사'));
-  // 공사가 주관인 8.1·8.6 열한 장에 협조 절(4.3 프로세스 관리 등)이 더해진다
-  assert.ok(qmpTally(empty, '공사').total > 11);
+  // 배포 양식함은 협조 절도 센다
+  assert.equal(qmpTally(empty, '공사', null, false, true).total, tracked('공사', true));
+  // 세 부서의 주관 몫을 더하면 전체와 같다 — 서식 하나가 두 탭에 겹쳐 세지지 않는다
+  assert.equal(['품질', '공무', '공사'].reduce((sum, d) => sum + qmpTally(empty, d).total, 0), qmpTally(empty, null).total);
   const s43 = QMP_SECTIONS.find((s) => s.no === '4.3');
   assert.ok(writesSection(s43, '공사') && writesSection(s43, '품질'));
   assert.equal(writesSection(QMP_SECTIONS.find((s) => s.no === '4.2'), '공사'), false);
@@ -180,4 +184,21 @@ test('시트에 QA 번호가 없으면 서류 이름의 절 번호로 — 9.4 �
   assert.equal(sheetCodesOf({ title: '9.3 내부심사', sheetNames: ['계획서', '점검표'] }).size, 0);
   // 절 번호가 없는 이름
   assert.equal(sheetCodesOf({ title: '회의록', sheetNames: ['Sheet1'] }).size, 0);
+});
+
+test('서식 번호에 딸린 시트만 — 서식 시트, 바로 뒤 견본, 더한 장', async () => {
+  const { sheetsOfCode } = await import('../apps/web/src/features/forms/qmpPlan.ts');
+  const doc = {
+    sheetNames: ['QA-10.1-1', 'QA-10.1-2', '견본', 'QA-10.1-3', 'QA-10.1-4', '견본 (2)', 'Sheet1', '2026-07'],
+    sheetSources: { '2026-07': '견본 (2)' },
+  };
+  assert.deepEqual(sheetsOfCode(doc, '10.1-2'), ['QA-10.1-2', '견본']);
+  assert.deepEqual(sheetsOfCode(doc, '10.1-4'), ['QA-10.1-4', '견본 (2)', '2026-07']);
+  assert.deepEqual(sheetsOfCode(doc, '10.1-3'), ['QA-10.1-3']);
+  assert.deepEqual(sheetsOfCode(doc, '9.9-9'), []);
+  assert.deepEqual(sheetsOfCode({ sheetNames: ['QA-7.5-4', 'QA-7.5-4(양식)'] }, '7.5-4'), ['QA-7.5-4', 'QA-7.5-4(양식)']);
+  // 참고 시트는 바로 앞 서식과 함께, 어느 서식에도 안 딸린 빈 시트는 빠진다
+  const docs76 = { sheetNames: ['QA-7.6-4', 'QA-7.6-5', '문서보안기준안(참고)'] };
+  assert.deepEqual(sheetsOfCode(docs76, '7.6-5'), ['QA-7.6-5', '문서보안기준안(참고)']);
+  assert.deepEqual(sheetsOfCode({ sheetNames: ['QA-6.2-3', '견본 (2)', 'Sheet1'] }, '6.2-3'), ['QA-6.2-3', '견본 (2)']);
 });

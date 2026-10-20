@@ -37,3 +37,12 @@ test('서버에서 본 적 있는 현장이 서버에서 사라지면 뺀다 —
   const { list } = mergeServerSites([...first, notYet], [busan]);
   assert.deepEqual(list.map((s) => s.name), ['부산장안(B1)', '새 현장']);
 });
+
+test('작성 일정은 나중에 정한 쪽을 쓴다', () => {
+  const older = { ...busan, qmp: { startDate: '2025-01-01', updatedAt: 1 } };
+  const newer = { ...busan, qmp: { startDate: '2025-04-01', updatedAt: 2 } };
+  assert.equal(mergeServerSites([older], [newer]).list[0].qmp.startDate, '2025-04-01');
+  assert.equal(mergeServerSites([newer], [older]).list[0].qmp.startDate, '2025-04-01');
+  assert.equal(mergeServerSites([busan], [newer]).list[0].qmp.startDate, '2025-04-01');
+  assert.equal(mergeServerSites([newer], [busan]).list[0].qmp.startDate, '2025-04-01');
+});

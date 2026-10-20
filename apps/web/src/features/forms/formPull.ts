@@ -23,6 +23,12 @@ const record = <T>(value: unknown): T => (value && typeof value === "object" && 
 
 /** 서버가 이만큼 넘게 더 새것이어야 덮는다 — 내가 방금 올린 것의 서버 시각은 몇 초 늦다. */
 const NEWER_MARGIN_MS = 60_000;
+/**
+ * 서버 서류를 다 받아 왔다는 알림 — 브라우저 사본을 읽는 화면(본사 점검의 서식 트리)이 다시 읽게.
+ * 처음 여는 PC 는 받는 데 시간이 걸려, 그 전에 연 화면은 서류가 어느 서식인지 몰랐다.
+ */
+export const PULLED_EVENT = "forms:pulled";
+
 /** 서버 목록 한 번의 최대 줄 수(Supabase 기본값) */
 const SERVER_PAGE_LIMIT = 1000;
 /** 한꺼번에 받는 수 */
@@ -137,6 +143,12 @@ export async function pullDocs(
         if (outcome === "added") result.added += 1;
         if (outcome === "updated") result.updated += 1;
       } catch (error) {
+        // 목록을 받은 뒤 그사이 누가 지웠다(404) — 실패가 아니다. 다음에 열 때 목록에서도 빠진다.
+        if ((error as { status?: number }).status === 404) {
+          done += 1;
+          onProgress?.(done, todo.length);
+          continue;
+        }
         result.failed += 1;
         console.warn(`[스마트폼] 서버 서류 “${row.title}”을(를) 받아 오지 못했습니다:`, error);
       }
@@ -145,5 +157,6 @@ export async function pullDocs(
     }
   };
   await Promise.all(Array.from({ length: PARALLEL }, worker));
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(PULLED_EVENT));
   return result;
 }

@@ -122,7 +122,7 @@ export default function HomeDashboard({
   const maxWaiting = Math.max(1, ...overview.waitingByPerson.map((person) => person.count));
   const noLineAtAll =
     overview.myTurn.length + overview.requested.length + overview.completed.length + overview.waitingByPerson.length === 0;
-  const progressPercent = percent(progress.made, progress.deployed);
+  const progressPercent = percent(progress.done, progress.total);
 
   return (
     <div className="grid items-start gap-5 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)_320px]">
@@ -304,65 +304,56 @@ export default function HomeDashboard({
 
         <Card
           title="서류 진척도"
-          sub={`${siteName} · 배포된 서류 중 이 현장에서 만든 서류`}
+          sub={`${siteName} · 품질관리계획서 서식 중 결재까지 끝난 것 — 서류함과 같은 수`}
           action={
             <button type="button" onClick={onGoSiteBox} className="text-xs font-semibold text-blue-600 hover:underline">
               서류함 ›
             </button>
           }
         >
-          {progress.deployed === 0 ? (
+          {progress.total === 0 ? (
             <p className="px-5 py-8 text-center text-sm text-slate-500">
-              아직 배포된 양식이 없습니다. 배포 양식함에 양식이 올라오면 진척도가 계산됩니다.
+              셀 서식이 없습니다. 서류함의 [작성 일정]에서 모든 절을 적용 제외했는지 확인해 주세요.
             </p>
           ) : (
             <div className="px-5 pb-5 pt-4">
-              <p className="flex items-baseline gap-2">
+              <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <span className="text-4xl font-bold tabular-nums text-[#063a74]">{progressPercent}%</span>
                 <span className="text-xs text-slate-500">
-                  배포된 서류 {progress.deployed}종 중 {progress.made}종 작성
+                  서식 {progress.total}종 중 끝남 {progress.done}종
+                  {progress.doing > 0 && ` · 작성 중 ${progress.doing}종`}
                 </span>
               </p>
-              {progress.undeployed > 0 && (
-                <p className="mt-1 text-[11px] text-slate-400">
-                  코드표에는 있지만 아직 배포 양식이 없는 {progress.undeployed}종은 현장에서 만들 수 없어 빼고 셉니다.
-                </p>
-              )}
               <ul className="mt-4 space-y-2.5">
-                {progress.divisions
-                  .filter((division) => division.deployed > 0)
-                  .map((division) => (
-                    <li key={division.taxonomyId} className="grid grid-cols-[90px_minmax(0,1fr)_80px] items-center gap-3 text-[13px]">
-                      <span className="truncate text-slate-700">{division.name}</span>
-                      <span className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                        <span
-                          className="block h-full rounded-full bg-[linear-gradient(90deg,#0a5aa8,#1478d6)]"
-                          style={{ width: `${percent(division.made, division.deployed)}%` }}
-                        />
-                      </span>
+                {progress.depts
+                  .filter((entry) => entry.total > 0)
+                  .map((entry) => (
+                    <li key={entry.dept} className="grid grid-cols-[90px_minmax(0,1fr)_80px] items-center gap-3 text-[13px]">
+                      <span className="truncate text-slate-700">{entry.dept} 주관</span>
+                      <ProgressBar done={entry.done} doing={entry.doing} total={entry.total} />
                       <span className="text-right tabular-nums text-slate-600">
-                        {division.made} / {division.deployed}종
+                        {entry.done} / {entry.total}종
                       </span>
                     </li>
                   ))}
               </ul>
-              {progress.lowGroups.length > 0 && (
+              {progress.lowSections.length > 0 && (
                 <>
-                  <p className="mt-5 text-xs font-semibold text-slate-600">진척이 가장 낮은 중분류</p>
+                  <p className="mt-5 text-xs font-semibold text-slate-600">진척이 가장 낮은 절</p>
                   <ul className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3 2xl:grid-cols-5">
-                    {progress.lowGroups.map((group) => (
+                    {progress.lowSections.map((sec) => (
                       <li
-                        key={`${group.taxonomyId}:${group.code}`}
+                        key={sec.no}
                         className={
                           "rounded-lg px-2 py-1.5 text-[11px] ring-1 " +
-                          (group.made === 0 ? "bg-rose-50 text-rose-800 ring-rose-200" : "bg-slate-50 text-slate-600 ring-slate-200")
+                          (sec.done + sec.doing === 0 ? "bg-rose-50 text-rose-800 ring-rose-200" : "bg-slate-50 text-slate-600 ring-slate-200")
                         }
                       >
-                        <span className="block truncate text-xs font-semibold">
-                          {group.code} {group.name}
+                        <span className="block truncate text-xs font-semibold" title={`${sec.no} ${sec.title} · ${sec.lead} 주관`}>
+                          {sec.no} {sec.title}
                         </span>
                         <span className="tabular-nums">
-                          {group.made} / {group.deployed}종
+                          {sec.done} / {sec.total}종 · {sec.lead}
                         </span>
                       </li>
                     ))}
@@ -537,6 +528,19 @@ function AlertRow({
   );
 }
 
+/** 진척 막대 — 끝난 것은 진하게, 작성 중인 것은 옅게 잇는다. %는 끝난 것만 센다. */
+export function ProgressBar({ done, doing, total }: { done: number; doing: number; total: number }) {
+  return (
+    <span
+      className="flex h-2.5 overflow-hidden rounded-full bg-slate-100"
+      title={`끝남 ${done} · 작성 중 ${doing} · 안 씀 ${Math.max(0, total - done - doing)}`}
+    >
+      <span className="block h-full bg-[linear-gradient(90deg,#0a5aa8,#1478d6)]" style={{ width: `${total > 0 ? (done / total) * 100 : 0}%` }} />
+      <span className="block h-full bg-amber-300" style={{ width: `${total > 0 ? (doing / total) * 100 : 0}%` }} />
+    </span>
+  );
+}
+
 /** 모든 현장 보기의 홈 — 현장별 점검표. 진척도가 낮은 현장이 위(먼저 볼 곳). */
 export function SitesAudit({ rows, onOpenSite }: { rows: SiteAuditRow[]; onOpenSite: (siteId: string) => void }) {
   return (
@@ -557,7 +561,7 @@ export function SitesAudit({ rows, onOpenSite }: { rows: SiteAuditRow[]; onOpenS
             </thead>
             <tbody>
               {rows.map((row) => {
-                const value = percent(row.made, row.deployed);
+                const value = percent(row.done, row.total);
                 return (
                   <tr
                     key={row.siteId}
@@ -567,12 +571,12 @@ export function SitesAudit({ rows, onOpenSite }: { rows: SiteAuditRow[]; onOpenS
                     <td className="px-5 py-3 font-semibold text-slate-900">{row.siteName}</td>
                     <td className="px-3 py-3">
                       <span className="flex items-center gap-3">
-                        <span className="h-2 w-40 overflow-hidden rounded-full bg-slate-100">
-                          <span className="block h-full rounded-full bg-blue-600" style={{ width: `${value}%` }} />
+                        <span className="w-40">
+                          <ProgressBar done={row.done} doing={row.doing} total={row.total} />
                         </span>
                         <span className="w-10 text-right font-bold tabular-nums text-slate-800">{value}%</span>
                         <span className="text-xs tabular-nums text-slate-400">
-                          {row.made} / {row.deployed}종
+                          {row.done} / {row.total}종
                         </span>
                       </span>
                     </td>

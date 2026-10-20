@@ -12,7 +12,8 @@
  */
 import { EXCEL_FILE_RE } from "./library.ts";
 import { insertRowsIntoSheetXml, shiftDrawingRows, shiftPrintArea } from "./sheetRowsExport.ts";
-import { applyMergesToSheetXml, centerMergedAnchors } from "./sheetMergesExport.ts";
+import { alignCells, applyMergesToSheetXml, centerMergedAnchors } from "./sheetMergesExport.ts";
+import { ALIGN_PREFIX, isAlignKey, parseAlign } from "./cellAlign.ts";
 import type { MergeEdits } from "./sheetMerges.ts";
 import {
   DRAWING_CONTENT_TYPE,
@@ -471,6 +472,22 @@ export async function buildFilledWorkbook(
         const centered = centerMergedAnchors(patched, stylesXml, merged);
         patched = centered.sheet;
         if (centered.styles !== stylesXml) await putText("xl/styles.xml", centered.styles);
+      }
+    }
+    // 화면에서 바꾼 칸 맞춤(`align:줄:칸`)을 엑셀 서식에 적는다.
+    const alignEdits = Object.entries(cells)
+      .filter(([key]) => isAlignKey(key))
+      .map(([key, text]) => {
+        const [row, col] = key.slice(ALIGN_PREFIX.length).split(":").map(Number);
+        return { row, col, ...parseAlign(text) };
+      })
+      .filter((edit) => Number.isFinite(edit.row) && Number.isFinite(edit.col));
+    if (alignEdits.length > 0) {
+      const stylesXml = await readText("xl/styles.xml");
+      if (stylesXml) {
+        const aligned = alignCells(patched, stylesXml, alignEdits);
+        patched = aligned.sheet;
+        if (aligned.styles !== stylesXml) await putText("xl/styles.xml", aligned.styles);
       }
     }
     if (stamps[sheetName]?.length) patched = await attachStamps(path, patched, stamps[sheetName]);

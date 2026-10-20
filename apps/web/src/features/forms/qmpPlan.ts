@@ -13,7 +13,7 @@
  * 배포 양식에서 만든 현장 서류가 저절로 맞물린다.
  */
 
-import { PERIODIC, alertDaysOf, cycleOf, parseDay, periodKeyOf, periodsBetween, sheetDate, type QmpCycle, type QmpSiteSettings } from "./qmpCycle.ts";
+import { PERIODIC, alertDaysOf, cycleOf, isExternal, parseDay, periodKeyOf, periodsBetween, sheetDate, type QmpCycle, type QmpSiteSettings } from "./qmpCycle.ts";
 
 export type QmpDept = "품질" | "공무" | "공사";
 export const QMP_DEPTS: QmpDept[] = ["품질", "공무", "공사"];
@@ -267,6 +267,8 @@ export interface QmpNamed {
    * 원본 시트의 번호로 같은 서식의 다음 장임을 안다(월별 서식의 달마다 장).
    */
   sheetSources?: Record<string, string>;
+  /** 파일째 보관하는 첨부(PDF 등) — 시트가 없다 */
+  attachment?: boolean;
 }
 
 /**
@@ -307,6 +309,15 @@ export function sheetCodesOf(doc: QmpNamed): Map<string, string> {
   }
   if (codes.size > 0) return codes;
 
+  /*
+   * [결과 올리기]로 올린 외부 작성 결과(PDF 등)는 시트가 없다. 이름을 "QA-8.6-3 주간 공정표 (2026-10-12 주)"처럼
+   * 서식 번호로 시작하게 지어 두므로, 이름의 번호로 그 서식에 붙인다(이름 자체를 장 하나로 친다).
+   */
+  if (doc.attachment && doc.sheetNames.length === 0 && doc.title) {
+    const code = qaCodeOf(doc.title);
+    if (code) return new Map([[doc.title, code]]);
+  }
+
   const label = `${doc.title ?? ""} ${doc.fileName ?? ""}`;
   const match = /(?:^|[^\d.])(\d{1,2})\.(\d{1,2})(?![\d.-])/.exec(label);
   const sec = match ? QMP_SECTIONS.find((item) => item.no === `${Number(match[1])}.${Number(match[2])}`) : undefined;
@@ -321,6 +332,39 @@ export function sheetCodesOf(doc: QmpNamed): Map<string, string> {
     }
   }
   return codes;
+}
+
+/**
+ * 바로 앞 서식에 딸린 시트 이름 — 견본(채워 둔 예시)과 참고 자료.
+ * 7.6 엑셀의 "문서보안기준안(참고)"는 QA-7.6-5 목록표의 보안등급을 정할 때 보는 표라 7.6-5 와 함께 보인다
+ * (2026-10-16 사용자 결정).
+ */
+const ATTACHED_NAME = /견본|샘플|sample|참고/i;
+
+/**
+ * 그 서식 번호에 딸린 시트 — 서식 시트, 그 바로 뒤의 견본·참고 시트, [시트 추가]로 더한 장.
+ *
+ * 회사 양식 엑셀은 절마다 한 권이라(10.2 에 QA-10.2-1·10.2-2·견본…) 서식 하나를 열어도 모든 시트가
+ * 탭에 떠서 같은 파일이 열린 것처럼 보였다(2026-10-16 사용자 신고). 계획서 화면에서 서식을 열면 이것만
+ * 탭에 보인다. 그 서식이 없으면 빈 배열(그때는 전부 보인다).
+ * 어느 서식에도 딸리지 않은 시트(빈 Sheet1·Sheet8, 7.2 의 "카메라")는 서식 화면에서 보이지 않는다
+ * — 사용자가 "지워 버려"라고 정했다.
+ */
+export function sheetsOfCode(doc: QmpNamed, code: string): string[] {
+  const codes = sheetCodesOf(doc);
+  const result: string[] = [];
+  let lastCode: string | undefined;
+  for (const name of doc.sheetNames) {
+    const own = codes.get(name);
+    const added = doc.sheetSources?.[name] !== undefined;
+    if (own) {
+      if (!added) lastCode = own;
+      if (own === code) result.push(name);
+    } else if (!added && ATTACHED_NAME.test(name) && lastCode === code) {
+      result.push(name);
+    }
+  }
+  return result;
 }
 
 /** 서식 한 장의 상태 */
@@ -375,6 +419,13 @@ export interface QmpFormState {
   excluded?: boolean;
   /** 준공 때 쓰는 서식인데 아직 안 썼다 — 때가 아니므로 세지 않는다 */
   notYet?: boolean;
+  /** 다른 사내 시스템에서 작성하는 서식 — 그 화면 링크와 [결과 올리기]를 단다. 올린 결과로 센다. */
+  external?: boolean;
+  /**
+   * 진행률에 세지 않는다 — 주기(주간·월간…) 외부 작성 서식. 매주 다른 시스템에 쓰고 PDF 를 또 올리면 두 번
+   * 일이라(2026-10-17 사용자 결정) 링크와 [결과 올리기](필요할 때만)만 둔다. 한 번 쓰는 외부 서식은 센다.
+   */
+  uncounted?: boolean;
 }
 
 const RANK: Record<QmpStatus, number> = { none: 0, doing: 1, done: 2 };
@@ -423,7 +474,9 @@ export function qmpStates(
           ? { status: "done", finishedAt: Math.max(...times.map((at) => at ?? 0)) }
           : { status: "doing" };
       } else {
-        state = { status: working.has(sheetName) ? "done" : "none" };
+        // 올린 외부 작성 결과(시트 없는 첨부)는 올린 것으로 끝이다.
+        const uploaded = doc.attachment === true && doc.sheetNames.length === 0;
+        state = { status: working.has(sheetName) || uploaded ? "done" : "none" };
       }
       const dept = doc.sheetDepts?.[sheetName];
       const full: QmpFormState = {
@@ -466,7 +519,7 @@ function applyCycles(
       const base: QmpFormState = result.get(form.code) ?? { status: "none" };
       const cycle = cycleOf(form.code, settings);
       const list = instances.get(form.code) ?? [];
-      let next: QmpFormState = { ...base, cycle };
+      let next: QmpFormState = { ...base, cycle, ...(isExternal(form.code, settings) ? { external: true } : {}) };
       if (excluded.has(sec.no)) next = { ...next, excluded: true };
       else if (cycle === "adhoc") {
         // 발송대장처럼 한 장에 줄을 쌓는 서식은 장이 늘지 않는다 — 건수 대신 마지막 기록 뒤 날수로 알린다.
@@ -510,6 +563,7 @@ function applyCycles(
               : "none";
         next = { ...next, status, periods: rows, written, due: rows.length };
       }
+      if (next.external && PERIODIC.includes(cycle)) next = { ...next, uncounted: true };
       result.set(form.code, next);
     }
   }
@@ -546,25 +600,45 @@ export function writesSection(sec: QmpSection, dept: QmpDept): boolean {
 /**
  * 부서 하나(또는 전체)의 신호등 집계.
  * 기준 문서는 현장이 쓰지 않으므로 빼고 센다. 배포 양식함은 기준 문서도 양식이라 함께 센다.
+ *
+ * 부서 탭은 **그 부서가 주관(●)인 절만** 센다(2026-10-16 사용자 결정). 협조(○) 부서는 주관 부서에 내용을
+ * 주고 서류는 주관이 한 부로 쓴다 — 협조까지 세면 서류 하나가 세 부서 탭에 다 "작성됨"으로 잡혔다.
+ * 협조 절은 탭에 "협조"로 보이기만 한다. 배포 양식함(`countHelp`)은 양식이 있나만 보므로 협조 절도 센다.
  */
 export function qmpTally(
   states: Map<string, QmpFormState>,
   dept: QmpDept | null,
   chapter: string | null = null,
   includeReference = false,
+  countHelp = false,
 ): { done: number; doing: number; none: number; total: number } {
   const tally = { done: 0, doing: 0, none: 0, total: 0 };
   for (const sec of QMP_SECTIONS) {
-    if (dept && !writesSection(sec, dept)) continue;
+    if (dept && !(countHelp ? writesSection(sec, dept) : sec.lead === dept)) continue;
     if (chapter && chapterOf(sec.no) !== chapter) continue;
-    for (const form of sec.forms) {
-      if (form.reference && !includeReference) continue;
-      const state = states.get(form.code);
-      // 적용 제외 절, 아직 때가 아닌 준공 서식은 세지 않는다.
-      if (state?.excluded || state?.notYet) continue;
-      tally[state?.status ?? "none"] += 1;
-      tally.total += 1;
-    }
+    const part = qmpSectionTally(states, sec, includeReference);
+    tally.done += part.done;
+    tally.doing += part.doing;
+    tally.none += part.none;
+    tally.total += part.total;
+  }
+  return tally;
+}
+
+/** 절 하나의 신호등 집계 — 홈의 "진척이 낮은 절"도 이것으로 센다. */
+export function qmpSectionTally(
+  states: Map<string, QmpFormState>,
+  sec: QmpSection,
+  includeReference = false,
+): { done: number; doing: number; none: number; total: number } {
+  const tally = { done: 0, doing: 0, none: 0, total: 0 };
+  for (const form of sec.forms) {
+    if (form.reference && !includeReference) continue;
+    const state = states.get(form.code);
+    // 적용 제외 절, 아직 때가 아닌 준공 서식은 세지 않는다.
+    if (state?.excluded || state?.notYet || state?.uncounted) continue;
+    tally[state?.status ?? "none"] += 1;
+    tally.total += 1;
   }
   return tally;
 }

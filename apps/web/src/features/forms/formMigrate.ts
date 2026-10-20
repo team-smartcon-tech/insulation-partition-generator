@@ -39,16 +39,24 @@ export interface MigrateResult {
 }
 
 /**
+ * 지워진 현장의 서류인가 — 현장 목록에 없는 현장을 가리킨다. 올려도 서버가 받지 않고(현장이 없다)
+ * 화면에서도 어느 현장에도 안 보인다. 다시 올리려 하면 열 때마다 "올리지 못한 것"이 떴다(사용자 신고).
+ */
+const orphan = (form: { kind?: string; siteId?: string }, siteIds: Set<string>) =>
+  form.kind === "site" && !!form.siteId && !siteIds.has(form.siteId);
+
+/**
  * 아직 서버에 없는 서류가 몇 건인가.
  *
  * **건수가 아니라 id 를 견준다.** 건수로 보면 "서버에 다른 PC 가 올린 5건, 내 브라우저에 다른 3건"
  * 같은 경우를 놓친다(3 > 5 가 아니니 없는 것으로 친다). 실제로 쓰다 보면 늘 이런 모양이 된다.
  */
 export async function pendingUploads(): Promise<string[]> {
-  const [local, onServer] = await Promise.all([listForms(), fetchDocs()]);
+  const [local, onServer, sites] = await Promise.all([listForms(), fetchDocs(), loadSites()]);
   const have = new Set(onServer.map((doc) => doc.id));
+  const siteIds = new Set(sites.map((site) => site.id));
   // 서버에 있던 서류가 서버에서 사라졌으면 다른 곳에서 지운 것이다 — 다시 올리면 지운 서류가 되살아난다.
-  return local.filter((form) => !have.has(form.id) && !form.fromServer).map((form) => form.id);
+  return local.filter((form) => !have.has(form.id) && !form.fromServer && !orphan(form, siteIds)).map((form) => form.id);
 }
 
 /**
@@ -109,12 +117,14 @@ export async function migrateLocalToServer(
    * 가리키는데, 그 배포 양식이 아직 서버에 없으면 서버가 거절한다(실제로 그랬다 — 첫 번에 실패하고
    * 두 번째에 성공했다).
    */
+  // 현장 번호가 서버 것으로 바뀌었을 수 있어(①) 현장 목록을 다시 읽는다.
+  const liveSites = new Set((await loadSites()).map((site) => site.id));
   const forms = (await listForms()).sort(
     (a, b) => (a.kind === "template" ? 0 : 1) - (b.kind === "template" ? 0 : 1),
   );
   report("서류", 0, forms.length);
   for (const [index, summary] of forms.entries()) {
-    if (existing.has(summary.id) || summary.fromServer) {
+    if (existing.has(summary.id) || summary.fromServer || orphan(summary, liveSites)) {
       result.skipped += 1;
       report("서류", index + 1, forms.length);
       continue;

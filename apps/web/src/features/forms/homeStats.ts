@@ -2,7 +2,7 @@
  * 홈 화면 숫자 — 결재 진행현황, 내 결재함, 서류 진척도, 알림, 전 현장 점검표.
  *
  * 화면 부품이 아니라 계산만 여기 둔다. 홈의 숫자는 "사실과 다르게 보이면" 믿지 않게 되는 숫자라
- * 규칙을 테스트로 묶어 둔다(예: 배포 양식이 없는 서류는 현장이 만들 수 없으니 진척도 분모에서 뺀다).
+ * 규칙을 테스트로 묶어 둔다(예: 서류 진척도는 현장 서류함의 신호등과 같은 수여야 한다).
  */
 import {
   isSamePerson,
@@ -12,7 +12,7 @@ import {
   type LineSlot,
 } from "./approvalLine.ts";
 import { isSiteDoc, isTemplate, type FormKind } from "./library.ts";
-import { divisionLabel, taxonomyIdOf, type Taxonomy } from "./taxonomy.ts";
+import { QMP_DEPTS, QMP_SECTIONS, qmpSectionTally, qmpTally, type QmpDept, type QmpFormState } from "./qmpPlan.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -190,86 +190,58 @@ export const daysSince = (since: number | undefined, now: number) =>
 
 // ─── 서류 진척도 ───────────────────────────────────────────
 
-export interface DivisionProgress {
-  taxonomyId: string;
-  name: string;
-  /** 배포 양식이 있는 서류 종류 수(= 현장이 만들 수 있는 것) */
-  deployed: number;
-  /** 그중 이 현장에서 만든 것 */
-  made: number;
-  /** 코드표에는 있지만 배포 양식이 아직 없는 종류 수 */
-  undeployed: number;
+export interface DeptProgress {
+  dept: QmpDept;
+  done: number;
+  doing: number;
+  total: number;
 }
 
-export interface GroupProgress {
-  taxonomyId: string;
-  code: string;
-  name: string;
-  deployed: number;
-  made: number;
+export interface SectionProgress {
+  no: string;
+  title: string;
+  lead: QmpDept;
+  done: number;
+  doing: number;
+  total: number;
 }
 
 export interface DocumentProgress {
-  deployed: number;
-  made: number;
-  undeployed: number;
-  divisions: DivisionProgress[];
-  /** 진척이 낮은 중분류(배포된 것이 있는 중분류만, 낮은 순) */
-  lowGroups: GroupProgress[];
+  /** 결재까지 끝난 서식 수 */
+  done: number;
+  /** 쓰기 시작했거나 결재 중인 서식 수 */
+  doing: number;
+  /** 세는 서식 수(기준 문서·적용 제외·아직 때가 아닌 준공 서식·주기 외부 작성은 뺀다) */
+  total: number;
+  /** 주관 부서별 — 현장 서류함의 부서 탭과 같은 수 */
+  depts: DeptProgress[];
+  /** 진척이 낮은 절(다 끝난 절은 빼고, 낮은 순) */
+  lowSections: SectionProgress[];
 }
 
 /**
- * 한 현장의 서류 진척도.
+ * 한 현장의 서류 진척도 — **현장 서류함(품질관리계획서 서식표)과 같은 기준**으로 센다(2026-10-20 사용자 요청).
  *
- * 분모는 **배포 양식이 있는 서류 종류**다. 배포 양식이 없는 칸은 현장이 만들 방법이 없어, 분모에
- * 넣으면 현장 잘못이 아닌데 진척도가 낮게 나온다. 그런 칸 수는 따로(`undeployed`) 알려 준다.
- * 한 종류에 여러 부(월별)를 만들어도 한 종으로 센다.
+ * 예전에는 코드표 칸 중 배포 양식이 있는 칸을 분모로, 서류를 하나라도 만든 칸을 분자로 셌다. 그래서 홈의
+ * %와 서류함의 %가 달랐다. 이제 서식마다 신호등(qmpStates)을 매긴 것을 그대로 모은다 — 끝난 것만 %에 든다.
  */
-export function documentProgress(
-  taxonomies: Taxonomy[],
-  docs: HomeDoc[],
-  siteId: string,
-  lowCount = 5,
-): DocumentProgress {
-  const slotKey = (doc: HomeDoc) => {
-    const taxonomyId = taxonomyIdOf(doc, taxonomies);
-    return taxonomyId && doc.code ? `${taxonomyId}:${doc.code}` : undefined;
-  };
-  const deployedSlots = new Set(docs.filter(isTemplate).map(slotKey).filter(Boolean));
-  const madeSlots = new Set(docs.filter((doc) => isSiteDoc(doc) && doc.siteId === siteId).map(slotKey).filter(Boolean));
-
-  const divisions: DivisionProgress[] = [];
-  const groups: GroupProgress[] = [];
-  for (const taxonomy of taxonomies) {
-    const division: DivisionProgress = { taxonomyId: taxonomy.id, name: divisionLabel(taxonomy.division) || "이름 없음", deployed: 0, made: 0, undeployed: 0 };
-    for (const group of taxonomy.groups) {
-      const entry: GroupProgress = { taxonomyId: taxonomy.id, code: group.code, name: group.name, deployed: 0, made: 0 };
-      for (const item of group.items) {
-        const key = `${taxonomy.id}:${item.code}`;
-        if (!deployedSlots.has(key)) {
-          division.undeployed += 1;
-          continue;
-        }
-        entry.deployed += 1;
-        if (madeSlots.has(key)) entry.made += 1;
-      }
-      division.deployed += entry.deployed;
-      division.made += entry.made;
-      if (entry.deployed > 0) groups.push(entry);
-    }
-    divisions.push(division);
-  }
-
-  const ratio = (entry: { deployed: number; made: number }) => entry.made / entry.deployed;
+export function documentProgress(states: Map<string, QmpFormState>, lowCount = 5): DocumentProgress {
+  const all = qmpTally(states, null);
+  const sections = QMP_SECTIONS.map((sec) => ({ no: sec.no, title: sec.title, lead: sec.lead, ...qmpSectionTally(states, sec) }));
+  const ratio = (entry: { done: number; total: number }) => entry.done / entry.total;
   return {
-    deployed: divisions.reduce((sum, entry) => sum + entry.deployed, 0),
-    made: divisions.reduce((sum, entry) => sum + entry.made, 0),
-    undeployed: divisions.reduce((sum, entry) => sum + entry.undeployed, 0),
-    divisions,
-    lowGroups: groups
-      .filter((entry) => entry.made < entry.deployed)
-      .sort((a, b) => ratio(a) - ratio(b) || b.deployed - a.deployed)
-      .slice(0, lowCount),
+    done: all.done,
+    doing: all.doing,
+    total: all.total,
+    depts: QMP_DEPTS.map((dept) => {
+      const tally = qmpTally(states, dept);
+      return { dept, done: tally.done, doing: tally.doing, total: tally.total };
+    }),
+    lowSections: sections
+      .filter((entry) => entry.total > 0 && entry.done < entry.total)
+      .sort((a, b) => ratio(a) - ratio(b) || b.total - a.total)
+      .slice(0, lowCount)
+      .map(({ none: _none, ...entry }) => entry),
   };
 }
 
@@ -280,8 +252,10 @@ export const percent = (made: number, total: number) => (total > 0 ? Math.round(
 export interface SiteAuditRow {
   siteId: string;
   siteName: string;
-  deployed: number;
-  made: number;
+  /** 서류 진척도 — 그 현장 서류함과 같은 수 */
+  done: number;
+  doing: number;
+  total: number;
   /** 결재가 진행중인 시트 수 */
   inProgress: number;
   stalled: number;
@@ -291,16 +265,17 @@ export interface SiteAuditRow {
 /**
  * 모든 현장 보기의 홈 — 오프라인 서류 점검용. 진척도가 낮은 현장이 위로 온다(먼저 볼 곳).
  */
-export function sitesAudit(
-  sites: { id: string; name: string }[],
-  taxonomies: Taxonomy[],
+export function sitesAudit<S extends { id: string; name: string }>(
+  sites: S[],
   docs: HomeDoc[],
+  /** 현장의 서식별 신호등 — 현장 서류함과 같은 것(작성 일정까지 넣어 센 것) */
+  statesOf: (site: S) => Map<string, QmpFormState>,
   now: number,
   staleDays = 3,
 ): SiteAuditRow[] {
   return sites
     .map((site) => {
-      const progress = documentProgress(taxonomies, docs, site.id, 0);
+      const progress = documentProgress(statesOf(site), 0);
       const siteDocs = docs.filter((doc) => isSiteDoc(doc) && doc.siteId === site.id);
       // 사람과 무관하게 세려고 아무도 아닌 사용자로 센다.
       const overview = approvalOverview(siteDocs, {}, now, staleDays);
@@ -315,12 +290,13 @@ export function sitesAudit(
       return {
         siteId: site.id,
         siteName: site.name,
-        deployed: progress.deployed,
-        made: progress.made,
+        done: progress.done,
+        doing: progress.doing,
+        total: progress.total,
         inProgress,
         stalled: overview.stalled.length,
         unassigned: overview.unassigned.length,
       };
     })
-    .sort((a, b) => percent(a.made, a.deployed) - percent(b.made, b.deployed) || a.siteName.localeCompare(b.siteName, "ko"));
+    .sort((a, b) => percent(a.done, a.total) - percent(b.done, b.total) || a.siteName.localeCompare(b.siteName, "ko"));
 }

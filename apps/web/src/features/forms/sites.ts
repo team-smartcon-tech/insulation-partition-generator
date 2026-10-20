@@ -83,7 +83,7 @@ export interface SiteProgress {
   filled: number;
   /** 코드표의 칸 수(회사 공통이라 현장마다 같다) */
   total: number;
-  /** 코드가 없어 어느 칸에도 안 들어간 서류 수 */
+  /** 어느 칸에도 안 들어간 서류 수(`isFiled` 가 아닌 것) */
   unfiled: number;
   /** 이 현장에서 마지막으로 고친 시각(ms). 없으면 0 */
   updatedAt: number;
@@ -95,10 +95,12 @@ export interface SiteProgress {
  * 서류 점검은 "어느 현장이 무엇을 안 올렸나"를 보는 일이다. 그래서 **칸 기준**으로 센다 —
  * 한 칸에 여러 장을 올려도 한 칸으로, 코드 없는 서류는 따로 센다.
  */
-export function summarizeSites(
+export function summarizeSites<F extends { siteId?: string; code?: string; taxonomyId?: string; updatedAt: number }>(
   sites: FormSite[],
-  forms: { siteId?: string; code?: string; taxonomyId?: string; updatedAt: number }[],
+  forms: F[],
   total: number,
+  /** 어느 칸에 들어가는 서류인가 — 없으면 코드가 있나로 본다. 화면은 계획서 서식 시트가 있나로 본다. */
+  isFiled: (form: F) => boolean = (form) => Boolean(form.code),
 ): SiteProgress[] {
   return sites.map((site) => {
     const mine = forms.filter((form) => siteIdOf(form, sites) === site.id);
@@ -107,7 +109,7 @@ export function summarizeSites(
     let updatedAt = 0;
     for (const form of mine) {
       if (form.code) slots.add(`${form.taxonomyId ?? ""}:${form.code}`);
-      else unfiled += 1;
+      if (!isFiled(form)) unfiled += 1;
       if (form.updatedAt > updatedAt) updatedAt = form.updatedAt;
     }
     return { site, filled: slots.size, total, unfiled, updatedAt };
@@ -141,7 +143,8 @@ export function mergeServerSites(
       id: remote.id,
       members: mine.members ?? remote.members,
       lineDefaults: mine.lineDefaults ?? remote.lineDefaults,
-      qmp: mine.qmp ?? remote.qmp,
+      // 작성 일정은 나중에 정한 쪽 — 다른 PC 에서 고친 것이 받아 와지고, 옛 것이 서버를 덮지 않게.
+      qmp: (mine.qmp?.updatedAt ?? 0) >= (remote.qmp?.updatedAt ?? 0) ? (mine.qmp ?? remote.qmp) : remote.qmp,
       onServer: true,
     };
   });
