@@ -88,7 +88,7 @@ export default function OutputPanel({
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
         <h2 className="text-[16px] font-bold text-slate-800">
           Output · 통합 물량 요약
-          <span className="ml-2 text-[12px] font-medium text-slate-500">
+          <span className="ml-2 text-[13px] font-medium text-slate-500">
             {scopeLabel}
           </span>
         </h2>
@@ -116,8 +116,8 @@ export default function OutputPanel({
 
       <div className="flex-1 min-h-0 grid grid-cols-[320px_1fr]">
         {/* SCOPE 트리 */}
-        <div className="border-r border-slate-200 overflow-auto p-3 text-[13px]">
-          <div className="text-[11px] font-bold tracking-wide text-slate-400 uppercase mb-2">
+        <div className="border-r border-slate-200 overflow-auto p-3 text-[14px]">
+          <div className="text-[12.5px] font-bold tracking-wide text-slate-400 uppercase mb-2">
             산출 대상
           </div>
           <label className="flex items-center gap-2 font-bold text-slate-800 py-1">
@@ -128,7 +128,7 @@ export default function OutputPanel({
               className="accent-[#004791]"
             />
             전체 현장
-            <span className="ml-auto text-[11px] text-slate-400">
+            <span className="ml-auto text-[12.5px] text-slate-400">
               {selectedCount}/{allIds.length}
             </span>
           </label>
@@ -157,14 +157,14 @@ export default function OutputPanel({
                           className="accent-[#004791]"
                         />
                         {c.core}
-                        <span className="ml-auto text-[11px] text-slate-400">
+                        <span className="ml-auto text-[12.5px] text-slate-400">
                           {c.walls.length}개
                         </span>
                       </label>
                       {c.walls.map(w => (
                         <label
                           key={w.wallId}
-                          className="ml-5 flex items-center gap-2 text-[12px] text-slate-500 py-0.5"
+                          className="ml-5 flex items-center gap-2 text-[13px] text-slate-500 py-0.5"
                         >
                           <input
                             type="checkbox"
@@ -236,7 +236,7 @@ export default function OutputPanel({
                   </td>
                 </tr>
                 {merged.discardedCount > 0 && (
-                  <tr className="bg-slate-50 text-center text-slate-500 text-[13px]">
+                  <tr className="bg-slate-50 text-center text-slate-500 text-[14px]">
                     <td className="px-3 py-1.5" colSpan={2}>
                       버림(폐기)
                     </td>

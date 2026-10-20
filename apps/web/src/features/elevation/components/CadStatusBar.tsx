@@ -34,7 +34,7 @@ export default function CadStatusBar({
 }: CadStatusBarProps) {
   return (
     <div
-      className="flex h-[30px] shrink-0 items-stretch text-[11.5px]"
+      className="flex h-[30px] shrink-0 items-stretch text-[13px]"
       style={{ background: "var(--ipg-rail)", borderTop: "1px solid rgba(255,255,255,.08)" }}
     >
       {/* 문서 탭 */}
@@ -62,7 +62,7 @@ export default function CadStatusBar({
         style={{ borderLeft: "1px solid rgba(255,255,255,.08)" }}
       >
         <Terminal className="h-3.5 w-3.5 shrink-0 text-white/30" />
-        <span className="truncate">{hint}</span>
+        <span className="ipg-num truncate">{hint}</span>
       </div>
 
       {/* 계측 표시 */}
@@ -113,10 +113,10 @@ function StatusTab({
       )}
       <Icon className="h-3.5 w-3.5" />
       {label}
-      <span className="text-[9.5px] font-bold tracking-[0.14em] text-white/25">{sub}</span>
+      <span className="text-[11px] font-bold tracking-[0.14em] text-white/25">{sub}</span>
       {badge != null && (
         <span
-          className="ipg-num rounded-full px-1.5 text-[10px] font-bold"
+          className="ipg-num rounded-full px-1.5 text-[11.5px] font-bold"
           style={{ background: "rgba(26,126,224,.28)", color: "#8ecbff" }}
         >
           {badge}
@@ -132,7 +132,7 @@ function Stat({ label, value }: { label: string; value: string }) {
       className="flex items-center gap-1.5 px-3"
       style={{ borderLeft: "1px solid rgba(255,255,255,.08)" }}
     >
-      <span className="text-[10.5px] font-semibold uppercase tracking-wider text-white/35">
+      <span className="text-[12px] font-semibold uppercase tracking-wider text-white/35">
         {label}
       </span>
       <span className="ipg-num font-bold text-white/85">{value}</span>
