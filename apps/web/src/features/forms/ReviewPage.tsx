@@ -5,7 +5,9 @@
  * 눌러 보면서 부적합한 내용을 점검하는 형식". 지금 현장이 쓰는 공유폴더(`Z:\01. 공사`)를 그대로
  * 옮겨 놓은 모양이어야 본사 사람이 익숙하게 쓴다.
  *
- * 왼쪽: 분류 트리(100 공통일반 / 300 공사일지 …). **파일이 없는 칸도 보여 준다** — 점검에서는
+ * 왼쪽: **품질관리계획서 트리**(장 → 절 → 서식 QA-x.x-x) — 현장 서류함과 같은 뼈대(2026-10-20 사용자 요청.
+ *       예전 현장 문서트리(코드표 100~900)로 두었더니 계획서 번호로 만든 서류가 모두 "분류 없는 서류"에 쌓였다).
+ *       서류는 시트 이름의 서식 번호로 제자리를 찾는다. **파일이 없는 서식도 보여 준다** — 점검에서는
  *       "안 올라온 서류"가 올라온 것만큼 중요하다.
  * 가운데: 고른 칸의 파일들.
  * 오른쪽(아래): 고른 파일의 **내용**. 엑셀은 격자를 그대로 그리고(내려받지 않아도 된다),
@@ -32,7 +34,6 @@ import {
   fetchDoc,
   fetchDocs,
   fetchSites,
-  fetchTaxonomies,
   fileUrl,
   patchDoc,
   removeAdmin,
@@ -44,7 +45,13 @@ import { fileKind, fileSizeText } from "./library";
 import FormSheetView from "./FormSheetView";
 import type { FormSheet } from "./types";
 import type { FormSite } from "./sites";
-import { divisionLabel, type Taxonomy } from "./taxonomy";
+import { QMP_CHAPTERS, QMP_SECTIONS, chapterOf, sheetCodesOf, sheetsOfCode, type QmpNamed } from "./qmpPlan";
+import { listForms } from "./formStore";
+import { PULLED_EVENT } from "./formPull";
+
+const CHAPTER_NOS = ["4", "5", "6", "7", "8", "9", "10"];
+/** 서식 번호가 없는 서류를 모으는 자리 */
+const OTHERS = "__others";
 
 const STATUS = {
   none: { label: "점검 전", tone: "bg-slate-100 text-slate-600" },
@@ -53,13 +60,18 @@ const STATUS = {
   fix: { label: "보완 요청", tone: "bg-rose-100 text-rose-800" },
 } as const;
 
-/** 트리에서 고른 자리. 코드가 없는 서류는 따로 모은다. */
-type Slot = { taxonomyId: string; code: string } | { taxonomyId: ""; code: "" };
-const slotKey = (taxonomyId: string, code: string) => `${taxonomyId}:${code}`;
+/** 트리에서 고른 서식 번호(예: "6.1-3"). 서식 번호가 없는 서류는 `OTHERS`. */
+type Slot = string;
+/** 서식 칸에 놓인 서류 — 엑셀 한 권에 서식이 여럿이라 그 서식 시트를 함께 든다 */
+type Placed = { doc: DocRow; sheetName?: string };
 
-export default function ReviewPage() {
+export default function ReviewPage({ admin = true }: { admin?: boolean } = {}) {
   const [sites, setSites] = useState<FormSite[]>([]);
-  const [taxonomies, setTaxonomies] = useState<Taxonomy[]>([]);
+  /**
+   * 서류마다 시트 이름 — 서버 목록에는 무거운 격자가 빠져 있어 시트 이름을 모른다. 화면을 열 때 서버에서 받아
+   * 둔 브라우저 사본(`formPull.ts`)에서 읽는다. 사본이 없는 서류는 이름(첨부 결과 등)으로 찾는다.
+   */
+  const [named, setNamed] = useState<Map<string, QmpNamed>>(new Map());
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "offline">("loading");
   const [message, setMessage] = useState<string | null>(null);
@@ -76,13 +88,17 @@ export default function ReviewPage() {
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setState("loading");
     try {
-      const [siteRows, taxonomyRows, docRows] = await Promise.all([
+      const [siteRows, docRows, local] = await Promise.all([
         fetchSites(),
-        fetchTaxonomies(),
         fetchDocs({ kind: "site" }),
+        listForms().catch(() => []),
       ]);
       setSites(siteRows);
-      setTaxonomies(taxonomyRows);
+      setNamed(
+        new Map(
+          local.map((form) => [form.id, { sheetNames: form.sheetNames, sheetSources: form.sheetSources, attachment: form.attachment }]),
+        ),
+      );
       setDocs(docRows);
       setSiteId((current) => current || siteRows[0]?.id || "");
       setState("ready");
@@ -97,6 +113,13 @@ export default function ReviewPage() {
     }
   }, []);
 
+  // 서버 서류를 다 받아 오면 시트 이름을 다시 읽는다(처음 여는 PC 는 받는 동안 서식을 모른다).
+  useEffect(() => {
+    const reload = () => void load(true);
+    window.addEventListener(PULLED_EVENT, reload);
+    return () => window.removeEventListener(PULLED_EVENT, reload);
+  }, [load]);
+
   useEffect(() => {
     void load();
     // 점검하는 사람은 화면을 열어 둔 채 기다린다. 30초마다 조용히 다시 읽는다.
@@ -106,26 +129,46 @@ export default function ReviewPage() {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  /** 이 현장의 서류만. 칸(분류+코드)별로 모아 둔다. */
+  /** 이 현장의 서류만. 서식 번호별로 모아 둔다(한 서류가 서식 여럿에 놓일 수 있다). */
   const bySlot = useMemo(() => {
-    const map = new Map<string, DocRow[]>();
+    const map = new Map<string, Placed[]>();
+    const put = (key: string, placed: Placed) => {
+      const list = map.get(key);
+      if (list) list.push(placed);
+      else map.set(key, [placed]);
+    };
     for (const doc of docs) {
       if (siteId && doc.site_id !== siteId) continue;
-      const key = slotKey(doc.taxonomy_id ?? "", doc.code ?? "");
-      const list = map.get(key);
-      if (list) list.push(doc);
-      else map.set(key, [doc]);
+      const local = named.get(doc.id);
+      const codes = sheetCodesOf({
+        sheetNames: local?.sheetNames ?? [],
+        sheetSources: local?.sheetSources,
+        title: doc.title,
+        fileName: doc.file_name,
+        attachment: local?.attachment ?? doc.attachment,
+      });
+      if (codes.size === 0) {
+        put(OTHERS, { doc });
+        continue;
+      }
+      // 같은 서식에 시트가 여럿(지난달 장 등)이어도 서류는 한 번 — 첫 시트로 연다.
+      const seen = new Set<string>();
+      for (const [sheetName, code] of codes) {
+        if (seen.has(code)) continue;
+        seen.add(code);
+        put(code, { doc, sheetName });
+      }
     }
     return map;
-  }, [docs, siteId]);
+  }, [docs, siteId, named]);
 
-  const inSlot = slot ? (bySlot.get(slotKey(slot.taxonomyId, slot.code)) ?? []) : [];
-  const unfiled = bySlot.get(slotKey("", "")) ?? [];
+  const inSlot = slot ? (bySlot.get(slot) ?? []) : [];
+  const unfiled = bySlot.get(OTHERS) ?? [];
   const siteDocs = useMemo(() => docs.filter((doc) => !siteId || doc.site_id === siteId), [docs, siteId]);
   const needFix = siteDocs.filter((doc) => doc.review_status === "fix").length;
   const notChecked = siteDocs.filter((doc) => doc.review_status === "none" || doc.review_status === "requested").length;
 
-  async function openFile(doc: DocRow) {
+  async function openFile(doc: DocRow, sheetName?: string) {
     setBusy(true);
     setOpenedBytes(null);
     setSheetIndex(0);
@@ -133,6 +176,11 @@ export default function ReviewPage() {
       // 목록에는 무거운 칸(격자·적은 글자)이 빠져 있다. 열 때 한 건만 통째로 받아 온다.
       const full = await fetchDoc(doc.id);
       setOpened(full);
+      // 고른 서식의 시트를 먼저 보여 준다(엑셀 한 권에 서식이 여럿이다).
+      if (sheetName && Array.isArray(full.sheets)) {
+        const index = (full.sheets as FormSheet[]).findIndex((sheet) => sheet.name === sheetName);
+        if (index >= 0) setSheetIndex(index);
+      }
       // 사진·PDF 는 그 자리에서 보여 준다. 엑셀은 격자가 이미 있어 파일을 받을 필요가 없다.
       const kind = fileKind(full.file_name);
       if (full.attachment && kind.preview) {
@@ -248,88 +296,81 @@ export default function ReviewPage() {
             className="max-h-[70vh] overflow-y-auto border-t border-slate-100 pt-3 lg:col-span-1"
             aria-label="현장 폴더"
           >
-            {taxonomies.length === 0 && (
-              <p className="px-2 py-6 text-center text-xs text-slate-400">
-                분류 코드표가 아직 서버에 없습니다. 현장에서 한 번 열면 올라갑니다.
-              </p>
-            )}
-            {taxonomies.map((taxonomy) => (
-              <div key={taxonomy.id} className="mb-3">
-                <p className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                  {divisionLabel(taxonomy.division) || "분류"}
-                </p>
-                {taxonomy.groups.map((group) => {
-                  const key = `${taxonomy.id}:${group.code}`;
-                  const open = openGroups.has(key);
-                  const count = group.items.reduce(
-                    (sum, item) => sum + (bySlot.get(slotKey(taxonomy.id, item.code))?.length ?? 0),
-                    0,
-                  );
-                  return (
-                    <div key={key}>
-                      <button
-                        type="button"
-                        onClick={() => toggleGroup(key)}
-                        className="flex w-full items-center gap-1 rounded-lg px-1.5 py-1.5 text-left text-[13px] text-slate-700 hover:bg-slate-50"
-                      >
-                        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                        <FolderOpen size={13} className="text-slate-400" />
-                        <span className="min-w-0 flex-1 truncate">
-                          <span className="tabular-nums text-slate-500">{group.code}</span> {group.name}
-                        </span>
-                        <span className={"shrink-0 text-[11px] " + (count > 0 ? "font-semibold text-blue-700" : "text-slate-300")}>
-                          {count}
-                        </span>
-                      </button>
-                      {open &&
-                        group.items.map((item) => {
-                          const files = bySlot.get(slotKey(taxonomy.id, item.code)) ?? [];
-                          const active = slot?.taxonomyId === taxonomy.id && slot?.code === item.code;
-                          return (
-                            <button
-                              key={`${key}:${item.code}`}
-                              type="button"
-                              onClick={() => {
-                                setSlot({ taxonomyId: taxonomy.id, code: item.code });
-                                setOpened(null);
-                              }}
-                              className={
-                                "flex w-full items-center gap-2 rounded-lg py-1 pl-8 pr-2 text-left text-[12.5px] transition " +
-                                (active ? "bg-blue-50 font-semibold text-blue-800" : "hover:bg-slate-50") +
-                                (files.length === 0 && !active ? " text-slate-400" : " text-slate-700")
-                              }
-                            >
-                              <span className="min-w-0 flex-1 truncate">
-                                <span className="tabular-nums">{item.code}</span> {item.name}
-                              </span>
-                              <span className="shrink-0 text-[11px] text-slate-400">
-                                {files.length > 0 ? files.length : "없음"}
-                              </span>
-                            </button>
-                          );
-                        })}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
+            {CHAPTER_NOS.map((no) => {
+              const sections = QMP_SECTIONS.filter((sec) => chapterOf(sec.no) === no);
+              return (
+                <div key={no} className="mb-3">
+                  <p className="px-1 pb-1 text-[11px] font-bold tracking-wide text-slate-400">
+                    제 {no} 장 {QMP_CHAPTERS[no]}
+                  </p>
+                  {sections.map((sec) => {
+                    const open = openGroups.has(sec.no);
+                    const count = new Set(sec.forms.flatMap((form) => (bySlot.get(form.code) ?? []).map((item) => item.doc.id))).size;
+                    return (
+                      <div key={sec.no}>
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(sec.no)}
+                          className="flex w-full items-center gap-1 rounded-lg px-1.5 py-1.5 text-left text-[13px] text-slate-700 hover:bg-slate-50"
+                        >
+                          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                          <FolderOpen size={13} className="text-slate-400" />
+                          <span className="min-w-0 flex-1 truncate">
+                            <span className="tabular-nums text-slate-500">{sec.no}</span> {sec.title}
+                          </span>
+                          <span className={"shrink-0 text-[11px] " + (count > 0 ? "font-semibold text-blue-700" : "text-slate-300")}>
+                            {count}
+                          </span>
+                        </button>
+                        {open &&
+                          sec.forms.map((form) => {
+                            const files = bySlot.get(form.code) ?? [];
+                            const active = slot === form.code;
+                            return (
+                              <button
+                                key={form.code}
+                                type="button"
+                                onClick={() => {
+                                  setSlot(form.code);
+                                  setOpened(null);
+                                }}
+                                title={form.reference ? "참고 문서(흐름도·작성방법·평가기준) — 현장이 작성하지 않습니다" : undefined}
+                                className={
+                                  "flex w-full items-center gap-2 rounded-lg py-1 pl-8 pr-2 text-left text-[12.5px] transition " +
+                                  (active ? "bg-blue-50 font-semibold text-blue-800" : "hover:bg-slate-50") +
+                                  (files.length === 0 && !active ? " text-slate-400" : " text-slate-700")
+                                }
+                              >
+                                <span className="min-w-0 flex-1 truncate">
+                                  <span className="tabular-nums">QA-{form.code}</span> {form.name}
+                                </span>
+                                <span className="shrink-0 text-[11px] text-slate-400">
+                                  {files.length > 0 ? files.length : form.reference ? "참고" : "없음"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
 
             {unfiled.length > 0 && (
               <button
                 type="button"
                 onClick={() => {
-                  setSlot({ taxonomyId: "", code: "" });
+                  setSlot(OTHERS);
                   setOpened(null);
                 }}
                 className={
                   "mt-2 flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-[13px] transition " +
-                  (slot?.taxonomyId === "" && slot?.code === ""
-                    ? "bg-blue-50 font-semibold text-blue-800"
-                    : "text-slate-700 hover:bg-slate-50")
+                  (slot === OTHERS ? "bg-blue-50 font-semibold text-blue-800" : "text-slate-700 hover:bg-slate-50")
                 }
               >
                 <FolderOpen size={13} className="text-slate-400" />
-                <span className="min-w-0 flex-1 truncate">분류 없는 서류</span>
+                <span className="min-w-0 flex-1 truncate">그 밖의 서류</span>
                 <span className="shrink-0 text-[11px] font-semibold text-blue-700">{unfiled.length}</span>
               </button>
             )}
@@ -339,7 +380,7 @@ export default function ReviewPage() {
           <div className="min-w-0 lg:col-span-3">
             {!slot && (
               <p className="py-16 text-center text-sm text-slate-500">
-                왼쪽에서 볼 칸을 골라 주세요. 숫자는 그 칸에 올라온 파일 수입니다.
+                왼쪽에서 볼 서식을 골라 주세요. 숫자는 그 서식이 든 현장 서류 수입니다.
               </p>
             )}
 
@@ -347,16 +388,16 @@ export default function ReviewPage() {
               <>
                 <ul className="divide-y divide-slate-100 border-y border-slate-100">
                   {inSlot.length === 0 && (
-                    <li className="py-8 text-center text-sm text-slate-500">이 칸에는 아직 올라온 서류가 없습니다.</li>
+                    <li className="py-8 text-center text-sm text-slate-500">이 서식이 든 현장 서류가 아직 없습니다.</li>
                   )}
-                  {inSlot.map((doc) => {
+                  {inSlot.map(({ doc, sheetName }) => {
                     const status = STATUS[doc.review_status] ?? STATUS.none;
                     const active = opened?.id === doc.id;
                     return (
                       <li key={doc.id}>
                         <button
                           type="button"
-                          onClick={() => void openFile(doc)}
+                          onClick={() => void openFile(doc, sheetName)}
                           className={
                             "flex w-full items-center gap-3 px-2 py-2.5 text-left transition " +
                             (active ? "bg-blue-50" : "hover:bg-slate-50")
@@ -388,14 +429,40 @@ export default function ReviewPage() {
                   })}
                 </ul>
 
-                {opened && <FileReview doc={opened} bytes={openedBytes} busy={busy} sheetIndex={sheetIndex} onSheet={setSheetIndex} onDownload={() => void download(opened)} onDecide={(status) => void decide(opened, status)} />}
+                {opened && (
+                  <FileReview
+                    doc={opened}
+                    bytes={openedBytes}
+                    busy={busy}
+                    sheetIndex={sheetIndex}
+                    onSheet={setSheetIndex}
+                    onDownload={() => void download(opened)}
+                    onDecide={(status) => void decide(opened, status)}
+                    onlySheets={
+                      slot && slot !== OTHERS
+                        ? new Set(
+                            sheetsOfCode(
+                              {
+                                sheetNames: ((Array.isArray(opened.sheets) ? opened.sheets : []) as FormSheet[]).map((item) => item.name),
+                                sheetSources: named.get(opened.id)?.sheetSources,
+                                title: opened.title,
+                                fileName: opened.file_name,
+                              },
+                              slot,
+                            ),
+                          )
+                        : undefined
+                    }
+                  />
+                )}
               </>
             )}
           </div>
         </div>
       )}
 
-      <AdminList />
+      {/* 명단을 바꾸는 것은 본사만 — 시범 운영으로 이 탭이 모두에게 보여도 명단은 본사에게만 보인다. */}
+      {admin && <AdminList />}
     </section>
   );
 }
@@ -519,12 +586,15 @@ function FileReview({
   onSheet,
   onDownload,
   onDecide,
+  onlySheets,
 }: {
   doc: DocRow;
   bytes: ArrayBuffer | null;
   busy: boolean;
   sheetIndex: number;
   onSheet: (index: number) => void;
+  /** 고른 서식의 시트만 탭에 — 엑셀 한 권에 서식이 여럿이다(현장 서류함과 같다). 없으면 전부 */
+  onlySheets?: Set<string>;
   onDownload: () => void;
   onDecide: (status: "ok" | "fix") => void;
 }) {
@@ -601,7 +671,7 @@ function FileReview({
         <div className="p-4">
           {sheets.length > 1 && (
             <div className="mb-3 flex flex-wrap gap-1.5">
-              {sheets.map((item, index) => (
+              {sheets.map((item, index) => onlySheets && onlySheets.size > 0 && !onlySheets.has(item.name) && index !== sheetIndex ? null : (
                 <button
                   key={item.name}
                   type="button"

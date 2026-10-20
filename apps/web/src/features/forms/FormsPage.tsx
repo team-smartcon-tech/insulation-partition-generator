@@ -14,6 +14,12 @@ import { useAuth } from "@/features/auth/AuthContext";
 import SignatureDialog, { useSignature } from "@/features/profile/SignatureDialog";
 import { writeSignature } from "@/features/profile/signature";
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  AlignVerticalJustifyStart,
   ArrowRight,
   BookOpen,
   House,
@@ -63,7 +69,7 @@ import {
 } from "./sheetMerges";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
-import HomeDashboard, { SitesAudit } from "./HomeDashboard";
+import HomeDashboard, { ProgressBar, SitesAudit } from "./HomeDashboard";
 import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
 import AddSheetDialog from "./AddSheetDialog";
 import DropUploadDialog from "./DropUploadDialog";
@@ -73,9 +79,14 @@ import ReviewPage from "./ReviewPage";
 import FeedbackPage from "./FeedbackPage";
 import { HQ_ONLY, SpaceSidebar, SpaceTabs, type Space } from "./SpaceNav";
 import OpenDocTabs, { addOpenDoc, closeOpenDoc, type OpenDoc } from "./OpenDocTabs";
+import SamplePeek, { isSampleSheet } from "./SamplePeek";
+import ResultUploadDialog from "./ResultUploadDialog";
+import { SHEET_LINKS, applySheetLink } from "./formLinks";
+import { allAligned, setAlign, withAlignOverrides, type CellAlign, type HAlign, type VAlign } from "./cellAlign";
+import { cycleOf, externalLinkOf } from "./qmpCycle";
 import ScrollTopButton from "./ScrollTopButton";
 import QmpBoard from "./QmpBoard";
-import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, qmpStates, templateForCode, templatesToImport, type QmpDept } from "./qmpPlan";
+import { hasQmpSheet, qmpLibraryStates, sheetCodesOf, sheetsOfCode, qmpStates, templateForCode, templatesToImport, type QmpDept, type QmpFormState } from "./qmpPlan";
 import { fetchMe } from "./formServer";
 import { approvalOverview, documentProgress, sitesAudit, type SiteAuditRow } from "./homeStats";
 import { findApprovalBoxes } from "./approval";
@@ -227,6 +238,30 @@ type LoadState =
  */
 const DOC_SPACES: ReadonlySet<Space> = new Set<Space>(["home", "library", "site"]);
 
+/**
+ * 시범 운영: 모든 직원에게 [배포 양식함]·[본사 점검]까지 다섯 탭을 다 보인다(2026-10-16 사용자 결정 —
+ * "어차피 시범 자료라 모든 직원한테"). 본사 관리자 명단 관리·의견 답변은 여전히 본사만 한다.
+ * 정식 운영 때 false 로 되돌리면 본사만 보인다.
+ */
+const PILOT_ALL_TABS = true;
+
+/** 맞춤 단추 — 엑셀 [맞춤] 묶음과 같은 순서 */
+const ALIGN_BUTTONS: {
+  vertical: { value: VAlign; label: string; Icon: typeof AlignLeft }[];
+  horizontal: { value: HAlign; label: string; Icon: typeof AlignLeft }[];
+} = {
+  vertical: [
+    { value: "top", label: "위쪽 맞춤", Icon: AlignVerticalJustifyStart },
+    { value: "middle", label: "가운데 맞춤(세로)", Icon: AlignVerticalJustifyCenter },
+    { value: "bottom", label: "아래쪽 맞춤", Icon: AlignVerticalJustifyEnd },
+  ],
+  horizontal: [
+    { value: "left", label: "왼쪽 맞춤", Icon: AlignLeft },
+    { value: "center", label: "가운데 맞춤", Icon: AlignCenter },
+    { value: "right", label: "오른쪽 맞춤", Icon: AlignRight },
+  ],
+};
+
 /** 등급만으로 본사가 되는 사람. 명단(`form_admins`)으로도 될 수 있고, 그 판단은 서버가 한다. */
 const HQ_ROLES = new Set(["super_admin", "system_admin"]);
 
@@ -321,6 +356,19 @@ export default function FormsPage() {
   const [values, setValues] = useState<FormValues>({});
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
+  /** 계획서 화면에서 연 서식 — 그 서식 시트만 탭에 보인다(`sheetsOfCode`) */
+  const [sheetFocus, setSheetFocus] = useState<{ docId: string; code: string } | null>(null);
+  /** 서류마다 마지막으로 집중해 본 서식 */
+  const focusMemo = useRef(new Map<string, string>());
+  /** [결과 올리기] 창 — 외부 작성 서식의 결과(PDF)를 올린다 */
+  const [resultUpload, setResultUpload] = useState<{
+    code: string;
+    name: string;
+    periodKey?: string;
+    periods?: QmpFormState["periods"];
+  } | null>(null);
+  /** 떠 있는 창으로 띄운 견본 시트(번호) */
+  const [samplePeek, setSamplePeek] = useState<number | null>(null);
   /** 서버 서류를 받아 오는 중(몇 건 중 몇 건) */
   const [pullProgress, setPullProgress] = useState<{ done: number; total: number } | null>(null);
   /** 코드표 목록 — 1차 분류(공무관련·품질관련 …)마다 한 벌 */
@@ -386,6 +434,11 @@ export default function FormsPage() {
    * 그 판단은 서버가 한다(`GET /api/forms/me`). 서버에 못 닿으면 등급만 보고 판단한다.
    */
   const isHq = useHqAdmin(user?.role);
+  /** 탭을 보일 사람 — 시범 운영 동안은 모든 직원(`PILOT_ALL_TABS`) */
+  const showHqTabs = isHq || PILOT_ALL_TABS;
+  // 다른 서류를 열면 떠 있던 견본 창은 닫는다(그 서류의 견본이 아니다).
+  const openedDocId = state.status === "ready" ? state.id : null;
+  useEffect(() => setSamplePeek(null), [openedDocId]);
   /**
    * 본사가 아닌 것으로 밝혀지면 본사 전용 화면에서 빠져나온다.
    *
@@ -393,8 +446,8 @@ export default function FormsPage() {
    * 다만 본사였다가 명단에서 빠진 뒤 다시 열었을 때를 위해 둔다.
    */
   useEffect(() => {
-    setSpaceState((current) => (HQ_ONLY.has(current) && !isHq ? "site" : current));
-  }, [isHq]);
+    setSpaceState((current) => (HQ_ONLY.has(current) && !showHqTabs ? "site" : current));
+  }, [showHqTabs]);
   const mySignature = useSignature(user?.id);
   /** 결재선 지정 창이 열려 있나 */
   const [lineDialogOpen, setLineDialogOpen] = useState(false);
@@ -431,6 +484,16 @@ export default function FormsPage() {
 
   /** 지금 보고 있는 시트 이름 — 되돌리기 기록에 어느 시트인지 적어 두려고 들고 있다. */
   const sheetNameRef = useRef<string>("");
+  /**
+   * 서식 잇기(`formLinks.ts`)에 필요한 것 — 이 서류의 시트들과 서식 번호, 시트마다 끼운·더한 줄 수.
+   * 칸 하나를 고칠 때마다 쓰므로 렌더마다 갈아 끼운다.
+   */
+  const linkContextRef = useRef<{
+    sheets: FormSheet[];
+    codes: Map<string, string>;
+    rowInserts: Record<string, number[]>;
+    extraRows: Record<string, number>;
+  } | null>(null);
 
   /** 방금 저장소에서 읽어 온 값. 이것과 같으면 저장할 게 없다. */
   const justLoadedRef = useRef<{ id: string; values: FormValues } | null>(null);
@@ -504,7 +567,7 @@ export default function FormsPage() {
 
   function setSpace(next: Space) {
     // 본사 전용 화면은 본사만. 화면에서 단추를 감추지만, 다른 길로 들어오는 것도 여기서 막는다.
-    if (HQ_ONLY.has(next) && !isHq) return;
+    if (HQ_ONLY.has(next) && !showHqTabs) return;
     setSpaceState(next);
     // 다른 곳으로 옮기면 코드표 편집은 끈다 — 편집 도구는 배포 양식함에만 있다.
     if (next === "site") setEditingTaxonomy(false);
@@ -657,13 +720,21 @@ export default function FormsPage() {
       try {
         let list = await loadSites();
         // 서버 현장 목록을 먼저 받는다 — 처음 여는 사람에게 "우리 현장" 대신 실제 현장이 보이게.
-        // 서버가 늦으면(4초) 기다리지 않고 브라우저 것을 쓴다.
-        const pulled = await Promise.race([
-          pullSites().catch(() => null),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
-        ]);
+        // 브라우저에 현장이 있으면 서버가 늦을 때(4초) 기다리지 않고 브라우저 것을 쓴다. 현장이 하나도 없는
+        // 처음 여는 PC 는 서버 답을 끝까지 기다린다.
+        const pulled =
+          list.length === 0
+            ? await pullSites().catch(() => null)
+            : await Promise.race([
+                pullSites().catch(() => null),
+                new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+              ]);
         if (pulled && pulled.length > 0) list = pulled;
-        if (list.length === 0) {
+        /*
+         * 첫 현장("우리 현장")은 **서버가 현장이 하나도 없다고 답했을 때만** 만든다. 서버가 늦거나 안 닿아
+         * 비어 보이는 것만으로 만들면, 그 현장이 서버에까지 올라가 모든 사람에게 보였다(2026-10-20 사용자 신고).
+         */
+        if (list.length === 0 && pulled !== null && pulled.length === 0) {
           list = addSite([], FIRST_SITE_NAME, () => crypto.randomUUID());
           await saveSites(list);
         }
@@ -1339,7 +1410,12 @@ export default function FormsPage() {
   /**
    * 홈에서 서류를 누르면 — 그 서류의 현장·양식함으로 옮기고, 그 시트를 펴서 보여 준다.
    */
-  async function openDocAt(formId: string, sheetName?: string) {
+  async function openDocAt(formId: string, sheetName?: string, code?: string) {
+    // 계획서 화면에서 서식을 눌렀으면 그 서식 시트만 탭에 보인다. 위쪽 열린 서류 탭으로 돌아와도
+    // 그 서식을 기억해 둔다.
+    if (code) focusMemo.current.set(formId, code);
+    const focusCode = code ?? focusMemo.current.get(formId);
+    setSheetFocus(focusCode ? { docId: formId, code: focusCode } : null);
     const target = forms.find((form) => form.id === formId);
     if (!target) {
       setStorageWarning("그 서류를 찾지 못했습니다(지워졌을 수 있습니다).");
@@ -1598,6 +1674,31 @@ export default function FormsPage() {
       historyRef.current.past.push({ sheet: sheetName, key: cellKey, before, after });
       // 새로 고치면 "다시하기"로 돌아갈 길은 사라진다(글쓰기 프로그램과 같은 규칙).
       historyRef.current.future = [];
+
+      /*
+       * 서식 잇기 — 6.1-3 평가표에서 "대응계획 유무: 유"인 줄을 6.1-4 대응계획서에 옮겨 쓴다(사용자 요청).
+       * 같은 서류(엑셀 한 권) 안의 대응계획서 시트에 채운다. 견본·참고 시트는 대상이 아니다.
+       */
+      const context = linkContextRef.current;
+      const code = context?.codes.get(sheetName);
+      const link = code ? SHEET_LINKS.find((item) => item.from === code) : undefined;
+      if (!context || !link) return;
+      const targets = context.sheets.filter((item) => context.codes.get(item.name) === link.to && !isSampleSheet(item));
+      const target = targets.find((item) => item.name.trim() === `QA-${link.to}`) ?? targets[0];
+      if (!target) return;
+      const lastRow =
+        target.rowCount + (context.rowInserts[target.name]?.length ?? 0) + (context.extraRows[target.name] ?? 0);
+      setValues((prev) => {
+        const result = applySheetLink(link, prev[sheetName] ?? {}, prev[target.name] ?? {}, lastRow);
+        if (result.overflow > 0) {
+          setStorageWarning(
+            `${link.label}(${target.name})에 빈 줄이 모자라 ${result.overflow}건을 옮기지 못했습니다. 그 시트에 줄을 더한 뒤 다시 고쳐 주세요.`,
+          );
+        } else if (result.changed > 0) {
+          setStorageWarning(`“유”로 적은 줄을 ${link.label}(${target.name})에 옮겨 적었습니다. 조치계획·담당자는 그 시트에서 적으세요.`);
+        }
+        return result.changed > 0 ? { ...prev, [target.name]: result.values } : prev;
+      });
     },
     [],
   );
@@ -1812,6 +1913,8 @@ export default function FormsPage() {
       setSpace("site");
       await refreshList();
       await openStored(copy.id, qmpSheet);
+      if (qmp && qmpSheet) focusMemo.current.set(copy.id, qmp.code);
+      setSheetFocus(qmp && qmpSheet ? { docId: copy.id, code: qmp.code } : null);
       scrollToViewer();
       setSaveState("saved");
       setStorageWarning(`“${target.name}” 서류함에 “${copy.title}”을(를) 만들었습니다. 여기서 작성하세요.`);
@@ -2028,6 +2131,32 @@ export default function FormsPage() {
    * [시트 추가] — 바탕 시트를 작성자가 고른다(2026-10-14 사용자 요청). 처음엔 **견본**을 골라 둔다 —
    * 직전 시트를 복사하면 지난달 내용이 그대로 딸려 온다. 어느 시트든 견본 표시("Sample")는 빠진다.
    */
+  /** [결과 올리기] — 고른 파일을 이 현장 서류(첨부)로 저장한다. 이름이 서식 번호로 시작해 그 서식에 붙는다. */
+  async function handleResultUpload(file: File, title: string) {
+    const target = writeSite;
+    setResultUpload(null);
+    if (!target) return;
+    try {
+      const bytes = await file.arrayBuffer();
+      await saveForm({ fileName: file.name, bytes, sheets: [], kind: "site", siteId: target.id, attachment: true, title });
+      await refreshList();
+      setStorageWarning(`“${title}”을(를) 올렸습니다. ${target.name} 서류함에 남고 그 서식이 작성된 것으로 셉니다.`);
+    } catch (error) {
+      setStorageWarning(error instanceof Error ? `결과를 올리지 못했습니다: ${error.message}` : "결과를 올리지 못했습니다.");
+    }
+  }
+
+  /** 고른 칸의 맞춤을 바꾼다 — 칸 값처럼 저장되고 Ctrl+Z 로 되돌린다 */
+  function changeAlign(patch: CellAlign) {
+    if (!sheet || selectedCells.length === 0) return;
+    const sheetName = sheet.name;
+    const result = setAlign(values[sheetName], selectedCells, patch);
+    if (result.changes.length === 0) return;
+    for (const [key, before, after] of result.changes) historyRef.current.past.push({ sheet: sheetName, key, before, after });
+    historyRef.current.future = [];
+    setValues((prev) => ({ ...prev, [sheetName]: { ...(prev[sheetName] ?? {}), ...Object.fromEntries(result.changes.map(([key, , after]) => [key, after])) } }));
+  }
+
   function handleAddSheet() {
     if (state.status !== "ready" || !sheet) return;
     setAddingSheet(true);
@@ -2081,9 +2210,11 @@ export default function FormsPage() {
     () => approvalOverview(siteForms, { id: user?.id, name: user?.name }, homeMinute * 60_000),
     [siteForms, user?.id, user?.name, homeMinute],
   );
+  // 서류 진척도 — 현장 서류함의 신호등과 같은 기준(품질관리계획서 서식, 작성 일정 반영)으로 센다.
+  const homeSite = sites.find((site) => site.id === siteId);
   const homeProgress = useMemo(
-    () => documentProgress(taxonomies, forms, siteId ?? ""),
-    [taxonomies, forms, siteId],
+    () => documentProgress(qmpStates(formsOfSite(forms.filter(isSiteDoc), sites, siteId), { settings: homeSite?.qmp })),
+    [forms, sites, siteId, homeSite?.qmp],
   );
   /**
    * 다른 분류의 같은 칸에만 새 판이 올라와, 이 칸이 옛 판으로 남은 곳.
@@ -2109,8 +2240,14 @@ export default function FormsPage() {
     return slots;
   }, [templates, taxonomies]);
   const homeAudit = useMemo(
-    () => sitesAudit(sites, taxonomies, forms, homeMinute * 60_000),
-    [sites, taxonomies, forms, homeMinute],
+    () =>
+      sitesAudit(
+        sites,
+        forms,
+        (site) => qmpStates(formsOfSite(forms.filter(isSiteDoc), sites, site.id), { settings: site.qmp }),
+        homeMinute * 60_000,
+      ),
+    [sites, forms, homeMinute],
   );
   // 배포 양식함에서 "작성하기"를 누를 때 사본이 들어갈 현장. 전 현장 보기였으면 첫 현장.
   const writeSite = sites.find((site) => site.id === siteId) ?? sites[0];
@@ -2174,8 +2311,23 @@ export default function FormsPage() {
    * 마지막에 아래로 더한 줄을 잇는다.
    */
   const sheet = baseSheet
-    ? withExtraRows(withMerges(withInsertedRows(baseSheet, sheetInserts), sheetMergeEdits), extraRowCount)
+    ? withAlignOverrides(
+        withExtraRows(withMerges(withInsertedRows(baseSheet, sheetInserts), sheetMergeEdits), extraRowCount),
+        values[baseSheet.name],
+      )
     : null;
+  /** 고른 범위의 칸들(맞춤 바꾸기 대상) — 합친 칸은 왼쪽 위 칸 하나로 친다 */
+  const selectedCells =
+    sheet && selection
+      ? sheet.cells.filter(
+          (cell) =>
+            !cell.hidden &&
+            cell.row >= selection.top &&
+            cell.row <= selection.bottom &&
+            cell.col >= selection.left &&
+            cell.col <= selection.right,
+        )
+      : [];
   /** 고른 범위의 왼쪽 위가 **합쳐진 칸**인가 — 그때만 [병합 해제]를 누를 수 있다. */
   const mergedAtSelection =
     !!sheet &&
@@ -2251,6 +2403,22 @@ export default function FormsPage() {
   const docSite = sites.find((site) => site.id === (openedSummary?.siteId ?? siteId));
   // 새 장을 만들 때 복사해 올 빈 양식. 없으면 지금 보는 시트를 쓴다.
   const template = state.status === "ready" ? findTemplateSheet(state.sheets) : undefined;
+  /** 탭에 보일 시트 이름(계획서 화면에서 서식을 열었을 때만). null 이면 전부 */
+  const focusNames = (() => {
+    if (state.status !== "ready" || !sheetFocus || sheetFocus.docId !== state.id) return null;
+    const names = sheetsOfCode(
+      {
+        sheetNames: state.sheets.map((item) => item.name),
+        title: state.title,
+        fileName: state.fileName,
+        sheetSources: openedSummary?.sheetSources,
+      },
+      sheetFocus.code,
+    );
+    return names.length > 0 ? new Set(names) : null;
+  })();
+  /** 집중해 보는 서식의 견본 — [시트 추가]의 바탕으로 먼저 골라 둔다 */
+  const focusTemplate = focusNames ? state.status === "ready" ? state.sheets.find((item) => focusNames.has(item.name) && isSampleSheet(item)) : undefined : undefined;
   // 고친 글자는 시트마다 따로 담긴다. 화면에는 지금 보는 시트 것만 넘긴다.
   const sheetValues = sheet ? (values[sheet.name] ?? {}) : {};
   const editedCount = Object.keys(sheetValues).length;
@@ -2270,6 +2438,21 @@ export default function FormsPage() {
   useEffect(() => {
     sheetNameRef.current = sheet?.name ?? "";
   }, [sheet]);
+  // 서식 잇기에 쓸 이 서류의 시트·서식 번호
+  linkContextRef.current =
+    state.status === "ready"
+      ? {
+          sheets: state.sheets,
+          codes: sheetCodesOf({
+            sheetNames: state.sheets.map((item) => item.name),
+            title: state.title,
+            fileName: state.fileName,
+            sheetSources: openedSummary?.sheetSources,
+          }),
+          rowInserts,
+          extraRows,
+        }
+      : null;
 
   // Ctrl+Z 되돌리기 / Ctrl+Y·Ctrl+Shift+Z 다시하기.
   useEffect(() => {
@@ -2292,7 +2475,7 @@ export default function FormsPage() {
       <SmartHeader
         brand={
           <Link href="/" title="스마트덱 도구 목록으로">
-            <BrandWordmark letters="SF" name="FORMS" caption="건설 공무관리 시스템" />
+            <BrandWordmark letters="SF" name="FORMS" caption="현장 서류 작성·이행 관리" />
           </Link>
         }
         center={
@@ -2314,14 +2497,14 @@ export default function FormsPage() {
           )
         }
         /* 넓은 화면에서는 왼쪽 메뉴가 있으니 위 탭은 좁은 화면에서만 보인다. */
-        subbar={<SpaceTabs space={space} onChange={setSpace} isHq={isHq} />}
+        subbar={<SpaceTabs space={space} onChange={setSpace} isHq={showHqTabs} />}
       />
 
       <div className="flex w-full items-start">
         <SpaceSidebar
           space={space}
           onChange={setSpace}
-          isHq={isHq}
+          isHq={showHqTabs}
           collapsed={navCollapsed}
           onToggleCollapsed={toggleNav}
         />
@@ -2394,7 +2577,7 @@ export default function FormsPage() {
         <div className="mb-6">
           {/* 본사 점검은 **서버를 직접 본다** — 다른 사람이 올린 것을 보는 일이라 브라우저 사본으로는 못 한다. */}
           {space === "review" ? (
-            <ReviewPage />
+            <ReviewPage admin={isHq} />
           ) : /* 의견은 **모든 직원**이 본다 — 본사 점검 옆에 둔다(2026-09-30 사용자 결정). */
           space === "feedback" ? (
             <FeedbackPage admin={isHq} myEmail={user?.email} />
@@ -2424,7 +2607,7 @@ export default function FormsPage() {
             )
           ) : space === "site" && !siteId ? (
             <SiteOverview
-              rows={summarizeSites(sites, siteDocs, totalSlots)}
+              rows={summarizeSites(sites, siteDocs, totalSlots, hasQmpSheet)}
               audit={homeAudit}
               onOpen={(id) => selectSite(id)}
               onAdd={() => void handleAddSite()}
@@ -2437,7 +2620,7 @@ export default function FormsPage() {
               others={templates
                 .filter((form) => !hasQmpSheet(form))
                 .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
-              onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
+              onOpen={(docId, sheetName, code) => void openDocAt(docId, sheetName, code)}
               onUpload={() => handleUpload()}
               busy={state.status === "loading"}
             />
@@ -2460,7 +2643,7 @@ export default function FormsPage() {
               others={siteForms
                 .filter((form) => !hasQmpSheet(form))
                 .map((form) => ({ id: form.id, title: form.title || form.fileName }))}
-              onOpen={(docId, sheetName) => void openDocAt(docId, sheetName)}
+              onOpen={(docId, sheetName, code) => void openDocAt(docId, sheetName, code)}
               canWrite={(code) => Boolean(templateForCode(templates, code))}
               onWrite={(code, dept, existing) => {
                 // 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 한 부 더 만들지 않고 그것을 연다.
@@ -2468,13 +2651,14 @@ export default function FormsPage() {
                   void (async () => {
                     if (existing.sheetName) await setSheetDept(existing.docId, existing.sheetName, dept);
                     await refreshList();
-                    await openDocAt(existing.docId, existing.sheetName);
+                    await openDocAt(existing.docId, existing.sheetName, code);
                   })();
                   return;
                 }
                 const template = templateForCode(templates, code);
                 if (template) void handleWrite(template.id, siteId, { code, dept });
               }}
+              onUploadResult={(code, name, periodKey, periods) => setResultUpload({ code, name, periodKey, periods })}
               onSetDept={(docId, sheetName, dept) => {
                 void setSheetDept(docId, sheetName, dept).then(() => refreshList());
               }}
@@ -2684,10 +2868,22 @@ export default function FormsPage() {
 
         {addingSheet && state.status === "ready" && (
           <AddSheetDialog
-            sheets={state.sheets.filter((item) => !item.custom).map((item) => item.name)}
-            initial={(template ?? sheet)?.name ?? ""}
+            sheets={state.sheets.filter((item) => !item.custom && (!focusNames || focusNames.has(item.name))).map((item) => item.name)}
+            initial={(focusNames ? (focusTemplate ?? sheet) : (template ?? sheet))?.name ?? ""}
             onCancel={() => setAddingSheet(false)}
             onConfirm={(source, name) => void createSheet(source, name)}
+          />
+        )}
+        {resultUpload && (
+          <ResultUploadDialog
+            code={resultUpload.code}
+            name={resultUpload.name}
+            cycle={cycleOf(resultUpload.code, writeSite?.qmp)}
+            periods={resultUpload.periods}
+            initialKey={resultUpload.periodKey}
+            link={externalLinkOf(resultUpload.code, writeSite?.qmp, writeSite?.name)}
+            onCancel={() => setResultUpload(null)}
+            onConfirm={(file, title) => void handleResultUpload(file, title)}
           />
         )}
         {slotWrite && (
@@ -3021,18 +3217,37 @@ export default function FormsPage() {
             </div>
 
             <div className="mb-4 flex flex-wrap items-center gap-2">
-              {state.sheets.map((item, index) => (
+              {focusNames && (
+                <span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-800" title="품질관리계획서 화면에서 연 서식의 시트만 보입니다">
+                  QA-{sheetFocus?.code}
+                </span>
+              )}
+              {state.sheets.map((item, index) => {
+                // 계획서 화면에서 연 서식이면 그 서식 시트만 — 지금 보고 있는 장은 늘 보인다.
+                if (focusNames && !focusNames.has(item.name) && index !== activeSheet) return null;
+                const sample = isSampleSheet(item) && index !== activeSheet;
+                return (
                 <button
                   key={item.name}
                   type="button"
-                  onClick={() => setActiveSheet(index)}
-                  title={item.custom ? "앱에서 더한 시트입니다." : "원본 엑셀의 시트입니다."}
+                  // 견본은 옮겨 가지 않고 떠 있는 창으로 띄운다 — 작성 중인 시트를 보면서 쓰게(2026-10-16 사용자 요청).
+                  onClick={() => (sample ? setSamplePeek(index) : setActiveSheet(index))}
+                  title={
+                    sample
+                      ? "견본을 떠 있는 창으로 띄웁니다. 작성 중인 시트는 그대로 두고 보면서 쓸 수 있습니다."
+                      : item.custom
+                        ? "앱에서 더한 시트입니다."
+                        : "원본 엑셀의 시트입니다."
+                  }
                   className={
                     index === activeSheet
                       ? "rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
-                      : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
+                      : sample
+                        ? "inline-flex items-center gap-1 rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
+                        : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
                   }
                 >
+                  {sample && <BookOpen size={12} aria-hidden />}
                   {item.name}
                   {/* 원본 엑셀에 없던 장은 표시해 둔다 — 이름 바꾸기·지우기가 여기에만 된다. */}
                   {item.custom && (
@@ -3041,7 +3256,8 @@ export default function FormsPage() {
                     </span>
                   )}
                 </button>
-              ))}
+                );
+              })}
 
               {!readOnly && (
               <button
@@ -3243,6 +3459,43 @@ export default function FormsPage() {
                 >
                   <TableCellsSplit size={14} /> 병합 해제
                 </button>
+                {/* 맞춤 — 엑셀 [맞춤]처럼 위·가운데·아래, 왼쪽·가운데·오른쪽 */}
+                <span className="ml-1 inline-flex items-center rounded-lg ring-1 ring-slate-300" role="group" aria-label="세로 맞춤">
+                  {ALIGN_BUTTONS.vertical.map(({ value, label, Icon }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={selectedCells.length === 0}
+                      onClick={() => changeAlign({ v: value })}
+                      title={`${label} — 고른 칸의 글자를 ${label}으로`}
+                      aria-pressed={allAligned(selectedCells, { v: value })}
+                      className={
+                        "p-1.5 transition first:rounded-l-lg last:rounded-r-lg disabled:cursor-not-allowed disabled:text-slate-300 " +
+                        (allAligned(selectedCells, { v: value }) ? "bg-slate-200 text-slate-900" : "text-slate-600 hover:bg-slate-50")
+                      }
+                    >
+                      <Icon size={14} />
+                    </button>
+                  ))}
+                </span>
+                <span className="inline-flex items-center rounded-lg ring-1 ring-slate-300" role="group" aria-label="가로 맞춤">
+                  {ALIGN_BUTTONS.horizontal.map(({ value, label, Icon }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={selectedCells.length === 0}
+                      onClick={() => changeAlign({ h: value })}
+                      title={`${label} — 고른 칸의 글자를 ${label}으로`}
+                      aria-pressed={allAligned(selectedCells, { h: value })}
+                      className={
+                        "p-1.5 transition first:rounded-l-lg last:rounded-r-lg disabled:cursor-not-allowed disabled:text-slate-300 " +
+                        (allAligned(selectedCells, { h: value }) ? "bg-slate-200 text-slate-900" : "text-slate-600 hover:bg-slate-50")
+                      }
+                    >
+                      <Icon size={14} />
+                    </button>
+                  ))}
+                </span>
                 <span>
                   {selection
                     ? `고른 범위 ${selection.bottom - selection.top + 1}줄 × ${selection.right - selection.left + 1}칸`
@@ -3251,6 +3504,18 @@ export default function FormsPage() {
               </div>
             )}
 
+            {samplePeek !== null && state.sheets[samplePeek] && isSampleSheet(state.sheets[samplePeek]) && (
+              <SamplePeek
+                key={`${state.id}:${state.sheets[samplePeek].name}`}
+                sheet={state.sheets[samplePeek]}
+                values={values[state.sheets[samplePeek].name]}
+                onClose={() => setSamplePeek(null)}
+                onGoTo={() => {
+                  setActiveSheet(samplePeek);
+                  setSamplePeek(null);
+                }}
+              />
+            )}
             <FormSheetView
               sheet={sheet}
               editable={canEdit}
@@ -3563,14 +3828,14 @@ function SiteOverview({
   onAdd,
 }: {
   rows: SiteProgress[];
-  /** 서류 진척도 — 홈과 같은 기준(배포된 서류 중 만든 종류 수)으로 센다 */
+  /** 서류 진척도 — 홈·현장 서류함과 같은 기준(품질관리계획서 서식 중 끝난 것)으로 센다 */
   audit: SiteAuditRow[];
   onOpen: (siteId: string) => void;
   onAdd: () => void;
 }) {
   const progressOf = (siteId: string) => audit.find((entry) => entry.siteId === siteId);
-  const totalMade = audit.reduce((sum, row) => sum + row.made, 0);
-  const totalDeployed = audit.reduce((sum, row) => sum + row.deployed, 0);
+  const totalDone = audit.reduce((sum, row) => sum + row.done, 0);
+  const totalCount = audit.reduce((sum, row) => sum + row.total, 0);
 
   return (
     <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -3581,13 +3846,13 @@ function SiteOverview({
             <span className="text-sm font-normal tabular-nums text-slate-500">현장 {rows.length}개</span>
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            현장을 눌러 그 현장 서류함으로 들어갑니다. 서류 진척도는 배포된 서류 중 그 현장에서 만든 서류 종류로 셉니다.
+            현장을 눌러 그 현장 서류함으로 들어갑니다. 서류 진척도는 품질관리계획서 서식 중 결재까지 끝난 것으로 셉니다(서류함과 같은 수).
           </p>
         </div>
-        {totalDeployed > 0 && (
+        {totalCount > 0 && (
           <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
-            전체 작성 <span className="tabular-nums">{totalMade}</span> /{" "}
-            <span className="tabular-nums">{totalDeployed}</span>종
+            전체 끝남 <span className="tabular-nums">{totalDone}</span> /{" "}
+            <span className="tabular-nums">{totalCount}</span>종
           </span>
         )}
         <button
@@ -3602,9 +3867,10 @@ function SiteOverview({
       <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {rows.map((row) => {
           const progress = progressOf(row.site.id);
-          const made = progress?.made ?? 0;
-          const deployed = progress?.deployed ?? 0;
-          const percent = deployed > 0 ? Math.round((made / deployed) * 100) : 0;
+          const done = progress?.done ?? 0;
+          const doing = progress?.doing ?? 0;
+          const total = progress?.total ?? 0;
+          const percent = total > 0 ? Math.round((done / total) * 100) : 0;
           return (
             <li key={row.site.id}>
               <button
@@ -3621,13 +3887,11 @@ function SiteOverview({
                   <span className="text-2xl font-bold tabular-nums text-slate-900">{percent}</span>
                   <span className="text-xs text-slate-400">%</span>
                   <span className="ml-auto text-xs tabular-nums text-slate-500">
-                    {deployed > 0 ? `${made} / ${deployed}종` : "배포된 양식 없음"}
+                    {total > 0 ? `${done} / ${total}종${doing > 0 ? ` · 작성 중 ${doing}` : ""}` : "셀 서식 없음"}
                   </span>
                 </span>
 
-                <span className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                  <span className="block h-full rounded-full bg-blue-600" style={{ width: `${percent}%` }} />
-                </span>
+                <ProgressBar done={done} doing={doing} total={total} />
 
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                   <span>
@@ -3635,7 +3899,7 @@ function SiteOverview({
                     {row.updatedAt > 0 ? new Date(row.updatedAt).toLocaleDateString("ko-KR") : "없음"}
                   </span>
                   {row.unfiled > 0 && (
-                    <span className="text-amber-700">코드 없는 서류 {row.unfiled}</span>
+                    <span className="text-amber-700">계획서 밖 서류 {row.unfiled}</span>
                   )}
                 </span>
               </button>

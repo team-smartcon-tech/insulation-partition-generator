@@ -376,6 +376,24 @@ forms.post("/sites", async (c) => {
     }
     // 같은 이름의 현장이 이미 있으면 그것을 돌려준다 — 두 개가 생기면 서류가 갈린다.
     if (res.status === 409) {
+      /*
+       * 작성 일정(착공일·주기)은 이미 있는 현장에서 정한다. 예전에는 있는 현장을 그대로 돌려줘서, 정한 작성
+       * 일정이 그 브라우저에만 남고 서버·다른 PC 에는 안 갔다(사용자 신고 — 운영에는 분기 횟수가 보이는데
+       * 다른 화면엔 안 보임). 보내 준 작성 일정은 있는 현장에 적는다. 조직·결재선은 브라우저마다 비어 있을 수
+       * 있어 여기서 덮지 않는다(빈 값으로 지워질 수 있다).
+       */
+      if (row.qmp_settings) {
+        const updated = await supabaseRest(
+          c.env,
+          "PATCH",
+          `/form_sites?name=eq.${encodeURIComponent(name)}`,
+          { qmp_settings: row.qmp_settings, updated_at: new Date().toISOString() },
+        );
+        if (updated.ok) {
+          const site = await firstRow(updated);
+          if (site) return c.json({ site, existed: true });
+        }
+      }
       const found = await supabaseRest(c.env, "GET", `/form_sites?name=eq.${encodeURIComponent(name)}&select=*`);
       return c.json({ site: await firstRow(found), existed: true });
     }

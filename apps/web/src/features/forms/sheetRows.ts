@@ -201,6 +201,13 @@ export function shiftCellKeys<T>(
 ): Record<string, T> {
   const next: Record<string, T> = {};
   for (const [key, value] of Object.entries(record ?? {})) {
+    // 칸 맞춤(`align:줄:칸`)도 그 칸을 따라 밀린다.
+    if (key.startsWith("align:")) {
+      const [rowText, colText] = key.slice("align:".length).split(":");
+      const row = Number(rowText);
+      next[Number.isFinite(row) && row >= fromRow ? `align:${row + delta}:${colText}` : key] = value;
+      continue;
+    }
     const [rowText, colText] = key.split(":");
     const row = Number(rowText);
     if (!Number.isFinite(row)) {

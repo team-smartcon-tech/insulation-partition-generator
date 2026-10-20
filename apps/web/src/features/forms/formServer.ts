@@ -71,7 +71,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       if (text) message = text.slice(0, 200);
     }
-    throw new Error(message);
+    // 몇 번 응답인지 함께 들고 간다 — 404(이미 지워짐)는 실패가 아니라 건너뛸 일이다.
+    throw Object.assign(new Error(message), { status: res.status });
   }
   return (await res.json()) as T;
 }

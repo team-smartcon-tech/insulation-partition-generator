@@ -9,13 +9,14 @@
  * - **배포 양식함**: 서식마다 회사 양식이 올라와 있는지. 빠진 것을 본사가 바로 찾는다.
  *
  * 생김새는 기존 서류함(`FormTree.tsx`)을 따른다 — 흰 카드, 서류철 탭, 왼쪽 목록, 한 줄짜리 행.
- * 부서 탭은 주관·협조를 가리지 않고 **그 부서가 쓰는 절**을 모두 보인다. 불은 서식마다 하나다
- * (누가 썼든 서류가 있으면 켜진다) — 부서마다 불을 달면 서식 한 장에 불이 셋 붙어 흐려진다.
+ * 부서 탭은 **그 부서가 주관(●)인 절만** 보이고 센다(2026-10-16 사용자 결정). 협조(○)는 주관에 내용을 주고
+ * 서류는 주관이 한 부로 쓴다 — 협조 절까지 보이고 세면 서류 하나가 세 탭에 다 잡혀 헷갈렸다. 누가 협조하는지는
+ * 절 제목 옆("주관 품질 · 협조 공무·공사")에 보인다. 불은 서식마다 하나다.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { CalendarClock, Check, ChevronDown, Download, FilePenLine, FileSpreadsheet, Search, Upload, X } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, Download, ExternalLink, FilePenLine, FileSpreadsheet, Search, Upload, X } from "lucide-react";
 import QmpSettingsDialog from "./QmpSettingsDialog";
-import { CYCLE_LABEL, PERIODIC, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
+import { CYCLE_LABEL, PERIODIC, externalLinkOf, type QmpCycle, type QmpSiteSettings } from "./qmpCycle";
 import {
   QMP_CHAPTERS,
   QMP_DEPTS,
@@ -25,7 +26,6 @@ import {
   qmpTally,
   sectionOfCode,
   writersOf,
-  writesSection,
   type QmpDept,
   type QmpFormState,
   type QmpStatus,
@@ -39,12 +39,14 @@ interface Props {
   /** 계획서 서식이 아닌 서류(시트 이름에 QA 번호가 없는 것) — 숨기지 않고 맨 아래에 모은다 */
   others: { id: string; title: string }[];
   /** 서류(또는 배포 양식)를 그 시트로 연다 */
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   /**
    * 현장 서류함: 그 서식을 쓴다 — 쓰는 부서와 함께. 이미 이 현장에 그 서식이 든 서류가 있으면
    * 그것을 열고(`existing`), 없으면 배포 양식으로 새로 만든다.
    */
   onWrite?: (code: string, dept: QmpDept, existing?: { docId: string; sheetName?: string }) => void;
+  /** 현장 서류함: 외부 작성 서식의 결과(PDF 등)를 올린다 — 주기 서식은 그 기간(`periodKey`)으로 */
+  onUploadResult?: (code: string, name: string, periodKey?: string, periods?: QmpFormState["periods"]) => void;
   /** 현장 서류함: 이미 정한 작성 부서를 바꾼다 */
   onSetDept?: (docId: string, sheetName: string, dept: QmpDept) => void;
   /** 현장 서류함: 그 서식이 든 배포 양식이 있나 */
@@ -98,6 +100,7 @@ export default function QmpBoard({
   onOpen,
   onWrite,
   onSetDept,
+  onUploadResult,
   canWrite,
   onUpload,
   importCount = 0,
@@ -135,6 +138,7 @@ export default function QmpBoard({
     else setPicking({ code, name, change: false });
   };
 
+  /** 부서 탭은 그 부서가 주관인 절만 보이고 센다(2026-10-16 사용자 결정 — 협조까지 보이면 헷갈린다). */
   const tally = (d: QmpDept | null, ch: string | null = null) => qmpTally(states, d, ch, withRefs);
   const overall = tally(null);
   /** 진행률 막대는 고른 부서 탭을 따른다 — "우리 부서는 얼마나 했나" 가 바로 보이게. */
@@ -148,7 +152,7 @@ export default function QmpBoard({
 
   const sections = useMemo(
     () =>
-      QMP_SECTIONS.filter((sec) => (!dept || writesSection(sec, dept)) && (!chapter || chapterOf(sec.no) === chapter))
+      QMP_SECTIONS.filter((sec) => (!dept || sec.lead === dept) && (!chapter || chapterOf(sec.no) === chapter))
         .map((sec) => ({
           ...sec,
           forms: sec.forms.filter((form) => {
@@ -197,7 +201,7 @@ export default function QmpBoard({
           <p className="mt-2 text-xs text-slate-500">
             {library
               ? "품질관리계획서 서식별로 회사 양식이 올라와 있는지 봅니다. 양식 엑셀의 시트 이름(QA-7.2-2 등)으로 저절로 제자리를 찾습니다."
-              : "품질관리계획서 절마다 작성 부서(첨부 QA-6.3-2)가 서류를 작성해 결재까지 마치면 초록불이 켜집니다."}
+              : "품질관리계획서 절마다 주관 부서(첨부 QA-6.3-2)가 서류를 작성해 결재까지 마치면 초록불이 켜집니다. 부서 탭에는 그 부서가 주관인 서식만 보입니다."}
           </p>
           {!library && onSaveSettings && (
             <p className="mt-1 text-xs text-slate-500">
@@ -403,7 +407,7 @@ export default function QmpBoard({
                     for (const form of sec.forms) {
                       if (!withRefs && form.reference) continue;
                       const formState = states.get(form.code);
-                      if (formState?.excluded || formState?.notYet) continue;
+                      if (formState?.excluded || formState?.notYet || formState?.uncounted) continue;
                       const status = formState?.status ?? "none";
                       if (status === "done") secTally.done += 1;
                       if (status === "doing") secTally.doing += 1;
@@ -420,7 +424,8 @@ export default function QmpBoard({
                           </span>
                           <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-normal text-blue-700">
                             {!library && !secExcluded && <Lamp status={lampOf(secTally)} size={8} />}
-                            작성 {[`${sec.lead}(주관)`, ...sec.help].join(" · ")}
+                            주관 {sec.lead}
+                            {sec.help.length > 0 && <span className="text-blue-500"> · 협조 {sec.help.join("·")}</span>}
                           </span>
                           {secExcluded && (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
@@ -443,6 +448,12 @@ export default function QmpBoard({
                                 onSetDept ? () => setPicking({ code: form.code, name: form.name, change: true }) : undefined
                               }
                               canWrite={canWrite}
+                              externalLink={externalLinkOf(form.code, settings, siteName)}
+                              onUploadResult={
+                                onUploadResult
+                                  ? (periodKey) => onUploadResult(form.code, form.name, periodKey, states.get(form.code)?.periods)
+                                  : undefined
+                              }
                             />
                           ))}
                         </ul>
@@ -602,16 +613,22 @@ function FormRow({
   onWrite,
   onChangeDept,
   canWrite,
+  externalLink,
+  onUploadResult,
 }: {
   code: string;
   name: string;
   reference: boolean;
   library: boolean;
   state: QmpFormState | undefined;
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   onWrite?: () => void;
   onChangeDept?: () => void;
   canWrite?: (code: string) => boolean;
+  /** 외부 작성 서식: 그 시스템 화면 주소 */
+  externalLink?: string;
+  /** 외부 작성 서식: 결과 올리기(주기 서식은 그 기간) */
+  onUploadResult?: (periodKey?: string) => void;
 }) {
   const status = state?.status ?? "none";
   const dim = reference && !library;
@@ -632,9 +649,10 @@ function FormRow({
   const periodic = cycle !== undefined && PERIODIC.includes(cycle);
   const periods = state?.periods;
   /** 지난 기간 가운데 비어 있는 수(지금 기간은 빼고) */
-  const missed = periods ? periods.slice(0, -1).filter((period) => period.status === "none").length : 0;
+  // 진행률에 안 세는 서식(주기 외부 작성)은 빠진 주를 빨갛게 알리지 않는다 — 올리기는 필요할 때만.
+  const missed = periods && !state?.uncounted ? periods.slice(0, -1).filter((period) => period.status === "none").length : 0;
   /** 주기 표시 — 누르면 기간별 칸이 펼쳐진다 */
-  const cycleTag = !cycle || cycle === "once" || state?.excluded || state?.notYet ? null : periodic && periods ? (
+  const cycleTag = !cycle || cycle === "once" || cycle === "external" || state?.excluded || state?.notYet ? null : periodic && periods ? (
     <button
       type="button"
       onClick={() => setOpen((on) => !on)}
@@ -664,7 +682,7 @@ function FormRow({
       {state?.docId ? (
         <button
           type="button"
-          onClick={() => onOpen(state.docId!, state.sheetName)}
+          onClick={() => onOpen(state.docId!, state.sheetName, code)}
           title={library ? `${name} — 배포 양식 열기` : `${name} — 이 현장 서류 열기`}
           className={"min-w-0 flex-1 truncate text-left hover:text-blue-700 hover:underline " + (dim || state.excluded ? "text-slate-400" : "text-slate-600")}
         >
@@ -674,6 +692,42 @@ function FormRow({
         <span className={"min-w-0 flex-1 truncate " + (dim || state?.excluded ? "text-slate-400" : "text-slate-600")}>{name}</span>
       )}
       {cycleTag}
+      {!library && state?.external && !state.excluded && (
+        <span className="inline-flex shrink-0 items-center gap-1">
+          {externalLink ? (
+            <a
+              href={externalLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={
+                state.uncounted
+                  ? "다른 사내 시스템에서 주기적으로 작성하는 서식입니다 — 눌러서 그 화면을 엽니다. 두 번 일이라 진행률에는 세지 않습니다(증빙이 필요할 때만 결과를 올리세요)."
+                  : "다른 사내 시스템에서 작성하는 서식입니다 — 눌러서 그 화면을 엽니다. 결과(PDF)를 올리면 작성된 것으로 셉니다."
+              }
+              className="inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-100"
+            >
+              외부 작성 <ExternalLink size={11} aria-hidden />
+            </a>
+          ) : (
+            <span
+              className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 ring-1 ring-indigo-200"
+              title="다른 사내 시스템에서 작성하는 서식입니다. [작성 일정]에서 그 화면 주소를 넣으면 바로 가는 링크가 생깁니다."
+            >
+              외부 작성
+            </span>
+          )}
+          {onUploadResult && (status !== "none" || periodic) && (
+            <button
+              type="button"
+              onClick={() => onUploadResult()}
+              title="그 시스템에서 뽑은 결과(PDF)를 올립니다. 올리면 그 주·그 달이 작성된 것으로 셉니다."
+              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-indigo-700 ring-1 ring-indigo-200 hover:bg-indigo-50"
+            >
+              <Upload size={11} aria-hidden /> 올리기
+            </button>
+          )}
+        </span>
+      )}
       {state?.quietDays !== undefined && (
         <span
           className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] tabular-nums text-amber-800 ring-1 ring-amber-200"
@@ -698,6 +752,9 @@ function FormRow({
         <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] text-slate-500">참고</span>
       ) : state?.excluded ? (
         <span className="shrink-0 text-xs text-slate-400">적용 제외</span>
+      ) : state?.uncounted ? (
+        // 진행률에 안 센다 — 줄이 붐비지 않게 따로 표시하지 않고, 외부 작성 표시에 마우스를 올리면 알려 준다.
+        <span className="sr-only">진행률 제외</span>
       ) : state?.notYet ? (
         <span className="shrink-0 text-xs text-slate-400" title="준공 때 쓰는 서식입니다 — 그 전에는 세지 않습니다">
           준공 때 작성
@@ -718,8 +775,19 @@ function FormRow({
         <span className="inline-flex shrink-0 items-center gap-2 text-xs">
           {deptTag}
           <Lamp status="none" />
-          {/* 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 새로 만들지 않고 그것을 연다. */}
-          {state?.docId || canWrite?.(code) ? (
+          {/* 외부 작성 서식은 그 시스템에서 쓰고 결과만 올린다. */}
+          {state?.external && onUploadResult ? (
+            periodic ? null : (
+              <button
+                type="button"
+                onClick={() => onUploadResult()}
+                className="rounded px-1.5 py-0.5 text-indigo-700 transition hover:bg-indigo-50"
+              >
+                결과 올리기
+              </button>
+            )
+          ) : /* 이미 이 현장에 그 서식이 든 서류가 있으면(전체 가져오기 등) 새로 만들지 않고 그것을 연다. */
+          state?.docId || canWrite?.(code) ? (
             <button
               type="button"
               onClick={() => onWrite?.()}
@@ -735,7 +803,14 @@ function FormRow({
         </span>
       )}
       </div>
-      {open && periods && cycle && <PeriodDots cycle={cycle} periods={periods} onOpen={onOpen} onWrite={onWrite} />}
+      {open && periods && cycle && <PeriodDots
+          cycle={cycle}
+          periods={periods}
+          onOpen={(docId, sheetName) => onOpen(docId, sheetName, code)}
+          // 외부 작성 서식은 빈 칸을 누르면 그 주·그 달 결과를 올린다.
+          onWrite={state?.external && onUploadResult ? undefined : onWrite}
+          onFill={state?.external && onUploadResult ? (periodKey) => onUploadResult(periodKey) : undefined}
+        />}
     </li>
   );
 }
@@ -746,11 +821,14 @@ function PeriodDots({
   periods,
   onOpen,
   onWrite,
+  onFill,
 }: {
   cycle: QmpCycle;
   periods: NonNullable<QmpFormState["periods"]>;
-  onOpen: (docId: string, sheetName?: string) => void;
+  onOpen: (docId: string, sheetName?: string, code?: string) => void;
   onWrite?: () => void;
+  /** 빈 기간을 눌렀을 때 그 기간으로 채운다(외부 작성 결과 올리기) */
+  onFill?: (periodKey: string) => void;
 }) {
   const years = new Map<string, typeof periods>();
   for (const period of periods) {
@@ -795,7 +873,7 @@ function PeriodDots({
                   type="button"
                   title={`${period.label} — ${label}${period.docId ? " (눌러서 열기)" : ""}`}
                   aria-label={`${period.label} ${label}`}
-                  onClick={() => (period.docId ? onOpen(period.docId, period.sheetName) : onWrite?.())}
+                  onClick={() => (period.docId ? onOpen(period.docId, period.sheetName) : onFill ? onFill(period.key) : onWrite?.())}
                   className={"h-3.5 w-3.5 rounded-full transition hover:scale-125 " + look}
                 />
               );
