@@ -69,7 +69,7 @@ import {
 } from "./sheetMerges";
 import FormGallery from "./FormGallery";
 import FormTree from "./FormTree";
-import HomeDashboard, { SitesAudit } from "./HomeDashboard";
+import HomeDashboard, { ProgressBar, SitesAudit } from "./HomeDashboard";
 import SlotWriteDialog, { type SlotWriteChoice } from "./SlotWriteDialog";
 import AddSheetDialog from "./AddSheetDialog";
 import DropUploadDialog from "./DropUploadDialog";
@@ -2210,9 +2210,11 @@ export default function FormsPage() {
     () => approvalOverview(siteForms, { id: user?.id, name: user?.name }, homeMinute * 60_000),
     [siteForms, user?.id, user?.name, homeMinute],
   );
+  // 서류 진척도 — 현장 서류함의 신호등과 같은 기준(품질관리계획서 서식, 작성 일정 반영)으로 센다.
+  const homeSite = sites.find((site) => site.id === siteId);
   const homeProgress = useMemo(
-    () => documentProgress(taxonomies, forms, siteId ?? ""),
-    [taxonomies, forms, siteId],
+    () => documentProgress(qmpStates(formsOfSite(forms.filter(isSiteDoc), sites, siteId), { settings: homeSite?.qmp })),
+    [forms, sites, siteId, homeSite?.qmp],
   );
   /**
    * 다른 분류의 같은 칸에만 새 판이 올라와, 이 칸이 옛 판으로 남은 곳.
@@ -2238,8 +2240,14 @@ export default function FormsPage() {
     return slots;
   }, [templates, taxonomies]);
   const homeAudit = useMemo(
-    () => sitesAudit(sites, taxonomies, forms, homeMinute * 60_000),
-    [sites, taxonomies, forms, homeMinute],
+    () =>
+      sitesAudit(
+        sites,
+        forms,
+        (site) => qmpStates(formsOfSite(forms.filter(isSiteDoc), sites, site.id), { settings: site.qmp }),
+        homeMinute * 60_000,
+      ),
+    [sites, forms, homeMinute],
   );
   // 배포 양식함에서 "작성하기"를 누를 때 사본이 들어갈 현장. 전 현장 보기였으면 첫 현장.
   const writeSite = sites.find((site) => site.id === siteId) ?? sites[0];
@@ -2599,7 +2607,7 @@ export default function FormsPage() {
             )
           ) : space === "site" && !siteId ? (
             <SiteOverview
-              rows={summarizeSites(sites, siteDocs, totalSlots)}
+              rows={summarizeSites(sites, siteDocs, totalSlots, hasQmpSheet)}
               audit={homeAudit}
               onOpen={(id) => selectSite(id)}
               onAdd={() => void handleAddSite()}
@@ -3820,14 +3828,14 @@ function SiteOverview({
   onAdd,
 }: {
   rows: SiteProgress[];
-  /** 서류 진척도 — 홈과 같은 기준(배포된 서류 중 만든 종류 수)으로 센다 */
+  /** 서류 진척도 — 홈·현장 서류함과 같은 기준(품질관리계획서 서식 중 끝난 것)으로 센다 */
   audit: SiteAuditRow[];
   onOpen: (siteId: string) => void;
   onAdd: () => void;
 }) {
   const progressOf = (siteId: string) => audit.find((entry) => entry.siteId === siteId);
-  const totalMade = audit.reduce((sum, row) => sum + row.made, 0);
-  const totalDeployed = audit.reduce((sum, row) => sum + row.deployed, 0);
+  const totalDone = audit.reduce((sum, row) => sum + row.done, 0);
+  const totalCount = audit.reduce((sum, row) => sum + row.total, 0);
 
   return (
     <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -3838,13 +3846,13 @@ function SiteOverview({
             <span className="text-sm font-normal tabular-nums text-slate-500">현장 {rows.length}개</span>
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            현장을 눌러 그 현장 서류함으로 들어갑니다. 서류 진척도는 배포된 서류 중 그 현장에서 만든 서류 종류로 셉니다.
+            현장을 눌러 그 현장 서류함으로 들어갑니다. 서류 진척도는 품질관리계획서 서식 중 결재까지 끝난 것으로 셉니다(서류함과 같은 수).
           </p>
         </div>
-        {totalDeployed > 0 && (
+        {totalCount > 0 && (
           <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
-            전체 작성 <span className="tabular-nums">{totalMade}</span> /{" "}
-            <span className="tabular-nums">{totalDeployed}</span>종
+            전체 끝남 <span className="tabular-nums">{totalDone}</span> /{" "}
+            <span className="tabular-nums">{totalCount}</span>종
           </span>
         )}
         <button
@@ -3859,9 +3867,10 @@ function SiteOverview({
       <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {rows.map((row) => {
           const progress = progressOf(row.site.id);
-          const made = progress?.made ?? 0;
-          const deployed = progress?.deployed ?? 0;
-          const percent = deployed > 0 ? Math.round((made / deployed) * 100) : 0;
+          const done = progress?.done ?? 0;
+          const doing = progress?.doing ?? 0;
+          const total = progress?.total ?? 0;
+          const percent = total > 0 ? Math.round((done / total) * 100) : 0;
           return (
             <li key={row.site.id}>
               <button
@@ -3878,13 +3887,11 @@ function SiteOverview({
                   <span className="text-2xl font-bold tabular-nums text-slate-900">{percent}</span>
                   <span className="text-xs text-slate-400">%</span>
                   <span className="ml-auto text-xs tabular-nums text-slate-500">
-                    {deployed > 0 ? `${made} / ${deployed}종` : "배포된 양식 없음"}
+                    {total > 0 ? `${done} / ${total}종${doing > 0 ? ` · 작성 중 ${doing}` : ""}` : "셀 서식 없음"}
                   </span>
                 </span>
 
-                <span className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                  <span className="block h-full rounded-full bg-blue-600" style={{ width: `${percent}%` }} />
-                </span>
+                <ProgressBar done={done} doing={doing} total={total} />
 
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                   <span>
@@ -3892,7 +3899,7 @@ function SiteOverview({
                     {row.updatedAt > 0 ? new Date(row.updatedAt).toLocaleDateString("ko-KR") : "없음"}
                   </span>
                   {row.unfiled > 0 && (
-                    <span className="text-amber-700">코드 없는 서류 {row.unfiled}</span>
+                    <span className="text-amber-700">계획서 밖 서류 {row.unfiled}</span>
                   )}
                 </span>
               </button>

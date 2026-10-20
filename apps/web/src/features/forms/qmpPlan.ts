@@ -616,14 +616,29 @@ export function qmpTally(
   for (const sec of QMP_SECTIONS) {
     if (dept && !(countHelp ? writesSection(sec, dept) : sec.lead === dept)) continue;
     if (chapter && chapterOf(sec.no) !== chapter) continue;
-    for (const form of sec.forms) {
-      if (form.reference && !includeReference) continue;
-      const state = states.get(form.code);
-      // 적용 제외 절, 아직 때가 아닌 준공 서식은 세지 않는다.
-      if (state?.excluded || state?.notYet || state?.uncounted) continue;
-      tally[state?.status ?? "none"] += 1;
-      tally.total += 1;
-    }
+    const part = qmpSectionTally(states, sec, includeReference);
+    tally.done += part.done;
+    tally.doing += part.doing;
+    tally.none += part.none;
+    tally.total += part.total;
+  }
+  return tally;
+}
+
+/** 절 하나의 신호등 집계 — 홈의 "진척이 낮은 절"도 이것으로 센다. */
+export function qmpSectionTally(
+  states: Map<string, QmpFormState>,
+  sec: QmpSection,
+  includeReference = false,
+): { done: number; doing: number; none: number; total: number } {
+  const tally = { done: 0, doing: 0, none: 0, total: 0 };
+  for (const form of sec.forms) {
+    if (form.reference && !includeReference) continue;
+    const state = states.get(form.code);
+    // 적용 제외 절, 아직 때가 아닌 준공 서식은 세지 않는다.
+    if (state?.excluded || state?.notYet || state?.uncounted) continue;
+    tally[state?.status ?? "none"] += 1;
+    tally.total += 1;
   }
   return tally;
 }

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 import { approvalOverview, daysSince, documentProgress, sitesAudit, turnStartedAt } from '../apps/web/src/features/forms/homeStats.ts';
 import { stampAssignedAt } from '../apps/web/src/features/forms/approvalLine.ts';
+import { qmpTally } from '../apps/web/src/features/forms/qmpPlan.ts';
 
 const DAY = 86400000;
 const NOW = 100 * DAY;
@@ -58,35 +59,41 @@ test('결재선 정한 시각: 같은 사람이면 처음 시각을 지킨다', 
   assert.deepEqual([stamped.a.assignedAt, stamped.b.assignedAt, stamped.c.assignedAt], [10, 99, 99]);
 });
 
-const taxonomy = {
-  id: 'q', division: '품질관련', fileName: 'x', conflicts: [],
-  groups: [
-    { code: '100', name: '공통', items: [{ code: '101', name: 'a' }, { code: '102', name: 'b' }, { code: '103', name: 'c' }] },
-    { code: '200', name: '교육', items: [{ code: '201', name: 'd' }, { code: '202', name: 'e' }] },
-  ],
-};
-const tpl = (code) => ({ id: `t${code}`, title: code, kind: 'template', code, taxonomyId: 'q' });
-const made = (code, siteId = 's1') => ({ id: `d${code}${siteId}`, title: code, kind: 'site', siteId, code, taxonomyId: 'q' });
+/** 서식 번호 → 신호등(현장 서류함이 매긴 것과 같은 꼴) */
+const states = (entries) => new Map(Object.entries(entries).map(([code, status]) => [code, { status }]));
+const made = (siteId) => ({ id: `d${siteId}`, title: 'x', kind: 'site', siteId });
 
-test('서류 진척도: 분모는 배포 양식이 있는 종류, 월별 여러 부는 한 종', () => {
-  const docs = [tpl('101'), tpl('102'), tpl('201'), made('101'), made('101'), made('201'), made('102', 's2')];
-  const progress = documentProgress([taxonomy], docs, 's1');
-  assert.deepEqual([progress.made, progress.deployed, progress.undeployed], [2, 3, 2], '103·202 는 배포 안 됨');
-  // 화면에 보이는 이름은 "관련"을 뗀 것이다(저장된 이름은 `품질관련` 그대로).
-  assert.deepEqual(progress.divisions.map((d) => [d.name, d.made, d.deployed]), [['품질', 2, 3]]);
-  assert.deepEqual(progress.lowGroups.map((g) => [g.code, g.made, g.deployed]), [['100', 1, 2]], '다 만든 중분류는 빠진다');
+test('서류 진척도: 현장 서류함과 같은 수 — 끝난 것만 %, 주관 부서별, 진척 낮은 절', () => {
+  const all = qmpTally(new Map(), null);
+  // 4.3(품질 주관) 1종 끝남, 4.2(공무 주관) 1종 작성 중 — PROCESS 는 기준 문서라 세지 않는다
+  const progress = documentProgress(states({ '4.3-2': 'done', '4.2-2': 'doing' }));
+  assert.deepEqual([progress.done, progress.doing, progress.total], [1, 1, all.total]);
+  assert.equal(
+    progress.depts.reduce((sum, d) => sum + d.total, 0),
+    progress.total,
+    '부서 탭(주관만)을 합치면 전체와 같다',
+  );
+  for (const d of progress.depts) assert.equal(d.total, qmpTally(new Map(), d.dept).total);
+  assert.ok(progress.lowSections.length <= 5);
+  assert.ok(progress.lowSections.every((sec) => sec.done < sec.total), '다 끝난 절은 빠진다');
+});
+
+test('서류 진척도: 적용 제외·주기 외부 작성은 세지 않는다', () => {
+  const base = documentProgress(new Map());
+  const skipped = documentProgress(new Map([['4.3-2', { status: 'none', excluded: true }], ['8.6-2', { status: 'none', uncounted: true }]]));
+  assert.equal(skipped.total, base.total - 2);
 });
 
 test('전 현장 점검표: 진척도 낮은 현장이 위, 결재 진행·멈춤·미지정 수', () => {
   const docs = [
-    tpl('101'), tpl('102'),
-    made('101'), made('102'),
-    { ...made('101', 's2'), approvalSheets: [sheet('9월', { a: signed('이상영', 'me', 90 * DAY) })] },
-    { ...made('101', 's2'), id: 'x2', approvalSheets: [sheet('9월', {}, {})] },
+    made('s1'),
+    { ...made('s2'), approvalSheets: [sheet('9월', { a: signed('이상영', 'me', 90 * DAY) })] },
+    { ...made('s2'), id: 'x2', approvalSheets: [sheet('9월', {}, {})] },
   ];
-  const rows = sitesAudit([{ id: 's1', name: '부산장안' }, { id: 's2', name: '광주선운' }], [taxonomy], docs, NOW);
-  assert.deepEqual(rows.map((r) => [r.siteName, r.made, r.deployed, r.inProgress, r.stalled, r.unassigned]), [
-    ['광주선운', 1, 2, 1, 1, 1],
-    ['부산장안', 2, 2, 0, 0, 0],
+  const byName = { s1: states({ '4.3-2': 'done', '4.3-3': 'done' }), s2: states({ '4.3-2': 'done', '4.2-2': 'doing' }) };
+  const rows = sitesAudit([{ id: 's1', name: '부산장안' }, { id: 's2', name: '광주선운' }], docs, (site) => byName[site.id], NOW);
+  assert.deepEqual(rows.map((r) => [r.siteName, r.done, r.doing, r.inProgress, r.stalled, r.unassigned]), [
+    ['광주선운', 1, 1, 1, 1, 1],
+    ['부산장안', 2, 0, 0, 0, 0],
   ]);
 });
