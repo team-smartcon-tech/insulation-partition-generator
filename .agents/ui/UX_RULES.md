@@ -2,6 +2,8 @@
 
 이 문서는 Woomi 표준 웹 서비스의 UX 상태와 사용자 흐름 기준을 정의한다.
 
+> **이 저장소 주의(insulation-partition-generator)**: 이 문서는 템플릿 표준 기준이다. 본문 규칙은 그대로 두고, 이 저장소에서는 다음을 함께 읽는다. CI(`.github/workflows/pr-checks.yml` — 이 저장소에는 없음)·Prettier·ESLint(`pnpm format:check`·`pnpm lint`)·Vitest·`pnpm test` 는 **없다**. Zustand·React Hook Form·Zod 도 **쓰지 않는다**(입력 검증은 손으로 쓴다). 프론트는 React Router v7(`app/routes/`·loader/action)이 아니라 Vite + wouter(`apps/web/src/features/*`, 라우트는 `apps/web/src/App.tsx`)다. 템플릿 샘플 컴포넌트(`SheetGrid`·공용 `Skeleton`·`version-info` 등)는 없다 — 공용 UI 는 `apps/web/src/components/` 에 실제로 있는 것만 쓴다. `packages/shared`(`@ipg/shared`)는 있지만 `src/index.ts` 한 파일에 공용 타입만 있다(`schemas/`·Zod 없음). 실제 검증 명령과 차이 목록은 [`AGENTS.md`](../../AGENTS.md) 11장, 구조는 `.agents/ARCHITECTURE.md` 7장.
+
 이 문서는 표준 제공 템플릿이다. 프로젝트에 적용할 때는 실제 사용자, 권한 구조, 주요 업무 흐름, 모바일 사용 여부, 접근성 요구사항을 확인하고 프로젝트에 맞게 수정한다. 단, loading/empty/error/permission 상태를 고려해야 한다는 기본 원칙은 유지한다.
 
 ---
@@ -157,6 +159,8 @@ empty state에는 다음 중 필요한 것을 포함한다.
 
 ## 13. Mobile
 
+- iPhone과 Galaxy의 대표 화면 비율을 참고해 세로·가로 방향을 검수한다. 최소 기준은 iPhone 19.5:9, Galaxy 19.5:9~20:9이며, 프로젝트의 실제 지원 기기가 정해지면 그 기기를 우선한다.
+- safe area, 주소창·도구막대에 따라 변하는 viewport, 화면 회전 후 레이아웃을 확인한다.
 - 주요 action은 터치하기 쉬운 크기여야 한다.
 - bottom action이나 sticky action을 사용할 때 콘텐츠를 가리지 않는다.
 - 입력 폼은 모바일 키보드에 가려지지 않게 한다.
@@ -164,7 +168,20 @@ empty state에는 다음 중 필요한 것을 포함한다.
 
 ---
 
-## 14. UX Documentation
+## 14. Selection And Bulk Actions
+
+목록·표에서 여러 행을 다루는 화면은 개별 조작만 제공하지 않는다.
+
+- 각 행에 선택 체크박스를 두고, 헤더에 전체 선택/해제 체크박스를 둔다. 일부만 선택된 상태는 indeterminate로 표시한다.
+- 선택된 항목 수를 표시하고, 선택이 있을 때 일괄 작업 툴바(일괄 수정, 일괄 삭제, 상태 일괄 변경 등)를 노출한다.
+- 여러 항목을 한 번에 만드는 흐름(일괄 등록: CSV/붙여넣기/여러 행 추가)과 여러 항목을 동시에 고치는 흐름(일괄 수정)을 함께 지원한다.
+- 일괄 작업은 실행 전 대상 건수와 변경 내용을 preview로 보여주고, §7 Destructive Actions 규칙(preview/dry-run/undo, 확인 dialog)을 따른다.
+- 선택 상태는 필터·정렬·페이지 이동 시 예측 가능하게 다룬다(페이지 이동 시 선택 유지 여부를 명확히 하거나 화면에 표시).
+- 체크박스는 공용 `Checkbox`(`app/shared/ui/checkbox.tsx`)를 쓰고, 표는 `SheetGrid`의 선택 열(`focusable:false`)로 구성한다.
+
+---
+
+## 15. UX Documentation
 
 에이전트는 반복되는 UX 패턴이나 공통 정책이 생기면 이 문서 또는 프로젝트별 UX 문서에 기록한다.
 
@@ -181,7 +198,7 @@ empty state에는 다음 중 필요한 것을 포함한다.
 
 ---
 
-## 15. AI Checklist
+## 16. AI Checklist
 
 UI 작업 후 에이전트는 작업 범위에 맞게 아래를 확인한다.
 
@@ -191,6 +208,10 @@ Empty state:
 Error state:
 Permission state:
 Mobile layout:
+Desktop 16:9 layout:
+iPhone/Galaxy viewport and safe area:
+Row selection (checkbox, select-all/indeterminate):
+Bulk create/edit and bulk-action toolbar:
 Keyboard/form behavior:
 Destructive action confirmation:
 API failure behavior:

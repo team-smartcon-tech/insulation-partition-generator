@@ -1,17 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 1) .env 계열 파일 차단 (단, .env.example / *.example 예시 파일은 허용 — 값이 없는 템플릿)
-env_files="$(git diff --cached --name-only | grep -E '(^|/)\.env($|\.)' | grep -vE '\.example$' || true)"
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+
+# 1) .env 계열 파일 차단. `.env.example` / `.env.*.example` 은 .gitignore 의
+#    `!.env.example` 과 같은 기준으로 허용한다(예시 파일은 추적하는 것이 표준이다).
+#    걸린 파일 목록을 함께 보여 준다(이 저장소에서 먼저 쓰던 출력).
+env_files="$(printf '%s\n' "$staged" | grep -E '(^|/)\.env($|\.)' | grep -vE '\.example$' || true)"
 if [ -n "$env_files" ]; then
   echo "ERROR: .env 파일은 커밋할 수 없습니다:"
   echo "$env_files"
+  echo "       예시가 필요하면 실제 값을 지우고 .env.example 로 두세요."
   exit 1
 fi
 
-# 2) 고엔트로피 시크릿 휴리스틱 (AWS, GitHub, 일반 토큰)
-if git diff --cached -U0 | grep -E '(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' >/dev/null; then
+# 2) 시크릿 휴리스틱. lockfile 과 빌드 산출물은 오탐만 만들어 제외한다.
+if git diff --cached -U0 -- . \
+    ':(exclude)pnpm-lock.yaml' ':(exclude)package-lock.json' ':(exclude)yarn.lock' \
+    ':(exclude)*build/*' ':(exclude)*dist/*' ':(exclude)*coverage/*' \
+  | grep -E '(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|sb_secret_[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' >/dev/null; then
   echo "ERROR: 시크릿으로 보이는 문자열이 감지되었습니다."
+  echo "       AWS 키, GitHub 토큰, Supabase secret key, JWT, PEM 개인키 형태를 검사합니다."
+  echo "       값을 코드에서 지우고 환경변수 또는 platform secret 으로 옮기세요."
   exit 1
 fi
 

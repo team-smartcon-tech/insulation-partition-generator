@@ -190,3 +190,54 @@ packages/
 - 도메인 간 직접 repository 호출은 금지한다.
 - shared에는 업무를 모르는 순수 공통만 둔다.
 - platform에는 서버/Worker 중심 공통 기반만 둔다.
+
+---
+
+## 7. Project Override (insulation-partition-generator)
+
+위 1~6장은 템플릿 표준이다. 이 저장소의 실제 구조는 아래와 같고(2026-10-21 코드 확인), 다르면 이 절이 이긴다(`AGENTS.md` 8장 — 실제 코드 우선).
+
+### 런타임 경계 — 4장과 같다
+
+```txt
+apps/web        Vite + React SPA (wouter)      → HTTP /api/* →  apps/worker
+apps/worker     Hono, 단일 Cloudflare Worker — SPA 정적 자산 + /api/* 를 함께 서빙
+packages/shared @ipg/shared 공용 타입(ElevState 등). web 은 features/elevation/types.ts 에서 재수출
+engine/         Python 마감 물량 엔진(finish_takeoff). 웹·Worker 와 코드를 공유하지 않는다
+```
+
+- `apps/web` 은 `apps/worker` 코드를 import 하지 않는다(주석의 경로 언급만 있음). Worker 는 다른 Worker(dcr-app)를 서비스 바인딩 `DCR_APP` 또는 `DCR_BASE_URL` HTTP 로 부른다 — 5장의 원칙과 같다.
+- 데이터 원천은 Supabase(DB + 비공개 Storage). Worker 만 service role 키로 접근하고, 브라우저는 Supabase 에 직접 붙지 않는다.
+
+### 프론트엔드 — 3장과 다르다
+
+React Router v7 Framework Mode 가 아니므로 `apps/web/app/`·`routes/`·loader/action 이 없다.
+
+```txt
+apps/web/src/
+  main.tsx, App.tsx          # 진입점, wouter <Route> 정의(URL 진입점은 여기 한 곳)
+  features/<도구>/           # 도구(기능) 단위 slice — elevation(단열 Layout)·tcRental·forms·market·takeoff·home·auth·profile
+    *Page.tsx, components/, api.ts(REST 클라), hooks.ts(react-query), types.ts, utils/
+  components/                # ui/(shadcn 방식 프리미티브) · layout/(SmartShell) · brand/
+  lib/utils.ts               # cn() 등 순수 유틸
+```
+
+- `entities/` 계층은 없다(3장의 "작은 프로젝트는 생략 가능"). 도구 사이 공유는 `components/`·`lib/`·`packages/shared` 로 한다.
+- 새 도구는 `features/home/tools.ts` 의 `TOOLS` 에 한 줄 + `features/<도구>/` + `App.tsx` 라우트(파일 머리 주석의 3단계).
+
+### 백엔드 — 2장과 다르다
+
+`domains/`·`platform/` 분리와 route/service/repository 3층이 없다. 라우트 파일 하나가 HTTP 입출력과 Supabase REST 호출을 함께 가진다.
+
+```txt
+apps/worker/src/
+  index.ts           # Hono 앱, /health, /api/auth/*, authMiddleware, /api/elevation-projects*, /api/takeoff/*, 하위 라우터 마운트
+  auth.ts            # DCR 로그인 위임, 세션 JWT(jose), authMiddleware, Env 타입
+  market.ts          # /api/market/*
+  forms.ts           # /api/forms/* (스마트폼 — 독립 이관 중)
+  sites.ts           # /api/sites (= /api/elevation-sites 별칭)
+  tcRental.ts        # /api/tc-rental-projects*
+  supabaseClient.ts  # Supabase REST/Storage fetch 헬퍼(index.ts 안에도 같은 헬퍼가 남아 있다)
+```
+
+- 실제 구조가 6장 Core Rules(route/service/repository 분리)와 다르다는 사실만 적는다. 기존 파일을 그 구조로 옮길지는 정해지지 않았다(결정 필요) — 정해지기 전에는 주변 파일 방식을 따른다.

@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-protected_branch="main"
-current_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo '')"
+# 푸시 대상 ref 를 stdin 으로 판정한다(형식: <local ref> <local sha> <remote ref> <remote sha>).
+# 현재 브랜치(HEAD)로 판정하면 두 가지가 동시에 틀린다.
+#   - main 에서 태그를 푸시하는 AGENTS.md 10장 절차가 막힌다.
+#   - feature 브랜치에서 `git push origin HEAD:main` 이 통과한다.
+blocked=""
 
-if [ "$current_branch" = "$protected_branch" ]; then
-  echo "ERROR: $protected_branch 브랜치 직접 푸시는 금지되어 있습니다. PR을 통해 병합하세요."
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      blocked="$remote_ref"
+      ;;
+  esac
+done
+
+if [ -n "$blocked" ]; then
+  echo "ERROR: $blocked 직접 푸시는 금지되어 있습니다. PR을 통해 병합하세요."
+  echo "       태그 푸시는 허용됩니다: git push origin v<표준 버전>"
   exit 1
 fi
 

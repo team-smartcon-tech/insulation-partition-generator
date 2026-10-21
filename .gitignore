@@ -34,3 +34,19 @@ engine/*.egg-info/
 # omc, graft
 .omc
 graft
+
+# --- 아래는 Woomi 코딩 에이전트 템플릿 2.27-draft 에서 가져온 줄 ---
+# 교육 원본 자료 (자체 git 저장소, 로컬 참고용)
+llm-wiki/
+
+
+# 저장소 루트를 Obsidian 볼트로 연 흔적(기계별 설정). 위키 볼트는 wiki/ 이고
+# wiki/.obsidian/graph.json 은 그래프 뷰 설정이라 추적한다.
+/.obsidian/
+
+# Claude Code가 만드는 로컬 워크트리.
+.claude/worktrees/
+
+# 템플릿의 `.omc/*`·`/graft/`·`/.ignore` 는 가져오지 않았다.
+# 위 `.omc`·`graft` 가 하위 폴더(apps/web/src/.omc 등)까지 이미 덮고,
+# `.ignore` 는 이 저장소가 추적하는 파일이다(graft 카드를 ripgrep 에 다시 여는 설정).
