@@ -39,12 +39,6 @@ graft
 # 교육 원본 자료 (자체 git 저장소, 로컬 참고용)
 llm-wiki/
 
-# opencode generated files
-.opencode/node_modules/
-.opencode/package.json
-.opencode/package-lock.json
-.opencode/bun.lock
-.opencode/dist/
 
 # 저장소 루트를 Obsidian 볼트로 연 흔적(기계별 설정). 위키 볼트는 wiki/ 이고
 # wiki/.obsidian/graph.json 은 그래프 뷰 설정이라 추적한다.
