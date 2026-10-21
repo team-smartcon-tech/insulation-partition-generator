@@ -104,7 +104,7 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 ## 게이트가 없으면 규칙이 아니라 권고다
 
-설정을 넣는 것과 강제하는 것은 다르다. 이 저장소의 PR 필수 검사는 도입 직전까지 **0개**였다 — 유일한 워크플로 `tag-version.yml` 은 `main` push 에 태그만 붙인다. 그래서 `.github/workflows/pr-checks.yml` 을 함께 넣었다: 포맷 검사 → 타입 검사 → 린트 → 테스트 → 빌드 → 훅 자체 점검.
+설정을 넣는 것과 강제하는 것은 다르다. 이 저장소의 PR 필수 검사는 도입 직전까지 **0개**였다 — 유일한 워크플로 `tag-version.yml`(이 저장소에는 없음) 은 `main` push 에 태그만 붙인다. 그래서 `.github/workflows/pr-checks.yml` 을 함께 넣었다: 포맷 검사 → 타입 검사 → 린트 → 테스트 → 빌드 → 훅 자체 점검.
 
 마지막 스텝(`agent-guard --selftest`)은 포맷·린트와 무관하지만 같은 이유로 들어갔다 — 로컬 훅이라 **CI 가 유일한 검사**다.
 

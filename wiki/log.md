@@ -20,3 +20,4 @@ tags: [wiki/log]
 - 규칙 정리본(`rules/`)·원본 기록(`sources/`)은 템플릿 것을 그대로 두었다 — 원본(`.agents/*`)이 같은 표준이고, 이 저장소의 차이는 원본 쪽 Project Override 가 가진다.
 - 남은 것: `systems/`(단열 Layout·TC 임대계획·App Market·스마트폼 화면 지식)는 아직 없다. 해당 화면을 다룰 때 만든다.
 - 같은 날 보강(리드 지시): 템플릿 전제를 주의 없이 지시하던 문서 18개(`.agents` 9·`wiki/rules` 9)에 "이 저장소 주의" 단락을 붙였다(본문 규칙은 그대로). `docs/브라우저-검증-절차.md` 를 들여오고 머리말에 실제 dev 포트(5473)·DCR 로그인을 적었다. 루트 `CHANGELOG.md` 를 제품 기준으로 새로 만들었다. `.opencode` 심볼릭 링크는 빼고 `opencode.json` 이 `.claude/skills` 를 직접 읽게 했다.
+- 같은 날 결정 반영: git 승인 경계는 템플릿 6장대로(브랜치·로컬 커밋은 사전 승인). 옛 "경로에 `secret` 이 들어간 파일 편집 차단" 훅은 `.claude/settings.json` 에 별도 훅으로 되살렸다 — 템플릿 `agent-guard.cjs` 는 값 파일만 막아 `secretStore.ts` 같은 경로가 통과했기 때문이다. `.agents/skills` 템플릿 사본과 `.userdocs/` 는 정리 보류.

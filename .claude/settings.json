@@ -30,6 +30,10 @@
           {
             "type": "command",
             "command": "node scripts/agent-guard.cjs file"
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync(0,'utf8'));const p=(i.tool_input&&i.tool_input.file_path)||'';if(/(^|[\\\\/])\\.env($|\\.)|\\.pem$|secret/i.test(p)){console.error('BLOCK: 민감 파일 수정 금지: '+p);process.exit(2);}\""
           }
         ]
       },

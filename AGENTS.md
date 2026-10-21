@@ -336,7 +336,9 @@ git tag -a v2.10-draft -m v2.10-draft && git push origin v2.10-draft
 | `CHANGELOG.md`·버전 | **바꿔 적용** — 루트 `CHANGELOG.md` 를 **제품 기준 단일 출처**로 둔다(2026-10-21 신설, 10장의 "분기한 프로젝트는 제품 버전을 따로 둔다" 형식). 규칙·문서·훅·앱 코드를 바꾸면 같은 작업에서 항목을 더한다. 템플릿 표준 번호는 머리말 "표준 버전" 에만 적는다. 태그 자동화는 위 줄대로 미도입 | 10장, `CLAUDE.md` |
 | `docs/브라우저-검증-절차.md` | **들여왔다** — 머리말 "이 저장소 주의"(CI 없음, 실제 dev 포트 5473·DCR 로그인, React Router 예시는 템플릿 기준)를 먼저 읽는다 | 7장, `.agents/code/TESTING.md` |
 | `/onboard` 명령 | **미도입** — 템플릿 샘플 앱(사이드바 이름 교체)을 전제로 한 첫 커밋 실습이다 | `CLAUDE.md` |
-| `.opencode/commands`·`.opencode/skills` 심볼릭 링크 | **미도입** — 템플릿의 링크가 작성자 PC 절대경로를 가리킨다. opencode 는 `opencode.json` `skills.paths` 로 `.claude/skills`·`.codex/skills` 를 직접 읽는다(명령은 opencode 에서 쓸 수 없다) | `opencode.json` |
+| `.opencode/commands`·`.opencode/skills` 심볼릭 링크 | **미도입** — 템플릿의 링크가 작성자 PC 절대경로를 가리킨다. Windows(`core.symlinks=false`)에서는 텍스트 파일로 풀린다. opencode 는 `opencode.json` `skills.paths` 의 `.codex/skills` 로 스킬을 읽는다(슬래시 명령은 opencode 에서 쓸 수 없다) | `opencode.json` |
+| 민감 파일 편집 차단 범위 | **보존** — 템플릿 `agent-guard.cjs file` 은 값 파일(`.env`·키·`secrets.*`)만 막는다. 이 저장소가 쓰던 "경로에 `secret` 이 들어간 파일·`.env` 계열·`*.pem` 편집 차단" 은 `.claude/settings.json` 의 Write\|Edit PreToolUse 에 **별도 훅으로 그대로** 두었다(6장 약화 금지). `agent-guard.cjs`(템플릿 공용)는 고치지 않았다 | `.claude/settings.json` |
+| `.agents/skills/` 의 템플릿 사본 6개(component-generator·db-migration·source-command-*), `.userdocs/` | **정리 보류** — 템플릿은 2.9·2.19 에서 지웠거나 `docs/` 로 합쳤지만 이 저장소는 그대로 둔다(2026-10-21 리드 결정). `.agents/skills/supabase*` 는 이 저장소가 설치한 스킬이다 | — |
 
 ### 검증 명령(실제값)
 

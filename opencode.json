@@ -15,7 +15,6 @@
   ],
   "skills": {
     "paths": [
-      ".claude/skills",
       ".codex/skills"
     ]
   },

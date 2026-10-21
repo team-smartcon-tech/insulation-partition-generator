@@ -17,6 +17,7 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 - **Woomi 코딩 에이전트 템플릿 2.0-draft → 2.27-draft 적용.** 에이전트 규칙 문서·명령(위키 4종 x Claude/Codex/Copilot)·훅(`scripts/agent-guard.cjs`, `.githooks/`)·opencode 설정·`docs/ai/`·`wiki/`·`docs/브라우저-검증-절차.md` 를 3-way 병합으로 들여왔다.
 - **들여오지 않은 것**(사용자 결정): CI(`pr-checks`·`tag-version`), Prettier·ESLint, `.nvmrc`, `/onboard`, `.opencode` 심볼릭 링크. 목록과 이유는 `AGENTS.md` 11장.
 - 이 `CHANGELOG.md` 를 제품 기준으로 새로 만들었다.
+- 민감 파일 편집 차단: 템플릿 훅(값 파일만)에 더해, 이 저장소가 쓰던 "경로에 `secret`·`.env`·`*.pem`" 차단 훅을 `.claude/settings.json` 에 그대로 남겼다.
 
 ### 추가 — 스마트폼 독립 이관 준비 (PR #58)
 
