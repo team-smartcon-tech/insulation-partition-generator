@@ -4,6 +4,10 @@
 
 배포는 코드 변경보다 위험하다. 에이전트는 사용자 승인 없이 자동 배포하지 않는다.
 
+> **이 저장소(insulation-partition-generator)**: 아래의 `format:check`·`lint`·`pnpm test`·CI(`pr-checks.yml`)는 **미도입**이다(2026-10-21 템플릿 2.27-draft 적용 때 사용자 결정). 실제로 돌리는 검증 명령은 [`AGENTS.md`](../AGENTS.md) 11장 "검증 명령(실제값)"을 따른다.
+
+> 이 저장소의 배포 정식 경로는 GitHub 연결 Workers Builds(Root `apps/worker` / Build `pnpm --filter web build` / Deploy `npx wrangler deploy`)다 — `CLAUDE.md` 0장.
+
 ---
 
 ## 1. Environments
@@ -224,8 +228,9 @@ Cron은 production과 dev/staging에서 모두 필요한지 확인한다. dev/st
 git status
 git fetch
 git status -sb
-pnpm lint
+pnpm format:check
 pnpm typecheck
+pnpm lint
 pnpm test
 pnpm build
 ```

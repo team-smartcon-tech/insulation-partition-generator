@@ -2,6 +2,8 @@
 
 이 문서는 Woomi 표준 프로젝트의 파일 위치와 layer boundary를 정의한다.
 
+> **이 저장소(insulation-partition-generator)**: 아래 `apps/web/app/*` 구조는 표준(React Router v7) 기준이다. 실제 구조(`apps/web/src/features/*`, wouter, 라우트 파일 하나에 HTTP·DB 호출이 함께 있는 Worker)는 [`.agents/ARCHITECTURE.md`](../ARCHITECTURE.md) 7장 Project Override 를 따른다.
+
 기준 레퍼런스는 CTPA의 `apps/web`, `apps/worker`, `packages/shared` 구성이다. 신규 프로젝트는 이 구조를 그대로 복사하기보다 `.agents/ARCHITECTURE.md`의 2.0 구조에 맞춰 적용한다.
 
 이 문서는 표준 제공 템플릿이다. 새 프로젝트 또는 기존 프로젝트에 적용할 때는 실제 실행 앱, 배포 단위, 프론트엔드 프레임워크 모드, 백엔드 런타임, shared package 존재 여부를 확인하고 프로젝트에 맞게 수정한다. 이미 존재하는 프로젝트의 구조를 무시하고 템플릿 구조를 기계적으로 강제하지 않는다.

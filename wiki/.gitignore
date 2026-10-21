@@ -1,0 +1,5 @@
+# 옵시디언 개인 설정은 공유하지 않는다.
+# 다만 graph.json 은 그래프 색을 팀이 같이 쓰려고 예외로 올린다.
+.obsidian/*
+!.obsidian/graph.json
+.DS_Store

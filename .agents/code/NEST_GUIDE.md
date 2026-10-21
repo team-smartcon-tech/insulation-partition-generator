@@ -8,7 +8,9 @@
 - 진입점이 `src/main.ts` + `NestFactory.create(...)`
 - 사용자 요청에 `Nest`, `NestJS` 명시
 
-## 2) Mandatory Reading Order (Nest)
+## 2) 함께 볼 문서 (Nest)
+
+읽기 범위는 `AGENTS.md` 1장을 따른다. 작은 작업에서 아래를 모두 읽지 않는다.
 
 1. `AGENTS.md`
 2. `.agents/ARCHITECTURE.md`

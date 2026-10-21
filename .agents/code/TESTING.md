@@ -2,6 +2,8 @@
 
 이 문서는 Woomi 표준 테스트와 검증 기준을 정의한다.
 
+> **이 저장소(insulation-partition-generator)**: 아래의 `format:check`·`lint`·`pnpm test`·CI(`pr-checks.yml`)는 **미도입**이다(2026-10-21 템플릿 2.27-draft 적용 때 사용자 결정). 실제로 돌리는 검증 명령은 [`AGENTS.md`](../../AGENTS.md) 11장 "검증 명령(실제값)"을 따른다.
+
 기준 레퍼런스는 CTPA의 Vitest 기반 Worker route test와 `pnpm lint/typecheck/test/build/deploy:dry` 검증 흐름이다.
 
 이 문서는 표준 제공 템플릿이다. 프로젝트에 적용할 때는 실제 test runner, E2E 도구, package script, CI 환경을 확인하고 명령과 테스트 범위를 프로젝트에 맞게 수정한다. 존재하지 않는 명령을 템플릿에 있다는 이유만으로 실행하거나 새로 만들지 않는다.
@@ -28,11 +30,17 @@
 ## 2. Standard Commands
 
 ```bash
-pnpm lint
+pnpm format:check
 pnpm typecheck
+pnpm lint
 pnpm test
 pnpm build
 ```
+
+이 다섯은 이 스캐폴드에 실제로 있고, CI(`.github/workflows/pr-checks.yml`)가 같은 순서로 돌린다.
+`pnpm lint` 는 타입 정보를 쓰는 규칙이 하나 있어 수 초~20초 걸리는 것이 정상이다.
+
+**다섯을 다 통과해도 화면에서 안 될 수 있다.** 기능(저장·편집·드래그·업로드·모드 전환)을 건드렸으면 PR 전에 브라우저에서 눌러 본다 — 절차는 템플릿의 `docs/브라우저-검증-절차.md`(이 저장소에는 들여오지 않았다). 파생 프로젝트에서 **테스트 490건이 전부 통과하는 상태로** 드래그가 잘못 동작한 사례가 있었다.
 
 Cloudflare Worker:
 
