@@ -149,9 +149,9 @@ function selftest() {
   block("pnpm build && git push", "main")
   // `+` 는 강제 갱신 refspec 이다. 떼지 않고 비교하면 `+main` 이 main 으로 보이지 않았다.
   block("git push origin +main", "feature/x")
-  block("git push origin +HEAD:main", "feature/x")
   block("git push origin +refs/heads/main", "feature/x")
   block("git push origin +HEAD", "main")
+  block("git push origin +HEAD:main", "feature/x") // 콜론 뒤만 보므로 원래도 막혔다 — 회귀 방지
 
   // 허용해야 하는 것 — 태그 푸시(AGENTS.md 10장)와 피처 브랜치
   pass("git push origin v2.7-draft", "main")
