@@ -46,7 +46,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SdMark } from "@/components/brand/BrandWordmark";
+import { ToolboxMark } from "@/components/brand/BrandWordmark";
 
 type IconType = ComponentType<{ className?: string }>;
 
@@ -337,7 +337,7 @@ export default function CadRibbon(p: CadRibbonProps) {
           borderBottom: "1px solid rgba(255,255,255,.08)",
         }}
       >
-        <SdMark className="h-7 w-7 shrink-0" />
+        <ToolboxMark className="h-7 w-7 shrink-0" />
         {/* 우미 로고 — 원본이 회색+네이비 2색이라 다크 바에서 묻힌다.
             brightness(0) invert(1) 로 흰색 실루엣으로 반전해 얹는다. */}
         <img

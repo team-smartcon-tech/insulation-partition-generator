@@ -112,7 +112,7 @@ export function alertDaysOf(code: string, settings?: QmpSiteSettings): number {
 
 /**
  * 이 현장에서 미리 알고 있는 외부 작성 주소(서식 번호 → 주소) — 설정에 없을 때 쓴다.
- * 부산장안(B1): 사용자가 알려 준 스마트우미 공정 화면. 주소의 cd7603f0… 는 스마트덱 현장 번호다.
+ * 부산장안(B1): 사용자가 알려 준 스마트우미 공정 화면. 주소의 cd7603f0… 는 스마트 툴박스(구 스마트덱) 현장 번호다.
  */
 const BUSAN_PROCESS =
   "https://sw.smartwoomi.com/process/frame/auto_cd7603f0-ed9e-4b12-a150-90813ce35d9d_%EA%B3%A8%EC%A1%B0_1774230094168";

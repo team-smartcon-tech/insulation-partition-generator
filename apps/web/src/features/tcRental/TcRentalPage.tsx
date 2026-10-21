@@ -886,7 +886,7 @@ export default function TcRentalPage() {
           </HeaderButton>
           {/*
             DB(REV 저장)가 정식 보관 경로다. 이 버튼은 파일로 빼두는 백업·공유용으로만 남긴다
-            — 스마트덱 접근 권한이 없는 사람에게 넘기거나, 저장 전에 손에 쥐고 싶을 때.
+            — 스마트 툴박스 접근 권한이 없는 사람에게 넘기거나, 저장 전에 손에 쥐고 싶을 때.
           */}
           <HeaderButton
             icon={<FileJson className="h-3.5 w-3.5" />}

@@ -2474,8 +2474,8 @@ export default function FormsPage() {
     <SmartBackground>
       <SmartHeader
         brand={
-          <Link href="/" title="스마트덱 도구 목록으로">
-            <BrandWordmark letters="SF" name="FORMS" caption="현장 서류 작성·이행 관리" />
+          <Link href="/" title="스마트 툴박스 도구 목록으로">
+            <BrandWordmark letters="SF" prefix="Smart" name="FORMS" caption="현장 서류 작성·이행 관리" />
           </Link>
         }
         center={
