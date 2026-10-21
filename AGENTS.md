@@ -129,7 +129,7 @@ Get-Content -Raw -Encoding UTF8 .agents\WORKFLOW.md
 ├── .agents/              # 에이전트 공통 규칙과 컨텍스트
 ├── .claude/              # Claude Code commands/skills/settings
 ├── .codex/               # Codex prompts/skills/hooks
-├── .opencode/            # opencode agents/skills/commands/config
+├── .opencode/            # opencode agents (commands·skills 링크는 이 저장소에는 없음 — 11장)
 ├── .github/              # Copilot prompts/instructions (workflows 없음 — CI 미도입, 11장)
 ├── .githooks/            # 로컬 git hook
 ├── docs/                 # 사람용 문서 — 이관계획·핸드오프·요구명세 · 브라우저-검증-절차.md · ai/(설계·결정·실행 계획)
@@ -154,7 +154,7 @@ Get-Content -Raw -Encoding UTF8 .agents\WORKFLOW.md
 |---|---|---|---|
 | Claude Code | `CLAUDE.md` | `.claude/commands/` | `.claude/skills/` |
 | Codex | `CODEX.md` | `.codex/prompts/` | `.codex/skills/` |
-| opencode | `opencode.json` | `.opencode/commands/` | `.opencode/skills/` |
+| opencode | `opencode.json` | `.opencode/commands/` (이 저장소에는 없음 — 11장) | `.opencode/skills/` (이 저장소에는 없음 — 11장) |
 | GitHub Copilot | `.github/copilot-instructions.md` | `.github/prompts/` | `.github/instructions/` |
 
 도구별 문서에는 공통 규칙을 숨기지 않는다. 공통 규칙은 `AGENTS.md` 또는 `.agents/*`에 반영한다.
@@ -252,6 +252,8 @@ Risk:
 
 ## 10. Versioning & Changelog
 
+> **이 저장소 주의**: 아래는 템플릿 기준이다. 이 저장소는 11장대로 **제품 버전은 루트 `CHANGELOG.md` 가 단일 출처**이고, 머리말 "표준 버전" 은 템플릿을 다시 당겨올 때만 바꾼다. `README.md` 에는 표준 버전 표기가 없어 갱신 대상이 아니다. Stop 훅(`agent-guard.cjs stop-changelog`)의 리마인더 문구("표준 버전·README 갱신")는 템플릿 공용 스크립트의 기준이라 그대로 두었다 — 이 저장소에서는 `CHANGELOG.md` 항목 추가로 읽는다.
+
 저장소의 공통 규칙, `.agents/*` 문서, `apps/*` 스캐폴드/코드, 훅에 영향을 주는 변경이 생기면 반드시 같은 작업에서 아래를 갱신한다.
 
 - 루트 `CHANGELOG.md`에 변경 항목을 추가한다.
@@ -337,7 +339,7 @@ git tag -a v2.10-draft -m v2.10-draft && git push origin v2.10-draft
 | `docs/브라우저-검증-절차.md` | **들여왔다** — 머리말 "이 저장소 주의"(CI 없음, 실제 dev 포트 5473·DCR 로그인, React Router 예시는 템플릿 기준)를 먼저 읽는다 | 7장, `.agents/code/TESTING.md` |
 | `/onboard` 명령 | **미도입** — 템플릿 샘플 앱(사이드바 이름 교체)을 전제로 한 첫 커밋 실습이다 | `CLAUDE.md` |
 | `.opencode/commands`·`.opencode/skills` 심볼릭 링크 | **미도입** — 템플릿의 링크가 작성자 PC 절대경로를 가리킨다. Windows(`core.symlinks=false`)에서는 텍스트 파일로 풀린다. opencode 는 `opencode.json` `skills.paths` 의 `.codex/skills` 로 스킬을 읽는다(슬래시 명령은 opencode 에서 쓸 수 없다) | `opencode.json` |
-| 민감 파일 편집 차단 범위 | **보존** — 템플릿 `agent-guard.cjs file` 은 값 파일(`.env`·키·`secrets.*`)만 막는다. 이 저장소가 쓰던 "경로에 `secret` 이 들어간 파일·`.env` 계열·`*.pem` 편집 차단" 은 `.claude/settings.json` 의 Write\|Edit PreToolUse 에 **별도 훅으로 그대로** 두었다(6장 약화 금지). `agent-guard.cjs`(템플릿 공용)는 고치지 않았다 | `.claude/settings.json` |
+| 민감 파일 편집 차단·`main` 푸시 차단 범위 | **보존** — 템플릿 `agent-guard.cjs file` 은 값 파일(`.env`·키·`secrets.*`)만 막는다. 이 저장소가 쓰던 "경로에 `secret` 이 들어간 파일·`.env` 계열·`*.pem` 편집 차단" 은 `.claude/settings.json` 의 Write\|Edit PreToolUse 에 **별도 훅으로 그대로** 두었다. `main` 직접 푸시 차단도 옛 정규식(`git push … main` — `+main`·`HEAD:main`·`refs/heads/main` 포함)을 Bash PreToolUse 에 별도 훅으로 남기고, 6장이 금지하는 강제 푸시(`--force*`·`-f`) 차단 훅을 더했다. 템플릿 `agent-guard.cjs bash` 는 `+main` 을 통과시킨다. **`.claude/settings.json`·`.codex/hooks.json` 모두** 같은 훅이다(6장 약화 금지). `agent-guard.cjs`(템플릿 공용)는 고치지 않았다 | `.claude/settings.json`, `.codex/hooks.json` |
 | `.agents/skills/` 의 템플릿 사본 6개(component-generator·db-migration·source-command-*), `.userdocs/` | **정리 보류** — 템플릿은 2.9·2.19 에서 지웠거나 `docs/` 로 합쳤지만 이 저장소는 그대로 둔다(2026-10-21 리드 결정). `.agents/skills/supabase*` 는 이 저장소가 설치한 스킬이다 | — |
 
 ### 검증 명령(실제값)

@@ -4,7 +4,15 @@ mode: subagent
 model: anthropic/claude-sonnet-4-6
 permission:
   edit: allow
-  bash: ask
+  bash:
+    "*": ask
+    "git commit*--no-verify*": deny
+    "git commit* -n*": deny
+    "git push*--no-verify*": deny
+    "git push*--force*": deny
+    "git push* -f*": deny
+    "git reset*--hard*": deny
+    "supabase db reset*": deny
 ---
 
 Woomi 프로젝트의 작업 계획 및 리뷰 전담 에이전트다.

@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "node scripts/agent-guard.cjs file"
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync(0,'utf8'));const p=(i.tool_input&&i.tool_input.file_path)||'';if(/(^|[\\\\/])\\.env($|\\.)|\\.pem$|secret/i.test(p)){console.error('BLOCK: 민감 파일 수정 금지: '+p);process.exit(2);}\""
           }
         ]
       },
@@ -16,6 +20,14 @@
           {
             "type": "command",
             "command": "node scripts/agent-guard.cjs bash"
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync(0,'utf8'));const c=(i.tool_input&&i.tool_input.command)||'';if(/git\\s+push[^|&;]*\\bmain\\b/.test(c)){console.error('BLOCK: main 브랜치 직접 푸시 금지');process.exit(2);}\""
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync(0,'utf8'));const c=(i.tool_input&&i.tool_input.command)||'';if(/git\\s+push[^|&;]*\\s(--force\\S*|-[A-Za-z]*f[A-Za-z]*)(\\s|$)/.test(c)){console.error('BLOCK: 강제 푸시(--force/-f) 금지 — 사용자 승인이 필요합니다. (AGENTS.md 6장)');process.exit(2);}\""
           }
         ]
       }
