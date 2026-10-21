@@ -10,15 +10,26 @@ permission:
     "git diff*": allow
     "git log*": allow
     "git show*": allow
-    "git add*": allow
+    "git branch --show-current": allow
+    "git branch --list*": allow
+    "git remote -v": allow
+    "git rev-parse*": allow
     "git switch -c*": allow
+    "git add*": allow
     "git commit*": allow
-    "pnpm *": allow
-    "pnpm exec *": ask
-    "pnpm dlx *": ask
+    "git config core.hooksPath*": ask
+    "git config core.hooksPath .githooks": allow
+    "pnpm -r typecheck": allow
+    "pnpm --filter web build": allow
+    "node --experimental-strip-types --no-warnings --test tests/*": allow
+    "node scripts/agent-guard.cjs*": allow
     "git commit*--no-verify*": deny
+    "git commit* -n*": deny
+    "git push*--no-verify*": deny
     "git push*--force*": deny
+    "git push* -f*": deny
     "git reset*--hard*": deny
+    "supabase db reset*": deny
 ---
 
 Woomi 표준 웹 서비스 프로젝트의 기본 에이전트다.

@@ -6,11 +6,18 @@ permission:
   edit: allow
   bash:
     "*": ask
-    "pnpm *": allow
-    "pnpm exec *": ask
-    "pnpm dlx *": ask
+    "pnpm -r typecheck": allow
+    "pnpm --filter web build": allow
+    "node --experimental-strip-types --no-warnings --test tests/*": allow
+    "node scripts/agent-guard.cjs*": allow
     "pnpm --filter worker run deploy:dry": allow
-    "wrangler deploy --dry-run*": allow
+    "git commit*--no-verify*": deny
+    "git commit* -n*": deny
+    "git push*--no-verify*": deny
+    "git push*--force*": deny
+    "git push* -f*": deny
+    "git reset*--hard*": deny
+    "supabase db reset*": deny
 ---
 
 Woomi 프로젝트의 빌드 및 배포 전담 에이전트다.
