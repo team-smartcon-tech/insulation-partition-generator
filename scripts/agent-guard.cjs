@@ -78,7 +78,8 @@ function blockedBash(input, branch) {
       .split(/\s+/)
       .filter((t) => t && !t.startsWith("-"))
       .slice(1)
-    const dst = refs.map((r) => r.split(":").pop())
+    // 앞의 `+` 는 강제 갱신 표시라 떼고 본다 — `+main` 도 main 대상 푸시다.
+    const dst = refs.map((r) => r.replace(/^\+/, "").split(":").pop())
     if (dst.some((d) => PROTECTED.test(d))) return "main 브랜치 직접 푸시"
     // ref 를 안 적었거나 HEAD 면 현재 브랜치로 판정한다. 명시한 ref 가 main 이 아니면
     // (태그·피처 브랜치) 통과 — AGENTS.md 10장의 `git push origin v<버전>` 이 여기 걸리면 안 된다.
@@ -146,6 +147,11 @@ function selftest() {
   block("git push origin :main", "feature/x")
   block("git push --all", "feature/x")
   block("pnpm build && git push", "main")
+  // `+` 는 강제 갱신 refspec 이다. 떼지 않고 비교하면 `+main` 이 main 으로 보이지 않았다.
+  block("git push origin +main", "feature/x")
+  block("git push origin +HEAD:main", "feature/x")
+  block("git push origin +refs/heads/main", "feature/x")
+  block("git push origin +HEAD", "main")
 
   // 허용해야 하는 것 — 태그 푸시(AGENTS.md 10장)와 피처 브랜치
   pass("git push origin v2.7-draft", "main")
