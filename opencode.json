@@ -15,7 +15,7 @@
   ],
   "skills": {
     "paths": [
-      ".opencode/skills",
+      ".claude/skills",
       ".codex/skills"
     ]
   },
@@ -66,11 +66,11 @@
     },
     "claude-commands": {
       "path": ".claude/commands",
-      "description": "Claude Code 명령 (opencode에서 심볼릭 링크로 참조)"
+      "description": "Claude Code 명령 (참고용 — opencode 명령 링크는 두지 않았다)"
     },
     "codex-prompts": {
       "path": ".codex/prompts",
-      "description": "Codex 프롬프트 (opencode에서 심볼릭 링크로 참조)"
+      "description": "Codex 프롬프트 (참고용)"
     }
   },
   "agent": {

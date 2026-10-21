@@ -27,6 +27,7 @@ Woomi 프로젝트의 빌드 및 배포 전담 에이전트다.
 - 배포 전에는 반드시 `pnpm --filter worker run deploy:dry`를 실행한다.
 - Cloudflare Worker 배포 전 프로젝트별 dry-run 명령을 우선한다.
 - 사용자 승인 없는 production 배포를 하지 않는다.
-- 이 저장소에는 `.github/workflows/` 가 없다. 배포 정식 경로는 GitHub 연결 Workers Builds 다(`CLAUDE.md` 0장).
+- `.github/workflows/` 가 있는 경우 확인하여 CI/CD 흐름을 파악한다(이 저장소에는 없음 — 배포 정식 경로는 GitHub 연결 Workers Builds, `CLAUDE.md` 0장).
+- 빌드 확인: `pnpm -r typecheck`, `pnpm --filter web build`.
 - `wrangler.toml` 또는 `wrangler.jsonc`의 설정을 정확히 확인한다.
 - Secret은 환경변수 또는 platform secret으로 관리한다.

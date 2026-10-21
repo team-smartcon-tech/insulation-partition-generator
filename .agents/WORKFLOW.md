@@ -2,7 +2,7 @@
 
 이 문서는 Woomi 신규 프로젝트에서 AI 에이전트와 개발자가 작업을 진행하는 표준 흐름을 정의한다.
 
-> **이 저장소(insulation-partition-generator)**: 아래의 `format:check`·`lint`·`pnpm test`·CI(`pr-checks.yml`)는 **미도입**이다(2026-10-21 템플릿 2.27-draft 적용 때 사용자 결정). 실제로 돌리는 검증 명령은 [`AGENTS.md`](../AGENTS.md) 11장 "검증 명령(실제값)"을 따른다.
+> **이 저장소 주의(insulation-partition-generator)**: 이 문서는 템플릿 표준 기준이다. 본문 규칙은 그대로 두고, 이 저장소에서는 다음을 함께 읽는다. CI(`.github/workflows/pr-checks.yml` — 이 저장소에는 없음)·Prettier·ESLint(`pnpm format:check`·`pnpm lint`)·Vitest·`pnpm test` 는 **없다**. Zustand·React Hook Form·Zod 도 **쓰지 않는다**(입력 검증은 손으로 쓴다). 프론트는 React Router v7(`app/routes/`·loader/action)이 아니라 Vite + wouter(`apps/web/src/features/*`, 라우트는 `apps/web/src/App.tsx`)다. 템플릿 샘플 컴포넌트(`SheetGrid`·공용 `Skeleton`·`version-info` 등)는 없다 — 공용 UI 는 `apps/web/src/components/` 에 실제로 있는 것만 쓴다. `packages/shared`(`@ipg/shared`)는 있지만 `src/index.ts` 한 파일에 공용 타입만 있다(`schemas/`·Zod 없음). 실제 검증 명령과 차이 목록은 [`AGENTS.md`](../AGENTS.md) 11장, 구조는 `.agents/ARCHITECTURE.md` 7장.
 
 `AGENTS.md`는 진입 규칙과 작업 라우팅을 담당한다. 이 문서는 **절차가 중요한 작업의 순서와 검증 방법**을 담당한다.
 

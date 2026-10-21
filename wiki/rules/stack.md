@@ -1,6 +1,6 @@
 ---
 type: rule
-updated: 2026-09-13
+updated: 2026-10-21
 tags: [area/아키텍처]
 ---
 
@@ -8,13 +8,15 @@ tags: [area/아키텍처]
 
 Woomi 신규 프로젝트의 표준 기술 선택. 스택을 바꾸려면 사유와 영향 범위를 문서화하고 합의 후 반영한다.
 
+> **이 저장소 주의(insulation-partition-generator)**: 이 문서는 템플릿 표준 기준이다. 본문 규칙은 그대로 두고, 이 저장소에서는 다음을 함께 읽는다. CI(`.github/workflows/pr-checks.yml` — 이 저장소에는 없음)·Prettier·ESLint(`pnpm format:check`·`pnpm lint`)·Vitest·`pnpm test` 는 **없다**. Zustand·React Hook Form·Zod 도 **쓰지 않는다**(입력 검증은 손으로 쓴다). 프론트는 React Router v7(`app/routes/`·loader/action)이 아니라 Vite + wouter(`apps/web/src/features/*`, 라우트는 `apps/web/src/App.tsx`)다. 템플릿 샘플 컴포넌트(`SheetGrid`·공용 `Skeleton`·`version-info` 등)는 없다 — 공용 UI 는 `apps/web/src/components/` 에 실제로 있는 것만 쓴다. `packages/shared`(`@ipg/shared`)는 있지만 `src/index.ts` 한 파일에 공용 타입만 있다(`schemas/`·Zod 없음). 실제 검증 명령과 차이 목록은 [`AGENTS.md`](../../AGENTS.md) 11장, 구조는 `.agents/ARCHITECTURE.md` 7장.
+
 ## 표준 스택
 
 - **프론트엔드** — React, React Router v7 Framework Mode, TypeScript, TanStack Query, Zustand, React Hook Form, Zod. 기본 프레임워크는 `React + Vite`가 아니라 React Router v7 Framework Mode다.
 - **백엔드** — Cloudflare Workers(또는 Pages Functions), Hono, TypeScript strict, Zod, Supabase JS.
 - **데이터베이스** — Supabase PostgreSQL, PostgreSQL function/RPC.
 - **스토리지/인프라** — Cloudflare R2 또는 Supabase Storage, Cron Triggers 또는 Queue, Wrangler.
-- **툴링** — pnpm workspace, TypeScript project references, Vitest, **Prettier**, **ESLint 9**, GitHub Actions(`pr-checks.yml`·`tag-version.yml`). 2.18-draft 에서 포맷·린트가 표준이 됐다 — 그 전 규칙이던 "strict 타입 검사로 커버되면 굳이 추가하지 않는다" 는 **근거가 틀렸다**(타입 검사가 못 잡는 버그가 스캐폴드에 실제로 있었다). 값과 근거는 [포맷과 린트 기준](formatting-and-linting.md). Wrangler는 여전히 **프로젝트에서 도입한 경우에만**.
+- **툴링** — pnpm workspace, TypeScript project references, Vitest, **Prettier**, **ESLint 9**, GitHub Actions(`pr-checks.yml`·`tag-version.yml` (이 저장소에는 없음)). 2.18-draft 에서 포맷·린트가 표준이 됐다 — 그 전 규칙이던 "strict 타입 검사로 커버되면 굳이 추가하지 않는다" 는 **근거가 틀렸다**(타입 검사가 못 잡는 버그가 스캐폴드에 실제로 있었다). 값과 근거는 [포맷과 린트 기준](formatting-and-linting.md). Wrangler는 여전히 **프로젝트에서 도입한 경우에만**.
 
 ## 상태·데이터 역할 분담
 

@@ -17,7 +17,7 @@ Claude Code 전용 보충 규칙. 공통 규칙의 1차 소스는 [`AGENTS.md`](
 ```bash
 pnpm install
 cp apps/worker/.dev.vars.example apps/worker/.dev.vars   # 로컬 시크릿(로그인/저장) — 값 채우기
-pnpm dev                     # worker(9887)+web(5173) 동시 기동. http://localhost:5173
+pnpm dev                     # worker(9887)+web(5473) 동시 기동. http://localhost:5473
 pnpm dev:web / pnpm dev:worker   # 개별 실행
 pnpm --filter web build      # 프로덕션 빌드(타입체크 포함)
 pnpm -r typecheck
@@ -99,4 +99,4 @@ git config core.hooksPath .githooks
 
 ## 규칙을 바꿀 때
 
-공통으로 적용될 규칙은 이 문서가 아니라 `AGENTS.md`·`.agents/*`에 반영한다. 그래야 Claude Code, Codex, Copilot이 같은 기준으로 일한다. 버전·변경 기록은 `AGENTS.md` §10 과 §11 Project Override 를 따른다(이 저장소에는 `CHANGELOG.md` 가 아직 없다).
+공통으로 적용될 규칙은 이 문서가 아니라 `AGENTS.md`·`.agents/*`에 반영한다. 그래야 Claude Code, Codex, Copilot이 같은 기준으로 일한다. 버전·변경 기록은 `AGENTS.md` §10 과 §11 Project Override 를 따른다 — 루트 `CHANGELOG.md` 가 제품 변경 기록의 단일 출처다.

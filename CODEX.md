@@ -108,4 +108,4 @@ Codex 전용 규칙만 바꾸지 않는다.
 
 그래야 Claude Code, Codex, GitHub Copilot이 같은 기준으로 작업한다.
 
-저장소의 규칙·문서·스캐폴드·훅을 바꾸면 같은 작업에서 `CHANGELOG.md`에 항목을 추가하고 `AGENTS.md`·`README.md`의 표준 버전과 최종 수정일을 갱신한다. 기준은 `AGENTS.md` 10장(Versioning & Changelog)을 따른다. 이 저장소에는 `CHANGELOG.md` 가 아직 없다(`AGENTS.md` 11장).
+저장소의 규칙·문서·스캐폴드·훅을 바꾸면 같은 작업에서 `CHANGELOG.md`에 항목을 추가하고 `AGENTS.md`·`README.md`의 표준 버전과 최종 수정일을 갱신한다. 기준은 `AGENTS.md` 10장(Versioning & Changelog)을 따른다. 이 저장소의 `CHANGELOG.md` 는 제품 기준이다(`AGENTS.md` 11장).

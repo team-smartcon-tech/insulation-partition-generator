@@ -100,7 +100,7 @@ strict mode는 타입을 복잡하게 만들라는 뜻이 아니다. 제품 코�
 - Vitest
 - **Prettier** (`.prettierrc.json`, `.prettierignore`)
 - **ESLint 9 flat config** (`eslint.config.mjs`)
-- GitHub Actions — `pr-checks.yml`(필수 검사), `tag-version.yml`(태그)
+- GitHub Actions — `pr-checks.yml`(필수 검사), `tag-version.yml`(태그) (이 저장소에는 없음)
 
 아래는 **프로젝트에서 도입한 경우에만** 기준으로 삼는다.
 

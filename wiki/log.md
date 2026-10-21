@@ -19,3 +19,4 @@ tags: [wiki/log]
 - 정한 것과 이유: CI(`pr-checks`·`tag-version`)·Prettier·ESLint·`.nvmrc`·`CHANGELOG.md` 는 **들여오지 않았다**(사용자 결정). 템플릿 문서가 이것들을 전제로 한 곳은 지우지 않고 `AGENTS.md` 11장 "들여오지 않은 것" 표로 "미도입" 을 표시했다.
 - 규칙 정리본(`rules/`)·원본 기록(`sources/`)은 템플릿 것을 그대로 두었다 — 원본(`.agents/*`)이 같은 표준이고, 이 저장소의 차이는 원본 쪽 Project Override 가 가진다.
 - 남은 것: `systems/`(단열 Layout·TC 임대계획·App Market·스마트폼 화면 지식)는 아직 없다. 해당 화면을 다룰 때 만든다.
+- 같은 날 보강(리드 지시): 템플릿 전제를 주의 없이 지시하던 문서 18개(`.agents` 9·`wiki/rules` 9)에 "이 저장소 주의" 단락을 붙였다(본문 규칙은 그대로). `docs/브라우저-검증-절차.md` 를 들여오고 머리말에 실제 dev 포트(5473)·DCR 로그인을 적었다. 루트 `CHANGELOG.md` 를 제품 기준으로 새로 만들었다. `.opencode` 심볼릭 링크는 빼고 `opencode.json` 이 `.claude/skills` 를 직접 읽게 했다.

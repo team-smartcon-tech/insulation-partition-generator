@@ -2,7 +2,7 @@
 
 이 문서는 Woomi 표준 테스트와 검증 기준을 정의한다.
 
-> **이 저장소(insulation-partition-generator)**: 아래의 `format:check`·`lint`·`pnpm test`·CI(`pr-checks.yml`)는 **미도입**이다(2026-10-21 템플릿 2.27-draft 적용 때 사용자 결정). 실제로 돌리는 검증 명령은 [`AGENTS.md`](../../AGENTS.md) 11장 "검증 명령(실제값)"을 따른다.
+> **이 저장소 주의(insulation-partition-generator)**: 이 문서는 템플릿 표준 기준이다. 본문 규칙은 그대로 두고, 이 저장소에서는 다음을 함께 읽는다. CI(`.github/workflows/pr-checks.yml` — 이 저장소에는 없음)·Prettier·ESLint(`pnpm format:check`·`pnpm lint`)·Vitest·`pnpm test` 는 **없다**. Zustand·React Hook Form·Zod 도 **쓰지 않는다**(입력 검증은 손으로 쓴다). 프론트는 React Router v7(`app/routes/`·loader/action)이 아니라 Vite + wouter(`apps/web/src/features/*`, 라우트는 `apps/web/src/App.tsx`)다. 템플릿 샘플 컴포넌트(`SheetGrid`·공용 `Skeleton`·`version-info` 등)는 없다 — 공용 UI 는 `apps/web/src/components/` 에 실제로 있는 것만 쓴다. `packages/shared`(`@ipg/shared`)는 있지만 `src/index.ts` 한 파일에 공용 타입만 있다(`schemas/`·Zod 없음). 실제 검증 명령과 차이 목록은 [`AGENTS.md`](../../AGENTS.md) 11장, 구조는 `.agents/ARCHITECTURE.md` 7장.
 
 기준 레퍼런스는 CTPA의 Vitest 기반 Worker route test와 `pnpm lint/typecheck/test/build/deploy:dry` 검증 흐름이다.
 
@@ -37,10 +37,10 @@ pnpm test
 pnpm build
 ```
 
-이 다섯은 이 스캐폴드에 실제로 있고, CI(`.github/workflows/pr-checks.yml`)가 같은 순서로 돌린다.
+이 다섯은 이 스캐폴드에 실제로 있고, CI(`.github/workflows/pr-checks.yml` (이 저장소에는 없음))가 같은 순서로 돌린다.
 `pnpm lint` 는 타입 정보를 쓰는 규칙이 하나 있어 수 초~20초 걸리는 것이 정상이다.
 
-**다섯을 다 통과해도 화면에서 안 될 수 있다.** 기능(저장·편집·드래그·업로드·모드 전환)을 건드렸으면 PR 전에 브라우저에서 눌러 본다 — 절차는 템플릿의 `docs/브라우저-검증-절차.md`(이 저장소에는 들여오지 않았다). 파생 프로젝트에서 **테스트 490건이 전부 통과하는 상태로** 드래그가 잘못 동작한 사례가 있었다.
+**다섯을 다 통과해도 화면에서 안 될 수 있다.** 기능(저장·편집·드래그·업로드·모드 전환)을 건드렸으면 PR 전에 브라우저에서 눌러 본다 — 절차는 [`docs/브라우저-검증-절차.md`](../../docs/브라우저-검증-절차.md)(머리말의 "이 저장소 주의" 먼저). 파생 프로젝트에서 **테스트 490건이 전부 통과하는 상태로** 드래그가 잘못 동작한 사례가 있었다.
 
 Cloudflare Worker:
 

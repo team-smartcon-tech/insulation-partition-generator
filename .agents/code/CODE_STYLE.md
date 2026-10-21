@@ -2,6 +2,8 @@
 
 이 문서는 Woomi 표준 TypeScript 코드 작성 기준을 정의한다.
 
+> **이 저장소 주의(insulation-partition-generator)**: 이 문서는 템플릿 표준 기준이다. 본문 규칙은 그대로 두고, 이 저장소에서는 다음을 함께 읽는다. CI(`.github/workflows/pr-checks.yml` — 이 저장소에는 없음)·Prettier·ESLint(`pnpm format:check`·`pnpm lint`)·Vitest·`pnpm test` 는 **없다**. Zustand·React Hook Form·Zod 도 **쓰지 않는다**(입력 검증은 손으로 쓴다). 프론트는 React Router v7(`app/routes/`·loader/action)이 아니라 Vite + wouter(`apps/web/src/features/*`, 라우트는 `apps/web/src/App.tsx`)다. 템플릿 샘플 컴포넌트(`SheetGrid`·공용 `Skeleton`·`version-info` 등)는 없다 — 공용 UI 는 `apps/web/src/components/` 에 실제로 있는 것만 쓴다. `packages/shared`(`@ipg/shared`)는 있지만 `src/index.ts` 한 파일에 공용 타입만 있다(`schemas/`·Zod 없음). 실제 검증 명령과 차이 목록은 [`AGENTS.md`](../../AGENTS.md) 11장, 구조는 `.agents/ARCHITECTURE.md` 7장.
+
 기준 레퍼런스는 CTPA의 Hono Worker, Supabase repository, response/error helper, React frontend 구성이다. 신규 프로젝트는 `.agents/ARCHITECTURE.md`의 2.0 구조를 우선한다.
 
 이 문서는 표준 제공 템플릿이다. 프로젝트에 이미 확정된 formatter, lint rule, import style, component library, backend framework 규칙이 있으면 먼저 확인하고 이 문서를 프로젝트 기준에 맞게 수정한다. 단, 보안, secret, 데이터 손실 방지 규칙은 완화하지 않는다.

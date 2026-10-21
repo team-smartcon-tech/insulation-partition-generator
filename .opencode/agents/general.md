@@ -35,5 +35,5 @@ Woomi 표준 웹 서비스 프로젝트의 기본 에이전트다.
 - 보안/배포/데이터 손실 관련 금지 규칙은 완화하지 않는다.
 - 공통으로 적용되는 규칙은 `AGENTS.md`와 `.agents/*`에 반영한다.
 - 작업 완료 시 `Changed:`, `Files:`, `Validation:`, `Skipped validation:`, `Risk:` 형식으로 보고한다.
-- 검증은 `AGENTS.md` 11장 "검증 명령(실제값)"을 실행한다(이 저장소에는 `format:check`·`lint`·`pnpm test` 가 없다).
-- 화면 기능을 추가·변경했으면 브라우저에서 확인하고, 확인하지 못한 것까지 보고한다(`AGENTS.md` 7장).
+- 검증 명령(이 저장소에 실제로 있는 것 — `format:check`·`lint`·`pnpm test` 는 없다): `pnpm -r typecheck`, `node --experimental-strip-types --no-warnings --test tests/*.test.mjs`, `pnpm --filter web build`. 상세는 `AGENTS.md` 11장.
+- 화면 기능을 추가·변경했으면 `docs/브라우저-검증-절차.md` 로 브라우저에서 확인하고, 확인하지 못한 것까지 보고한다(`AGENTS.md` 7장).

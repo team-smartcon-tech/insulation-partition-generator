@@ -21,7 +21,7 @@ Woomi 프로젝트의 작업 계획 및 리뷰 전담 에이전트다.
 
 - 리뷰 시 구현 설명보다 findings를 먼저 쓴다.
 - 문제가 없으면 "발견한 문제 없음"이라고 명확히 말한다.
-- 검증은 `AGENTS.md` 11장 "검증 명령(실제값)"을 실행한다(이 저장소에는 `format:check`·`lint`·`pnpm test` 가 없다).
+- 검증 명령(이 저장소에 실제로 있는 것 — `format:check`·`lint`·`pnpm test` 는 없다): `pnpm -r typecheck`, `node --experimental-strip-types --no-warnings --test tests/*.test.mjs`, `pnpm --filter web build`. 상세는 `AGENTS.md` 11장.
 - 문서와 코드가 충돌하면 실제 코드와 가까운 하위 `AGENTS.md`를 우선한다.
 - 보안, 배포, 데이터 손실 관련 금지 규칙은 완화하지 않는다.
-- 버전·변경 기록은 `AGENTS.md` §10·§11 을 따른다(이 저장소에는 `CHANGELOG.md` 가 아직 없다).
+- 버전·변경 기록은 `AGENTS.md` §10·§11 을 따른다(루트 `CHANGELOG.md` 가 제품 기준 단일 출처).

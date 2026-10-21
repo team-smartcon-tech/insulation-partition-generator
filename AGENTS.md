@@ -4,7 +4,8 @@ Woomi 표준 웹 서비스 프로젝트에서 모든 AI 에이전트가 먼저 �
 
 이 문서는 길게 구현 방법을 설명하지 않는다. 작업 유형을 분류하고, 필요한 `.agents/*` 문서로 라우팅하며, 보안/배포/데이터 손실 같은 절대 금지 규칙만 직접 가진다.
 
-- 표준 버전: `2.27-draft` (기반 템플릿 표준. 이 저장소의 제품 버전은 따로 두지 않았다 — 11장)
+- 표준 버전: `2.27-draft` (기반 템플릿 표준 — 템플릿을 다시 당겨올 때만 바꾼다)
+- 제품 버전: 루트 [`CHANGELOG.md`](./CHANGELOG.md) 최상단이 단일 출처 (10장 · 11장)
 - 최종 수정일: 2026-10-21
 - 기준 레퍼런스: CTPA Hono Worker layered architecture
 - 1차 원칙: 실제 코드와 가장 가까운 프로젝트 문서가 우선한다. 단, 보안/배포/데이터 손실 금지 규칙은 완화할 수 없다.
@@ -131,12 +132,13 @@ Get-Content -Raw -Encoding UTF8 .agents\WORKFLOW.md
 ├── .opencode/            # opencode agents/skills/commands/config
 ├── .github/              # Copilot prompts/instructions (workflows 없음 — CI 미도입, 11장)
 ├── .githooks/            # 로컬 git hook
-├── docs/                 # 사람용 문서 — 이관계획·핸드오프·요구명세 · ai/(설계·결정·실행 계획)
+├── docs/                 # 사람용 문서 — 이관계획·핸드오프·요구명세 · 브라우저-검증-절차.md · ai/(설계·결정·실행 계획)
 ├── .userdocs/            # 템플릿 2.0 시절 설계 기록(템플릿은 2.19 에서 docs/ 로 합쳤다 — 이 저장소는 아직 옮기지 않음)
 ├── wiki/                 # 팀 지식 위키 (rules·sources / systems·patterns 는 생기면 / Obsidian 볼트 겸용)
 ├── scripts/              # 반복 자동화
 ├── supabase/             # migrations/ (전용 프로젝트 `yzercziwazfrjsjnmbhr` 에만 적용)
 ├── AGENTS.md
+├── CHANGELOG.md          # 제품 변경 기록(단일 출처)
 ├── CLAUDE.md
 ├── CODEX.md
 └── README.md
@@ -202,9 +204,9 @@ pnpm test
 pnpm build
 ```
 
-템플릿 스캐폴드는 위 다섯을 모두 제공하고 CI(`pr-checks.yml`)로 막는다. **이 저장소에는 아직 없다** — 실제로 돌릴 수 있는 명령은 11장 "검증 명령(실제값)"을 따른다. 없는 명령을 실행해 실패를 확인하지 않는다.
+템플릿 스캐폴드는 위 다섯을 모두 제공하고 CI(`pr-checks.yml` (이 저장소에는 없음))로 막는다. **이 저장소에는 아직 없다** — 실제로 돌릴 수 있는 명령은 11장 "검증 명령(실제값)"을 따른다. 없는 명령을 실행해 실패를 확인하지 않는다.
 
-**메뉴·탭·화면의 기능을 추가·변경했으면 자동 검사로 끝내지 않는다.** 자동 검사는 "화면에서 실제로 눌러 보면 되는가"를 증명하지 않는다 — PR 전에 브라우저에서 확인하고, **무엇을 확인하지 못했는지까지** PR 에 적는다. 문구·색·여백만 바꾼 수정과 문서·리팩터는 대상이 아니다. (템플릿의 절차 문서 `docs/브라우저-검증-절차.md` 는 이 저장소에 들여오지 않았다 — 11장.)
+**메뉴·탭·화면의 기능을 추가·변경했으면 자동 검사로 끝내지 않는다.** 자동 검사는 "화면에서 실제로 눌러 보면 되는가"를 증명하지 않는다 — PR 전에 브라우저에서 확인하고, **무엇을 확인하지 못했는지까지** PR 에 적는다. 문구·색·여백만 바꾼 수정과 문서·리팩터는 대상이 아니다. 절차는 [`docs/브라우저-검증-절차.md`](./docs/브라우저-검증-절차.md)(머리말의 "이 저장소 주의" 먼저).
 
 Cloudflare Worker 배포 전에는 프로젝트별 dry-run 명령을 우선한다.
 
@@ -276,7 +278,7 @@ Risk:
 
 문구 오타 수정처럼 사소한 변경은 버전을 올리지 않고 `CHANGELOG.md` 항목만 남기거나 생략할 수 있다. 이 갱신은 `git commit`/`push` 없이도 수행하며, 커밋과 별개다.
 
-**git 태그**(템플릿 기준 — **이 저장소는 태그 자동화 미도입**, 11장): `.github/workflows/tag-version.yml`이 `main` 푸시마다 `CHANGELOG.md` 최상단 버전을 읽어 `v<표준 버전>` 태그를 붙인다. 태그가 이미 있으면 아무것도 하지 않는다. **에이전트가 태그를 직접 만들지 않는다.**
+**git 태그**(템플릿 기준 — **이 저장소는 태그 자동화 미도입**, 11장): `.github/workflows/tag-version.yml` (이 저장소에는 없음)이 `main` 푸시마다 `CHANGELOG.md` 최상단 버전을 읽어 `v<표준 버전>` 태그를 붙인다. 태그가 이미 있으면 아무것도 하지 않는다. **에이전트가 태그를 직접 만들지 않는다.**
 
 - 태그는 **`main`에만** 남는다. 워크플로우가 `main` 푸시에서만 돌기 때문이다. 피처 브랜치 커밋은 머지 방식(squash·rebase)에 따라 사라지거나 다른 커밋이 되어, 태그가 어디에도 없는 커밋을 가리키게 된다.
 - 버전당 하나다. 같은 버전을 여러 PR로 나눠 머지하면 첫 머지에서 한 번만 붙는다.
@@ -321,9 +323,9 @@ git tag -a v2.10-draft -m v2.10-draft && git push origin v2.10-draft
 - 저장/불러오기: worker `/api/elevation-projects*` + Supabase 테이블 `elev_projects`/`elev_revisions` + Storage 버킷 `elev-dxf`. 로그인 벽 뒤에 있다(§ Project Overview "Admin roles").
 - SSX dev 기존 데이터(프로젝트 2·리비전 5)는 DB만 이관됨(DXF 원본 파일 제외). 상세: 핸드오프 문서 §3-D.
 
-### 템플릿 2.27-draft 적용 (2026-10-21) — 들여오지 않은 것
+### 템플릿 2.27-draft 적용 (2026-10-21) — 들여오지 않은 것·바꿔 적용한 것
 
-템플릿을 다시 당겨오며(2.0-draft → 2.27-draft) 아래는 **사용자 결정으로 가져오지 않았다.** 규칙을 지운 것이 아니라 "이 저장소에는 아직 없다"는 표시다. 템플릿 문서에서 이 장치를 전제로 한 문장을 만나면 여기를 우선한다.
+템플릿을 다시 당겨오며(2.0-draft → 2.27-draft) 아래는 **사용자 결정으로 가져오지 않았거나 바꿔 적용했다.** 규칙을 지운 것이 아니라 "이 저장소에는 아직 없다"는 표시다. 템플릿 문서에서 이 장치를 전제로 한 문장을 만나면 여기를 우선한다.
 
 | 템플릿 장치 | 이 저장소 | 영향받는 문서 |
 |---|---|---|
@@ -331,9 +333,10 @@ git tag -a v2.10-draft -m v2.10-draft && git push origin v2.10-draft
 | `.github/workflows/tag-version.yml`(태그 자동화) | **미도입** — 10장의 자동 태그는 일어나지 않는다. 태그가 필요하면 10장 수동 명령을 사용자 승인 후 | 10장 |
 | Prettier·ESLint(`format:check`·`lint`, `.prettierrc.json`·`eslint.config.mjs`) | **미도입** — 루트 `lint` 스크립트(`pnpm -r lint`)는 있으나 lint 를 가진 패키지가 없다. 손으로 주변 파일 스타일에 맞춘다 | 7장, `.agents/STACK.md` 7장, `.agents/code/CODE_STYLE.md` |
 | `.nvmrc`·`.git-blame-ignore-revs` | **미도입** — Node 버전은 루트 `package.json` `engines.node >=20` | — |
-| `CHANGELOG.md`·제품 버전 | **미도입** — 10장의 CHANGELOG 갱신은 아직 적용하지 않는다. Stop 훅(`agent-guard.cjs stop-changelog`)의 CHANGELOG 리마인더는 그래서 계속 뜰 수 있다 | 10장, `CLAUDE.md` |
-| `docs/브라우저-검증-절차.md` | **미도입**(템플릿 사람용 문서) — 브라우저 확인 의무 자체는 7장대로 남는다 | 7장, `.agents/code/TESTING.md` |
+| `CHANGELOG.md`·버전 | **바꿔 적용** — 루트 `CHANGELOG.md` 를 **제품 기준 단일 출처**로 둔다(2026-10-21 신설, 10장의 "분기한 프로젝트는 제품 버전을 따로 둔다" 형식). 규칙·문서·훅·앱 코드를 바꾸면 같은 작업에서 항목을 더한다. 템플릿 표준 번호는 머리말 "표준 버전" 에만 적는다. 태그 자동화는 위 줄대로 미도입 | 10장, `CLAUDE.md` |
+| `docs/브라우저-검증-절차.md` | **들여왔다** — 머리말 "이 저장소 주의"(CI 없음, 실제 dev 포트 5473·DCR 로그인, React Router 예시는 템플릿 기준)를 먼저 읽는다 | 7장, `.agents/code/TESTING.md` |
 | `/onboard` 명령 | **미도입** — 템플릿 샘플 앱(사이드바 이름 교체)을 전제로 한 첫 커밋 실습이다 | `CLAUDE.md` |
+| `.opencode/commands`·`.opencode/skills` 심볼릭 링크 | **미도입** — 템플릿의 링크가 작성자 PC 절대경로를 가리킨다. opencode 는 `opencode.json` `skills.paths` 로 `.claude/skills`·`.codex/skills` 를 직접 읽는다(명령은 opencode 에서 쓸 수 없다) | `opencode.json` |
 
 ### 검증 명령(실제값)
 
