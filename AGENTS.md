@@ -20,12 +20,13 @@ Woomi 표준 웹 서비스 프로젝트에서 모든 AI 에이전트가 먼저 �
 Project name: insulation-partition-generator (표시명: **단열 Layout** — 구 "단열재 나누기도 생성기")
 What it does: DXF 도면으로 외단열재 나누기도와 자재 물량을 자동 산출해 도면/엑셀로 내보내는 웹 도구. 지금은 홈(런처)에 시공 도구 여러 개를 얹은 사내 플랫폼이다
              — 단열 Layout(`/tools/insulation`, takeoff 마감 물량 패널 포함), TC/HOIST 발주의뢰서(`/tools/tc-rental`, TC 임대계획),
-               스마트폼(`/tools/forms`), App Market(`/market/*`, 관리자가 게시하는 홈 카드). 목록 단일 원천: `apps/web/src/features/home/tools.ts`
-             — 스마트폼은 2026-10-21 독립 이관 준비를 마쳤고 별도 저장소 `woomi-ai-innovation/2026-leesy121212-alt` 로 옮겨 가는 중이다
-               (`docs/2026-10-21-스마트폼-독립이관계획.md`). 이관이 끝나 안정될 때까지 이 저장소의 스마트폼 코드·테이블은 지우지 않는다
+               App Market(`/market/*`, 관리자가 게시하는 홈 카드). 목록 단일 원천: `apps/web/src/features/home/tools.ts`
+             — 스마트폼은 2026-10-21 이관을 마쳤다(새 저장소 `woomi-ai-innovation/2026-leesy121212-alt`, 새 주소 https://smart-forms.jogh.workers.dev).
+               이 저장소의 스마트폼 화면·API·시험 코드는 지웠다. DB `form_*` 6개·버킷 `form-files` 는 되돌리기용으로 2026-11-04 까지 보존한다(삭제는 별도 승인)
+               — 그때까지 건드리지 않는다. 경위: `docs/2026-10-21-스마트폼-독립이관계획.md`
 Main users: 단열재 물량·시공도면 담당자 (원래 SSX 본사 메뉴 기능), 그 외 도구별 현장·본사 담당자
 Core workflows: (단열 Layout) DXF 업로드 → 외벽 그리기 → 창/문 배치 → 보드 규격·정책 설정 → 나누기도 미리보기 → DXF/SVG/CSV/XLSX/ZIP 내보내기 → (선택) 프로젝트 저장/불러오기
-Important data: 단열 Layout 프로젝트·리비전(작업상태 JSON + 수량요약 + 업로드 DXF), 현장(`elev_sites`), App Market(`market_*`), TC 임대계획(`tc_rental_*`), 스마트폼 서류(`form_*`) — 전부 전용 Supabase 의 테이블 + 비공개 Storage 버킷. 테이블 목록은 `supabase/migrations/`
+Important data: 단열 Layout 프로젝트·리비전(작업상태 JSON + 수량요약 + 업로드 DXF), 현장(`elev_sites`), App Market(`market_*`), TC 임대계획(`tc_rental_*`) — 전부 전용 Supabase 의 테이블 + 비공개 Storage 버킷. 테이블 목록은 `supabase/migrations/`
 Admin roles: 앱 전체 로그인 벽(DCR 통합로그인, 이메일+비밀번호). 허용 role: super_admin/system_admin/site_admin/member. App Market 게시·삭제는 super_admin·system_admin 만. 상세는 `CLAUDE.md` 0장 "인증"
 External services: Cloudflare Worker(계정 Smarttech `2b025f536a98444871b3306efbfd6b2a`), Supabase(전용 ref `yzercziwazfrjsjnmbhr`), dcr-app(같은 계정 Worker — 로그인 위임 `/auth/login` 과 takeoff 실 검수용 LLM 프록시 `/api/llm/generate`, 서비스 바인딩 `DCR_APP` 우선·`DCR_BASE_URL` 폴백)
 Launch target: 사내용 웹 도구. **배포 완료(라이브)** — https://insulation-partition-generator.jogh.workers.dev

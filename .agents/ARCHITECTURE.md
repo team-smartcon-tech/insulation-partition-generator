@@ -216,9 +216,9 @@ React Router v7 Framework Mode 가 아니므로 `apps/web/app/`·`routes/`·load
 ```txt
 apps/web/src/
   main.tsx, App.tsx          # 진입점, wouter <Route> 정의(URL 진입점은 여기 한 곳)
-  features/<도구>/           # 도구(기능) 단위 slice — elevation(단열 Layout)·tcRental·forms·market·takeoff·home·auth·profile
+  features/<도구>/           # 도구(기능) 단위 slice — elevation(단열 Layout)·tcRental·market·takeoff·home·auth
     *Page.tsx, components/, api.ts(REST 클라), hooks.ts(react-query), types.ts, utils/
-  components/                # ui/(shadcn 방식 프리미티브) · layout/(SmartShell) · brand/
+  components/                # ui/(shadcn 방식 프리미티브) · brand/
   lib/utils.ts               # cn() 등 순수 유틸
 ```
 
@@ -234,7 +234,6 @@ apps/worker/src/
   index.ts           # Hono 앱, /health, /api/auth/*, authMiddleware, /api/elevation-projects*, /api/takeoff/*, 하위 라우터 마운트
   auth.ts            # DCR 로그인 위임, 세션 JWT(jose), authMiddleware, Env 타입
   market.ts          # /api/market/*
-  forms.ts           # /api/forms/* (스마트폼 — 독립 이관 중)
   sites.ts           # /api/sites (= /api/elevation-sites 별칭)
   tcRental.ts        # /api/tc-rental-projects*
   supabaseClient.ts  # Supabase REST/Storage fetch 헬퍼(index.ts 안에도 같은 헬퍼가 남아 있다)

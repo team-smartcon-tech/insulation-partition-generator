@@ -25,8 +25,6 @@ import {
 import market from "./market";
 import sites from "./sites";
 import tcRental from "./tcRental";
-// 스마트폼(/tools/forms) 전용 라우트 — 파일은 apps/worker/src/forms.ts 한 곳에 모아 두었다.
-import formsRoutes from "./forms";
 
 export type { Env };
 
@@ -186,9 +184,6 @@ app.use("/api/*", authMiddleware());
 
 // App Market(홈 게시 도구) — /api/market/* . 단열재 나누기도 라우트와 분리된 신규 모듈.
 app.route("/api/market", market);
-
-// 스마트폼 — 현장 서류를 서버에 두고 본사가 점검한다(로그인 필수, 위 미들웨어 뒤).
-app.route("/api/forms", formsRoutes);
 
 // 현장(프로젝트 카드) — /api/elevation-sites* . 세부 프로젝트는 아래 /api/elevation-projects*.
 app.route("/api/elevation-sites", sites);

@@ -24,3 +24,11 @@ tags: [wiki/log]
 - 같은 날: 템플릿 2.28-draft 의 `scripts/agent-guard.cjs` 를 받았다(`+` 붙은 main 대상 refspec 차단). 기반 템플릿 표준을 2.28-draft 로 올렸다.
 - 같은 날 결정 반영: git 승인 경계는 템플릿 6장대로(브랜치·로컬 커밋은 사전 승인). 옛 "경로에 `secret` 이 들어간 파일 편집 차단" 훅은 `.claude/settings.json` 에 별도 훅으로 되살렸다 — 템플릿 `agent-guard.cjs` 는 값 파일만 막아 `secretStore.ts` 같은 경로가 통과했기 때문이다. `.agents/skills` 템플릿 사본과 `.userdocs/` 는 정리 보류.
 - 같은 날 독립 검증 반영: 템플릿 `agent-guard.cjs bash` 가 `git push origin +main` 을 통과시키고, `.codex/hooks.json` 에서는 옛 secret 경로 차단이 빠져 있었다. 옛 main push·secret 경로 훅과 강제 푸시 차단을 `.claude`·`.codex` 양쪽에 별도 훅으로 두었다(공용 스크립트는 그대로).
+
+## 2026-10-21 · 정리 · 스마트폼 이관 완료, IPG 코드 제거
+
+- 왜 남기나: 스마트폼이 새 저장소·새 Worker·새 Supabase 로 옮겨 갔다(데이터 대조 일치). 이 저장소에 남은 스마트폼 코드는 이제 아무도 쓰지 않는다.
+- 한 것: 홈 내장 카드·`/tools/forms`·`/api/forms`·`features/forms/`·`SmartShell.tsx`·`features/profile/`·스마트폼 시험과 fixtures 를 지웠다(브랜치 `chore/remove-smart-forms`). 계획서 `docs/2026-10-21-스마트폼-독립이관계획.md` §3-C 에 진행을 적었다.
+- 정한 것과 이유(사용자): 새 주소 연결은 사용자가 홈에 따로 만들었으므로 리다이렉트는 두지 않는다. DB `form_*` 6개·버킷 `form-files` 는 되돌리기용으로 2026-11-04 까지 보존하고 삭제는 별도 승인으로 한다.
+- 남긴 것: `scripts/smart-forms-split/`·`tests/smart-forms-split-copy.test.mjs`·`docs/smart-forms-split/`·`supabase/migrations/` 의 `form_*` 마이그레이션(표가 아직 있으므로 이력도 둔다).
+- 남은 것: 2026-11-04 이후 표·버킷 삭제(별도 승인). 그때 위 복사 도구와 `form_*` 마이그레이션 처리도 정한다. 이 기록 위쪽 "`systems/` … 스마트폼 화면 지식" 은 이제 만들 대상이 아니다.

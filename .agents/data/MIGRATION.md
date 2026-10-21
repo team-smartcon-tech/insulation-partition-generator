@@ -232,6 +232,7 @@ Approval:
 
 ## 8. Notes
 
-- 운영 DB(`yzercziwazfrjsjnmbhr`)는 공지사항(`announcements`)·스마트폼(`form_*`) 등 **다른 저장소의 앱과 공유**한다. 이 저장소 마이그레이션은 자기 테이블만 건드린다.
+- 운영 DB(`yzercziwazfrjsjnmbhr`)는 공지사항(`announcements`) 등 **다른 저장소의 앱과 공유**한다. 이 저장소 마이그레이션은 자기 테이블만 건드린다.
+- `form_*` 6개와 버킷 `form-files` 는 이 저장소가 만든 스마트폼 테이블이다(`supabase/migrations/` 의 `form_*` 마이그레이션). 스마트폼은 2026-10-21 새 저장소·새 Supabase 로 이관했고 코드는 지웠다. 표와 버킷은 2026-11-04 까지 보존하고, 그 뒤 별도 승인으로 지운다. 그 전에는 새 마이그레이션으로 건드리지 않는다.
 - `20260910000001_elev_sites`, `20260918000001_tc_rental_projects` 는 DB 마이그레이션 기록에 없다(직접 SQL 로 적용된 것으로 보임). 새 마이그레이션은 Supabase MCP `apply_migration` 으로 적용해 기록을 남긴다.
 - 컬럼을 새로 조회하는 Worker 변경이 함께 있으면 **마이그레이션 적용 → Worker 배포** 순서를 지킨다(반대 순서면 PostgREST 가 없는 컬럼 조회로 실패).

@@ -41,6 +41,7 @@ pnpm -r typecheck
 - Supabase(전용): ref `yzercziwazfrjsjnmbhr` · 테이블 `elev_projects`/`elev_revisions`, `market_apps`/`market_app_versions`/`market_app_likes` · 버킷 `elev-dxf`·`market-shots`(둘 다 private)
 - Cloudflare 계정: Smarttech `2b025f536a98444871b3306efbfd6b2a` (wrangler.jsonc `account_id`)
 - Worker 시크릿: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Cloudflare Secrets)
+- 스마트폼(`form_*` 6개 표·`form-files` 버킷)은 2026-10-21 새 저장소·새 Supabase 로 이관해 코드를 지웠다. 이 표·버킷은 2026-11-04 까지 되돌리기용으로 보존한다 — 건드리지 않는다(삭제는 별도 승인).
 
 **인증 (DCR 통합로그인 · 회원)**
 
