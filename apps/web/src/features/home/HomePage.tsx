@@ -76,7 +76,7 @@ const toolToCard = (tool: ToolDef): HomeCard => ({
   available: tool.status === "available",
   thumbnail: tool.thumbnail,
   logo: tool.logo,
-  meta: "우미 · 스마트덱",
+  meta: "우미 · 스마트 툴박스",
   href: tool.status === "available" ? tool.path : undefined,
 });
 
@@ -104,7 +104,7 @@ export default function HomePage() {
         icon: LayoutGrid,
         available: true,
         thumbnail: app.thumbnail_url,
-        meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 스마트덱",
+        meta: [app.author_name, app.team].filter(Boolean).join(" · ") || "우미 · 스마트 툴박스",
         // 설치형도 카드는 상세로 보낸다(설명·화면을 보고 받도록).
         href: `/market/${app.id}`,
         section: toSection(app.section),
@@ -285,7 +285,7 @@ export default function HomePage() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="h-[2px] w-5 rounded-full bg-[#5cc8ff]" />
               <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-[#a9d8ff]">
-                SmartDeck · Tool Directory
+                Woomi · Tool Directory
               </span>
               {/* 요약 칩 — 배너에서 규모를 바로 보여준다 */}
               <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-white/12 px-2.5 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/25 backdrop-blur">
@@ -300,7 +300,7 @@ export default function HomePage() {
               className="mt-1.5 text-[30px] leading-[1.12] text-white drop-shadow-[0_3px_14px_rgba(0,20,45,0.45)]"
               style={{ fontFamily: "'Black Han Sans', 'SUIT Variable', sans-serif" }}
             >
-              건설계획 자동화 TOOL
+              SMART TOOL BOX
             </h1>
             <p className="mt-1.5 max-w-xl text-[13px] leading-snug text-white/75">
               현장에서 바로 쓰는 시공 자동화 앱·도구를 한곳에서 찾고, 직접 만든 도구를 공유해 보세요.
