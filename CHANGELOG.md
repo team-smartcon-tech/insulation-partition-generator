@@ -8,6 +8,15 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 
 ---
 
+## [Unreleased]
+
+### 제거 — 스마트폼 (이관 완료)
+
+- 스마트폼은 2026-10-21 새 저장소(`woomi-ai-innovation/2026-leesy121212-alt`)·새 주소(https://smart-forms.jogh.workers.dev)·새 Supabase 로 이관을 마쳤다. 이 저장소에서는 코드를 지운다.
+- 지운 것: 홈 내장 카드(`tools.ts` 의 `forms`)와 로고 2개, `/tools/forms` 라우트, `apps/web/src/features/forms/`, 스마트폼만 쓰던 `components/layout/SmartShell.tsx`·`features/profile/`(결재 서명), Worker `/api/forms`(`forms.ts`), 시험 `tests/form-*`·`signature.test.mjs`·`tests/fixtures/`.
+- 홈에서 새 주소로 가는 연결은 사용자가 따로 만들었다. 옛 경로 리다이렉트는 두지 않는다.
+- DB `form_*` 6개·버킷 `form-files` 는 되돌리기용으로 **2026-11-04 까지 보존**한다. 삭제는 별도 승인. 복사 도구(`scripts/smart-forms-split/`)와 이관 계획서도 그때까지 남긴다.
+
 ## [0.1.0] - 2026-10-21
 
 번호는 루트 `package.json` 의 `version`(0.1.0)에 맞췄다.

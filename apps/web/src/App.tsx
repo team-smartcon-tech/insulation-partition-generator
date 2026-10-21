@@ -2,7 +2,6 @@ import { Route, Switch } from "wouter";
 import { Toaster } from "sonner";
 import ElevationGeneratorPage from "@/features/elevation/ElevationGeneratorPage";
 import TcRentalPage from "@/features/tcRental/TcRentalPage";
-import FormsPage from "@/features/forms/FormsPage";
 import LoginPage from "@/features/auth/LoginPage";
 import AuthGate from "@/features/auth/AuthGate";
 import HomePage from "@/features/home/HomePage";
@@ -30,12 +29,6 @@ export default function App() {
         <Route path="/tools/tc-rental">
           <AuthGate>
             <TcRentalPage />
-          </AuthGate>
-        </Route>
-        {/* 도구: 스마트폼(Smart Forms) — 사내 서식 모음집 */}
-        <Route path="/tools/forms">
-          <AuthGate>
-            <FormsPage />
           </AuthGate>
         </Route>
         {/* App Market — 게시/수정/상세 (구체적인 경로가 /market/:appId 보다 먼저 와야 한다) */}
