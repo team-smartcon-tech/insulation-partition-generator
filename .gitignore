@@ -30,3 +30,7 @@ Thumbs.db
 engine/**/__pycache__/
 engine/.pytest_cache/
 engine/*.egg-info/
+
+# omc, graft
+.omc
+graft
