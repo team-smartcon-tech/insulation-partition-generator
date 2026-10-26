@@ -6,8 +6,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addMarketAppVersion,
   deleteMarketApp,
+  getHomeOrder,
   getMarketApp,
   listMarketApps,
+  saveHomeOrder,
   publishMarketApp,
   toggleMarketAppLike,
   updateMarketApp,
@@ -88,6 +90,26 @@ export function useAddMarketAppVersion(appId: string) {
     mutationFn: (args: { version: string; note?: string }) =>
       addMarketAppVersion(appId, args.version, args.note),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.all }),
+  });
+}
+
+const homeOrderKey = [...keys.all, "home-order"] as const;
+
+/** 홈 카드 순서 — 실패해도 홈은 기본 정렬로 떠야 하므로 재시도하지 않는다 */
+export function useHomeOrder() {
+  return useQuery({
+    queryKey: homeOrderKey,
+    queryFn: getHomeOrder,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+export function useSaveHomeOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (keys: string[]) => saveHomeOrder(keys),
+    onSuccess: (data) => qc.setQueryData(homeOrderKey, data),
   });
 }
 

@@ -729,4 +729,71 @@ market.delete("/apps/:appId", async (c) => {
   }
 });
 
+// ─── 홈 카드 순서 ───────────────────────────────────────────
+
+/** 카드 키 — "tool:{내장 도구 id}" / "market:{uuid}" (web HomePage 의 HomeCard.key 와 같은 형식) */
+const CARD_KEY_RE = /^(tool|market):[A-Za-z0-9_-]{1,80}$/;
+const MAX_CARD_KEYS = 300;
+
+/**
+ * GET /api/market/home-order — 관리자가 정한 홈 카드 순서 (로그인 사용자 전체)
+ * 테이블이 아직 없거나(마이그레이션 전) 조회가 실패하면 빈 순서 → 화면은 기본 정렬로 동작한다.
+ */
+market.get("/home-order", async (c) => {
+  try {
+    const res = await supabaseRest(c.env, "GET", "/market_home_order?id=eq.home&select=card_keys");
+    if (!res.ok) {
+      console.error("[market/home-order GET]", await res.text());
+      return c.json({ keys: [] });
+    }
+    const rows = (await res.json()) as { card_keys: string[] | null }[];
+    return c.json({ keys: rows[0]?.card_keys ?? [] });
+  } catch (err) {
+    console.error("[market/home-order GET]", errMsg(err));
+    return c.json({ keys: [] });
+  }
+});
+
+/** PUT /api/market/home-order — 순서 통째로 교체 (관리자 전용) body: { keys: string[] } */
+market.put("/home-order", async (c) => {
+  if (!adminOnly(c)) return c.json({ error: "순서 변경 권한이 없습니다." }, 403);
+  const body = (await c.req.json().catch(() => null)) as { keys?: unknown } | null;
+  if (!body || !Array.isArray(body.keys)) {
+    return c.json({ error: "keys 배열이 필요합니다." }, 400);
+  }
+  const keys = Array.from(
+    new Set(body.keys.filter((k): k is string => typeof k === "string" && CARD_KEY_RE.test(k))),
+  );
+  if (keys.length !== body.keys.length) {
+    return c.json({ error: "잘못된 카드 키가 있습니다." }, 400);
+  }
+  if (keys.length > MAX_CARD_KEYS) {
+    return c.json({ error: `카드는 최대 ${MAX_CARD_KEYS}개까지입니다.` }, 400);
+  }
+  try {
+    const user = c.get("user");
+    const res = await supabaseRest(
+      c.env,
+      "POST",
+      "/market_home_order?on_conflict=id",
+      {
+        id: "home",
+        card_keys: keys,
+        updated_at: new Date().toISOString(),
+        updated_by: user?.name ?? user?.id ?? null,
+      },
+      "resolution=merge-duplicates,return=representation",
+    );
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[market/home-order PUT]", errText);
+      return c.json({ error: `순서 저장 실패: ${errText}` }, res.status as 500);
+    }
+    return c.json({ keys });
+  } catch (err) {
+    console.error("[market/home-order PUT]", errMsg(err));
+    return c.json({ error: `순서 저장 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
 export default market;

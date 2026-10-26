@@ -16,13 +16,20 @@ import {
   Eye,
   Heart,
   Download,
+  ArrowUpDown,
+  GripVertical,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
 import BrandWordmark from "@/components/brand/BrandWordmark";
-import { useMarketApps } from "@/features/market/hooks";
+import { useHomeOrder, useMarketApps, useSaveHomeOrder } from "@/features/market/hooks";
 import { SECTIONS, type SectionId } from "@/features/market/types";
 import { TOOLS, type ToolDef } from "./tools";
+import { applyHomeOrder, moveCardKey, stepCardKey } from "./homeOrder";
 
 /** 게시 권한 role — 최종 판정은 서버(market.ts)가 하고, 여기선 버튼 노출 여부만 본다. */
 const PUBLISH_ROLES = new Set(["super_admin", "system_admin"]);
@@ -93,7 +100,15 @@ export default function HomePage() {
 
   const [query, setQuery] = useState("");
 
-  const cards = useMemo(() => {
+  // ── 카드 순서: 관리자가 저장한 순서(DB)를 기본 정렬 위에 덮는다. 편집 중엔 초안 순서로 그린다 ──
+  const { data: homeOrder } = useHomeOrder();
+  const saveOrder = useSaveHomeOrder();
+  const [draftKeys, setDraftKeys] = useState<string[] | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const editing = draftKeys !== null;
+
+  const defaultCards = useMemo(() => {
     const published = marketApps.map<HomeCard>((app) => {
       const download = app.distribution === "download";
       return {
@@ -136,8 +151,36 @@ export default function HomePage() {
     ];
   }, [marketApps]);
 
+  const savedKeys = homeOrder?.keys;
+  const cards = useMemo(() => {
+    const ordered = applyHomeOrder(defaultCards, savedKeys ?? []);
+    return draftKeys ? applyHomeOrder(ordered, draftKeys) : ordered;
+  }, [defaultCards, savedKeys, draftKeys]);
+
+  const sectionByKey = useMemo(() => new Map(cards.map((c) => [c.key, c.section])), [cards]);
+  const sectionOf = (key: string) => sectionByKey.get(key) ?? "";
+
+  const startEdit = () => {
+    setQuery("");
+    setOrderError(null);
+    setDraftKeys(cards.map((c) => c.key));
+  };
+  const cancelEdit = () => {
+    setDraftKeys(null);
+    setDragKey(null);
+    setOrderError(null);
+  };
+  const commitEdit = () => {
+    if (!draftKeys) return;
+    setOrderError(null);
+    saveOrder.mutate(draftKeys, {
+      onSuccess: () => setDraftKeys(null),
+      onError: (err) => setOrderError(err instanceof Error ? err.message : "순서 저장에 실패했습니다."),
+    });
+  };
+
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = editing ? "" : query.trim().toLowerCase();
     if (!q) return cards;
     return cards.filter(
       (c) =>
@@ -145,7 +188,7 @@ export default function HomePage() {
         c.description.toLowerCase().includes(q) ||
         c.tags.some((tag) => tag.toLowerCase().includes(q))
     );
-  }, [cards, query]);
+  }, [cards, query, editing]);
 
   // 섹션별로 묶는다(섹션 안 순서는 위 cards 정렬 그대로). 카드가 없는 섹션은 제목까지 숨긴다.
   const sections = useMemo(
@@ -312,13 +355,48 @@ export default function HomePage() {
               <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60" />
               <input
                 value={query}
+                disabled={editing}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="도구명 · 설명 · 태그 검색"
                 className="h-11 w-full rounded-xl border border-white/25 bg-white/12 pl-10 pr-3 text-[14px] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] outline-none backdrop-blur transition-all placeholder:text-white/55 focus:border-white/60 focus:bg-white/20 focus:ring-2 focus:ring-white/25"
               />
             </div>
+            {/* 순서 편집 — 관리자만. 편집 중엔 저장/취소로 바뀐다 */}
+            {canPublish && !editing && (
+              <button
+                type="button"
+                onClick={startEdit}
+                className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-white/30 bg-white/10 px-4 text-[14px] font-bold text-white backdrop-blur transition-all hover:bg-white/20"
+                title="카드 순서를 바꿉니다 (모든 사용자에게 같은 순서로 보입니다)"
+              >
+                <ArrowUpDown className="h-4 w-4" />
+                순서 편집
+              </button>
+            )}
+            {editing && (
+              <>
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  disabled={saveOrder.isPending}
+                  className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-white/30 bg-white/10 px-4 text-[14px] font-bold text-white backdrop-blur transition-all hover:bg-white/20 disabled:opacity-50"
+                >
+                  <X className="h-4 w-4" />
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={commitEdit}
+                  disabled={saveOrder.isPending}
+                  className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-white px-5 text-[14px] font-bold text-[#0a5aa8] shadow-[0_14px_30px_-14px_rgba(0,20,45,0.9)] transition-all hover:bg-[#f2f8ff] disabled:opacity-60"
+                >
+                  <Check className="h-4 w-4" />
+                  {saveOrder.isPending ? "저장 중…" : "순서 저장"}
+                </button>
+              </>
+            )}
             {/* 게시하기 — 관리자만 노출 */}
-            {canPublish && (
+            {canPublish && !editing && (
               <button
                 type="button"
                 onClick={() => navigate("/market/new")}
@@ -334,6 +412,15 @@ export default function HomePage() {
 
       {/* ── 본문 (App Market) ── */}
       <main className="relative mx-auto w-full max-w-[2100px] px-8 pb-14 pt-9">
+        {editing && (
+          <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl border border-[#0a63b8]/25 bg-[#eaf3ff] px-4 py-3 text-[13px] text-[#0a4a8a]">
+            <ArrowUpDown className="h-4 w-4 shrink-0" />
+            <span>
+              카드를 끌어다 놓거나 ← → 버튼으로 순서를 바꾸세요. 같은 섹션 안에서만 옮길 수 있고, 저장하면 모든 사용자에게 같은 순서로 보입니다.
+            </span>
+            {orderError && <span className="font-semibold text-red-600">{orderError}</span>}
+          </div>
+        )}
         {sections.map((sec, idx) => (
           <section key={sec.id} className={idx > 0 ? "mt-12" : undefined}>
             {/* 섹션 헤더 */}
@@ -341,13 +428,66 @@ export default function HomePage() {
 
             {/* 카드 그리드 — 준비 중 도구도 같은 크기 카드로 이어 붙인다 */}
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {sec.cards.map((card) => (
-                <AppCard
-                  key={card.key}
-                  card={card}
-                  onOpen={() => card.href && navigate(card.href)}
-                />
-              ))}
+              {sec.cards.map((card, i) =>
+                editing ? (
+                  <div
+                    key={card.key}
+                    draggable
+                    onDragStart={(e) => {
+                      setDragKey(card.key);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragEnd={() => setDragKey(null)}
+                    onDragOver={(e) => {
+                      if (dragKey && sectionOf(dragKey) === card.section) e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragKey) setDraftKeys((prev) => prev && moveCardKey(prev, sectionOf, dragKey, card.key));
+                      setDragKey(null);
+                    }}
+                    className={
+                      "relative grid cursor-grab rounded-2xl outline-dashed outline-2 outline-offset-2 transition-opacity active:cursor-grabbing " +
+                      (dragKey === card.key ? "opacity-40 outline-[#0a63b8]" : "outline-[#0a63b8]/35")
+                    }
+                  >
+                    <AppCard card={card} onOpen={() => {}} />
+                    {/* 편집 중엔 카드 클릭(이동)을 막고 순서 조작만 받는다 */}
+                    <div className="absolute inset-0 rounded-2xl">
+                      <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2 py-1 text-[11px] font-bold text-slate-600 shadow-sm ring-1 ring-slate-200">
+                        <GripVertical className="h-3.5 w-3.5" />
+                        {i + 1}
+                      </span>
+                      <div className="absolute bottom-3 right-3 flex gap-1">
+                        <button
+                          type="button"
+                          aria-label={`${card.name} 앞으로`}
+                          disabled={i === 0}
+                          onClick={() => setDraftKeys((prev) => prev && stepCardKey(prev, sectionOf, card.key, -1))}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-600 shadow ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-30"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`${card.name} 뒤로`}
+                          disabled={i === sec.cards.length - 1}
+                          onClick={() => setDraftKeys((prev) => prev && stepCardKey(prev, sectionOf, card.key, 1))}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-600 shadow ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-30"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <AppCard
+                    key={card.key}
+                    card={card}
+                    onOpen={() => card.href && navigate(card.href)}
+                  />
+                ),
+              )}
             </div>
           </section>
         ))}

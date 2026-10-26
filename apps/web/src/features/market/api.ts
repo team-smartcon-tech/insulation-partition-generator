@@ -149,3 +149,16 @@ export function deleteMarketApp(appId: string) {
     method: "DELETE",
   });
 }
+
+/** 홈 카드 순서 — 카드 키("tool:id" / "market:uuid") 배열 */
+export function getHomeOrder() {
+  return marketFetch<{ keys: string[] }>("/home-order");
+}
+
+/** 홈 카드 순서 저장 (관리자) — 배열 통째로 교체 */
+export function saveHomeOrder(keys: string[]) {
+  return marketFetch<{ keys: string[] }>("/home-order", {
+    method: "PUT",
+    body: JSON.stringify({ keys }),
+  });
+}
