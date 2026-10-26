@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { User, Lock, Eye, EyeOff, LayoutGrid, Construction, FileText, Wrench } from "lucide-react";
+import { ToolboxMark } from "@/components/brand/BrandWordmark";
 import { useAuth } from "./AuthContext";
 import { AuthError } from "./authApi";
 
@@ -25,7 +26,7 @@ const FEATURES = [
 
 const INPUT_CLS =
   "h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] pl-11 text-[14.5px] text-white outline-none transition-colors " +
-  "placeholder:text-white/35 focus:border-[#4A9EFF]/70 focus:bg-white/[0.09] focus:ring-[3px] focus:ring-[#4A9EFF]/20";
+  "placeholder:text-white/35 focus:border-[#8fd4ff]/70 focus:bg-white/[0.09] focus:ring-[3px] focus:ring-[#8fd4ff]/20";
 
 export default function LoginPage() {
   const { user, isLoading, login } = useAuth();
@@ -90,7 +91,7 @@ export default function LoginPage() {
   );
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#070d18] text-white">
+    <div className="relative min-h-screen overflow-hidden bg-[#0d141d] text-white">
       {/* ── 배경 ──
           기본은 사진 없는 어두운 그라데이션. `public/login-bg.jpg` 를 두면(없으면 브라우저가 조용히 무시) 그 위에
           사진이 깔리고, 아래 오버레이가 글·카드 가독성을 지킨다. 사진은 자사 현장 촬영분만 쓴다. */}
@@ -99,9 +100,9 @@ export default function LoginPage() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(900px 600px at 78% 22%, rgba(20,120,214,0.28) 0%, transparent 65%)," +
-            "radial-gradient(700px 500px at 12% 85%, rgba(10,99,184,0.18) 0%, transparent 65%)," +
-            "linear-gradient(160deg, #0b1526 0%, #070d18 55%, #05090f 100%)",
+            "radial-gradient(900px 620px at 80% 18%, rgba(108,194,255,0.20) 0%, transparent 65%)," +
+            "radial-gradient(760px 520px at 10% 88%, rgba(20,120,214,0.14) 0%, transparent 65%)," +
+            "linear-gradient(160deg, #182331 0%, #111a26 50%, #0d141d 100%)",
         }}
       />
       <div
@@ -123,7 +124,7 @@ export default function LoginPage() {
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(90deg, rgba(6,11,21,0.55) 0%, rgba(6,11,21,0.15) 50%, rgba(6,11,21,0.6) 100%)",
+            "linear-gradient(90deg, rgba(13,20,29,0.5) 0%, rgba(13,20,29,0.1) 50%, rgba(13,20,29,0.55) 100%)",
         }}
       />
 
@@ -145,12 +146,12 @@ export default function LoginPage() {
               다음 현장의 표준이 됩니다
             </h1>
             <p className="mt-5 text-[17px] text-white/75">현장 시공 자동화 도구 공유 플랫폼</p>
-            <span className="mt-7 block h-[3px] w-14 rounded-full bg-[#4A9EFF]" />
+            <span className="mt-7 block h-[3px] w-14 rounded-full bg-[#8fd4ff]" />
 
             <ul className="mt-14 flex max-w-[760px] divide-x divide-white/15">
               {FEATURES.map(({ icon: Icon, l1, l2 }, i) => (
                 <li key={l1} className={"flex-1 " + (i === 0 ? "pr-6" : "px-6")}>
-                  <Icon className="h-7 w-7 text-[#4A9EFF]" strokeWidth={1.6} />
+                  <Icon className="h-7 w-7 text-[#8fd4ff]" strokeWidth={1.6} />
                   <p className="mt-4 text-[13.5px] font-semibold leading-snug text-white/90 [word-break:keep-all]">
                     {l1}
                     <br />
@@ -164,11 +165,36 @@ export default function LoginPage() {
           {/* 우: 로그인 카드 */}
           <form
             onSubmit={onSubmit}
-            className="mx-auto w-full max-w-[440px] rounded-2xl border border-white/10 bg-[#0d1522]/85 px-8 py-10 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] backdrop-blur-xl sm:px-10"
+            className="mx-auto w-full max-w-[440px] rounded-2xl border border-white/10 bg-[#141f2d]/90 px-8 py-10 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] backdrop-blur-xl sm:px-10"
           >
-            <div className="text-center">
-              <h2 className="whitespace-nowrap text-[28px] font-extrabold tracking-tight text-white sm:text-[34px]">SMART TOOL BOX</h2>
-              <p className="mt-1.5 text-[14px] text-white/55">Smart Site Tools</p>
+            {/* 카드 머리 — BrandWordmark 와 같은 표기 규칙(앞 단어 얇게, TOOL BOX 만 세움)의 흰색 판 */}
+            <div className="flex items-center gap-3.5">
+              <ToolboxMark className="h-12 w-12 shrink-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.45)]" />
+              <div className="flex flex-col leading-none">
+                <h2 className="flex items-baseline gap-[3px] whitespace-nowrap">
+                  <span
+                    className="mr-[4px] text-[22px] font-light tracking-[0.02em] text-white/60"
+                    style={{ fontFamily: "'Archivo', 'SUIT Variable', sans-serif" }}
+                  >
+                    SMART
+                  </span>
+                  <span
+                    className="text-[24px] tracking-[-0.045em] text-white"
+                    style={{ fontFamily: "'Archivo Black', 'SUIT Variable', sans-serif" }}
+                  >
+                    TOOL BOX
+                  </span>
+                  <span
+                    className="text-[24px] leading-none text-[#8fd4ff]"
+                    style={{ fontFamily: "'Archivo Black', 'SUIT Variable', sans-serif" }}
+                  >
+                    .
+                  </span>
+                </h2>
+                <span className="mt-[6px] text-[9px] font-bold uppercase tracking-[0.26em] text-white/45">
+                  Smart Site Tools
+                </span>
+              </div>
             </div>
 
             <div className="mt-9 space-y-3.5">
@@ -201,7 +227,7 @@ export default function LoginPage() {
                   onClick={() => setShowPw((v) => !v)}
                   aria-label={showPw ? "비밀번호 숨기기" : "비밀번호 보기"}
                   aria-pressed={showPw}
-                  className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-white/40 transition-colors hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4A9EFF]/50"
+                  className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-white/40 transition-colors hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8fd4ff]/50"
                 >
                   {showPw ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
                 </button>
@@ -211,7 +237,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="mt-6 h-12 w-full rounded-lg bg-[#1478d6] text-[15px] font-bold text-white transition-colors hover:bg-[#0a63b8] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[#4A9EFF]/40 disabled:opacity-60"
+              className="mt-6 h-12 w-full rounded-lg bg-[#1478d6] text-[15px] font-bold text-white transition-colors hover:bg-[#0a63b8] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[#8fd4ff]/40 disabled:opacity-60"
             >
               {submitting ? "로그인 중…" : "로그인"}
             </button>
