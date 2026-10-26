@@ -2,7 +2,7 @@
  * 로그인 화면 — DCR 로그인(이메일 + 비밀번호, SSX 동일).
  * 성공 시 홈("/")으로 이동. 이미 로그인 상태면 홈으로 리다이렉트.
  *
- * 디자인: 전면 어두운 현장 사진(자사 현장 항공샷 `public/login-bg.jpg`) 위에
+ * 디자인: 전면 어두운 바탕(그라데이션 — `public/login-bg.jpg` 를 두면 현장 사진이 그 위에 깔린다) 위에
  * 왼쪽은 헤드라인 + 도구 4종 아이콘 줄, 오른쪽은 떠 있는 어두운 카드 폼. 한 화면에 들어오고 스크롤이 없다.
  * lg 미만에서는 카드만 보인다.
  */
@@ -91,13 +91,31 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#070d18] text-white">
-      {/* ── 배경: 현장 사진을 어둡게 눌러 깔고, 왼쪽 글·오른쪽 카드 쪽을 더 어둡게 ── */}
+      {/* ── 배경 ──
+          기본은 사진 없는 어두운 그라데이션. `public/login-bg.jpg` 를 두면(없으면 브라우저가 조용히 무시) 그 위에
+          사진이 깔리고, 아래 오버레이가 글·카드 가독성을 지킨다. 사진은 자사 현장 촬영분만 쓴다. */}
       <div
         aria-hidden
-        className="absolute inset-0 bg-cover bg-center"
+        className="absolute inset-0"
         style={{
-          backgroundImage: "url(/login-bg.jpg)",
-          filter: "brightness(0.42) saturate(0.55)",
+          background:
+            "radial-gradient(900px 600px at 78% 22%, rgba(20,120,214,0.28) 0%, transparent 65%)," +
+            "radial-gradient(700px 500px at 12% 85%, rgba(10,99,184,0.18) 0%, transparent 65%)," +
+            "linear-gradient(160deg, #0b1526 0%, #070d18 55%, #05090f 100%)",
+        }}
+      />
+      <div
+        aria-hidden
+        className="absolute inset-0 bg-cover bg-center opacity-55"
+        style={{ backgroundImage: "url(/login-bg.jpg)", filter: "brightness(0.45) saturate(0.5)" }}
+      />
+      {/* 사선 결 — 사진이 없을 때 바탕이 밋밋하지 않게, 있을 때는 거의 안 보인다 */}
+      <div
+        aria-hidden
+        className="absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(135deg, rgba(255,255,255,0.6) 0 1px, transparent 1px 96px)",
         }}
       />
       <div
@@ -105,7 +123,7 @@ export default function LoginPage() {
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(90deg, rgba(6,11,21,0.78) 0%, rgba(6,11,21,0.45) 50%, rgba(6,11,21,0.82) 100%), linear-gradient(180deg, rgba(6,11,21,0.35) 0%, rgba(6,11,21,0.1) 40%, rgba(6,11,21,0.6) 100%)",
+            "linear-gradient(90deg, rgba(6,11,21,0.55) 0%, rgba(6,11,21,0.15) 50%, rgba(6,11,21,0.6) 100%)",
         }}
       />
 
