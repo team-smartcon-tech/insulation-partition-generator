@@ -2,7 +2,7 @@
  * 로그인 화면 — DCR 로그인(이메일 + 비밀번호, SSX 동일).
  * 성공 시 홈("/")으로 이동. 이미 로그인 상태면 홈으로 리다이렉트.
  *
- * 디자인: 전면 어두운 바탕(그라데이션 — `public/login-bg.jpg` 를 두면 현장 사진이 그 위에 깔린다) 위에
+ * 디자인: 홈 배너와 같은 딥블루 그라데이션 바탕(`public/login-bg.jpg` 를 두면 현장 사진이 그 위에 깔린다) 위에
  * 왼쪽은 헤드라인 + 도구 4종 아이콘 줄, 오른쪽은 떠 있는 어두운 카드 폼. 한 화면에 들어오고 스크롤이 없다.
  * lg 미만에서는 카드만 보인다.
  */
@@ -25,8 +25,10 @@ const FEATURES = [
 ];
 
 const INPUT_CLS =
-  "h-12 w-full rounded-lg border border-white/10 bg-white/[0.06] pl-11 text-[14.5px] text-white outline-none transition-colors " +
-  "placeholder:text-white/35 focus:border-[#8fd4ff]/70 focus:bg-white/[0.09] focus:ring-[3px] focus:ring-[#8fd4ff]/20";
+  "h-12 w-full rounded-lg border border-white/15 bg-white/[0.08] pl-11 text-[14.5px] text-white outline-none transition-colors " +
+  "placeholder:text-white/40 focus:border-white/60 focus:bg-white/[0.12] focus:ring-[3px] focus:ring-white/20 " +
+  // 크롬 자동완성이 칸을 흰색으로 덮지 않게 — 안쪽 그림자로 바탕을 유지하고 글자색을 고정한다
+  "autofill:shadow-[inset_0_0_0_1000px_#0b2f5e] autofill:[-webkit-text-fill-color:#fff] autofill:[caret-color:#fff]";
 
 export default function LoginPage() {
   const { user, isLoading, login } = useAuth();
@@ -91,47 +93,48 @@ export default function LoginPage() {
   );
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#0d141d] text-white">
-      {/* ── 배경 ──
-          기본은 사진 없는 어두운 그라데이션. `public/login-bg.jpg` 를 두면(없으면 브라우저가 조용히 무시) 그 위에
-          사진이 깔리고, 아래 오버레이가 글·카드 가독성을 지킨다. 사진은 자사 현장 촬영분만 쓴다. */}
+    <div className="relative min-h-screen overflow-hidden bg-[#043a74] text-white">
+      {/* ── 배경 — 홈 배너(HomePage 히어로)와 같은 딥블루 그라데이션 + 도면 격자 + 광원.
+          `public/login-bg.jpg` 를 두면(없으면 브라우저가 조용히 무시) 그 위에 사진이 어둡게 깔린다. 자사 현장 촬영분만 쓴다. */}
       <div
         aria-hidden
-        className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(900px 620px at 80% 18%, rgba(108,194,255,0.20) 0%, transparent 65%)," +
-            "radial-gradient(760px 520px at 10% 88%, rgba(20,120,214,0.14) 0%, transparent 65%)," +
-            "linear-gradient(160deg, #182331 0%, #111a26 50%, #0d141d 100%)",
-        }}
+        className="absolute inset-0 bg-[linear-gradient(105deg,#00224a_0%,#0a5aa8_38%,#1478d6_62%,#043a74_100%)]"
       />
       <div
         aria-hidden
-        className="absolute inset-0 bg-cover bg-center opacity-55"
-        style={{ backgroundImage: "url(/login-bg.jpg)", filter: "brightness(0.45) saturate(0.5)" }}
+        className="absolute inset-0 bg-cover bg-center opacity-40"
+        style={{ backgroundImage: "url(/login-bg.jpg)", filter: "brightness(0.5) saturate(0.5)" }}
       />
-      {/* 사선 결 — 사진이 없을 때 바탕이 밋밋하지 않게, 있을 때는 거의 안 보인다 */}
       <div
         aria-hidden
-        className="absolute inset-0 opacity-[0.07]"
+        className="pointer-events-none absolute inset-0 opacity-[0.14]"
         style={{
           backgroundImage:
-            "repeating-linear-gradient(135deg, rgba(255,255,255,0.6) 0 1px, transparent 1px 96px)",
+            "linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)",
+          backgroundSize: "34px 34px",
+          maskImage: "radial-gradient(120% 130% at 78% 0%, #000 10%, transparent 72%)",
+          WebkitMaskImage: "radial-gradient(120% 130% at 78% 0%, #000 10%, transparent 72%)",
         }}
       />
       <div
         aria-hidden
-        className="absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(90deg, rgba(13,20,29,0.5) 0%, rgba(13,20,29,0.1) 50%, rgba(13,20,29,0.55) 100%)",
-        }}
+        className="pointer-events-none absolute -right-24 -top-40 h-[520px] w-[640px] rounded-full blur-[90px]"
+        style={{ background: "radial-gradient(circle, #4fc3ff 0%, transparent 70%)", opacity: 0.3 }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-40 left-[8%] h-[420px] w-[640px] rounded-full blur-[90px]"
+        style={{ background: "radial-gradient(ellipse, #0d2f66 0%, transparent 70%)", opacity: 0.6 }}
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent"
       />
 
       {/* ── 상단 브랜드 ── */}
       <header className="relative z-10 flex items-center gap-3 px-8 pt-8 lg:px-16">
         {woomiLogo("h-7 w-auto select-none object-contain brightness-0 invert")}
-        <span className="h-5 w-px bg-white/30" />
+        <span className="h-5 w-px bg-white/40" />
         <span className="text-[14px] font-semibold tracking-tight text-white/85">스마트 툴박스</span>
       </header>
 
@@ -145,13 +148,13 @@ export default function LoginPage() {
               <br />
               다음 현장의 표준이 됩니다
             </h1>
-            <p className="mt-5 text-[17px] text-white/75">현장 시공 자동화 도구 공유 플랫폼</p>
-            <span className="mt-7 block h-[3px] w-14 rounded-full bg-[#8fd4ff]" />
+            <p className="mt-5 text-[17px] text-white/80">현장 시공 자동화 도구 공유 플랫폼</p>
+            <span className="mt-7 block h-[3px] w-14 rounded-full bg-[#5cc8ff]" />
 
             <ul className="mt-14 flex max-w-[760px] divide-x divide-white/15">
               {FEATURES.map(({ icon: Icon, l1, l2 }, i) => (
                 <li key={l1} className={"flex-1 " + (i === 0 ? "pr-6" : "px-6")}>
-                  <Icon className="h-7 w-7 text-[#8fd4ff]" strokeWidth={1.6} />
+                  <Icon className="h-7 w-7 text-[#a9d8ff]" strokeWidth={1.6} />
                   <p className="mt-4 text-[13.5px] font-semibold leading-snug text-white/90 [word-break:keep-all]">
                     {l1}
                     <br />
@@ -165,7 +168,7 @@ export default function LoginPage() {
           {/* 우: 로그인 카드 */}
           <form
             onSubmit={onSubmit}
-            className="mx-auto w-full max-w-[440px] rounded-2xl border border-white/10 bg-[#141f2d]/90 px-8 py-10 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.7)] backdrop-blur-xl sm:px-10"
+            className="mx-auto w-full max-w-[440px] rounded-2xl border border-white/15 bg-[#001c40]/80 px-8 py-10 shadow-[0_30px_80px_-20px_rgba(0,20,45,0.8)] backdrop-blur-xl sm:px-10"
           >
             {/* 카드 머리 — BrandWordmark 와 같은 표기 규칙(앞 단어 얇게, TOOL BOX 만 세움)의 흰색 판 */}
             <div className="flex items-center gap-3.5">
@@ -227,7 +230,7 @@ export default function LoginPage() {
                   onClick={() => setShowPw((v) => !v)}
                   aria-label={showPw ? "비밀번호 숨기기" : "비밀번호 보기"}
                   aria-pressed={showPw}
-                  className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-white/40 transition-colors hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8fd4ff]/50"
+                  className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-white/40 transition-colors hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
                 >
                   {showPw ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
                 </button>
@@ -237,7 +240,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="mt-6 h-12 w-full rounded-lg bg-[#1478d6] text-[15px] font-bold text-white transition-colors hover:bg-[#0a63b8] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[#8fd4ff]/40 disabled:opacity-60"
+              className="mt-6 h-12 w-full rounded-lg bg-white text-[15px] font-bold text-[#0a5aa8] shadow-[0_14px_30px_-14px_rgba(0,20,45,0.9)] transition-all hover:bg-[#f2f8ff] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-white/40 disabled:opacity-60"
             >
               {submitting ? "로그인 중…" : "로그인"}
             </button>
@@ -247,7 +250,7 @@ export default function LoginPage() {
                 type="checkbox"
                 checked={saveId}
                 onChange={(e) => setSaveId(e.target.checked)}
-                className="h-4 w-4 rounded border-white/30 bg-white/10 accent-[#1478d6]"
+                className="h-4 w-4 rounded border-white/30 bg-white/10 accent-white"
               />
               아이디 저장
             </label>
