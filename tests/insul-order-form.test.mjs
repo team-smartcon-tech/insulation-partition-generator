@@ -15,6 +15,7 @@ import { proposeOrderLines } from "../apps/web/src/features/elevation/orderForm/
 import {
   buildInsulOrderWorkbook,
   loadBudgetWorkbook,
+  writeInsulOrderXlsx,
 } from "../apps/web/src/features/elevation/orderForm/insulOrderForm.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -45,6 +46,7 @@ async function fakeBudget(extraItems = 0) {
     ws.getColumn(5).hidden = true;
     ws.pageSetup.printArea = "A1:M20";
     ws.pageSetup.orientation = "landscape";
+    ws.pageSetup.fitToPage = true; // 용지 맞춤 + 그룹 요약 설정이 한 시트에 — ExcelJS sheetPr 순서 버그가 드러나는 조합
     ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
   };
   const extra = Array.from({ length: extraItems }, (_, i) => ["단열재", `T:${30 + i} 시험규격 ${i}`, "M2", 10 + i]);
@@ -103,10 +105,10 @@ async function build(extraItems = 0) {
     new Date(2026, 9, 27),
   );
   // 저장했다 다시 읽는다 — 공유 수식·병합이 저장 때 터지지 않는지까지 본다
-  const buf = await out.xlsx.writeBuffer();
+  const buf = await writeInsulOrderXlsx(out);
   const re = new ExcelJS.Workbook();
   await re.xlsx.load(buf);
-  return { out: re, warnings, budget, lines };
+  return { out: re, warnings, budget, lines, buf };
 }
 
 test("표지·청구서·검토 3장 + 내역서 2장이 남고, 다른 시트와 명명 범위는 없다", async () => {
@@ -134,7 +136,16 @@ test("내역서는 값만 옮겨진다 (수식은 계산값으로)", async () =>
 });
 
 test("내역서의 접힌 그룹·숨긴 열·인쇄 설정이 그대로 따라온다", async () => {
-  const { out } = await build();
+  const { out, buf } = await build();
+  // <sheetPr> 자식 순서 — outlinePr 가 pageSetUpPr 앞에 와야 Excel 이 연다 (ExcelJS 가 거꾸로 쓴다)
+  const JSZip = require("jszip");
+  const zip = await JSZip.loadAsync(buf);
+  for (const name of Object.keys(zip.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))) {
+    const xml = await zip.file(name).async("string");
+    const o = xml.indexOf("<outlinePr");
+    const p = xml.indexOf("<pageSetUpPr");
+    if (o >= 0 && p >= 0) assert.ok(o < p, `${name}: outlinePr 가 pageSetUpPr 뒤에 있다`);
+  }
   const b = out.getWorksheet(BASE_NAME);
   assert.deepEqual([6, 7, 8].map((r) => [b.getRow(r).outlineLevel, b.getRow(r).hidden]), [[1, true], [1, true], [1, true]]);
   assert.equal(b.getRow(9).hidden, false);

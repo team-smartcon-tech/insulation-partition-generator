@@ -16,6 +16,7 @@
  */
 // 타입만 정적으로 쓴다 — 라이브러리 본체는 실제로 만들 때만 받는다(첫 화면 무게).
 import type ExcelJS from "exceljs";
+import JSZip from "jszip";
 import type { InsulBudget } from "./budgetParser.ts";
 import { effectiveRows, type OrderLine } from "./orderLines.ts";
 
@@ -469,6 +470,26 @@ export async function buildInsulOrderWorkbook(
   return { workbook: wb, warnings };
 }
 
+/**
+ * 통합 문서를 xlsx 바이트로 — ExcelJS 가 쓴 `<sheetPr>` 자식 순서를 바로잡는다.
+ *
+ * OOXML 은 `<sheetPr>` 안을 tabColor → outlinePr → pageSetUpPr 순으로 요구하는데, ExcelJS 는
+ * pageSetUpPr(용지 맞춤) 을 outlinePr(그룹 요약 위치) 앞에 쓴다. 둘 다 있는 시트(접어 둔 내역서 +
+ * 인쇄 설정)가 생기면 Excel 이 파일을 열지 못한다("Open 속성을 구할 수 없습니다"). 둘 중 하나만
+ * 있으면 멀쩡해서 양식 3장에서는 드러나지 않았다. 저장된 zip 안의 시트 XML 에서 순서를 바꾼다.
+ */
+export async function writeInsulOrderXlsx(wb: ExcelJS.Workbook): Promise<Uint8Array> {
+  const raw = await wb.xlsx.writeBuffer();
+  const zip = await JSZip.loadAsync(raw);
+  const sheets = Object.keys(zip.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
+  for (const name of sheets) {
+    const xml = await zip.file(name)!.async("string");
+    const fixed = xml.replace(/(<pageSetUpPr\b[^>]*\/>)(<outlinePr\b[^>]*\/>)/g, "$2$1");
+    if (fixed !== xml) zip.file(name, fixed);
+  }
+  return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+}
+
 /** 양식을 받아 채우고 내려받는다 (브라우저) */
 export async function generateInsulOrderForm(input: InsulOrderInput): Promise<string[]> {
   const res = await fetch(TEMPLATE_URL);
@@ -476,7 +497,7 @@ export async function generateInsulOrderForm(input: InsulOrderInput): Promise<st
   const { workbook: wb, warnings } = await buildInsulOrderWorkbook(input, await res.arrayBuffer());
   const siteName = input.siteName.trim() || "현장";
 
-  const buf = await wb.xlsx.writeBuffer();
+  const buf = await writeInsulOrderXlsx(wb);
   const blob = new Blob([buf], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
