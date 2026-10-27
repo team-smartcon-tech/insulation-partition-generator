@@ -201,12 +201,22 @@ function plainValue(cell: ExcelJS.Cell): ExcelJS.CellValue {
  */
 function copySheetValues(src: ExcelJS.Worksheet, wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet {
   const dst = wb.addWorksheet(name);
+  // 시트 속성(그룹 요약 행 위치 등)·인쇄 설정 — 사용자가 접어 둔 그룹과 인쇄 영역이 그대로 따라온다
+  dst.properties = { ...src.properties };
+  dst.pageSetup = { ...src.pageSetup };
   src.columns?.forEach((col, i) => {
-    if (col?.width) dst.getColumn(i + 1).width = col.width;
+    if (!col) return;
+    const d = dst.getColumn(i + 1);
+    if (col.width) d.width = col.width;
+    if (col.hidden) d.hidden = true;
+    if (col.outlineLevel) d.outlineLevel = col.outlineLevel;
   });
-  src.eachRow({ includeEmpty: false }, (row, r) => {
+  // 빈 줄도 돈다 — 접힌(숨김) 줄·그룹 수준은 값이 없는 줄에도 붙어 있다
+  src.eachRow({ includeEmpty: true }, (row, r) => {
     const drow = dst.getRow(r);
     if (row.height) drow.height = row.height;
+    if (row.hidden) drow.hidden = true;
+    if (row.outlineLevel) drow.outlineLevel = row.outlineLevel;
     row.eachCell({ includeEmpty: false }, (cell, c) => {
       const d = drow.getCell(c);
       d.value = plainValue(cell);

@@ -37,6 +37,15 @@ async function fakeBudget(extraItems = 0) {
     for (const r of rows) ws.addRow(r);
     // 금액 수식 — 복사할 때 값으로 바뀌어야 한다
     ws.getCell("F5").value = { formula: "D5*E5", result: 1 };
+    // 사용자가 접어 둔 그룹(6~8행 숨김, 수준 1)·숨긴 열·인쇄 영역 — 그대로 따라와야 한다
+    for (const r of [6, 7, 8]) {
+      ws.getRow(r).outlineLevel = 1;
+      ws.getRow(r).hidden = true;
+    }
+    ws.getColumn(5).hidden = true;
+    ws.pageSetup.printArea = "A1:M20";
+    ws.pageSetup.orientation = "landscape";
+    ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
   };
   const extra = Array.from({ length: extraItems }, (_, i) => ["단열재", `T:${30 + i} 시험규격 ${i}`, "M2", 10 + i]);
   mk(BASE_NAME, [
@@ -122,6 +131,17 @@ test("내역서는 값만 옮겨진다 (수식은 계산값으로)", async () =>
   assert.equal(v(b.getCell("D7")), 85);
   assert.equal(f(b.getCell("F5")), null);
   assert.equal(v(b.getCell("F5")), 1);
+});
+
+test("내역서의 접힌 그룹·숨긴 열·인쇄 설정이 그대로 따라온다", async () => {
+  const { out } = await build();
+  const b = out.getWorksheet(BASE_NAME);
+  assert.deepEqual([6, 7, 8].map((r) => [b.getRow(r).outlineLevel, b.getRow(r).hidden]), [[1, true], [1, true], [1, true]]);
+  assert.equal(b.getRow(9).hidden, false);
+  assert.equal(b.getColumn(5).hidden, true);
+  assert.equal(b.pageSetup.printArea, "A1:M20");
+  assert.equal(b.pageSetup.orientation, "landscape");
+  assert.equal(b.properties.outlineProperties?.summaryBelow, false);
 });
 
 test("발주수량 검토 — 공종/소제목/품목 줄과 내역서 행 참조, 겹별 세분화", async () => {
