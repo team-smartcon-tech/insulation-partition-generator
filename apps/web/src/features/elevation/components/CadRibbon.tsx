@@ -116,6 +116,8 @@ export interface CadRibbonProps {
   onExportSiteReportCsv: () => void;
   /** 현장식 산출서 버튼 라벨의 두께 표기 (예 "50T/90T") */
   siteReportThkLabel: string;
+  /** 단열재 자재 발주의뢰서 — 실행예산 내역서를 올려 회사 양식으로 */
+  onOpenOrderForm: () => void;
   onExportCombinedDxf: () => void;
   onExportSplitDxf: () => void;
   onExportCombinedSvg: () => void;
@@ -811,6 +813,13 @@ export default function CadRibbon(p: CadRibbonProps) {
                 onClick={p.onOpenOutput}
                 disabled={!p.canExport}
                 title="동·코어별 통합 물량 산출"
+              />
+              <BigBtn
+                icon={FileSpreadsheet}
+                label={"발주\n의뢰서"}
+                onClick={p.onOpenOrderForm}
+                disabled={!p.canExport}
+                title="단열재 자재 발주의뢰서 — 실행예산 내역서(2-2·11-3)를 올리면 Layout 물량으로 겹별 세분화해 회사 양식으로 내보냅니다"
               />
             </Group>
             <Group title="프로젝트">

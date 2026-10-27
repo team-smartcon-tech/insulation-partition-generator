@@ -84,6 +84,8 @@ export interface WorkflowRailProps {
   onOpenTakeoff: () => void;
   onExportSiteReportCsv: () => void;
   siteReportThkLabel: string;
+  /** 단열재 자재 발주의뢰서 */
+  onOpenOrderForm: () => void;
 
   // ── 저장 ──
   onSaveRev: () => void;
@@ -620,6 +622,12 @@ function StepOutput({ p }: { p: WorkflowRailProps }) {
         icon={FileSpreadsheet}
         label={`현장식 산출서 CSV · ${p.siteReportThkLabel}`}
         onClick={p.onExportSiteReportCsv}
+        disabled={!p.canExport}
+      />
+      <PanelBtn
+        icon={FileSpreadsheet}
+        label="단열재 발주의뢰서 (회사 양식)"
+        onClick={p.onOpenOrderForm}
         disabled={!p.canExport}
       />
       <PanelBtn icon={Blocks} label="마감 물량 · 기성 관리" onClick={p.onOpenTakeoff} />

@@ -58,6 +58,12 @@ export interface BoardCell {
   /** 이 셀이 속한 세그먼트의 겹 두께(mm). 물량을 두께별로 분리 집계할 때 사용 */
   thickness: number;
   /**
+   * 이 셀이 속한 세그먼트(변) 번호 — `resolveSegInsul(w)[seg]` 로 노출타입(직접/간접외기)을
+   * 되찾는다. 발주의뢰서는 실행예산 줄(T150=직접외기, T110=간접외기)에 겹별 물량을 나눠
+   * 넣어야 해서 두께만으로는 부족하다(55T 가 직접 2P 에도, 간접 1P/2P 에도 쓰인다).
+   */
+  seg?: number;
+  /**
    * 창에 옆구리만 걸쳐 한 장으로 붙이고 창 부분을 따내는(노치) 판의 따낸 사각형 —
    * 판 좌하단 기준 좌표(mm). 물량 최소 재단에서 이 조각을 다른 조각의 재료로 쓴다.
    */
@@ -434,6 +440,7 @@ function tileSiteConstructability(
               xRemainder: w < L - EPS,
               yRemainder: h < H - EPS,
               thickness: thicknessOf(si),
+              seg: si,
             });
           }
         }
@@ -699,6 +706,7 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
             xRemainder: seg.remainder,
             yRemainder: h < H - 1e-6,
             thickness: segLapW(si),
+            seg: si,
           });
         }
       }
@@ -789,6 +797,7 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
             xRemainder: w < L - 1e-6,
             yRemainder: h < H - 1e-6,
             thickness: cell.thickness,
+            seg: cell.seg,
           });
         }
       }
