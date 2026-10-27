@@ -47,6 +47,7 @@ import {
   Undo2,
 } from "lucide-react";
 import {
+  type BoardCell,
   developPly,
   developPlyMinBoards,
   summarizeBoards,
@@ -3899,38 +3900,57 @@ export default function ElevationGeneratorPage() {
    * 현장식 산출서 ② 동별 집계와 같은 경로(동·타입 셀의 소스 입면 × 그 그룹 세대수)를 돌되,
    * 두께가 아니라 노출·겹으로 가른다. 실행예산은 `T:150`(직접외기) · `T:110`(간접외기) 한 줄씩인데
    * 발주는 겹마다(95T + 55T, 55T + 55T) 내야 하고, 55T 하나로는 셋을 가를 수 없기 때문이다.
-   * 판수는 두께가 다른 조각을 한 판에서 자를 수 없으므로 (노출·겹·두께) 묶음마다 따로 센다.
+   *
+   * 판수는 **두께별로 한 번만** 센다(`wallThicknessTally` 와 같은 묶음 — 현장산출서 CSV 와 합이 맞는다).
+   * 같은 55T 면 직접 2P 자투리와 간접 1P 자투리를 한 판에서 같이 자를 수 있으므로, 노출·겹으로
+   * 쪼개서 따로 재단하면 판이 더 나온다(부산장안 실측 +4.7%). 그래서 두께별 판수를 먼저 구하고
+   * 그 안에서 (노출·겹)별 **시공 면적 비율**로 나눠 넣는다. 입면 단위로 소수점 판수를 그대로 두고
+   * 세대수를 곱해 더하므로, 두께별 합계는 CSV 와 같고 반올림은 발주 줄에서 한 번만 한다.
    */
   const computeOrderTotals = (): LayoutTotals => {
     const fullArea = (boardLength * boardHeight) / 1_000_000;
     type Acc = { thickness: number; boards: number };
     const packOpt = placement === "min-waste" ? MIN_WASTE_PACK : {};
     const tallyCache = new Map<string, Map<string, Acc>>();
-    /** 입면 1세대의 (노출|겹) → 주문 판수 */
+    /** 입면 1세대의 (노출|겹) → 주문 판수(두께별 판수를 시공 면적 비율로 배분, 소수 유지) */
     const tallyOf = (w: WallChain, fh: number): Map<string, Acc> => {
       const key = `${w.id}|${Math.round(fh)}`;
       const hit = tallyCache.get(key);
       if (hit) return hit;
       const segs = resolveSegInsul(w);
       const { dev1, dev2 } = buildPlyDev(w, fh);
-      const m = new Map<string, Acc>();
-      for (const [ply, cells] of [[1, dev1.cells], [2, dev2?.cells ?? []]] as const) {
-        const groups = new Map<string, typeof cells>();
-        for (const c of cells) {
-          if (c.discarded) continue;
-          const ex = segs[c.seg ?? -1]?.exposure ?? "custom";
-          const k = `${ex}|${ply}|${Math.round(c.thickness)}`;
-          const g = groups.get(k);
-          if (g) g.push(c);
-          else groups.set(k, [c]);
+      type Tagged = { cell: BoardCell; ex: string; ply: 1 | 2; thk: number };
+      const tagged: Tagged[] = [];
+      for (const [ply, cells] of [[1, dev1.cells], [2, dev2?.cells ?? []]] as const)
+        for (const cell of cells) {
+          if (cell.discarded) continue;
+          const ex = segs[cell.seg ?? -1]?.exposure ?? "custom";
+          tagged.push({ cell, ex, ply, thk: Math.round(cell.thickness) });
         }
-        for (const [k, sub] of groups) {
-          const [ex, , thk] = k.split("|");
-          const boards = summarizeBoards(sub, boardLength, boardHeight, packOpt).orderBoardCount;
-          const ek = `${ex}|${ply}`;
-          const cur = m.get(ek);
-          if (cur) cur.boards += boards;
-          else m.set(ek, { thickness: Number(thk), boards });
+      const m = new Map<string, Acc>();
+      for (const thk of new Set(tagged.map(t => t.thk))) {
+        const ofThk = tagged.filter(t => t.thk === thk);
+        // 두께별 주문 판수 — 겹·노출 가리지 않고 한 묶음으로 재단 (CSV 와 같은 값)
+        const boards = summarizeBoards(
+          ofThk.map(t => t.cell),
+          boardLength,
+          boardHeight,
+          packOpt
+        ).orderBoardCount;
+        // (노출|겹)별 시공 면적 → 비율로 판수 배분
+        const area = new Map<string, number>();
+        let total = 0;
+        for (const t of ofThk) {
+          const a = t.cell.w * t.cell.h;
+          const k = `${t.ex}|${t.ply}`;
+          area.set(k, (area.get(k) ?? 0) + a);
+          total += a;
+        }
+        for (const [k, a] of area) {
+          const share = total > 0 ? boards * (a / total) : 0;
+          const cur = m.get(k);
+          if (cur) cur.boards += share;
+          else m.set(k, { thickness: thk, boards: share });
         }
       }
       tallyCache.set(key, m);
