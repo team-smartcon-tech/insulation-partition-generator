@@ -106,6 +106,13 @@ import { getElevRevision, getElevProject, fetchDxfText } from "./api";
 import OutputPanel from "./components/OutputPanel";
 import InsulOrderDialog from "./orderForm/InsulOrderDialog.tsx";
 import type { LayoutPlyTotal, LayoutTotals, OrderExposure } from "./orderForm/orderLines.ts";
+import {
+  makeCmp,
+  siteReportToCsv,
+  type SiteReport,
+  type SiteReportBuildingRow,
+  type SiteReportTypeRow,
+} from "./orderForm/siteReport.ts";
 import CadRibbon from "./components/CadRibbon";
 import ProjectBrowser from "./components/ProjectBrowser";
 import WorkflowRail from "./components/WorkflowRail";
@@ -799,6 +806,7 @@ export default function ElevationGeneratorPage() {
   // 단열재 발주의뢰서 — 열 때 현장 합계를 한 번 계산해 넘긴다(렌더마다 전개를 다시 돌리지 않게)
   const [orderOpen, setOrderOpen] = useState(false);
   const [orderTotals, setOrderTotals] = useState<LayoutTotals>({ plies: [], units: 0 });
+  const [orderReport, setOrderReport] = useState<SiteReport | null>(null);
 
   // ── 프로젝트 저장 / REV(리비전) ──
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -3996,6 +4004,7 @@ export default function ElevationGeneratorPage() {
       return;
     }
     setOrderTotals(computeOrderTotals());
+    setOrderReport(buildSiteReport());
     setOrderOpen(true);
   };
 
@@ -4006,13 +4015,20 @@ export default function ElevationGeneratorPage() {
    * 층고가 그룹마다 다르면 나누기·물량이 달라지므로 그룹 층고로 각각 전개해 집계한다.
    * 두께 열은 실제 등장하는 두께로 자동 구성.
    */
-  const handleExportSiteReportCsv = () => {
-    if (!insulOn) return;
+  /**
+   * 현장산출서 — 구조화된 보고서.
+   *  ① 단위세대 타입 × 층 그룹별 단열재 수량 (개수 EA · 면적 M2, 대표 입면 1세대 기준)
+   *  ② 동별 집계표 (층 그룹별 단위세대 물량 × 그 그룹 세대수 합)
+   * 층고가 그룹마다 다르면 나누기·물량이 달라지므로 그룹 층고로 각각 전개해 집계한다.
+   * 두께 열은 실제 등장하는 두께로 자동 구성. CSV 와 발주의뢰서 「현장산출검토」 시트가 이 하나를 쓴다.
+   * 타입이 없으면 안내하고 null.
+   */
+  const buildSiteReport = (): SiteReport | null => {
+    if (!insulOn) return null;
     if (typeMatrix.types.length === 0) {
       toast.error("먼저 '동·타입 설정'에서 타입을 만들고 세대수를 입력하세요.");
-      return;
+      return null;
     }
-    const esc = (s: string) => (s ?? "").replace(/,/g, " ");
     // 입면×층고 tally 캐시 (같은 층고면 재사용)
     const tallyCache = new Map<string, Map<number, { ea: number; areaM2: number }>>();
     const tallyOf = (w: WallChain | null, fh: number) => {
@@ -4048,14 +4064,6 @@ export default function ElevationGeneratorPage() {
             tallyForGroup(src, g.key, b.id)?.forEach((_, k) => thkSet.add(k));
       }
     const thks = [...thkSet].sort((a, b) => a - b);
-    const eaCols = thks.map(t => `${t}T 개수(EA)`).join(",");
-    const arCols = thks.map(t => `${t}T 면적(M2)`).join(",");
-    // 실면적(나누기 전 전개면 − 오프닝) 대비 산출면적(발주 판수 기준) 비교 열 — 두께별 + 합계
-    const netCols = thks.map(t => `${t}T 실면적(M2)`).join(",");
-    const lossCols = thks.map(t => `${t}T 로스율(%)`).join(",");
-    const cmpCols = `${netCols},${lossCols},실면적 계(M2),산출면적 계(M2),차이(M2),로스율(%)`;
-    /** 비교열 자리 수만큼의 대시 (대표 입면이 없는 행용) */
-    const cmpDash = [...thks.map(() => "-"), ...thks.map(() => "-"), "-", "-", "-", "-"].join(",");
     /** 실면적 캐시 — (입면, 층고) 단위. tallyOf 와 같은 키 규칙 */
     const netCache = new Map<string, Map<number, number>>();
     const netOf = (w: WallChain | null, fh: number) => {
@@ -4067,67 +4075,36 @@ export default function ElevationGeneratorPage() {
       netCache.set(key, v);
       return v;
     };
-    /** 두께별 실면적·산출면적 → 비교 열들. 실면적 0 이면 로스율은 대시 */
-    const cmpCells = (
-      net: Map<number, number> | null,
-      gross: Map<number, number>
-    ) => {
-      const n = thks.map(t => net?.get(t) ?? 0);
-      const g = thks.map(t => gross.get(t) ?? 0);
-      const loss = n.map((v, i) =>
-        v > 0 ? (((g[i] - v) / v) * 100).toFixed(1) : "-"
-      );
-      const nSum = n.reduce((a, b) => a + b, 0);
-      const gSum = g.reduce((a, b) => a + b, 0);
-      const lossAll = nSum > 0 ? (((gSum - nSum) / nSum) * 100).toFixed(1) : "-";
-      return [
-        ...n.map(v => v.toFixed(2)),
-        ...loss,
-        nSum.toFixed(2),
-        gSum.toFixed(2),
-        (gSum - nSum).toFixed(2),
-        lossAll,
-      ].join(",");
-    };
-
-    const rows: string[] = [];
-    const missing: string[] = [];
 
     // ── ① 단위세대 타입 × 층 그룹별 단열재 수량 (대표 입면 1세대 기준) ──
-    rows.push("[단위세대 타입별 단열재 수량]");
-    rows.push(
-      "※ 실면적 = 전개면(전개길이×층고) − 오프닝. 나누기와 무관한 순수 시공면적. 변(면)마다의 두께로 나눠 집계."
-    );
-    rows.push("※ 산출면적 = 주문 판수 × 정척면적(현장식). 로스율 = (산출−실면적) ÷ 실면적.");
-    rows.push(`단위세대 타입,층 그룹,층고(mm),${eaCols},${arCols},${cmpCols}`);
+    const typeRows: SiteReportTypeRow[] = [];
+    const missing: string[] = [];
     for (const t of typeMatrix.types) {
       const rep = repElevByType(t.id);
       if (!rep) {
         missing.push(t.name);
-        const dash = thks.map(() => "-").join(",");
-        rows.push(`${esc(t.name)},-,-,${dash},${dash},${cmpDash}`);
+        typeRows.push({ type: t.name, group: null, floorHeight: null, ea: null, area: null, cmp: null });
         continue;
       }
       for (const g of activeGroupsFor(rep)) {
         const fh = floorHeightFor(rep, g);
         const tally = tallyOf(rep, fh);
         const gLabel = FLOOR_GROUPS.find(x => x.key === g)?.label ?? g;
-        const ea = thks.map(x => tally?.get(x)?.ea ?? 0);
-        const ar = thks.map(x => (tally?.get(x)?.areaM2 ?? 0).toFixed(2));
         const gross = new Map<number, number>();
         thks.forEach(x => gross.set(x, tally?.get(x)?.areaM2 ?? 0));
-        rows.push(
-          `${esc(t.name)},${gLabel},${Math.round(fh)},${ea.join(",")},${ar.join(",")},${cmpCells(netOf(rep, fh), gross)}`
-        );
+        typeRows.push({
+          type: t.name,
+          group: gLabel,
+          floorHeight: fh,
+          ea: thks.map(x => tally?.get(x)?.ea ?? 0),
+          area: thks.map(x => tally?.get(x)?.areaM2 ?? 0),
+          cmp: makeCmp(thks, netOf(rep, fh), gross),
+        });
       }
     }
-    rows.push("");
 
     // ── ② 동별 단열재 집계표 (층 그룹별 물량 × 그 그룹 세대수) ──
-    rows.push("[동별 단열재 집계표]");
-    rows.push(
-      `동,단위세대 타입,1~3F,지붕층,기준층,세대수,층고(1~3F/지붕/기준),${arCols},${cmpCols}`
-    );
+    const buildingRows: SiteReportBuildingRow[] = [];
     const grand = new Map<number, number>();
     let grandUnits = 0;
     // 전체 대비용 누계 — 세대수를 곱한 두께별 실면적
@@ -4160,31 +4137,43 @@ export default function ElevationGeneratorPage() {
               cellNet.set(k, (cellNet.get(k) ?? 0) + v * n)
             );
         }
-        const fhLabel = FLOOR_GROUPS.map(g =>
-          src ? Math.round(floorHeightFor(src, g.key, b.id)) : "-"
-        ).join("/");
-        const ar = thks.map(x => {
-          const a = byThk.get(x) ?? 0;
-          grand.set(x, (grand.get(x) ?? 0) + a);
-          return src ? a.toFixed(1) : "-";
-        });
+        thks.forEach(x => grand.set(x, (grand.get(x) ?? 0) + (byThk.get(x) ?? 0)));
         cellNet.forEach((v, k) => grandNet.set(k, (grandNet.get(k) ?? 0) + v));
-        rows.push(
-          `${esc(b.name)},${esc(t.name)},${low},${roof},${base},${total},${fhLabel},${ar.join(",")},${src ? cmpCells(cellNet, byThk) : cmpDash}`
-        );
+        buildingRows.push({
+          building: b.name,
+          type: t.name,
+          low,
+          roof,
+          base,
+          total,
+          floorHeights: src ? FLOOR_GROUPS.map(g => floorHeightFor(src, g.key, b.id)) : null,
+          area: src ? thks.map(x => byThk.get(x) ?? 0) : null,
+          cmp: src ? makeCmp(thks, cellNet, byThk) : null,
+        });
       }
     }
-    rows.push(
-      `합계,,,,,${grandUnits},,${thks.map(t => (grand.get(t) ?? 0).toFixed(1)).join(",")},${cmpCells(grandNet, grand)}`
-    );
+    return {
+      thks,
+      typeRows,
+      buildingRows,
+      total: {
+        units: grandUnits,
+        area: thks.map(t => grand.get(t) ?? 0),
+        cmp: makeCmp(thks, grandNet, grand),
+      },
+      missing,
+    };
+  };
 
-    if (missing.length > 0)
+  /** 현장식 산출서 CSV — buildSiteReport 를 CSV 로 */
+  const handleExportSiteReportCsv = () => {
+    const report = buildSiteReport();
+    if (!report) return;
+    if (report.missing.length > 0)
       toast.info(
-        `대표 입면이 없는 타입: ${missing.join(", ")} — 물량 0/대시. 입면에서 해당 타입을 지정하세요.`
+        `대표 입면이 없는 타입: ${report.missing.join(", ")} — 물량 0/대시. 입면에서 해당 타입을 지정하세요.`
       );
-
-    const csv = "﻿" + rows.join("\r\n");
-    downloadText(`${exportBase}_현장산출서.csv`, csv, "text/csv");
+    downloadText(`${exportBase}_현장산출서.csv`, siteReportToCsv(report), "text/csv");
   };
 
   /**
@@ -6634,6 +6623,8 @@ export default function ElevationGeneratorPage() {
           defaultSiteName={activeProjectData?.project.name ?? fileName.replace(/\.dxf$/i, "")}
           totals={orderTotals}
           presets={exposurePresets}
+          siteReport={orderReport}
+          boardSpec={{ boardLength, boardHeight }}
         />
 
         {/* 현장 → 세부 프로젝트 카드 화면 (프로젝트 선택·생성·REV 불러오기) */}

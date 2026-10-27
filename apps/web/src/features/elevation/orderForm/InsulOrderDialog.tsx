@@ -21,6 +21,7 @@ import {
   type OrderPreset,
 } from "./orderLines.ts";
 import { generateInsulOrderForm, loadBudgetWorkbook } from "./insulOrderForm.ts";
+import type { SiteReport } from "./siteReport.ts";
 
 const fmt = (n: number) => Math.round(n).toLocaleString("ko-KR");
 
@@ -30,6 +31,8 @@ export default function InsulOrderDialog({
   defaultSiteName,
   totals,
   presets,
+  siteReport,
+  boardSpec,
 }: {
   open: boolean;
   onClose: () => void;
@@ -38,6 +41,9 @@ export default function InsulOrderDialog({
   /** 단열 Layout 현장 합계 (노출·겹별) */
   totals: LayoutTotals;
   presets: OrderPreset[];
+  /** 현장산출서 — 있으면 맨 뒤에 「현장산출검토」 시트로 붙는다 */
+  siteReport: SiteReport | null;
+  boardSpec: { boardLength: number; boardHeight: number };
 }) {
   const [siteName, setSiteName] = useState(defaultSiteName);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -105,9 +111,19 @@ export default function InsulOrderDialog({
     if (!budget || !workbook) return;
     setExporting(true);
     try {
-      const warn = await generateInsulOrderForm({ siteName, budgetWorkbook: workbook, budget, lines });
+      const warn = await generateInsulOrderForm({
+        siteName,
+        budgetWorkbook: workbook,
+        budget,
+        lines,
+        siteReport: siteReport ?? undefined,
+        boardSpec,
+      });
       toast.success("단열재 자재 발주의뢰서를 내려받았습니다.", {
-        description: warn.length > 0 ? warn.join(" · ") : "표지 · 자재청구서 · 발주수량 검토 + 내역서 2장",
+        description:
+          warn.length > 0
+            ? warn.join(" · ")
+            : `표지 · 자재청구서 · 발주수량 검토 + 내역서 2장${siteReport ? " + 현장산출검토" : ""}`,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "발주의뢰서 생성에 실패했습니다.");

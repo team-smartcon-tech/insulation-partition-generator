@@ -19,6 +19,7 @@ import type ExcelJS from "exceljs";
 import JSZip from "jszip";
 import type { InsulBudget } from "./budgetParser.ts";
 import { effectiveRows, type OrderLine } from "./orderLines.ts";
+import { addSiteReportSheet, type SiteReport } from "./siteReport.ts";
 
 const TEMPLATE_URL = "/templates/insul-order-template.xlsx";
 const KEEP_SHEETS = ["표지", "자재청구서", "발주수량 검토"];
@@ -55,6 +56,10 @@ export interface InsulOrderInput {
   budgetWorkbook: ExcelJS.Workbook;
   budget: InsulBudget;
   lines: OrderLine[];
+  /** 현장산출서 — 있으면 맨 뒤에 「현장산출검토」 시트를 붙인다 */
+  siteReport?: SiteReport;
+  /** 정척 규격(mm) — 현장산출검토 머리말 */
+  boardSpec?: { boardLength: number; boardHeight: number };
 }
 
 // ── 공용 보조 (tcOrderForm 과 같은 규칙 — 그쪽 파일은 타워크레인 전용이라 가져오지 않는다) ──
@@ -464,6 +469,15 @@ export async function buildInsulOrderWorkbook(
   const refs = qty ? fillQty(qty, { ...input, siteName }) : [];
   const req = wb.getWorksheet("자재청구서");
   if (req) fillRequest(req, siteName, refs);
+
+  // 맨 뒤에 현장산출검토 한 장 — 양식이 아니라 우리가 그리는 근거 자료다
+  if (input.siteReport)
+    addSiteReportSheet(wb, input.siteReport, {
+      siteName,
+      boardLength: input.boardSpec?.boardLength ?? 0,
+      boardHeight: input.boardSpec?.boardHeight ?? 0,
+      now,
+    });
 
   // 수식만 써 두고 값은 비워 두므로, 파일을 열 때 엑셀이 다시 계산하게 한다
   wb.calcProperties.fullCalcOnLoad = true;
