@@ -104,6 +104,58 @@
   .ambient-anim { animation: none !important; }
 }
 
+/* ── 로그인 배경 — 도면 위에 골조가 그려지는 드래프팅 애니메이션 (features/auth/LoginBackdrop) ── */
+/* 선 그리기: pathLength=1 이라 dashoffset 1→0 이 "끝에서 끝까지" 다. 지연 전에는 from 상태(안 보임)로 머문다 */
+@keyframes draftDraw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes draftFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 레벨 스캔선 — 지면에서 꼭대기까지(--scan 은 음수 px) 올라가며 끝에서 사라진다 */
+@keyframes draftScan {
+  0% { transform: translateY(var(--scan-from)) translateY(0); opacity: 0; }
+  8% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateY(var(--scan-from)) translateY(var(--scan)); opacity: 0; }
+}
+/* 트롤리 — 지브 시작점(기본 transform)에서 --tx/--ty 만큼 갔다가 돌아온다 */
+@keyframes trolleyRun {
+  0%, 100% { transform: translate(var(--trolley-x), var(--trolley-y)); }
+  50% { transform: translate(calc(var(--trolley-x) + var(--tx)), calc(var(--trolley-y) + var(--ty))); }
+}
+/* CAD 커서 헤어라인 — 세로선은 가로로, 가로선은 세로로 느리게 오간다 */
+@keyframes hairlineX {
+  0%, 100% { transform: translateX(16vw); }
+  50% { transform: translateX(64vw); }
+}
+@keyframes hairlineY {
+  0%, 100% { transform: translateY(26vh); }
+  50% { transform: translateY(72vh); }
+}
+/* 글자·카드 등장 */
+@keyframes loginRise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.draft-stroke {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: draftDraw 1.1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.draft-fade {
+  animation: draftFade 0.9s ease-out both;
+}
+.login-rise {
+  animation: loginRise 0.75s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 그리기·등장 애니메이션을 끄면 완성된 그림(dashoffset 0 · opacity 1)이 바로 보인다 */
+  .draft-stroke, .draft-fade, .login-rise { animation: none !important; }
+}
+
 /* ══════════════════════════════════════════════════════════════
    단열재 나누기도 — 디자인 토큰 (컨셉: 정밀 계측기)
    다크 크롬(타이틀바·레일)이 캔버스와 이어지고, 인스펙터만 밝게 떠서
