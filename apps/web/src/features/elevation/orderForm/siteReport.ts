@@ -382,7 +382,8 @@ export function addSiteReportSheet(wb: ExcelJS.Workbook, r: SiteReport, opts: Si
   ws.getColumn(2).width = 12;
   for (let c = 3; c <= lastCol; c += 1) ws.getColumn(c).width = 10;
   ws.getColumn(7).width = 17;
-  ws.pageSetup.printArea = `A1:${colLetter(lastCol)}${row}`;
+  // 마지막 내용 줄까지만 — 빈 줄 하나가 더 들어가면 그 줄만 다음 장으로 넘어가 빈 쪽이 생긴다
+  ws.pageSetup.printArea = `A1:${colLetter(lastCol)}${row - 1}`;
   ws.pageSetup.margins = { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 };
   return ws;
 }
