@@ -103,6 +103,8 @@ import {
 } from "./hooks";
 import { getElevRevision, getElevProject, fetchDxfText } from "./api";
 import OutputPanel from "./components/OutputPanel";
+import InsulOrderDialog from "./orderForm/InsulOrderDialog.tsx";
+import type { LayoutPlyTotal, LayoutTotals, OrderExposure } from "./orderForm/orderLines.ts";
 import CadRibbon from "./components/CadRibbon";
 import ProjectBrowser from "./components/ProjectBrowser";
 import WorkflowRail from "./components/WorkflowRail";
@@ -793,6 +795,9 @@ export default function ElevationGeneratorPage() {
   );
 
   const [outputOpen, setOutputOpen] = useState(false);
+  // 단열재 발주의뢰서 — 열 때 현장 합계를 한 번 계산해 넘긴다(렌더마다 전개를 다시 돌리지 않게)
+  const [orderOpen, setOrderOpen] = useState(false);
+  const [orderTotals, setOrderTotals] = useState<LayoutTotals>({ plies: [], units: 0 });
 
   // ── 프로젝트 저장 / REV(리비전) ──
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -3889,6 +3894,92 @@ export default function ElevationGeneratorPage() {
   };
 
   /**
+   * 발주의뢰서용 현장 합계 — **(노출타입, 겹)** 별 주문 판수·현장식 면적.
+   *
+   * 현장식 산출서 ② 동별 집계와 같은 경로(동·타입 셀의 소스 입면 × 그 그룹 세대수)를 돌되,
+   * 두께가 아니라 노출·겹으로 가른다. 실행예산은 `T:150`(직접외기) · `T:110`(간접외기) 한 줄씩인데
+   * 발주는 겹마다(95T + 55T, 55T + 55T) 내야 하고, 55T 하나로는 셋을 가를 수 없기 때문이다.
+   * 판수는 두께가 다른 조각을 한 판에서 자를 수 없으므로 (노출·겹·두께) 묶음마다 따로 센다.
+   */
+  const computeOrderTotals = (): LayoutTotals => {
+    const fullArea = (boardLength * boardHeight) / 1_000_000;
+    type Acc = { thickness: number; boards: number };
+    const packOpt = placement === "min-waste" ? MIN_WASTE_PACK : {};
+    const tallyCache = new Map<string, Map<string, Acc>>();
+    /** 입면 1세대의 (노출|겹) → 주문 판수 */
+    const tallyOf = (w: WallChain, fh: number): Map<string, Acc> => {
+      const key = `${w.id}|${Math.round(fh)}`;
+      const hit = tallyCache.get(key);
+      if (hit) return hit;
+      const segs = resolveSegInsul(w);
+      const { dev1, dev2 } = buildPlyDev(w, fh);
+      const m = new Map<string, Acc>();
+      for (const [ply, cells] of [[1, dev1.cells], [2, dev2?.cells ?? []]] as const) {
+        const groups = new Map<string, typeof cells>();
+        for (const c of cells) {
+          if (c.discarded) continue;
+          const ex = segs[c.seg ?? -1]?.exposure ?? "custom";
+          const k = `${ex}|${ply}|${Math.round(c.thickness)}`;
+          const g = groups.get(k);
+          if (g) g.push(c);
+          else groups.set(k, [c]);
+        }
+        for (const [k, sub] of groups) {
+          const [ex, , thk] = k.split("|");
+          const boards = summarizeBoards(sub, boardLength, boardHeight, packOpt).orderBoardCount;
+          const ek = `${ex}|${ply}`;
+          const cur = m.get(ek);
+          if (cur) cur.boards += boards;
+          else m.set(ek, { thickness: Number(thk), boards });
+        }
+      }
+      tallyCache.set(key, m);
+      return m;
+    };
+    const acc = new Map<string, Acc>();
+    let units = 0;
+    for (const b of typeMatrix.buildings)
+      for (const t of typeMatrix.types) {
+        const counts = typeMatrix.cells[cellKey(b.id, t.id)];
+        if (!counts) continue;
+        const src = elevForCell(b.id, t.id);
+        for (const g of FLOOR_GROUPS) {
+          const n = counts[g.key] ?? 0;
+          if (n <= 0) continue;
+          units += n;
+          if (!src) continue;
+          tallyOf(src, floorHeightFor(src, g.key, b.id)).forEach((v, k) => {
+            const cur = acc.get(k);
+            if (cur) cur.boards += v.boards * n;
+            else acc.set(k, { thickness: v.thickness, boards: v.boards * n });
+          });
+        }
+      }
+    const plies: LayoutPlyTotal[] = [...acc.entries()].map(([k, v]) => {
+      const [ex, ply] = k.split("|");
+      return {
+        exposure: ex as OrderExposure,
+        ply: Number(ply) as 1 | 2,
+        thickness: v.thickness,
+        boards: v.boards,
+        areaM2: v.boards * fullArea,
+      };
+    });
+    plies.sort((a, b) =>
+      a.exposure === b.exposure ? a.ply - b.ply : a.exposure.localeCompare(b.exposure)
+    );
+    return { plies, units };
+  };
+  const handleOpenOrderForm = () => {
+    if (!insulOn) {
+      toast.error("단열재 나누기를 켠 뒤 발주의뢰서를 만들 수 있습니다.");
+      return;
+    }
+    setOrderTotals(computeOrderTotals());
+    setOrderOpen(true);
+  };
+
+  /**
    * 현장식 산출서 CSV — 두께(50T/90T/…)별로 나눠 산출.
    *  ① 단위세대 타입 × 층 그룹별 단열재 수량 (개수 EA · 면적 M2)
    *  ② 동별 집계표 (층 그룹별 단위세대 물량 × 그 그룹 세대수 합)
@@ -4416,6 +4507,7 @@ export default function ElevationGeneratorPage() {
           onExportCombinedSvg={() => handleExportCombined("svg")}
           onExportInsulationCsv={handleExportInsulationCsv}
           onExportSiteReportCsv={handleExportSiteReportCsv}
+          onOpenOrderForm={handleOpenOrderForm}
           siteReportThkLabel={thkLabel}
           onOpenOutput={() => setOutputOpen(true)}
           canExport={canExport}
@@ -4568,6 +4660,7 @@ export default function ElevationGeneratorPage() {
             onOpenOutput={() => setOutputOpen(true)}
             onOpenTakeoff={() => setTakeoffOpen(true)}
             onExportSiteReportCsv={handleExportSiteReportCsv}
+            onOpenOrderForm={handleOpenOrderForm}
             siteReportThkLabel={thkLabel}
             onSaveRev={handleSaveRev}
             savingRev={saveRevMut.isPending}
@@ -6513,6 +6606,15 @@ export default function ElevationGeneratorPage() {
             onClose={() => setOutputOpen(false)}
           />
         )}
+
+        {/* 단열재 자재 발주의뢰서 — 실행예산 내역서 업로드 → 회사 양식으로 */}
+        <InsulOrderDialog
+          open={orderOpen}
+          onClose={() => setOrderOpen(false)}
+          defaultSiteName={activeProjectData?.project.name ?? fileName.replace(/\.dxf$/i, "")}
+          totals={orderTotals}
+          presets={exposurePresets}
+        />
 
         {/* 현장 → 세부 프로젝트 카드 화면 (프로젝트 선택·생성·REV 불러오기) */}
         <ProjectBrowser
