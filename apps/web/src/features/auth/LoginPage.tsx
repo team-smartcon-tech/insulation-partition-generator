@@ -114,7 +114,7 @@ export default function LoginPage() {
               className="login-rise text-[42px] font-extrabold leading-[1.25] tracking-[-0.02em] [word-break:keep-all] xl:text-[48px]"
               style={{ animationDelay: "0.15s" }}
             >
-              현장에서 만든 도구가
+              내가 만든 도구가
               <br />
               다음 현장의 표준이 됩니다
             </h1>
