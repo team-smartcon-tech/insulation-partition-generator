@@ -16,6 +16,8 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 - 엔진 단위는 그대로 동이다. 동의 최상층(`top_floor`)은 코어 중 가장 높은 층으로 서버가 맞춘다. 낮은 코어의 최상층(단열재 단계 등)은 아직 계획에 따로 반영하지 않는다.
 - DB 마이그레이션 `20261030090000_gantt_core_top_floors.sql`: `gantt_buildings.core_top_floors int[]` 추가(추가만, null 이면 모든 코어가 `top_floor`). 적용 전에는 동 저장이 이 칸 때문에 실패하며, 그때는 마이그레이션이 필요하다고 알린다.
 - Worker `/api/gantt/buildings`: `coreTopFloors` 를 받고 돌려준다. 예전처럼 `cores`·`topFloor` 만 와도 받는다.
+- 코어를 동 줄 안에 세로로 쌓는 하위 줄로 바꿨다. 코어마다 「최상층 · 옥탑 층수 · 코어 삭제」가 한 줄에 있다. 처음 안은 코어 이름이 세로로 꺾이고, 삭제 X 가 곱하기 기호처럼 보여 지울 수 없어 보였다.
+- **옥탑 층수**: 체크박스 대신 코어별 옥탑 층수(0 = 없음). 마이그레이션 `20261030100000_gantt_core_rooftop_floors.sql` 로 `gantt_buildings.core_rooftop_floors int[]` 추가(추가만). `has_rooftop` 은 옥탑 있는 코어가 하나라도 있으면 참. 엔진은 아직 옥탑을 계획에 쓰지 않는다.
 
 ### 추가 — 스마트 공정표 (2026-10-29)
 

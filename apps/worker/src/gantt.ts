@@ -178,6 +178,8 @@ export const buildingSchema = z
     name: z.string().min(1),
     cores: z.number().int().min(1).max(8).default(1),
     coreTopFloors: z.array(floorSchema).min(1).max(8).optional(),
+    /** 코어별 옥탑 층수(0 = 없음). coreTopFloors 와 같은 순서·길이. 없으면 hasRooftop 기준 1/0 */
+    coreRooftopFloors: z.array(z.number().int().min(0).max(10)).max(8).optional(),
     baseFloor: z.number().int().min(1).default(3),
     topFloor: floorSchema.optional(),
     hasRooftop: z.boolean().default(false),
@@ -186,7 +188,15 @@ export const buildingSchema = z
   .refine((b) => b.coreTopFloors || b.topFloor != null, { message: "최상층이 없습니다." })
   .transform((b) => {
     const coreTopFloors = b.coreTopFloors ?? Array.from({ length: b.cores }, () => b.topFloor as number);
-    return { ...b, cores: coreTopFloors.length, coreTopFloors, topFloor: Math.max(...coreTopFloors) };
+    const coreRooftopFloors = coreTopFloors.map((_, i) => b.coreRooftopFloors?.[i] ?? (b.hasRooftop ? 1 : 0));
+    return {
+      ...b,
+      cores: coreTopFloors.length,
+      coreTopFloors,
+      topFloor: Math.max(...coreTopFloors),
+      coreRooftopFloors,
+      hasRooftop: coreRooftopFloors.some((n) => n > 0),
+    };
   });
 export type Building = z.output<typeof buildingSchema>;
 
@@ -197,20 +207,26 @@ type BuildingRow = {
   base_floor: number;
   top_floor: number;
   core_top_floors?: number[] | null;
+  core_rooftop_floors?: number[] | null;
   has_rooftop: boolean;
   current_floor: number | null;
 };
 
-const fromRow = (r: BuildingRow): Building => ({
-  buildingNo: r.building_no,
-  name: r.name,
-  cores: r.core_top_floors?.length || r.cores,
-  coreTopFloors: r.core_top_floors?.length ? r.core_top_floors : Array.from({ length: r.cores }, () => r.top_floor),
-  baseFloor: r.base_floor,
-  topFloor: r.core_top_floors?.length ? Math.max(...r.core_top_floors) : r.top_floor,
-  hasRooftop: r.has_rooftop,
-  currentFloor: r.current_floor ?? null,
-});
+const fromRow = (r: BuildingRow): Building => {
+  const coreTopFloors = r.core_top_floors?.length ? r.core_top_floors : Array.from({ length: r.cores }, () => r.top_floor);
+  const coreRooftopFloors = coreTopFloors.map((_, i) => r.core_rooftop_floors?.[i] ?? (r.has_rooftop ? 1 : 0));
+  return {
+    buildingNo: r.building_no,
+    name: r.name,
+    cores: coreTopFloors.length,
+    coreTopFloors,
+    coreRooftopFloors,
+    baseFloor: r.base_floor,
+    topFloor: Math.max(...coreTopFloors),
+    hasRooftop: coreRooftopFloors.some((n) => n > 0),
+    currentFloor: r.current_floor ?? null,
+  };
+};
 
 async function loadBuildings(env: Env, siteId: string): Promise<Building[]> {
   const res = await supabaseRest(
@@ -433,6 +449,7 @@ gantt.put("/buildings/:siteId", async (c) => {
           name: b.name,
           cores: b.cores,
           core_top_floors: b.coreTopFloors,
+          core_rooftop_floors: b.coreRooftopFloors,
           base_floor: b.baseFloor,
           top_floor: b.topFloor,
           has_rooftop: b.hasRooftop,
@@ -447,6 +464,8 @@ gantt.put("/buildings/:siteId", async (c) => {
         // core_top_floors 칸이 아직 없음(마이그레이션 20261030090000 전) — 조용히 버리지 않고 알린다
         if (text.includes("core_top_floors"))
           throw new GanttError(500, "코어별 최상층 칸이 DB에 아직 없습니다. 마이그레이션(20261030090000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
+        if (text.includes("core_rooftop_floors"))
+          throw new GanttError(500, "코어별 옥탑 층수 칸이 DB에 아직 없습니다. 마이그레이션(20261030100000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
         throw new GanttError(500, `동 저장 실패: ${text}`, "DATABASE_ERROR");
       }
     }

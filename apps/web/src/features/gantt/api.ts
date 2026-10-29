@@ -54,6 +54,8 @@ export const buildingSchema = z.object({
   cores: z.number().int().min(1).max(8),
   /** 코어별 최상층 [1코어, 2코어, …]. cores = 길이, topFloor = 최댓값 (서버가 맞춘다) */
   coreTopFloors: z.array(z.number().int().min(1).max(80)).min(1).max(8),
+  /** 코어별 옥탑 층수(0 = 없음). coreTopFloors 와 같은 순서·길이. hasRooftop = 하나라도 > 0 */
+  coreRooftopFloors: z.array(z.number().int().min(0).max(10)).max(8),
   baseFloor: z.number().int().min(1),
   topFloor: z.number().int().min(1).max(80),
   hasRooftop: z.boolean(),
