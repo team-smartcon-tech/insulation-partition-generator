@@ -116,18 +116,18 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
                                 <X />
                               </Button>
                             ) : null}
+                            {k === cores.length - 1 && cores.length < MAX_CORES ? (
+                              <button
+                                type="button"
+                                className="ml-1 inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-primary hover:bg-muted"
+                                onClick={() => setCores(i, [...cores, cores.at(-1) ?? { top: 30, rooftop: 1 }])}
+                              >
+                                <Plus className="size-3.5" /> 코어 추가
+                              </button>
+                            ) : null}
                           </div>
                         );
                       })}
-                      {cores.length < MAX_CORES ? (
-                        <button
-                          type="button"
-                          className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-primary hover:bg-muted"
-                          onClick={() => setCores(i, [...cores, cores.at(-1) ?? { top: 30, rooftop: 1 }])}
-                        >
-                          <Plus className="size-3.5" /> 코어 추가
-                        </button>
-                      ) : null}
                     </div>
                   </td>
                   <td className="py-1.5 pr-2 w-24">
