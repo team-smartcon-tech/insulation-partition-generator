@@ -202,7 +202,12 @@ async function loadBuildings(env: Env, siteId: string): Promise<Building[]> {
     "GET",
     `/gantt_buildings?site_id=eq.${encodeURIComponent(siteId)}&select=*&order=building_no.asc`,
   );
-  if (!res.ok) throw new GanttError(500, `동 목록 조회 실패: ${await res.text()}`, "DATABASE_ERROR");
+  if (!res.ok) {
+    const text = await res.text();
+    // 마이그레이션 전(표 없음)에는 빈 목록으로 간주 — 최상층 없이(끝없이 올라감) 계획한다
+    if (text.includes("PGRST205")) return [];
+    throw new GanttError(500, `동 목록 조회 실패: ${text}`, "DATABASE_ERROR");
+  }
   return ((await res.json()) as BuildingRow[]).map(fromRow);
 }
 
@@ -212,7 +217,11 @@ async function loadSettings(env: Env, siteId: string) {
     "GET",
     `/gantt_site_settings?site_id=eq.${encodeURIComponent(siteId)}&select=settings,updated_at,updated_by&limit=1`,
   );
-  if (!res.ok) throw new GanttError(500, `설정 조회 실패: ${await res.text()}`, "DATABASE_ERROR");
+  if (!res.ok) {
+    const text = await res.text();
+    if (text.includes("PGRST205")) return { settings: DEFAULT_SITE_SETTINGS, saved: false, updatedAt: null, updatedBy: null };
+    throw new GanttError(500, `설정 조회 실패: ${text}`, "DATABASE_ERROR");
+  }
   const rows = (await res.json()) as { settings: unknown; updated_at: string; updated_by: string | null }[];
   const parsed = rows[0] ? siteSettingsSchema.safeParse(rows[0].settings) : null;
   return {
