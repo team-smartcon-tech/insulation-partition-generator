@@ -165,16 +165,30 @@ async function listReports(env: Env, q: { siteId: string; from: string; to: stri
 
 // ─── 이 앱 DB: 현장 설정·동 목록 ──────────────────────────────────────────
 
-export const buildingSchema = z.object({
-  buildingNo: z.number().int().min(1),
-  name: z.string().min(1),
-  cores: z.number().int().min(1).max(8).default(1),
-  baseFloor: z.number().int().min(1).default(3),
-  topFloor: z.number().int().min(1).max(80),
-  hasRooftop: z.boolean().default(false),
-  currentFloor: z.number().int().min(0).nullable().default(null),
-});
-export type Building = z.infer<typeof buildingSchema>;
+const floorSchema = z.number().int().min(1).max(80);
+
+/**
+ * 동 하나. 코어마다 최상층이 다를 수 있어 coreTopFloors(1코어, 2코어, …)로 받는다.
+ * cores·topFloor 는 coreTopFloors 에서 나온다 — 코어 수 = 길이, 동 최상층 = 최댓값(엔진은 동 단위).
+ * 예전 클라이언트처럼 coreTopFloors 없이 cores·topFloor 만 오면 [topFloor × cores] 로 본다.
+ */
+export const buildingSchema = z
+  .object({
+    buildingNo: z.number().int().min(1),
+    name: z.string().min(1),
+    cores: z.number().int().min(1).max(8).default(1),
+    coreTopFloors: z.array(floorSchema).min(1).max(8).optional(),
+    baseFloor: z.number().int().min(1).default(3),
+    topFloor: floorSchema.optional(),
+    hasRooftop: z.boolean().default(false),
+    currentFloor: z.number().int().min(0).nullable().default(null),
+  })
+  .refine((b) => b.coreTopFloors || b.topFloor != null, { message: "최상층이 없습니다." })
+  .transform((b) => {
+    const coreTopFloors = b.coreTopFloors ?? Array.from({ length: b.cores }, () => b.topFloor as number);
+    return { ...b, cores: coreTopFloors.length, coreTopFloors, topFloor: Math.max(...coreTopFloors) };
+  });
+export type Building = z.output<typeof buildingSchema>;
 
 type BuildingRow = {
   building_no: number;
@@ -182,6 +196,7 @@ type BuildingRow = {
   cores: number;
   base_floor: number;
   top_floor: number;
+  core_top_floors?: number[] | null;
   has_rooftop: boolean;
   current_floor: number | null;
 };
@@ -189,9 +204,10 @@ type BuildingRow = {
 const fromRow = (r: BuildingRow): Building => ({
   buildingNo: r.building_no,
   name: r.name,
-  cores: r.cores,
+  cores: r.core_top_floors?.length || r.cores,
+  coreTopFloors: r.core_top_floors?.length ? r.core_top_floors : Array.from({ length: r.cores }, () => r.top_floor),
   baseFloor: r.base_floor,
-  topFloor: r.top_floor,
+  topFloor: r.core_top_floors?.length ? Math.max(...r.core_top_floors) : r.top_floor,
   hasRooftop: r.has_rooftop,
   currentFloor: r.current_floor ?? null,
 });
@@ -416,6 +432,7 @@ gantt.put("/buildings/:siteId", async (c) => {
           building_no: b.buildingNo,
           name: b.name,
           cores: b.cores,
+          core_top_floors: b.coreTopFloors,
           base_floor: b.baseFloor,
           top_floor: b.topFloor,
           has_rooftop: b.hasRooftop,
@@ -425,7 +442,13 @@ gantt.put("/buildings/:siteId", async (c) => {
         })),
         "resolution=merge-duplicates,return=representation",
       );
-      if (!up.ok) throw new GanttError(500, `동 저장 실패: ${await up.text()}`, "DATABASE_ERROR");
+      if (!up.ok) {
+        const text = await up.text();
+        // core_top_floors 칸이 아직 없음(마이그레이션 20261030090000 전) — 조용히 버리지 않고 알린다
+        if (text.includes("core_top_floors"))
+          throw new GanttError(500, "코어별 최상층 칸이 DB에 아직 없습니다. 마이그레이션(20261030090000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
+        throw new GanttError(500, `동 저장 실패: ${text}`, "DATABASE_ERROR");
+      }
     }
     // 목록에서 빠진 동은 삭제 (이 앱의 설정 표. 스마트웍스 DB 가 아니다)
     const notIn = nos.length ? `&building_no=not.in.(${nos.join(",")})` : "";

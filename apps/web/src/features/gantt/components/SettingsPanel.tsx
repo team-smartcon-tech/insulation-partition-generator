@@ -28,14 +28,14 @@ export default function SettingsPanel({ siteId, siteName }: { siteId: string | n
 
   const onSave = async () => {
     if (!siteId) return;
-    const bad = buildings.find((b) => !b.name.trim() || b.topFloor < b.baseFloor);
+    const bad = buildings.find((b) => !b.name.trim() || b.coreTopFloors.some((f) => f < b.baseFloor));
     if (bad) {
-      toast.error(`${bad.buildingNo}동: 이름이 비었거나 최상층이 기준층 시작보다 낮습니다.`);
+      toast.error(`${bad.buildingNo}동: 이름이 비었거나 최상층이 기준층 시작보다 낮은 코어가 있습니다.`);
       return;
     }
     const nos = buildings.map((b) => b.buildingNo);
     if (new Set(nos).size !== nos.length) {
-      toast.error("동 번호가 중복됩니다.");
+      toast.error("동 번호가 중복됩니다. 코어별 층이 다르면 한 줄에서 코어를 추가하세요.");
       return;
     }
     try {
