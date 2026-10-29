@@ -3,12 +3,15 @@
  * 같은 동이라도 코어마다 최상층·옥탑이 다를 수 있어, 동 한 줄 안에 코어를 세로로 쌓는다(동을 두 줄로 넣지 않는다).
  * 동의 최상층 = 코어 중 가장 높은 층. 최상층이 있어야 11월 이후 계획이 맞는다(최상층 타설 뒤 사이클에서 빠짐).
  */
-import { Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Building } from "../api";
 
 const num = (v: string, fallback: number) => (v === "" || Number.isNaN(Number(v)) ? fallback : Number(v));
 const MAX_CORES = 8;
+
+/** 이름 안의 첫 숫자를 d 만큼 올리고 내린다 ("401동" → "402동"). 숫자가 없으면 그대로 */
+const stepName = (name: string, d: number) => name.replace(/\d+/, (m) => String(Math.max(0, Number(m) + d)).padStart(m.length, "0"));
 
 type Core = { top: number; rooftop: number };
 const coresOf = (b: Building): Core[] => b.coreTopFloors.map((top, k) => ({ top, rooftop: b.coreRooftopFloors[k] ?? 0 }));
@@ -70,7 +73,26 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
                     <input className={cell} type="number" min={1} value={b.buildingNo} onChange={(e) => update(i, { buildingNo: num(e.target.value, b.buildingNo) })} />
                   </td>
                   <td className="py-1.5 pr-2 w-28">
-                    <input className={cell} value={b.name} onChange={(e) => update(i, { name: e.target.value })} />
+                    <div className="relative">
+                      <input
+                        className={`${cell} pr-6`}
+                        value={b.name}
+                        onChange={(e) => update(i, { name: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+                          e.preventDefault();
+                          update(i, { name: stepName(b.name, e.key === "ArrowUp" ? 1 : -1) });
+                        }}
+                      />
+                      <div className="absolute inset-y-0 right-0.5 flex flex-col justify-center">
+                        <button type="button" tabIndex={-1} aria-label={`${b.name} 이름 숫자 올리기`} className="flex h-3.5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => update(i, { name: stepName(b.name, 1) })}>
+                          <ChevronUp className="size-3" />
+                        </button>
+                        <button type="button" tabIndex={-1} aria-label={`${b.name} 이름 숫자 내리기`} className="flex h-3.5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => update(i, { name: stepName(b.name, -1) })}>
+                          <ChevronDown className="size-3" />
+                        </button>
+                      </div>
+                    </div>
                   </td>
                   <td className="py-1.5 pr-2 w-20">
                     <input className={cell} type="number" min={1} value={b.baseFloor} onChange={(e) => update(i, { baseFloor: num(e.target.value, b.baseFloor) })} />
