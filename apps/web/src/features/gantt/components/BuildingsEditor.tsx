@@ -3,6 +3,7 @@
  * 같은 동이라도 코어마다 최상층·옥탑이 다를 수 있어, 동 한 줄 안에 코어를 세로로 쌓는다(동을 두 줄로 넣지 않는다).
  * 동의 최상층 = 코어 중 가장 높은 층. 최상층이 있어야 11월 이후 계획이 맞는다(최상층 타설 뒤 사이클에서 빠짐).
  */
+import type { InputHTMLAttributes } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Building } from "../api";
@@ -12,6 +13,64 @@ const MAX_CORES = 8;
 
 /** 이름 안의 첫 숫자를 d 만큼 올리고 내린다 ("401동" → "402동"). 숫자가 없으면 그대로 */
 const stepName = (name: string, d: number) => name.replace(/\d+/, (m) => String(Math.max(0, Number(m) + d)).padStart(m.length, "0"));
+
+/**
+ * 화살표가 달린 입력칸 — 이 표의 모든 칸(숫자·이름)이 같은 화살표를 쓰게 한다.
+ * 브라우저 기본 숫자 화살표는 숨기고, 마우스를 올리거나 칸에 들어가면 위·아래 화살표가 보인다. 방향키도 같다.
+ */
+function StepInput({
+  onStep,
+  className = "",
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "className"> & { onStep: (d: 1 | -1) => void; className?: string }) {
+  const btn = "flex h-3.5 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground";
+  return (
+    <div className={`group relative ${className}`}>
+      <input
+        {...rest}
+        className="h-8 w-full rounded-md border border-input bg-card pl-2 pr-5 text-sm tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+          e.preventDefault();
+          onStep(e.key === "ArrowUp" ? 1 : -1);
+        }}
+      />
+      <div className="absolute inset-y-0 right-0.5 flex flex-col justify-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+        <button type="button" tabIndex={-1} aria-label="올리기" className={btn} onClick={() => onStep(1)}>
+          <ChevronUp className="size-3" />
+        </button>
+        <button type="button" tabIndex={-1} aria-label="내리기" className={btn} onClick={() => onStep(-1)}>
+          <ChevronDown className="size-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 숫자 칸 — 화살표는 min·max 안에서만 움직인다 */
+function NumInput({
+  value,
+  onValue,
+  min,
+  max,
+  className,
+  ...rest
+}: { value: number | null; onValue: (v: number | null) => void; min: number; max?: number; className?: string; placeholder?: string; "aria-label"?: string }) {
+  const clamp = (v: number) => Math.min(max ?? Infinity, Math.max(min, v));
+  return (
+    <StepInput
+      {...rest}
+      className={className}
+      type="number"
+      inputMode="numeric"
+      min={min}
+      max={max}
+      value={value ?? ""}
+      onChange={(e) => onValue(e.target.value === "" ? null : num(e.target.value, value ?? min))}
+      onStep={(d) => onValue(clamp((value ?? min - d) + d))}
+    />
+  );
+}
 
 type Core = { top: number; rooftop: number };
 const coresOf = (b: Building): Core[] => b.coreTopFloors.map((top, k) => ({ top, rooftop: b.coreRooftopFloors[k] ?? 0 }));
@@ -32,9 +91,6 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
     onChange([...value, { buildingNo: next, name: `${next}동`, baseFloor: 3, currentFloor: null, ...fromCores([{ top: 30, rooftop: 1 }]) } as Building]);
   };
   const setCores = (i: number, cores: Core[]) => update(i, fromCores(cores));
-
-  const cell = "h-8 w-full rounded-md border border-input bg-card px-2 text-sm tabular-nums";
-  const small = "h-8 w-14 rounded-md border border-input bg-card px-2 text-sm tabular-nums";
 
   return (
     <div className="rounded-lg border border-border bg-card p-4">
@@ -70,32 +126,18 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
               return (
                 <tr key={i} className="border-t border-border/60 align-top">
                   <td className="py-1.5 pr-2 w-20">
-                    <input className={cell} type="number" min={1} value={b.buildingNo} onChange={(e) => update(i, { buildingNo: num(e.target.value, b.buildingNo) })} />
+                    <NumInput min={1} value={b.buildingNo} onValue={(v) => update(i, { buildingNo: v ?? b.buildingNo })} aria-label="동 번호" />
                   </td>
                   <td className="py-1.5 pr-2 w-28">
-                    <div className="relative">
-                      <input
-                        className={`${cell} pr-6`}
-                        value={b.name}
-                        onChange={(e) => update(i, { name: e.target.value })}
-                        onKeyDown={(e) => {
-                          if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-                          e.preventDefault();
-                          update(i, { name: stepName(b.name, e.key === "ArrowUp" ? 1 : -1) });
-                        }}
-                      />
-                      <div className="absolute inset-y-0 right-0.5 flex flex-col justify-center">
-                        <button type="button" tabIndex={-1} aria-label={`${b.name} 이름 숫자 올리기`} className="flex h-3.5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => update(i, { name: stepName(b.name, 1) })}>
-                          <ChevronUp className="size-3" />
-                        </button>
-                        <button type="button" tabIndex={-1} aria-label={`${b.name} 이름 숫자 내리기`} className="flex h-3.5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => update(i, { name: stepName(b.name, -1) })}>
-                          <ChevronDown className="size-3" />
-                        </button>
-                      </div>
-                    </div>
+                    <StepInput
+                      value={b.name}
+                      aria-label="이름"
+                      onChange={(e) => update(i, { name: e.target.value })}
+                      onStep={(d) => update(i, { name: stepName(b.name, d) })}
+                    />
                   </td>
                   <td className="py-1.5 pr-2 w-20">
-                    <input className={cell} type="number" min={1} value={b.baseFloor} onChange={(e) => update(i, { baseFloor: num(e.target.value, b.baseFloor) })} />
+                    <NumInput min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작" />
                   </td>
                   <td className="py-1.5 pr-2">
                     <div className="space-y-1">
@@ -105,25 +147,23 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
                           <div key={k} className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
                             <span className="w-10 shrink-0 font-medium text-foreground">{k + 1}코어</span>
                             <span>최상층</span>
-                            <input
-                              className={small}
-                              type="number"
+                            <NumInput
+                              className="w-16"
                               min={1}
                               max={80}
                               value={c.top}
                               aria-label={`${b.name} ${k + 1}코어 최상층`}
-                              onChange={(e) => set({ top: num(e.target.value, c.top) })}
+                              onValue={(v) => set({ top: v ?? c.top })}
                             />
                             <span className="mr-2">층</span>
                             <span>옥탑</span>
-                            <input
-                              className={small}
-                              type="number"
+                            <NumInput
+                              className="w-16"
                               min={0}
                               max={10}
                               value={c.rooftop}
                               aria-label={`${b.name} ${k + 1}코어 옥탑 층수`}
-                              onChange={(e) => set({ rooftop: num(e.target.value, c.rooftop) })}
+                              onValue={(v) => set({ rooftop: v ?? c.rooftop })}
                             />
                             <span>층</span>
                             {multi ? (
@@ -153,7 +193,7 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
                     </div>
                   </td>
                   <td className="py-1.5 pr-2 w-24">
-                    <input className={cell} type="number" min={0} value={b.currentFloor ?? ""} placeholder="일보 우선" onChange={(e) => update(i, { currentFloor: e.target.value === "" ? null : num(e.target.value, 0) })} />
+                    <NumInput min={0} value={b.currentFloor} placeholder="일보 우선" onValue={(v) => update(i, { currentFloor: v })} aria-label="현재 층" />
                   </td>
                   <td className="py-1.5 text-right">
                     <Button variant="ghost" size="icon-sm" title={`${b.name} 삭제`} aria-label={`${b.name} 삭제`} onClick={() => remove(i)}>
