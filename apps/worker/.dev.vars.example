@@ -23,3 +23,8 @@ COOKIE_SECURE=false
 # service_role 키는 Supabase 대시보드 Settings → API 에서 복사(커밋 금지). 로그인만 테스트할 땐 비워둬도 됨.
 SUPABASE_URL=https://yzercziwazfrjsjnmbhr.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=
+
+# 스마트 공정표 — 스마트웍스(dcr-app) Supabase 읽기 전용(작업일보·현장). CTPA 가 쓰는 운영 DB(shdsg…)와 같은 키.
+# service_role 키는 Supabase 대시보드 → 프로젝트 shdsgyzzwtteqdbhkvny → Settings → API. 이 앱은 SELECT 만 한다.
+DCR_SUPABASE_URL=https://shdsgyzzwtteqdbhkvny.supabase.co
+DCR_SUPABASE_SERVICE_ROLE_KEY=

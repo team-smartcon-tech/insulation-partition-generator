@@ -10,6 +10,14 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 
 ## [Unreleased]
 
+### 추가 — 스마트 공정표 (2026-10-29)
+
+- 홈 시공 도구에 **스마트 공정표** 카드(`/tools/gantt`). Smart-Gantt-Chart 저장소(제품 0.5.0)에서 이관해 이후 개발은 여기서 한다.
+- `packages/gantt-engine`: 달력(§4)·기준층 사이클(§3)·현장 설정(§5)·반일 슬롯 시뮬레이터(§7)·작업일보 해석(골조·전기·설비 구간)·실적→출발 상태·**최상층 규칙**(최상층 타설 뒤 사이클 종료, 최상층 사이클에 단열재(1·2호) 단계 — 설계 §8-2). 계약은 zod. 테스트 Node 러너 36건.
+- Worker `/api/gantt/*`: 스마트웍스(dcr-app) Supabase **읽기 전용**(현장·작업일보, `DCR_SUPABASE_*` — CTPA 와 같은 운영 DB `shdsg…`), `/simulate`, `/plan`(실적 + 동별 최상층 → 예정), `/settings/:siteId`·`/buildings/:siteId`(이 앱 DB).
+- DB 마이그레이션 `20261029120000_gantt_settings.sql`: `gantt_site_settings`(현장 설정 jsonb), `gantt_buildings`(동 번호·이름·코어·기준층 시작·최상층·옥탑·현재 층). RLS 켜고 정책 없음(service_role 전용).
+- 화면 `features/gantt/`: 탭 3개 — 작업일보(원문 + 단계별 카드, CTPA 배치), 공정표(월 이동·요약·간트 실적/예정·저장 없이 바꿔 보기), 설정(현장 설정 + 동 목록 저장). 현장은 상단 PROJECT 선택(브라우저 기억). 규칙 문서 `docs/gantt/설계.md`.
+
 ### 변경 — 홈 런처 UI 정리 (2026-10-29)
 
 - 카드에서 「사용 가능」배지·조회수 알약·태그 칩을 걷어내고 로고 패널(16:9) · 이름 · 태그 한 줄 · 두 줄 설명 · 작성자·조회/좋아요 로 정리했다. 전부 사용 가능인데 배지가 다 붙어 노이즈였다. 카드는 한 줄 4장(2xl 5장)으로 키웠다.

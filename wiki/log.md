@@ -32,3 +32,10 @@ tags: [wiki/log]
 - 정한 것과 이유(사용자): 새 주소 연결은 사용자가 홈에 따로 만들었으므로 리다이렉트는 두지 않는다. DB `form_*` 6개·버킷 `form-files` 는 되돌리기용으로 2026-11-04 까지 보존하고 삭제는 별도 승인으로 한다.
 - 남긴 것: `scripts/smart-forms-split/`·`tests/smart-forms-split-copy.test.mjs`·`docs/smart-forms-split/`·`supabase/migrations/` 의 `form_*` 마이그레이션(표가 아직 있으므로 이력도 둔다).
 - 남은 것: 2026-11-04 이후 표·버킷 삭제(별도 승인). 그때 위 복사 도구와 `form_*` 마이그레이션 처리도 정한다. 이 기록 위쪽 "`systems/` … 스마트폼 화면 지식" 은 이제 만들 대상이 아니다.
+
+## 2026-10-29 · 넣기·만들기 · 스마트 공정표를 툴박스 내장 도구로 이관
+
+- 계기: 따로 만들던 Smart-Gantt-Chart(공정 엔진·작업일보 해석·간트)를 로그인·DB 가 있는 이 툴박스에 카드 하나로 넣기로 했다(사용자 결정). 기존 저장소는 기록용으로 둔다.
+- 한 것: `packages/gantt-engine`(순수 엔진 + zod 계약, Node 러너 테스트 36건), Worker `/api/gantt/*`, `features/gantt/` 3탭 화면, `gantt_*` 마이그레이션, `docs/gantt/설계.md`(규칙 1차 소스).
+- 정한 것과 이유: 스마트웍스 일보는 **dcr-app Supabase 를 service_role 로 SELECT 만**(CTPA 와 같은 방식, 운영 DB `shdsg…`; 테스트 DB `kejie…` 와 혼동 주의 — 키의 JWT `ref` 와 주소를 대조한다). 엔진 테스트는 이 저장소 규칙대로 Vitest 대신 Node 내장 러너. 화면은 wouter + React Query 로 다시 썼고 간트 그리기는 그대로. 최상층은 `gantt_buildings.top_floor` 로 — 없으면 끝없이 올라간다.
+- 남은 것: 마이그레이션 SQL 적용(사용자, SQL Editor), 툴박스 `.dev.vars` 에 DCR 키(복사해 둠) 반영 후 재시작, 실데이터로 3탭 확인, 현장 범위 권한(dcr managed_sites)·공휴일 달력 DB 화·최적안 탐색.

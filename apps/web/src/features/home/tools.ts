@@ -7,7 +7,7 @@
  *   3) App.tsx 에 <Route path="/tools/xxx"> 연결
  * → 홈(HomePage)은 이 배열을 읽어 카드를 자동으로 그린다.
  */
-import { Square, TowerControl, type LucideIcon } from "lucide-react";
+import { CalendarRange, Square, TowerControl, type LucideIcon } from "lucide-react";
 import type { SectionId } from "@/features/market/types";
 
 export type ToolStatus = "available" | "comingSoon";
@@ -60,6 +60,19 @@ export const TOOLS: ToolDef[] = [
     tags: ["타워크레인", "호이스트", "발주의뢰서"],
     thumbnail: "/brand/logo-tc-rental.svg",
     logo: "/brand/mark-tc-rental.svg",
+    sortLast: true,
+  },
+  {
+    id: "gantt",
+    name: "스마트 공정표",
+    description:
+      "스마트웍스 작업일보를 읽어 골조 공정을 동·층·단계로 해석하고, 실적 기준으로 앞으로의 공정을 반일 단위로 자동 재산정합니다.",
+    path: "/tools/gantt",
+    icon: CalendarRange,
+    status: "available",
+    tags: ["골조 공정", "작업일보", "간트"],
+    thumbnail: "/brand/logo-gantt.svg",
+    logo: "/brand/mark-gantt.svg",
     sortLast: true,
   },
   // 빈 자리표시자 카드는 두지 않는다 — 홈은 "준비 중" 섹션에 컴팩트 타일로만 노출한다.

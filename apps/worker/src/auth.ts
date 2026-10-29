@@ -40,6 +40,9 @@ export interface Env {
   COOKIE_SECURE?: string;
   /** (선택) 로그인 rate-limit용 KV. 없으면 제한 생략(문서화). */
   RATE_LIMIT?: IpgKV;
+  /** 스마트 공정표 — 스마트웍스(dcr-app) Supabase 읽기 전용. URL 은 wrangler vars, 키는 secret */
+  DCR_SUPABASE_URL?: string;
+  DCR_SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 
 export interface SessionUser {
