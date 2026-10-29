@@ -166,18 +166,19 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
                               onValue={(v) => set({ rooftop: v ?? c.rooftop })}
                             />
                             <span>층</span>
-                            {multi ? (
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="ml-1 text-muted-foreground hover:text-red-600"
-                                title={`${k + 1}코어 삭제`}
-                                aria-label={`${b.name} ${k + 1}코어 삭제`}
-                                onClick={() => setCores(i, cores.filter((_, j) => j !== k))}
-                              >
-                                <X />
-                              </Button>
-                            ) : null}
+                            {/* 코어가 하나면 X 는 숨기되 자리는 남겨 "코어 추가" 위치를 맞춘다 */}
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className={`ml-1 text-muted-foreground hover:text-red-600 ${multi ? "" : "invisible"}`}
+                              disabled={!multi}
+                              aria-hidden={!multi}
+                              title={`${k + 1}코어 삭제`}
+                              aria-label={`${b.name} ${k + 1}코어 삭제`}
+                              onClick={() => setCores(i, cores.filter((_, j) => j !== k))}
+                            >
+                              <X />
+                            </Button>
                             {k === cores.length - 1 && cores.length < MAX_CORES ? (
                               <button
                                 type="button"
