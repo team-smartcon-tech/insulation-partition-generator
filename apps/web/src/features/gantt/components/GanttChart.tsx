@@ -37,8 +37,22 @@ const GROUP_LABEL: Record<Group, string> = {
   rebar: "철근",
   mep: "기전(오전)",
   alform: "알폼",
-  insulation: "바닥단열재(최상층)",
+  insulation: "단열재(최상층)",
   pour: "타설",
+};
+
+/** 상자 안 세로 글자 (반일 칸이 좁아 짧게). 철근 뒤 기전이 붙은 하루 상자는 철근 이름 */
+const STAGE_TEXT: Record<Stage, string> = {
+  MARK: "먹매김",
+  GANGFORM: "갱폼",
+  WALL_REBAR: "벽철근",
+  WALL_MEP: "기전",
+  ALFORM: "알폼",
+  TOP_INSULATION: "단열재",
+  SLAB_REBAR: "슬래브",
+  SLAB_MEP: "기전",
+  POUR: "타설",
+  CURE: "양생",
 };
 
 const GROUP_STYLE: Record<Group, string> = {
@@ -80,39 +94,42 @@ const STAGE_INDEX: Record<Stage, number> = {
 /** 층 표시: 옥탑은 PH1·PH2, 그 외 42F */
 const floorLabel = (a: { floor: number; roof?: number }) => (a.roof ? `PH${a.roof}` : `${a.floor}F`);
 
-type Box = { span: "AM" | "PM" | "DAY"; group: Group; title: string };
+type Box = { span: "AM" | "PM" | "DAY"; group: Group; title: string; text?: string };
 
-function dayBoxes(date: string, label: string, am?: Assignment, pm?: Assignment): Box[] {
+/** 글자: 같은 작업이 여러 칸 이어지면(cont = 앞 칸과 같은 작업) 첫 칸에만 */
+const textOf = (stage: Stage, cont: boolean) => (cont ? undefined : STAGE_TEXT[stage]);
+
+function dayBoxes(date: string, label: string, am: Assignment | undefined, pm: Assignment | undefined, cont: (a: Assignment) => boolean): Box[] {
   const t = (a: Assignment, half: string) => `${date} ${half} · ${label} ${floorLabel(a)} · ${STAGE_TITLE[a.stage]}`;
   if (am && pm) {
     const g1 = STAGE_GROUP[am.stage];
     const g2 = STAGE_GROUP[pm.stage];
     if (g1 === g2 || (g1 === "rebar" && g2 === "mep")) {
-      return [{ span: "DAY", group: g1, title: `${t(am, "오전")} / ${STAGE_TITLE[pm.stage]}` }];
+      return [{ span: "DAY", group: g1, title: `${t(am, "오전")} / ${STAGE_TITLE[pm.stage]}`, text: textOf(am.stage, cont(am)) }];
     }
     return [
-      { span: "AM", group: g1, title: t(am, "오전") },
-      { span: "PM", group: g2, title: t(pm, "오후") },
+      { span: "AM", group: g1, title: t(am, "오전"), text: textOf(am.stage, cont(am)) },
+      { span: "PM", group: g2, title: t(pm, "오후"), text: textOf(pm.stage, cont(pm)) },
     ];
   }
-  if (am) return [{ span: am.stage === "POUR" ? "DAY" : "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전") }];
-  if (pm) return [{ span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후") }];
+  if (am) return [{ span: am.stage === "POUR" ? "DAY" : "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: textOf(am.stage, cont(am)) }];
+  if (pm) return [{ span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후"), text: textOf(pm.stage, cont(pm)) }];
   return [];
 }
 
-function actualBoxes(date: string, label: string, works: ActualWork[]): Box[] {
+function actualBoxes(date: string, label: string, works: ActualWork[], cont: (w: ActualWork) => boolean): Box[] {
   const sorted = [...works].sort((a, b) => STAGE_INDEX[a.stage] - STAGE_INDEX[b.stage]);
   const t = (w: ActualWork) => `${date} 실적 · ${label} ${w.floor}F · ${STAGE_TITLE[w.stage]}`;
-  if (sorted.length === 1) return [{ span: "DAY", group: STAGE_GROUP[sorted[0].stage], title: t(sorted[0]) }];
+  if (sorted.length === 1) return [{ span: "DAY", group: STAGE_GROUP[sorted[0].stage], title: t(sorted[0]), text: textOf(sorted[0].stage, cont(sorted[0])) }];
   const [a, b] = [sorted[0], sorted[sorted.length - 1]];
   const g1 = STAGE_GROUP[a.stage];
   const g2 = STAGE_GROUP[b.stage];
   if (g1 === g2 || (g1 === "rebar" && g2 === "mep")) {
-    return [{ span: "DAY", group: g1, title: sorted.map(t).join(" / ") }];
+    return [{ span: "DAY", group: g1, title: sorted.map(t).join(" / "), text: textOf(a.stage, cont(a)) }];
   }
   return [
-    { span: "AM", group: g1, title: t(a) },
-    { span: "PM", group: g2, title: t(b) },
+    { span: "AM", group: g1, title: t(a), text: textOf(a.stage, cont(a)) },
+    { span: "PM", group: g2, title: t(b), text: textOf(b.stage, cont(b)) },
   ];
 }
 
@@ -125,9 +142,14 @@ function BoxEl({ box }: { box: Box }) {
         box.span === "DAY" && "inset-x-0.5",
         box.span === "AM" && "left-0.5 right-1/2 mr-px",
         box.span === "PM" && "left-1/2 right-0.5 ml-px",
+        box.text && "flex items-center justify-center overflow-hidden",
       )}
       title={box.title}
-    />
+    >
+      {box.text ? (
+        <span className="select-none text-[10px] font-medium leading-none tracking-tighter text-foreground/75 [writing-mode:vertical-rl]">{box.text}</span>
+      ) : null}
+    </div>
   );
 }
 
@@ -148,6 +170,32 @@ export default function GanttChart({ data }: { data: GanttData }) {
   for (const w of data.actual ?? []) {
     const k = `${w.date}|${w.buildingId}`;
     actualByCell.set(k, [...(actualByCell.get(k) ?? []), w]);
+  }
+  // 이어지는 칸: 같은 동에서 바로 앞 작업이 같은 공종·같은 층(옥탑 포함)이면 같은 작업의 둘째 칸 이후다.
+  // 공종은 층마다 한 번씩만 나오므로 앞 작업과 같으면 이어진 것 (일요일을 건너도 이어진다)
+  const same = (x: { stage: Stage; floor: number; roof?: number }, y: { stage: Stage; floor: number; roof?: number }) =>
+    x.stage === y.stage && x.floor === y.floor && (x.roof ?? 0) === (y.roof ?? 0);
+  const contPlan = new Set<Assignment>();
+  const prevPlan = new Map<number, Assignment>();
+  for (const a of [...data.assignments].sort((x, y) => x.date.localeCompare(y.date) || x.half.localeCompare(y.half))) {
+    const p = prevPlan.get(a.buildingId);
+    if (p && same(p, a)) contPlan.add(a);
+    prevPlan.set(a.buildingId, a);
+  }
+  // 실적은 반일 구분이 없어 날짜 단위로 본다: 그 동의 앞 실적 날짜에 같은 작업이 있으면 이어진 것
+  const contActual = new Set<ActualWork>();
+  const actualDays = new Map<number, Map<string, ActualWork[]>>();
+  for (const w of data.actual ?? []) {
+    const byDate = actualDays.get(w.buildingId) ?? new Map<string, ActualWork[]>();
+    byDate.set(w.date, [...(byDate.get(w.date) ?? []), w]);
+    actualDays.set(w.buildingId, byDate);
+  }
+  for (const byDate of actualDays.values()) {
+    const dates = [...byDate.keys()].sort();
+    dates.forEach((date, i) => {
+      const prev = i > 0 ? byDate.get(dates[i - 1])! : [];
+      for (const w of byDate.get(date)!) if (prev.some((x) => same(x, w))) contActual.add(w);
+    });
   }
   const asOf = data.asOf ?? null;
   const isActualDay = (date: string) => asOf !== null && date <= asOf;
@@ -196,13 +244,13 @@ export default function GanttChart({ data }: { data: GanttData }) {
                 const am = get(d.date, "AM", id);
                 const pm = get(d.date, "PM", id);
                 const planned = !isActualDay(d.date);
-                const boxes = isActualDay(d.date) && actual ? actualBoxes(d.date, label(id), actual) : planned ? dayBoxes(d.date, label(id), am, pm) : [];
+                const boxes = isActualDay(d.date) && actual ? actualBoxes(d.date, label(id), actual, (w) => contActual.has(w)) : planned ? dayBoxes(d.date, label(id), am, pm, (a) => contPlan.has(a)) : [];
                 // 사이클 시작(먹매김) 칸에 층 라벨 (옥탑은 PH1·PH2)
                 const markActual = actual?.find((w) => w.stage === "MARK");
                 const markPlan = am?.stage === "MARK" ? am : pm?.stage === "MARK" ? pm : undefined;
                 const startFloor = actual ? (markActual ? `${markActual.floor}F` : undefined) : markPlan ? floorLabel(markPlan) : undefined;
                 return (
-                  <div key={d.date} className={dayCell(d, "h-14")}>
+                  <div key={d.date} className={dayCell(d, "h-[4.25rem]")}>
                     {startFloor !== undefined ? (
                       <div className="absolute left-0.5 top-0.5 whitespace-nowrap text-[10px] leading-none text-muted-foreground">{startFloor}</div>
                     ) : null}
