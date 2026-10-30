@@ -39,10 +39,10 @@ const STAGE_TONE: Record<Stage, string> = {
   WALL_MEP: "bg-amber-100 text-amber-800",
   SLAB_MEP: "bg-amber-100 text-amber-800",
   CURE: "bg-stone-100 text-stone-700",
-  FORM_WALL: "bg-orange-100 text-orange-800",
-  FORM_SLAB: "bg-orange-100 text-orange-800",
+  FORM_WALL: "bg-sky-100 text-sky-800",
+  FORM_SLAB: "bg-sky-100 text-sky-800",
   SHORING: "bg-slate-200 text-slate-700",
-  FORM_STRIP: "bg-orange-50 text-orange-700",
+  FORM_STRIP: "bg-sky-50 text-sky-700",
 };
 
 function Highlight({ text, re }: { text: string; re: RegExp }) {

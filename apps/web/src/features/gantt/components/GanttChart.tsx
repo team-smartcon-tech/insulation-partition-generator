@@ -76,9 +76,9 @@ const GROUP_STYLE: Record<Group, string> = {
   alform: "bg-sky-100 border-sky-500",
   insulation: "bg-lime-200 border-lime-600", // 타설(장미색)과 구별되게 연두
   pour: "bg-rose-100 border-rose-500",
-  form: "bg-orange-100 border-orange-500",
+  form: "bg-sky-100 border-sky-500", // 거푸집 = 알폼과 같은 색 (2026-10-30 사용자 요청)
   shoring: "bg-slate-200 border-slate-500",
-  strip: "bg-orange-50 border-orange-400 border-dashed",
+  strip: "bg-sky-50 border-sky-400 border-dashed", // 거푸집 해체 = 같은 계열 점선
 };
 
 const STAGE_TITLE: Record<Stage, string> = {
