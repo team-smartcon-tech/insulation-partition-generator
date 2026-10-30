@@ -40,11 +40,53 @@ const renumber = (name: string, from: number, to: number) => {
   return re.test(name) ? name.replace(re, `$1${to}`) : name;
 };
 
+/** 일괄 적용 한 칸: 이름 · 숫자 · 「적용」 */
+function BulkField({
+  label,
+  hint,
+  min,
+  max,
+  value,
+  onValue,
+  onApply,
+}: {
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+  value: number;
+  onValue: (v: number) => void;
+  onApply: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5" title={hint}>
+      <span className="whitespace-nowrap">{label}</span>
+      <NumInput className="w-[50px]" min={min} max={max} value={value} aria-label={`${label} 일괄`} onValue={(v) => onValue(v ?? min)} />
+      <span>층</span>
+      <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={onApply}>
+        적용
+      </Button>
+    </div>
+  );
+}
+
 export default function BuildingsEditor({ value, onChange, siteId = null }: { value: Building[]; onChange: (next: Building[]) => void; siteId?: string | null }) {
   // 스마트웍스에서 불러오기: 동·코어별 최상층을 채운다. 지하·기준층 시작·옥탑·이름은 있는 동은 그대로, 새 동은 마지막 동 값 복사.
   // 스마트웍스에 없는 동은 지우지 않는다. 화면에만 채우고 저장은 「저장」 버튼으로.
   const [importing, setImporting] = useState(false);
-  // 옥탑 일괄: 모든 동·모든 코어의 옥탑 층수를 한 번에 (동별·코어별로 다시 고칠 수 있다)
+  // 일괄 적용 (지하·기준층 시작·옥탑): 모든 동(옥탑은 모든 코어)에 한 번에. 동별·코어별로 다시 고칠 수 있다
+  const [bulkBasement, setBulkBasement] = useState<number>(() => value.at(-1)?.basementFloors ?? 0);
+  const [bulkBase, setBulkBase] = useState<number>(() => value.at(-1)?.baseFloor ?? 3);
+  const applyBulkBasement = () => {
+    if (!value.length) return;
+    onChange(value.map((b) => ({ ...b, basementFloors: bulkBasement })));
+    toast.success(`모든 동의 지하를 ${bulkBasement}층으로 바꿨습니다. 「저장」을 눌러야 반영됩니다.`);
+  };
+  const applyBulkBase = () => {
+    if (!value.length) return;
+    onChange(value.map((b) => ({ ...b, baseFloor: bulkBase })));
+    toast.success(`모든 동의 기준층 시작을 ${bulkBase}층으로 바꿨습니다. 「저장」을 눌러야 반영됩니다.`);
+  };
   const [bulkRoof, setBulkRoof] = useState<number>(() => value.at(-1)?.coreRooftopFloors[0] ?? 1);
   const applyBulkRoof = () => {
     if (!value.length) return;
@@ -127,14 +169,6 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-          <div className="mr-1 flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-xs text-muted-foreground" title="모든 동·코어의 옥탑 층수를 한 번에 바꿉니다 (0 = 없음)">
-            <span className="whitespace-nowrap">옥탑 일괄</span>
-            <NumInput className="w-14" min={0} max={10} value={bulkRoof} aria-label="옥탑 일괄 층수" onValue={(v) => setBulkRoof(v ?? 0)} />
-            <span>층</span>
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={applyBulkRoof} disabled={!value.length}>
-              모두 적용
-            </Button>
-          </div>
           {siteId ? (
             <Button
               variant="outline"
@@ -151,6 +185,14 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
           </Button>
         </div>
       </div>
+      {value.length ? (
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">일괄 적용</span>
+          <BulkField label="지하" hint="모든 동의 지하층 수 (0 = 없음)" min={0} max={10} value={bulkBasement} onValue={setBulkBasement} onApply={applyBulkBasement} />
+          <BulkField label="기준층 시작" hint="모든 동의 기준층 시작 층" min={1} max={80} value={bulkBase} onValue={setBulkBase} onApply={applyBulkBase} />
+          <BulkField label="옥탑" hint="모든 동·코어의 옥탑 층수 (0 = 없음)" min={0} max={10} value={bulkRoof} onValue={setBulkRoof} onApply={applyBulkRoof} />
+        </div>
+      ) : null}
       {value.length === 0 ? (
         <p className="rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">아직 동이 없습니다. "동 추가"로 시작하세요.</p>
       ) : (
