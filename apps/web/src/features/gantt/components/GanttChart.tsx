@@ -147,7 +147,15 @@ function actualBoxes(date: string, label: string, works: ActualWork[], cont: (w:
   const floorsOf = (stage: Stage) => [...new Set(works.filter((w) => w.stage === stage).map((w) => `${w.floor}F`))].join("·");
   const t = (w: ActualWork) => `${date} 실적 · ${label} ${floorsOf(w.stage)} · ${STAGE_TITLE[w.stage]}`;
   if (sorted.length === 1) return [{ span: "DAY", group: STAGE_GROUP[sorted[0].stage], title: t(sorted[0]), text: textOf(sorted[0].stage, cont(sorted[0])) }];
-  return sorted.map((w, i) => ({ span: "DAY", group: STAGE_GROUP[w.stage], title: t(w), text: textOf(w.stage, cont(w)), seg: { i, n: sorted.length } }));
+  // 한 칸에 4개 이상이면 상자가 너무 좁아 글자는 숨긴다 (툴팁·칸 클릭 팝업으로 확인)
+  const showText = sorted.length < 4;
+  return sorted.map((w, i) => ({
+    span: "DAY",
+    group: STAGE_GROUP[w.stage],
+    title: t(w),
+    text: showText ? textOf(w.stage, cont(w)) : undefined,
+    seg: { i, n: sorted.length },
+  }));
 }
 
 function BoxEl({ box }: { box: Box }) {
