@@ -10,8 +10,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { FinishResponse, FinishStat } from "../api";
-import { CALENDAR, useFinish, useFinishReports, useSettings } from "../hooks";
-import { planFinishBuilding, type FinishPlanSettings } from "@ipg/gantt-engine";
+import { useFinish, useFinishReports, useFrameReady, useSettings } from "../hooks";
+import { ALWAYS_FINISH_TRADES, hasFinishPlan, planFinishBuilding, type FinishPlanSettings } from "@ipg/gantt-engine";
 import { RotateCcw } from "lucide-react";
 import FinishPlanForm from "./FinishPlanForm";
 import { monthRange, shiftMonth, todayKst } from "../dates";
@@ -65,9 +65,12 @@ export default function FinishPanel({
   const [override, setOverride] = useState<FinishPlanSettings | null>(null);
   useEffect(() => setOverride(null), [siteId]);
   const finishSettings = override ?? saved.data?.settings.finish;
+  // 골조 선행(창틀 = 골조 5개 층)용 층별 S타설일 — 골조 실적·예정. 받는 동안은 골조 선행 없이 계산
+  const frameReady = useFrameReady(siteId, todayKst());
   const plans = useMemo(
-    () => new Map((d?.gantt.buildings ?? []).map((gb) => [gb.buildingNo, planFinishBuilding(gb as never, finishSettings, CALENDAR, d!.asOf)])),
-    [d, finishSettings],
+    () =>
+      new Map((d?.gantt.buildings ?? []).map((gb) => [gb.buildingNo, planFinishBuilding(gb as never, finishSettings, d!.asOf, undefined, frameReady)])),
+    [d, finishSettings, frameReady],
   );
   useEffect(() => setBno(null), [siteId]);
   const b: Building | undefined = d?.buildings.find((x) => x.buildingNo === bno) ?? d?.buildings[0];
@@ -163,7 +166,8 @@ export default function FinishPanel({
       </div>
 
       {view === "gantt" ? (
-        d.gantt.trades.length ? (
+        // 늘 두는 공종(타일)만 있으면 스마트웍스에 맞는 공종이 없는 것. 간트에서 뺀 공종(창짝설치·유리·몰딩·가구)만 있어도 같다
+        d.gantt.trades.some((t) => !ALWAYS_FINISH_TRADES.has(t.key as never) && hasFinishPlan(t.key)) ? (
           <FinishGantt
             gantt={d.gantt}
             plans={plans}
@@ -175,7 +179,7 @@ export default function FinishPanel({
           />
         ) : (
           <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
-            이 현장 스마트웍스 마감 공종 중 간트 공종(내장·PL창호·유리·타일·방통·가구·도배·마루)에 맞는 것이 없습니다.
+            이 현장 스마트웍스 마감 공종 중 간트 공종(PL창호 창틀·내장·타일·방수·방통·도배·마루)에 맞는 것이 없습니다.
           </p>
         )
       ) : !b ? (

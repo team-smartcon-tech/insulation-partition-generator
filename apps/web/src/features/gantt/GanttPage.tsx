@@ -2,11 +2,12 @@
  * 스마트 공정표 — /tools/gantt
  *
  * 스마트웍스 작업일보를 읽어 골조 공정을 동·층·단계로 해석하고(작업일보 탭), 실적 기준으로 앞으로의
- * 공정을 반일 단위로 계산해 간트로 보여준다(공정표 탭). 현장 규모·설정은 설정 탭에서 저장한다.
+ * 공정을 반일 단위로 계산해 간트로 보여준다(공정표 탭). 3D 골조 탭은 같은 실적을 동·층 블록으로 쌓아 보여 준다.
+ * 현장 규모·설정은 설정 탭에서 저장한다.
  * 현장은 상단에서 고르고 브라우저에 기억한다. 규칙의 1차 소스는 docs/gantt/설계.md.
  */
 import { useEffect, useMemo, useState } from "react";
-import { CalendarRange, PaintRoller, ClipboardList, Settings2 } from "lucide-react";
+import { Box, CalendarRange, PaintRoller, ClipboardList, Settings2 } from "lucide-react";
 import ToolShell from "@/features/tcRental/components/ToolShell";
 import { cn } from "@/lib/utils";
 import { useSites } from "./hooks";
@@ -14,12 +15,14 @@ import DailyReportPanel from "./components/DailyReportPanel";
 import SitePicker from "./components/SitePicker";
 import SchedulePanel from "./components/SchedulePanel";
 import FinishPanel from "./components/FinishPanel";
+import Frame3DPanel from "./components/Frame3DPanel";
 import SettingsPanel from "./components/SettingsPanel";
 
-type Tab = "reports" | "schedule" | "finish" | "settings";
+type Tab = "reports" | "schedule" | "frame3d" | "finish" | "settings";
 const TABS: { id: Tab; label: string; icon: typeof ClipboardList }[] = [
   { id: "reports", label: "작업일보", icon: ClipboardList },
   { id: "schedule", label: "골조 공정표", icon: CalendarRange },
+  { id: "frame3d", label: "3D 골조", icon: Box },
   { id: "finish", label: "마감 공정표", icon: PaintRoller },
   { id: "settings", label: "설정", icon: Settings2 },
 ];
@@ -95,6 +98,8 @@ export default function GanttPage() {
           <DailyReportPanel key={siteId ?? ""} siteId={siteId} siteName={site?.name ?? ""} initialDate={site?.lastReportDate ?? null} />
         ) : tab === "schedule" ? (
           <SchedulePanel siteId={siteId} siteName={site?.name ?? ""} actionsSlot={tabActions} />
+        ) : tab === "frame3d" ? (
+          <Frame3DPanel key={siteId ?? ""} siteId={siteId} siteName={site?.name ?? ""} onBack={() => setTab("schedule")} />
         ) : tab === "finish" ? (
           <FinishPanel siteId={siteId} siteName={site?.name ?? ""} actionsSlot={tabActions} onGoSettings={() => setTab("settings")} />
         ) : (

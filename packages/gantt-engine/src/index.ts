@@ -48,6 +48,7 @@ export {
 } from "./finish/aggregate.ts"
 export {
   FINISH_TRADES,
+  ALWAYS_FINISH_TRADES,
   buildFinishGantt,
   finishTradeOf,
   floorListText,
@@ -62,5 +63,5 @@ export {
   type FinishTrade,
   type FinishTradeKey,
 } from "./finish/gantt.ts"
-export { DEFAULT_FINISH_PLAN, finishPlanOf, planFinishBuilding, type FinishPlanRow } from "./finish/plan.ts"
+export { DEFAULT_FINISH_PLAN, finishPlanOf, hasFinishPlan, planFinishBuilding, type FinishPlanRow, type FrameReady } from "./finish/plan.ts"
 export { buildFinishReportBars, parseFinishReport, type FinishReportBar, type FinishReportItem, type FinishReportRow } from "./finish/report.ts"
