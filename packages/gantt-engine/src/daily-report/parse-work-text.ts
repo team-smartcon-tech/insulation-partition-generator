@@ -21,7 +21,8 @@ export type Section = "structure" | "electric" | "mechanical"
 const SECTION_HEADER = /^\s*\*\s*(.+?)\s*(?:\(\d+\))?\s*$/
 const COLON_LINE = /^\s*-\s*([^:：/]+?)\s*[:：]\s*(.+)$/
 const DASH_LINE = /^\s*-\s*(.+)$/
-const FLOOR = /(?:^|\s)(B?\d{1,3})\s*F\b/i
+// 층: "37F", "B2F", "37층" (전기·설비 일보는 "층" 으로도 적는다)
+const FLOOR = /(?:^|\s)(B?\d{1,3})\s*(?:F\b|층)/i
 const BUILDING_NO = /(\d{2,4})\s*동/
 /** 작업 문구 앞에 붙은 동·구역 이름. "401동", "근생#2", "부대시설", "지하주차장" */
 const LEADING_BUILDING =
@@ -88,6 +89,14 @@ export function extractStructureSection(rawText: string): string[] {
 
 type Part = { building: string; text: string }
 
+/**
+ * 동이 아닌 장소로 시작하는 조각 ("근린생활시설#2 1F 바닥 배관작업", "지하주차장 B2F …").
+ * 이런 조각은 앞 조각의 동을 이어받으면 안 된다 — 2026-09-19 남원주 일보에서
+ * "404동 32F 벽체 배관작업 / 근린생활시설#2 1F 바닥 배관작업" 의 뒤 조각이 404동 1층 기전으로 읽혔다.
+ */
+const OTHER_PLACE =
+  /^(근린생활시설|근생|지하\s*주차장|주차장|부대\s*(?:복리)?\s*시설|주민\s*공동\s*시설|관리동|경비실|상가|어린이집|커뮤니티|단지|외부|조경)\S*|^[^\s\d/]+#\d+/
+
 /** 한 줄을 (동, 작업 문구) 묶음으로 쪼갠다. 못 쪼개면 null. */
 function splitLine(line: string): Part[] | null {
   const colon = COLON_LINE.exec(line)
@@ -110,6 +119,11 @@ function splitLine(line: string): Part[] | null {
     if (b) {
       lastBuilding = b[1].replace(/\s+/g, "")
       parts.push({ building: lastBuilding, text: p.slice(b[0].length).trim() })
+    } else if (lastBuilding && OTHER_PLACE.test(p)) {
+      // 다른 장소: 그 장소를 건물로 둔다(동 번호 없음 → 공정표에서 빠짐). 뒤 조각도 이 장소를 이어받는다
+      const place = OTHER_PLACE.exec(p)![0]
+      lastBuilding = place
+      parts.push({ building: place, text: p.slice(place.length).trim() })
     } else if (lastBuilding) {
       parts.push({ building: lastBuilding, text: p })
     } else {

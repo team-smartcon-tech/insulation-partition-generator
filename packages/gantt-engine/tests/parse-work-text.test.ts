@@ -78,3 +78,30 @@ describe("parseWorkText", () => {
     assert.deepEqual(unmatched, [])
   })
 })
+
+describe("다른 장소 조각은 앞 동을 이어받지 않는다", () => {
+  it("2026-09-19 전기: 근린생활시설#2 바닥 배관은 404동 기전이 아니다", () => {
+    const { entries } = parseWorkText(
+      "* 전기(17)\n- 403동 33F 바닥 배관작업 / 404동 32F 벽체 배관작업 / 근린생활시설#2 1F 바닥 배관작업",
+    )
+    const b404 = entries.filter((e) => e.buildingNo === 404)
+    assert.deepEqual(b404.map((e) => [e.floor, e.stage]), [[32, "WALL_MEP"]])
+    const place = entries.find((e) => e.building.startsWith("근린생활시설"))
+    assert.ok(place)
+    assert.equal(place.buildingNo, null)
+  })
+  it("동 이름 없는 작업 조각은 지금처럼 앞 동을 이어받는다", () => {
+    const { entries } = parseWorkText("* 전기(17)\n- 404동 32F 벽체 배관작업 / 33F 바닥 배관작업")
+    assert.deepEqual(entries.map((e) => [e.buildingNo, e.floor, e.stage]), [[404, 32, "WALL_MEP"], [404, 33, "SLAB_MEP"]])
+  })
+})
+
+describe("층 표기 '층'", () => {
+  it("2026-10-23 전기: 403동 37층 벽체 배관 → 37층 벽 기전", () => {
+    const { entries } = parseWorkText("* 전기(24)\n- 403동 37층 벽체 배관작업 / 지하주차장 B3F 몰드바 바디설치작업")
+    const e = entries.find((x) => x.buildingNo === 403)
+    assert.equal(e?.floor, 37)
+    assert.equal(e?.stage, "WALL_MEP")
+    assert.equal(e?.text, "벽체 배관작업")
+  })
+})
