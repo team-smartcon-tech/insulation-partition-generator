@@ -2,7 +2,7 @@
  * 동별 간트 (설계 §7 "출력", 디자인 시안 2026-10-29). Smart-Gantt-Chart 저장소에서 이식.
  * - 하루 한 칸, 왼쪽 오전 · 오른쪽 오후. 작업이 있는 반일만 연한 상자. 철근 오전 + 기전 오후는 상자 하나.
  * - 사이클 시작(먹매김) 위에 층 라벨(옥탑은 PH1·PH2). 날짜마다 세로 구분선, 일요일 세로 띠. 유휴 줄은 온종일 유휴인 날만 상자.
- * - 실적(작업일보, asOf 까지)은 또렷하게, 예정(엔진)은 연하게. 둘 사이에 세로 선.
+ * - 실적(작업일보, asOf 까지)은 또렷하게, 예정(엔진)은 연하게. 오늘은 날짜 머리줄 칸을 채워 표시(2026-10-30, 세로 선 대신). 요일은 월~일 모두.
  */
 import type {
   ActualWork,
@@ -15,6 +15,7 @@ import type {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import CellReportDialog, { type CellTarget } from "./CellReportDialog";
+import { todayKst } from "../dates";
 import {
   GROUP_LABEL,
   STAGE_GROUP,
@@ -221,12 +222,12 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
   }
   const asOf = data.asOf ?? null;
   const isActualDay = (date: string) => asOf !== null && date <= asOf;
-  const isPlanStart = (date: string) => asOf !== null && date > asOf && !data.days.some((d) => d.date > asOf && d.date < date);
+  const today = todayKst();
 
   const month = Number(data.from.slice(5, 7));
   const gridCols = { gridTemplateColumns: `5.5rem repeat(${data.days.length}, minmax(0, 1fr))` };
   const dayCell = (d: DayInfo, extra?: string) =>
-    cn("relative min-w-0 border-r border-border/50", d.isSunday && "bg-muted", isPlanStart(d.date) && "border-l-2 border-l-primary/60", extra);
+    cn("relative min-w-0 border-r border-border/50", d.isSunday && "bg-muted", extra);
 
   const pourDates = new Set([
     ...data.assignments.filter((a) => isPour(a.stage)).map((a) => a.date),
@@ -241,8 +242,11 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
           <div className="grid" style={gridCols}>
             <div />
             {data.days.map((d) => (
-              <div key={d.date} className={cn("border-r border-border/50 text-center text-[11px]", d.isSunday && "text-red-600", d.isSaturday && "text-sky-600")}>
-                {d.isSunday ? "일" : d.isSaturday ? "토" : ""}
+              <div
+                key={d.date}
+                className={cn("border-r border-border/50 text-center text-[11px]", d.isSunday || d.isHoliday ? "text-red-600" : d.isSaturday ? "text-sky-600" : "text-muted-foreground")}
+              >
+                {"일월화수목금토"[new Date(`${d.date}T00:00:00Z`).getUTCDay()]}
               </div>
             ))}
           </div>
@@ -252,9 +256,9 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
               <div
                 key={d.date}
                 className={cn("border-r border-border/50 text-center tabular-nums", (d.isSunday || d.isHoliday) && "font-semibold text-red-600")}
-                title={d.isHoliday ? `${d.date} 공휴일` : d.date}
+                title={d.date === today ? `${d.date} 오늘` : d.isHoliday ? `${d.date} 공휴일` : d.date}
               >
-                {Number(d.date.slice(8))}
+                {d.date === today ? <span className="inline-flex min-w-5 items-center justify-center rounded-md bg-primary px-1 font-semibold text-primary-foreground">{Number(d.date.slice(8))}</span> : Number(d.date.slice(8))}
               </div>
             ))}
           </div>
@@ -363,7 +367,7 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
         </div>
         <p>
           칸 왼쪽 오전 · 오른쪽 오후. W철근·W기전 = 벽철근·벽 기전, S철근·S기전 = 슬래브철근·슬래브 기전. 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일, 알폼 대신 거푸집). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
-           칸을 누르면 그날 그 동의 작업일보.{asOf ? ` 세로 선 왼쪽은 작업일보 실적(${asOf}까지, 또렷함), 오른쪽은 엔진 예정(연함).` : ""}
+           칸을 누르면 그날 그 동의 작업일보.{asOf ? ` 작업일보 실적(${asOf}까지)은 또렷하게, 그 뒤 엔진 예정은 연하게.` : ""} 채운 날짜 = 오늘.
         </p>
       </div>
     </div>

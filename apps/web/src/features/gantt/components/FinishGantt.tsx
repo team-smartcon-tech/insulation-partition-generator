@@ -3,7 +3,7 @@
  * - 실적 막대(진함): 스마트웍스 세대 완료일을 이어 붙인 구간, 위에 층 범위("5~6F").
  * - 예정 막대(연한 점선): 남은 층을 선행 공종·간격·층 묶음 규칙으로 (엔진 planFinishBuilding, 오른쪽 설정 카드).
  * - 코어 단위 (2026-10-30): 동이 코어로 나뉘면 공종 줄도 코어마다(같은 공종의 코어 줄은 붙여서). 일보 「N코어」 는 그 코어 줄에만.
- * - 오늘 세로선. 일요일 띠, 공휴일 빨간 날짜, 날짜 세로줄은 골조 간트와 같다.
+ * - 오늘은 날짜 머리줄 칸을 채워 표시(세로선 대신). 요일은 월~일 모두. 일요일 띠, 공휴일 빨간 날짜, 날짜 세로줄은 골조 간트와 같다.
  */
 import { FINISH_TRADES, dateRange, floorListText, floorRangeText, getDayInfo, type FinishPlanRow } from "@ipg/gantt-engine";
 import { useState } from "react";
@@ -60,7 +60,6 @@ export default function FinishGantt({
   const days = dateRange(from, to).map((d) => getDayInfo(CALENDAR, d));
   const n = days.length;
   const idx = (d: string) => days.findIndex((x) => x.date === d);
-  const todayIdx = idx(asOf);
   const gridCols = { gridTemplateColumns: `9rem repeat(${n}, minmax(0, 1fr))` };
   const dayCell = (d: (typeof days)[number]) => cn("border-r border-border/50", d.isSunday && "bg-muted");
 
@@ -80,8 +79,11 @@ export default function FinishGantt({
           <div className="grid" style={gridCols}>
             <div />
             {days.map((d) => (
-              <div key={d.date} className={cn("border-r border-border/50 text-center text-[11px]", d.isSunday && "text-red-600", d.isSaturday && "text-sky-600")}>
-                {d.isSunday ? "일" : d.isSaturday ? "토" : ""}
+              <div
+                key={d.date}
+                className={cn("border-r border-border/50 text-center text-[11px]", d.isSunday || d.isHoliday ? "text-red-600" : d.isSaturday ? "text-sky-600" : "text-muted-foreground")}
+              >
+                {"일월화수목금토"[new Date(`${d.date}T00:00:00Z`).getUTCDay()]}
               </div>
             ))}
           </div>
@@ -91,9 +93,9 @@ export default function FinishGantt({
               <div
                 key={d.date}
                 className={cn("border-r border-border/50 text-center tabular-nums", (d.isSunday || d.isHoliday) && "font-semibold text-red-600")}
-                title={d.isHoliday ? `${d.date} 공휴일` : d.date}
+                title={d.date === asOf ? `${d.date} 오늘` : d.isHoliday ? `${d.date} 공휴일` : d.date}
               >
-                {Number(d.date.slice(8))}
+                {d.date === asOf ? <span className="inline-flex min-w-5 items-center justify-center rounded-md bg-primary px-1 font-semibold text-primary-foreground">{Number(d.date.slice(8))}</span> : Number(d.date.slice(8))}
               </div>
             ))}
           </div>
@@ -211,9 +213,6 @@ export default function FinishGantt({
                               style={{ left: `${(hover.k / n) * 100}%`, width: `${100 / n}%` }}
                             />
                           ) : null}
-                          {todayIdx >= 0 ? (
-                            <div className="absolute inset-y-0 border-l-2 border-primary/60" style={{ left: `${((todayIdx + 1) / n) * 100}%` }} />
-                          ) : null}
                           {/* 위: 일보 작업 (작업일보 마감 줄) */}
                           {visible.map((bar, i) => {
                             const p = place(bar)!;
@@ -285,7 +284,7 @@ export default function FinishGantt({
           <span className="inline-block h-3 w-4 rounded-sm border border-dashed border-slate-400 bg-slate-100" />
           예정(선행 공종·간격·층 묶음 규칙)
         </span>
-        <span>위 = 일보 작업(작업일보 마감 줄, 3일 안에 이어지면 한 막대) · 아래 = ✓ 그날 완료한 층(스마트웍스 마감입력 날짜)·예정 · 막대 위 = 층 범위 · 세로선 = 오늘 · 칸을 누르면 그날 작업일보</span>
+        <span>위 = 일보 작업(작업일보 마감 줄, 3일 안에 이어지면 한 막대) · 아래 = ✓ 그날 완료한 층(스마트웍스 마감입력 날짜)·예정 · 막대 위 = 층 범위 · 채운 날짜 = 오늘 · 칸을 누르면 그날 작업일보</span>
       </div>
     </div>
   );
