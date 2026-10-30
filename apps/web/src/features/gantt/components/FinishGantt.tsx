@@ -50,6 +50,12 @@ export default function FinishGantt({
   topFloorOf: (buildingNo: number) => number | null;
 }) {
   const [target, setTarget] = useState<FinishCellTarget | null>(null);
+  /** 마우스가 올라간 칸 (줄 key + 날짜 칸 번호) — 그 칸만 칠한다 */
+  const [hover, setHover] = useState<{ key: string; k: number } | null>(null);
+  const colAt = (e: { clientX: number; currentTarget: HTMLElement }) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return Math.min(n - 1, Math.max(0, Math.floor(((e.clientX - rect.left) / rect.width) * n)));
+  };
   const { from, to } = monthRange(month);
   const days = dateRange(from, to).map((d) => getDayInfo(CALENDAR, d));
   const n = days.length;
@@ -168,12 +174,16 @@ export default function FinishGantt({
                           {pct != null ? <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{pct}%</span> : null}
                         </div>
                         <div
-                          className="relative cursor-pointer hover:bg-primary/5"
+                          className="relative cursor-pointer"
                           style={{ gridColumn: `span ${n}`, height }}
+                          onMouseMove={(e) => {
+                            const k = colAt(e);
+                            if (hover?.key !== key || hover.k !== k) setHover({ key, k });
+                          }}
+                          onMouseLeave={() => setHover(null)}
                           onClick={(e) => {
                             // 누른 가로 위치 → 날짜 칸
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const k = Math.min(n - 1, Math.max(0, Math.floor(((e.clientX - rect.left) / rect.width) * n)));
+                            const k = colAt(e);
                             const date = days[k].date;
                             const on = (x: FinishBarT) => x.start <= date && date <= x.end;
                             setTarget({
@@ -195,6 +205,12 @@ export default function FinishGantt({
                               <div key={d.date} className={dayCell(d)} />
                             ))}
                           </div>
+                          {hover?.key === key ? (
+                            <div
+                              className="pointer-events-none absolute inset-y-0 bg-primary/15 ring-1 ring-inset ring-primary/40"
+                              style={{ left: `${(hover.k / n) * 100}%`, width: `${100 / n}%` }}
+                            />
+                          ) : null}
                           {todayIdx >= 0 ? (
                             <div className="absolute inset-y-0 border-l-2 border-primary/60" style={{ left: `${((todayIdx + 1) / n) * 100}%` }} />
                           ) : null}
