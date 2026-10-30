@@ -15,6 +15,9 @@ const MAX_CORES = 8;
 /** 이름 안의 첫 숫자를 d 만큼 올리고 내린다 ("401동" → "402동"). 숫자가 없으면 그대로 */
 const stepName = (name: string, d: number) => name.replace(/\d+/, (m) => String(Math.max(0, Number(m) + d)).padStart(m.length, "0"));
 
+/** 코어 칸 너비: 코어 | 세대 | 최상층 | 옥탑 | 삭제·코어 추가 — 헤더와 코어 줄이 같이 쓴다 */
+const CORE_GRID = "grid grid-cols-[2.75rem_3.5rem_4.25rem_4.25rem_auto] items-center gap-x-1.5";
+
 /** units = 그 코어가 한 층에서 맡는 세대 수 (0 = 모름) */
 type Core = { top: number; rooftop: number; units?: number };
 const coresOf = (b: Building): Core[] =>
@@ -156,7 +159,16 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
               <th className="pb-1 pr-2 whitespace-nowrap">이름</th>
               <th className="pb-1 pr-2 whitespace-nowrap" title="지하 맨 아래층 (B3 까지면 3). 일보 없는 동의 지하 출발 층">지하</th>
               <th className="pb-1 pr-2 whitespace-nowrap">기준층 시작</th>
-              <th className="pb-1 pr-2 whitespace-nowrap">코어별 최상층 · 옥탑</th>
+              <th className="pb-1 pr-2 font-normal">
+                {/* 코어 줄과 같은 칸 너비 — 헤더가 각 입력칸 바로 위에 온다 */}
+                <div className={CORE_GRID}>
+                  <span className="whitespace-nowrap font-medium">코어</span>
+                  <span className="whitespace-nowrap font-medium">세대</span>
+                  <span className="whitespace-nowrap font-medium">최상층</span>
+                  <span className="whitespace-nowrap font-medium">옥탑</span>
+                  <span />
+                </div>
+              </th>
               <th className="pb-1 pr-2 whitespace-nowrap">현재 층</th>
               <th className="pb-1" />
             </tr>
@@ -189,10 +201,9 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                       {cores.map((c, k) => {
                         const set = (patch: Partial<Core>) => setCores(i, cores.map((x, j) => (j === k ? { ...x, ...patch } : x)));
                         return (
-                          <div key={k} className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-                            <span className="w-10 shrink-0 font-medium text-foreground">{k + 1}코어</span>
+                          <div key={k} className={`${CORE_GRID} whitespace-nowrap text-xs text-muted-foreground`}>
+                            <span className="font-medium text-foreground">{k + 1}코어</span>
                             <NumInput
-                              className="w-12"
                               min={0}
                               max={10}
                               value={c.units ? c.units : null}
@@ -200,32 +211,14 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                               aria-label={`${b.name} ${k + 1}코어 세대수`}
                               onValue={(v) => set({ units: v ?? 0 })}
                             />
-                            <span className="mr-2">세대</span>
-                            <span>최상층</span>
-                            <NumInput
-                              className="w-16"
-                              min={1}
-                              max={80}
-                              value={c.top}
-                              aria-label={`${b.name} ${k + 1}코어 최상층`}
-                              onValue={(v) => set({ top: v ?? c.top })}
-                            />
-                            <span className="mr-2">층</span>
-                            <span>옥탑</span>
-                            <NumInput
-                              className="w-16"
-                              min={0}
-                              max={10}
-                              value={c.rooftop}
-                              aria-label={`${b.name} ${k + 1}코어 옥탑 층수`}
-                              onValue={(v) => set({ rooftop: v ?? c.rooftop })}
-                            />
-                            <span>층</span>
+                            <NumInput min={1} max={80} value={c.top} aria-label={`${b.name} ${k + 1}코어 최상층`} onValue={(v) => set({ top: v ?? c.top })} />
+                            <NumInput min={0} max={10} value={c.rooftop} aria-label={`${b.name} ${k + 1}코어 옥탑 층수`} onValue={(v) => set({ rooftop: v ?? c.rooftop })} />
+                            <div className="flex items-center">
                             {/* 코어가 하나면 X 는 숨기되 자리는 남겨 "코어 추가" 위치를 맞춘다 */}
                             <Button
                               variant="ghost"
                               size="icon-sm"
-                              className={`ml-1 text-muted-foreground hover:text-red-600 ${multi ? "" : "invisible"}`}
+                              className={`text-muted-foreground hover:text-red-600 ${multi ? "" : "invisible"}`}
                               disabled={!multi}
                               aria-hidden={!multi}
                               title={`${k + 1}코어 삭제`}
@@ -243,6 +236,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                                 <Plus className="size-3.5" /> 코어 추가
                               </button>
                             ) : null}
+                            </div>
                           </div>
                         );
                       })}
