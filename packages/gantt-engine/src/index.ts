@@ -58,3 +58,4 @@ export {
   type FinishTrade,
   type FinishTradeKey,
 } from "./finish/gantt.ts"
+export { DEFAULT_FINISH_PLAN, finishPlanOf, planFinishBuilding, type FinishPlanRow } from "./finish/plan.ts"

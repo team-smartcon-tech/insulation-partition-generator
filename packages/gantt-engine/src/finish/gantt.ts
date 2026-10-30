@@ -84,8 +84,10 @@ export type FinishGanttRow = {
   total: number
   perWeek: number
   actual: FinishBar[]
-  /** 예정 (남은 층, 최근 속도). 속도가 주당 1세대 미만이면 null */
+  /** (참고) 최근 속도만으로 낸 예정 — 화면 예정은 planFinish(선행·층 묶음 규칙)를 쓴다 */
   forecast: FinishBar | null
+  /** 층별 완료 (낮은 층부터). last = 그 층 마지막 완료일 (다 끝났으면 그 층 완료일) */
+  floors: { floor: number; units: number; done: number; last: IsoDate | null }[]
 }
 export type FinishGanttBuilding = { buildingNo: number; name: string; rows: FinishGanttRow[] }
 export type FinishGantt = { trades: FinishTrade[]; buildings: FinishGanttBuilding[] }
@@ -175,7 +177,13 @@ export function buildFinishGantt(input: {
             units: left.length,
           }
         }
-        return { trade: t.key, sources: [...(namesOf.get(t.key) ?? [])], done, total, perWeek, actual, forecast }
+        const floorNos = [...new Set(mine.map((r) => r.floor))].sort((x, y) => x - y)
+        const floors = floorNos.map((f) => {
+          const fr = mine.filter((r) => r.floor === f)
+          const ds = fr.map((r) => doneAt.get(`${r.id}|${t.key}`)).filter((d): d is IsoDate => !!d)
+          return { floor: f, units: fr.length, done: ds.length, last: ds.length ? ds.reduce((m, d) => (d > m ? d : m)) : null }
+        })
+        return { trade: t.key, sources: [...(namesOf.get(t.key) ?? [])], done, total, perWeek, actual, forecast, floors }
       })
       return { buildingNo: b.buildingNo, name: b.name, rows }
     })

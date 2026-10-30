@@ -3,12 +3,13 @@
  */
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { DEFAULT_SITE_SETTINGS, type SiteSettings } from "@ipg/gantt-engine";
+import { DEFAULT_SITE_SETTINGS, FINISH_TRADES, type SiteSettings } from "@ipg/gantt-engine";
 import { Button } from "@/components/ui/button";
 import type { Building } from "../api";
 import { useSaveBuildings, useSaveSettings, useSettings } from "../hooks";
 import BuildingsEditor from "./BuildingsEditor";
 import ZonesEditor from "./ZonesEditor";
+import FinishPlanForm from "./FinishPlanForm";
 import SettingsForm from "./SettingsForm";
 
 export default function SettingsPanel({ siteId, siteName }: { siteId: string | null; siteName: string }) {
@@ -69,13 +70,23 @@ export default function SettingsPanel({ siteId, siteName }: { siteId: string | n
         </Button>
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
-        <SettingsForm
-          value={settings}
-          onChange={(next) => {
-            setSettings(next);
-            setDirty(true);
-          }}
-        />
+        <div className="min-w-0 space-y-4">
+          <SettingsForm
+            value={settings}
+            onChange={(next) => {
+              setSettings(next);
+              setDirty(true);
+            }}
+          />
+          <FinishPlanForm
+            trades={FINISH_TRADES}
+            value={settings.finish}
+            onChange={(finish) => {
+              setSettings({ ...settings, finish });
+              setDirty(true);
+            }}
+          />
+        </div>
         <div className="min-w-0 space-y-4">
           <BuildingsEditor
             siteId={siteId}

@@ -75,6 +75,18 @@ export const undergroundZoneSchema = z.object({
   team: z.string().min(1).max(10).default("A"),
 })
 
+/**
+ * 마감 공정표 예정 규칙 (2026-10-30). 공종(간트 공종 키)마다: 선행 공종, 선행이 그 층을 끝낸 뒤 간격(일),
+ * 한 번에 하는 층 수(묶음), 묶음당 작업일. 아래층부터, 같은 공종은 앞 묶음이 끝나야 다음 묶음.
+ */
+export const finishTradePlanSchema = z.object({
+  pred: z.string().nullable(),
+  gapDays: z.number().int().min(0).max(120),
+  floorsPerBatch: z.number().int().min(1).max(20),
+  daysPerBatch: z.number().int().min(1).max(60),
+})
+export const finishPlanSettingsSchema = z.record(z.string(), finishTradePlanSchema)
+
 export const siteSettingsSchema = z.object({
   buildingCount: z.number().int().min(1).max(30),
   rebarTeams: z.number().int().min(1).max(10),
@@ -86,6 +98,8 @@ export const siteSettingsSchema = z.object({
   noPMOnlyStart: z.object({ rebar: z.boolean(), alform: z.boolean() }),
   /** 지하·저층 공정. 없으면 DEFAULT_UNDERGROUND_SETTINGS */
   underground: undergroundSettingsSchema.optional(),
+  /** 마감 공정표 예정 규칙 (공종 키 → 선행·간격·층 묶음·묶음당 일). 없으면 DEFAULT_FINISH_PLAN */
+  finish: finishPlanSettingsSchema.optional(),
   /** 지하층 구역별 순서 (배열 순서 = 시공 순서, 같은 팀 안에서) */
   zones: z.array(undergroundZoneSchema).max(50).optional(),
   /** 지하 형틀(거푸집) 팀 이름 목록 ("A", "B"). 구역이 없는 팀도 남겨 두려고 따로 둔다 */
@@ -262,6 +276,8 @@ export type HalfDayOptions = z.infer<typeof halfDayOptionsSchema>
 export type SiteSettings = z.infer<typeof siteSettingsSchema>
 export type UndergroundSettings = z.infer<typeof undergroundSettingsSchema>
 export type UndergroundZone = z.infer<typeof undergroundZoneSchema>
+export type FinishTradePlan = z.infer<typeof finishTradePlanSchema>
+export type FinishPlanSettings = z.infer<typeof finishPlanSettingsSchema>
 export type CalendarConfig = z.infer<typeof calendarConfigSchema>
 export type SimulateRequest = z.infer<typeof simulateRequestSchema>
 export type Stage = z.infer<typeof stageSchema>

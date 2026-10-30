@@ -10,7 +10,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { FinishResponse, FinishStat } from "../api";
-import { useFinish } from "../hooks";
+import { CALENDAR, useFinish, useSettings } from "../hooks";
+import { planFinishBuilding, type FinishPlanSettings } from "@ipg/gantt-engine";
+import { RotateCcw } from "lucide-react";
+import FinishPlanForm from "./FinishPlanForm";
 import { shiftMonth, todayKst } from "../dates";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import FinishGantt from "./FinishGantt";
@@ -55,6 +58,15 @@ export default function FinishPanel({
   // 기본은 간트(골조 공정표와 같은 한 달 보기), 진척표는 보조
   const [view, setView] = useState<"gantt" | "matrix">("gantt");
   const [month, setMonth] = useState(todayKst().slice(0, 7));
+  // 예정 규칙: 저장값(설정 탭) 위에 이 화면에서만 바꿔 보기 (골조 공정표와 같은 방식)
+  const saved = useSettings(siteId);
+  const [override, setOverride] = useState<FinishPlanSettings | null>(null);
+  useEffect(() => setOverride(null), [siteId]);
+  const finishSettings = override ?? saved.data?.settings.finish;
+  const plans = useMemo(
+    () => new Map((d?.gantt.buildings ?? []).map((gb) => [gb.buildingNo, planFinishBuilding(gb as never, finishSettings, CALENDAR, d!.asOf)])),
+    [d, finishSettings],
+  );
   useEffect(() => setBno(null), [siteId]);
   const b: Building | undefined = d?.buildings.find((x) => x.buildingNo === bno) ?? d?.buildings[0];
   const typeName = useMemo(() => new Map((d?.types ?? []).map((t) => [t.id, t.name])), [d]);
@@ -110,7 +122,8 @@ export default function FinishPanel({
   const anyWork = d.buildings.some((x) => x.stats.some((s) => s.done > 0));
 
   return (
-    <div className="space-y-4" data-print-root>
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="min-w-0 space-y-4" data-print-root>
       {actionsSlot ? createPortal(actions, actionsSlot) : null}
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">
@@ -149,7 +162,7 @@ export default function FinishPanel({
 
       {view === "gantt" ? (
         d.gantt.trades.length ? (
-          <FinishGantt gantt={d.gantt} month={month} asOf={d.asOf} />
+          <FinishGantt gantt={d.gantt} plans={plans} month={month} asOf={d.asOf} />
         ) : (
           <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
             이 현장 스마트웍스 마감 공종 중 간트 공종(내장·PL창호·유리·타일·방통·가구·도배·마루)에 맞는 것이 없습니다.
@@ -242,7 +255,7 @@ export default function FinishPanel({
                     <th className="px-2 pb-1">후미층</th>
                     <th className="px-2 pb-1">최근 완료</th>
                     <th className="px-2 pb-1">주당</th>
-                    <th className="px-2 pb-1 text-left">예상 완료</th>
+                    <th className="px-2 pb-1 text-left">예상 완료(최근 속도)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -289,6 +302,19 @@ export default function FinishPanel({
           </section>
         </>
       )}
+    </div>
+      <aside className="min-w-0 space-y-2 print:hidden">
+        <div className="flex items-center justify-between gap-2 px-1">
+          <span className="text-sm font-semibold">설정 (저장 없이 바꿔 보기)</span>
+          {override ? (
+            <Button variant="ghost" size="sm" onClick={() => setOverride(null)}>
+              <RotateCcw /> 저장값으로
+            </Button>
+          ) : null}
+        </div>
+        <FinishPlanForm trades={d.gantt.trades} value={finishSettings} onChange={setOverride} />
+        <p className="px-1 text-xs text-muted-foreground">저장은 설정 탭 「마감 예정 규칙」에서 합니다.</p>
+      </aside>
     </div>
   );
 }

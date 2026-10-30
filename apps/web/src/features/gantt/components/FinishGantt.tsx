@@ -1,10 +1,10 @@
 /**
  * 마감 공정표 간트 (2026-10-30, 골조 공정표와 같은 방식). 한 달, 날짜 칸 × 동·공종 줄.
  * - 실적 막대(진함): 스마트웍스 세대 완료일을 이어 붙인 구간, 위에 층 범위("5~6F").
- * - 예정 막대(연한 점선): 남은 층, 최근 4주 속도 (엔진 buildFinishGantt).
+ * - 예정 막대(연한 점선): 남은 층을 선행 공종·간격·층 묶음 규칙으로 (엔진 planFinishBuilding, 오른쪽 설정 카드).
  * - 오늘 세로선. 일요일 띠, 공휴일 빨간 날짜, 날짜 세로줄은 골조 간트와 같다.
  */
-import { dateRange, floorRangeText, getDayInfo } from "@ipg/gantt-engine";
+import { dateRange, floorRangeText, getDayInfo, type FinishPlanRow } from "@ipg/gantt-engine";
 import { cn } from "@/lib/utils";
 import type { FinishBarT, FinishResponse } from "../api";
 import { monthRange } from "../dates";
@@ -26,7 +26,18 @@ const GROUP_TONE: Record<string, { solid: string; light: string; legend: string 
 const toneOf = (group: string) => GROUP_TONE[group] ?? GROUP_TONE["마루"];
 const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 
-export default function FinishGantt({ gantt, month, asOf }: { gantt: Gantt; month: string; asOf: string }) {
+export default function FinishGantt({
+  gantt,
+  plans,
+  month,
+  asOf,
+}: {
+  gantt: Gantt;
+  /** 동 → 공종별 예정 막대 (planFinishBuilding: 선행·층 묶음 규칙) */
+  plans: Map<number, FinishPlanRow[]>;
+  month: string;
+  asOf: string;
+}) {
   const { from, to } = monthRange(month);
   const days = dateRange(from, to).map((d) => getDayInfo(CALENDAR, d));
   const n = days.length;
@@ -71,7 +82,8 @@ export default function FinishGantt({ gantt, month, asOf }: { gantt: Gantt; mont
           </div>
 
           {gantt.buildings.map((b) => {
-            const rows = b.rows.filter((r) => r.actual.length || r.forecast);
+            const planOf = new Map((plans.get(b.buildingNo) ?? []).map((p) => [p.trade, p.bars]));
+            const rows = b.rows.filter((r) => r.actual.length || (planOf.get(r.trade) ?? []).length);
             return (
               <div key={b.buildingNo} className="border-b-2 border-border">
                 <div className="grid bg-muted/40" style={gridCols}>
@@ -120,22 +132,20 @@ export default function FinishGantt({ gantt, month, asOf }: { gantt: Gantt; mont
                               </div>
                             );
                           })}
-                          {r.forecast
-                            ? (() => {
-                                const p = place(r.forecast);
-                                if (!p) return null;
-                                const label = floorRangeText(r.forecast.floorFrom, r.forecast.floorTo);
-                                return (
-                                  <div className="absolute bottom-1 top-0" style={{ left: p.left, width: p.width }}>
-                                    <div className="truncate whitespace-nowrap text-[10px] italic leading-4 text-muted-foreground">{label} 예정</div>
-                                    <div
-                                      className={cn("h-3 rounded-sm border border-dashed", tone.light)}
-                                      title={`${b.name} ${t?.label} ${label} 예정 · ${md(r.forecast.start)}~${md(r.forecast.end)} · 남은 ${r.forecast.units}세대, 최근 4주 주당 ${r.perWeek}세대`}
-                                    />
-                                  </div>
-                                );
-                              })()
-                            : null}
+                          {(planOf.get(r.trade) ?? []).map((bar, i) => {
+                            const p = place(bar);
+                            if (!p) return null;
+                            const label = floorRangeText(bar.floorFrom, bar.floorTo);
+                            return (
+                              <div key={`p${i}`} className="absolute bottom-1 top-0" style={{ left: p.left, width: p.width }}>
+                                <div className="truncate whitespace-nowrap text-[10px] italic leading-4 text-muted-foreground">{label}</div>
+                                <div
+                                  className={cn("h-3 rounded-sm border border-dashed", tone.light)}
+                                  title={`${b.name} ${t?.label} ${label} 예정 · ${md(bar.start)}~${md(bar.end)} · 남은 ${bar.units}세대 (선행·층 묶음 규칙)`}
+                                />
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -155,7 +165,7 @@ export default function FinishGantt({ gantt, month, asOf }: { gantt: Gantt; mont
         ))}
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-3 w-4 rounded-sm border border-dashed border-slate-400 bg-slate-100" />
-          예정(남은 층 · 최근 4주 속도)
+          예정(선행 공종·간격·층 묶음 규칙)
         </span>
         <span>막대 위 = 층 범위 · 막대 = 스마트웍스 세대 완료일 구간(3일 넘게 끊기면 새 막대) · 세로선 = 오늘</span>
       </div>

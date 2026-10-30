@@ -174,6 +174,7 @@ const finishResponseSchema = z.object({
               perWeek: z.number(),
               actual: z.array(finishBarSchema),
               forecast: finishBarSchema.nullable(),
+              floors: z.array(z.object({ floor: z.number(), units: z.number(), done: z.number(), last: z.string().nullable() })).default([]),
             }),
           ),
         }),
