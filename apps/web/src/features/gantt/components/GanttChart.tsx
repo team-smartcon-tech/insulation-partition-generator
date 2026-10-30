@@ -207,7 +207,13 @@ function BoxEl({ box }: { box: Box }) {
         <span className="select-none text-[10px] font-semibold leading-none tabular-nums text-foreground/70">{box.count}</span>
       ) : null}
       {box.text ? (
-        <span className="select-none text-[10px] font-medium leading-none tracking-tighter text-foreground/75 [text-orientation:upright] [writing-mode:vertical-rl]">
+        // 세로 글자는 넘치면 왼쪽 줄로 꺾여 "집 S거푸" 처럼 읽힌다 — 줄바꿈 금지, 4글자 이상은 한 단계 작게
+        <span
+          className={cn(
+            "select-none whitespace-nowrap font-medium leading-none tracking-tighter text-foreground/75 [text-orientation:upright] [writing-mode:vertical-rl]",
+            box.text.length >= 4 ? "text-[8.5px]" : "text-[10px]",
+          )}
+        >
           {box.text}
         </span>
       ) : null}
