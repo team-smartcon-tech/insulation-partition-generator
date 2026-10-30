@@ -29,7 +29,7 @@ const STAGE_TONE: Record<Stage, string> = {
   GANGFORM: "bg-emerald-100 text-emerald-800",
   WALL_REBAR: "bg-violet-100 text-violet-800",
   ALFORM: "bg-sky-100 text-sky-800",
-  TOP_INSULATION: "bg-pink-100 text-pink-800",
+  TOP_INSULATION: "bg-lime-200 text-lime-900",
   SLAB_REBAR: "bg-violet-100 text-violet-800",
   POUR: "bg-rose-100 text-rose-800",
   WALL_MEP: "bg-amber-100 text-amber-800",

@@ -63,7 +63,7 @@ const GROUP_STYLE: Record<Group, string> = {
   rebar: "bg-violet-100 border-violet-500",
   mep: "bg-amber-100 border-amber-500",
   alform: "bg-sky-100 border-sky-500",
-  insulation: "bg-pink-100 border-pink-500",
+  insulation: "bg-lime-200 border-lime-600", // 타설(장미색)과 구별되게 연두
   pour: "bg-rose-100 border-rose-500",
 };
 
