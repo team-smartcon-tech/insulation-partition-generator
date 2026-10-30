@@ -605,3 +605,33 @@
 .ipg-dark .text-white {
   color: #fff;
 }
+
+/* 스마트 공정표 인쇄 (공정표 탭 「인쇄」 버튼, 2026-10-30).
+   [data-print-root] 만 보이게 하고 앱 헤더·탭·설정 패널은 숨긴다. A3 가로, 배경색(공종 색) 그대로. */
+@media print {
+  @page {
+    size: A3 landscape;
+    margin: 8mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body:has([data-print-root]) * {
+    visibility: hidden;
+  }
+  body:has([data-print-root]) [data-print-root],
+  body:has([data-print-root]) [data-print-root] * {
+    visibility: visible;
+  }
+  body:has([data-print-root]) [data-print-root] {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+  }
+  [data-print-root] .overflow-x-auto {
+    overflow: visible !important;
+  }
+}
