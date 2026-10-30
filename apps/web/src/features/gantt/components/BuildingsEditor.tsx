@@ -83,20 +83,32 @@ const fromCores = (cores: Core[]): Partial<Building> => ({
   hasRooftop: cores.some((c) => c.rooftop > 0),
 });
 
+/** 이름 속 옛 동 번호를 새 번호로 ("401동(A)" → "402동(A)"). 이름에 옛 번호가 없으면 그대로 */
+const renumber = (name: string, from: number, to: number) => {
+  const re = new RegExp(`(^|[^0-9])${from}(?![0-9])`);
+  return re.test(name) ? name.replace(re, `$1${to}`) : name;
+};
+
 export default function BuildingsEditor({ value, onChange }: { value: Building[]; onChange: (next: Building[]) => void }) {
   const update = (i: number, patch: Partial<Building>) => onChange(value.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   const remove = (i: number) => onChange(value.filter((_, j) => j !== i));
   const add = () => {
-    // 비어 있으면 101동부터 (예전 401 은 남원주 1차 기준값이었다), 아니면 마지막 동 + 1
-    const next = (value.at(-1)?.buildingNo ?? 100) + 1;
-    onChange([...value, { buildingNo: next, name: `${next}동`, baseFloor: 3, currentFloor: null, basementFloors: 0, ...fromCores([{ top: 30, rooftop: 1 }]) } as Building]);
+    // 비어 있으면 101동부터 (예전 401 은 남원주 1차 기준값이었다), 아니면 마지막 동 + 1.
+    // 「코어 추가」 처럼 마지막 동의 지하·기준층 시작·코어별 최상층·옥탑을 그대로 가져온다. 현재 층은 동마다 달라 비운다.
+    const last = value.at(-1);
+    const next = (last?.buildingNo ?? 100) + 1;
+    const name = last ? renumber(last.name, last.buildingNo, next) : `${next}동`;
+    onChange([
+      ...value,
+      last
+        ? { ...last, buildingNo: next, name: name === last.name ? `${next}동` : name, currentFloor: null, coreTopFloors: [...last.coreTopFloors], coreRooftopFloors: [...last.coreRooftopFloors] }
+        : ({ buildingNo: next, name, baseFloor: 3, currentFloor: null, basementFloors: 0, ...fromCores([{ top: 30, rooftop: 1 }]) } as Building),
+    ]);
   };
   /** 동 번호를 바꾸면 이름 속 같은 번호도 바꾼다 ("401동" → "101동", "401동(A)" → "101동(A)"). 이름에 옛 번호가 없으면 그대로 */
   const setNo = (i: number, no: number) => {
     const b = value[i];
-    const re = new RegExp(`(^|[^0-9])${b.buildingNo}(?![0-9])`);
-    const name = re.test(b.name) ? b.name.replace(re, `$1${no}`) : b.name;
-    update(i, { buildingNo: no, name });
+    update(i, { buildingNo: no, name: renumber(b.name, b.buildingNo, no) });
   };
   const setCores = (i: number, cores: Core[]) => update(i, fromCores(cores));
 
