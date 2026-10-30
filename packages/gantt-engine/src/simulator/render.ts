@@ -13,6 +13,10 @@ const SHORT: Record<Stage, string> = {
   SLAB_MEP: "검",
   POUR: "타",
   CURE: "양",
+  FORM_WALL: "벽",
+  FORM_SLAB: "바",
+  SHORING: "동",
+  FORM_STRIP: "해",
 }
 
 export function renderText(result: SimulationResult): string {

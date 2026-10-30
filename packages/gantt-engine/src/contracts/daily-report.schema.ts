@@ -15,7 +15,9 @@ export const siteSchema = z.object({
 export const workEntrySchema = z.object({
   building: z.string(), // "401동"
   buildingNo: z.number().int().nullable(), // 401
-  floor: z.number().int().nullable(), // 38 (38F)
+  floor: z.number().int().nullable(), // 38 (38F), -1 (B1F)
+  /** 숫자로 못 나타내는 층 표기 ("RF") */
+  floorLabel: z.string().optional(),
   text: z.string(), // "바닥 먹매김"
   stage: stageSchema.nullable(),
 })

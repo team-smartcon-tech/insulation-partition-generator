@@ -22,6 +22,7 @@ import {
   simulate,
   simulateRequestSchema,
   siteSettingsSchema,
+  UNDERGROUND_STAGES,
   type BuildingState,
   type DailyReport,
   type PlanResponse,
@@ -369,6 +370,7 @@ gantt.post("/plan", async (c) => {
         buildings: warm.buildings.map((b) => ({ id: b.id, label: `${b.id}동` })),
         actual: [],
         reportDates,
+        unplanned: [],
       };
       return c.json(body);
     }
@@ -380,8 +382,19 @@ gantt.post("/plan", async (c) => {
     const rooftopOf = (b: Building) =>
       Math.max(0, ...b.coreTopFloors.map((t, i) => (t === b.topFloor ? b.coreRooftopFloors[i] ?? 0 : 0)));
     const rooftops = new Map(buildings.map((b) => [b.buildingNo, rooftopOf(b)]));
+    // 지하·저층 공정 중인 동은 예정을 계산하지 않는다 (엔진은 기준층 사이클만 — 설계 §8-2, 2026-10-30 1안: 실적만 표시).
+    // 판단: 그 동의 마지막 실적 날에 지하 공종(거푸집·동바리·해체)이 있거나, RF 같은 비숫자 층이거나, 기준층 시작보다 낮다.
+    const baseFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.baseFloor ?? 2;
+    const unplanned = new Set<number>();
+    for (const b of progress.buildings) {
+      const mine = progress.actual.filter((a) => a.buildingId === b.id);
+      const lastDate = mine.at(-1)?.date;
+      const lastDay = mine.filter((a) => a.date === lastDate);
+      const top = Math.max(...lastDay.map((a) => a.floor));
+      if (lastDay.some((a) => UNDERGROUND_STAGES.includes(a.stage) || a.floorLabel != null) || top < baseFloorOf(b.id)) unplanned.add(b.id);
+    }
     const initial: BuildingState[] = [
-      ...progress.initial.map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
+      ...progress.initial.filter((b) => !unplanned.has(b.id)).map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
       ...buildings
         .filter((b) => !reported.has(b.buildingNo))
         .map((b) => ({
@@ -410,13 +423,15 @@ gantt.post("/plan", async (c) => {
           })
         : null;
     const statsFrom = planFrom > req.from ? planFrom : req.from;
+    // 화면 줄: 예정 계산하는 동 + 실적만 있는 동(지하·저층)
+    const allIds = [...new Set([...initial.map((b) => b.id), ...unplanned])].sort((a, b) => a - b);
     const empty = { fullDays: 0, halfDays: 0 };
     const labelOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.name ?? progress.buildings.find((x) => x.id === id)?.label ?? `${id}동`;
     const body: PlanResponse = {
       from: req.from,
       to: req.to,
       days,
-      buildingIds: initial.map((b) => b.id),
+      buildingIds: allIds,
       assignments: (planned?.assignments ?? [])
         .filter((a) => a.date >= req.from && a.date <= req.to)
         .map(({ date, half, buildingId, stage, floor, roof }) => ({ date, half, buildingId, stage, floor, roof })),
@@ -424,9 +439,10 @@ gantt.post("/plan", async (c) => {
         ? periodStats(planned, req.calendar, statsFrom, req.to)
         : { from: statsFrom, to: req.to, pours: 0, pourGapDays: 0, idle: { rebar: empty, alform: empty, gangform: empty } },
       asOf: progress.asOf,
-      buildings: initial.map((b) => ({ id: b.id, label: labelOf(b.id) })),
+      buildings: allIds.map((id) => ({ id, label: labelOf(id) })),
       actual: progress.actual.filter((a) => a.date >= req.from && a.date <= req.to),
       reportDates,
+      unplanned: [...unplanned].sort((a, b) => a - b),
     };
     return c.json(body);
   } catch (err) {

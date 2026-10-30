@@ -8,7 +8,7 @@ import { STAGES, nextStage } from "../rules/stages.ts"
 import type { BuildingState } from "../simulator/simulator.ts"
 
 /** 실적 한 칸: 그날 그 동이 한 단계 (반일 구분 없음) */
-export type ActualWork = { date: IsoDate; buildingId: number; stage: Stage; floor: number }
+export type ActualWork = { date: IsoDate; buildingId: number; stage: Stage; floor: number; floorLabel?: string }
 
 export type BuildingLabel = { id: number; label: string }
 
@@ -24,6 +24,9 @@ export type Progress = {
 }
 
 const order = (s: Stage) => STAGES.indexOf(s)
+
+/** 기전 규칙(순서 밖 제외·이월)은 기준층 사이클 전제 — 지하·저층(2층 미만, RF 등)은 일보 그대로 둔다 */
+const isBaseFloor = (a: ActualWork) => a.floorLabel == null && a.floor >= 2
 
 /** 배근 → 그 뒤 기전 (W철근 → 벽 기전, S철근 → 슬래브 기전) */
 const MEP_AFTER: Partial<Record<Stage, Stage>> = { WALL_REBAR: "WALL_MEP", SLAB_REBAR: "SLAB_MEP" }
@@ -46,7 +49,7 @@ function dropMepOutsideWindow(actual: ActualWork[]): void {
   const drop = new Set<ActualWork>()
   for (const a of actual) {
     const w = MEP_WINDOW[a.stage]
-    if (!w) continue
+    if (!w || !isBaseFloor(a)) continue
     const mine = actual.filter((x) => x.buildingId === a.buildingId)
     const opened = mine.filter((x) => x.stage === w.opens && x.date <= a.date).at(-1)?.date
     const closed = opened !== undefined && mine.some((x) => x.stage === w.closes && x.date > opened && x.date <= a.date)
@@ -73,8 +76,8 @@ function deferContinuedMep(actual: ActualWork[]): void {
     ds.forEach((date, i) => {
       const next = ds[i + 1]
       if (!next) return
-      const today = actual.filter((a) => a.buildingId === id && a.date === date)
-      const tomorrow = actual.filter((a) => a.buildingId === id && a.date === next)
+      const today = actual.filter((a) => a.buildingId === id && a.date === date && isBaseFloor(a))
+      const tomorrow = actual.filter((a) => a.buildingId === id && a.date === next && isBaseFloor(a))
       for (const [rebar, mep] of Object.entries(MEP_AFTER) as [Stage, Stage][]) {
         if (!today.some((a) => a.stage === rebar)) continue
         if (!tomorrow.some((a) => a.stage === mep)) continue
@@ -100,7 +103,13 @@ export function progressFromReports(
     if (r.date > upTo) continue
     for (const e of r.entries) {
       if (e.buildingNo === null || !e.stage) continue
-      actual.push({ date: r.date, buildingId: e.buildingNo, stage: e.stage, floor: e.floor ?? 0 })
+      actual.push({
+        date: r.date,
+        buildingId: e.buildingNo,
+        stage: e.stage,
+        floor: e.floor ?? 0,
+        ...(e.floorLabel ? { floorLabel: e.floorLabel } : {}),
+      })
     }
   }
   actual.sort((a, b) => a.date.localeCompare(b.date) || a.buildingId - b.buildingId)

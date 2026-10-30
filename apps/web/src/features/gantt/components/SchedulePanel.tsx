@@ -32,6 +32,10 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
   const plan = usePlan(siteId, from, to, settings, todayKst());
   const d = plan.data;
   const noBuildings = saved.data && saved.data.buildings.length === 0;
+  // 지하·저층 공정 중이라 예정을 계산하지 않은 동 (실적만 표시)
+  const unplanned = d?.unplanned ?? [];
+  const allUnplanned = d != null && unplanned.length > 0 && unplanned.length === d.buildingIds.length;
+  const labelOf = (id: number) => d?.buildings?.find((b) => b.id === id)?.label ?? `${id}동`;
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
@@ -48,8 +52,13 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
                 : d
                   ? " · 작업일보가 없어 설정 탭의 동 목록(현재 층)에서 출발한 예정입니다."
                   : ""}
-            {noBuildings ? (
+            {noBuildings && !unplanned.length ? (
               <span className="ml-2 text-amber-700">설정 탭에서 동별 최상층을 넣으면 사이클 종료·단열재 단계가 반영됩니다.</span>
+            ) : null}
+            {unplanned.length ? (
+              <span className="ml-2 text-amber-700">
+                {allUnplanned ? "모든 동이" : `${unplanned.map(labelOf).join("·")}은(는)`} 지하·저층 공정이라 작업일보 실적만 표시합니다(예정 계산은 기준층부터).
+              </span>
             ) : null}
           </p>
           <div className="flex items-center gap-2">
@@ -67,7 +76,7 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
           <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">{(plan.error as Error).message}</div>
         ) : d ? (
           <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className={allUnplanned ? "hidden" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>
               <Stat label={d.asOf ? "예정 타설" : "타설"} value={`${d.stats.pours}회`} sub={d.asOf ? `${d.stats.from}부터 월말까지` : undefined} />
               <Stat label="타설 공백" value={`${d.stats.pourGapDays}일`} />
               <Stat label="알폼 온종일 유휴" value={`${d.stats.idle.alform.fullDays}일`} sub={`반일 ${d.stats.idle.alform.halfDays}일`} />

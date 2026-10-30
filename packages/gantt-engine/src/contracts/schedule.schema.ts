@@ -50,6 +50,11 @@ export const stageSchema = z.enum([
   "SLAB_MEP",
   "POUR",
   "CURE",
+  // 지하·저층(재래식 거푸집) — 실적 표시용. 예정 계산(시뮬레이터)은 아직 기준층 사이클만 (설계 §8-2)
+  "FORM_WALL",
+  "FORM_SLAB",
+  "SHORING",
+  "FORM_STRIP",
 ])
 
 export const halfSchema = z.enum(["AM", "PM"])
@@ -127,6 +132,10 @@ export const STAGE_LABEL: Record<z.infer<typeof stageSchema>, string> = {
   SLAB_MEP: "기전·검측(슬래브)",
   POUR: "타설",
   CURE: "양생",
+  FORM_WALL: "벽체 거푸집",
+  FORM_SLAB: "바닥 거푸집",
+  SHORING: "시스템 동바리",
+  FORM_STRIP: "거푸집 해체",
 }
 
 // ── 현장 실적 기반 계획 (작업일보 → 출발 상태 → 예정) ────────────────────────
@@ -146,6 +155,8 @@ export const actualWorkSchema = z.object({
   buildingId: z.number().int(),
   stage: stageSchema,
   floor: z.number().int(),
+  /** 숫자로 못 나타내는 층 표기 ("RF"). 있으면 화면은 이것을 쓴다 */
+  floorLabel: z.string().optional(),
 })
 
 export const buildingLabelSchema = z.object({ id: z.number().int(), label: z.string() })
@@ -157,6 +168,8 @@ export const planResponseSchema = simulateResponseSchema.extend({
   actual: z.array(actualWorkSchema),
   /** 기간 안에 일보가 있던 날짜들 (본문이 비어 있어도 포함) */
   reportDates: z.array(isoDateSchema),
+  /** 예정을 계산하지 않은 동 — 지하·저층 공정 중이라 엔진(기준층 사이클)이 이어서 계산할 수 없다 */
+  unplanned: z.array(z.number().int()).default([]),
 })
 
 export type PlanRequest = z.infer<typeof planRequestSchema>

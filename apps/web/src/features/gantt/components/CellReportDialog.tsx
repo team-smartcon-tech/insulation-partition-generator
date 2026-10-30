@@ -22,6 +22,10 @@ const NAME: Record<Stage, string> = {
   SLAB_MEP: "S기전(슬래브 기전·검측)",
   POUR: "타설",
   CURE: "양생",
+  FORM_WALL: "W거푸집(벽체 거푸집)",
+  FORM_SLAB: "S거푸집(바닥 거푸집)",
+  SHORING: "시스템 동바리",
+  FORM_STRIP: "거푸집 해체",
 };
 
 export type CellTarget = {
@@ -40,7 +44,8 @@ export type CellTarget = {
 /** 옥탑은 알폼이 아니라 일반 거푸집 */
 const nameOf = (a: { stage: Stage; roof?: number }) => (a.stage === "ALFORM" && a.roof != null ? "거푸집(옥탑)" : NAME[a.stage]);
 
-const floorText = (a: { floor: number | null; roof?: number }) => (a.roof ? `PH${a.roof}` : a.floor == null ? "층 없음" : `${a.floor}F`);
+const floorText = (a: { floor: number | null; roof?: number; floorLabel?: string }) =>
+  a.roof ? `PH${a.roof}` : a.floorLabel ? a.floorLabel : a.floor == null ? "층 없음" : a.floor < 0 ? `B${-a.floor}F` : `${a.floor}F`;
 
 /** 원문에서 그 동 번호가 나오는 줄만, 바로 위 구간 제목("* 전기(20)")과 함께 */
 function linesFor(rawText: string, buildingNo: number): { header: string | null; lines: string[] }[] {
@@ -163,7 +168,7 @@ export default function CellReportDialog({ siteId, target, onClose }: { siteId: 
                             {ok ? "반영" : e.stage ? "제외" : "공정 무관"}
                           </span>
                           <span>
-                            {e.floor == null ? "" : `${e.floor}F `}
+                            {e.floor == null && !e.floorLabel ? "" : `${floorText(e)} `}
                             {e.text}
                           </span>
                           <span className="text-xs text-muted-foreground">{e.stage ? `→ ${NAME[e.stage]}` : ""}</span>

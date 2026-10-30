@@ -13,6 +13,7 @@
 // 줄 모양 둘 다 지원: "- <동>: <작업> / <작업>" (동이 줄 앞에 한 번) 와 "- <동> <작업> / <동> <작업>" (작업마다 동).
 // 요약 글은 AI 가 쓴 것이라 날마다 모양이 조금씩 다를 수 있다 — 못 읽은 줄은 버리지 않고 unmatched 로 돌려준다.
 import type { Stage, WorkEntry } from "../contracts/index.ts"
+import { isNumberedFormat, parseNumbered } from "./parse-numbered.ts"
 
 export type ParsedWorkText = { entries: WorkEntry[]; unmatched: string[] }
 
@@ -134,6 +135,8 @@ function splitLine(line: string): Part[] | null {
 }
 
 export function parseWorkText(rawText: string): ParsedWorkText {
+  // 번호 붙은 공사 구간 양식("1. 형틀 공사 (133)") 은 따로 읽는다 — 남원주 2차 등 지하·저층 골조 일보
+  if (isNumberedFormat(rawText)) return parseNumbered(rawText)
   const entries: WorkEntry[] = []
   const unmatched: string[] = []
 

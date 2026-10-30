@@ -12,7 +12,15 @@ export const STAGES = [
   "SLAB_MEP", // 5' 기전배관·검측 (자동)
   "POUR", // 6 타설 (오전, 그날 전체), 펌프카·레미콘
   "CURE", // 7 양생 — 옥탑 순서표에서만 칸을 차지한다. 기준층 동절기 양생은 달력 규칙(먹매김과 같은 날)
+  // 지하·저층(재래식 거푸집). 일보 실적 표시용 — 시뮬레이터 사이클에는 들어가지 않는다 (설계 §8-2, 2026-10-30 1안)
+  "FORM_WALL", // 벽체 거푸집 설치
+  "FORM_SLAB", // 바닥 거푸집 설치
+  "SHORING", // 시스템 동바리
+  "FORM_STRIP", // 거푸집 해체
 ] as const
+
+/** 지하·저층 전용 단계 (예정 계산 안 함) */
+export const UNDERGROUND_STAGES: readonly Stage[] = ["FORM_WALL", "FORM_SLAB", "SHORING", "FORM_STRIP"]
 
 export type Stage = (typeof STAGES)[number]
 
@@ -39,6 +47,10 @@ export const STAGE_SLOTS: Record<Stage, number> = {
   SLAB_MEP: 1,
   POUR: 1,
   CURE: 2,
+  FORM_WALL: 2,
+  FORM_SLAB: 2,
+  SHORING: 2,
+  FORM_STRIP: 2,
 }
 
 export const STAGE_LABEL: Record<Stage, string> = {
@@ -52,6 +64,10 @@ export const STAGE_LABEL: Record<Stage, string> = {
   SLAB_MEP: "기전·검측(슬래브)",
   POUR: "타설",
   CURE: "양생",
+  FORM_WALL: "벽체 거푸집",
+  FORM_SLAB: "바닥 거푸집",
+  SHORING: "시스템 동바리",
+  FORM_STRIP: "거푸집 해체",
 }
 
 /**
@@ -62,6 +78,8 @@ export function nextStage(stage: Stage, isTopFloor = false): Stage {
   if (stage === "ALFORM") return isTopFloor ? "TOP_INSULATION" : "SLAB_REBAR"
   // 기준층 사이클은 타설에서 다시 먹매김으로. 양생(CURE)은 옥탑 순서표에서만 쓴다
   if (stage === "POUR" || stage === "CURE") return "MARK"
+  // 지하 단계는 기준층 사이클 밖 — 다음은 기준층 첫 단계로 둔다(예정 계산에서는 이런 동을 빼므로 쓰이지 않는다)
+  if ((UNDERGROUND_STAGES as readonly string[]).includes(stage)) return "MARK"
   const i = STAGES.indexOf(stage)
   return STAGES[i + 1]
 }

@@ -18,7 +18,7 @@ import CellReportDialog, { type CellTarget } from "./CellReportDialog";
 
 export type GanttData = SimulateResponse & Partial<Pick<PlanResponse, "asOf" | "buildings" | "actual">>;
 
-type Group = "cure" | "gangform" | "rebar" | "mep" | "alform" | "insulation" | "pour";
+type Group = "cure" | "gangform" | "rebar" | "mep" | "alform" | "insulation" | "pour" | "form" | "shoring" | "strip";
 
 const STAGE_GROUP: Record<Stage, Group> = {
   MARK: "cure",
@@ -31,6 +31,10 @@ const STAGE_GROUP: Record<Stage, Group> = {
   SLAB_MEP: "mep",
   POUR: "pour",
   CURE: "cure",
+  FORM_WALL: "form",
+  FORM_SLAB: "form",
+  SHORING: "shoring",
+  FORM_STRIP: "strip",
 };
 
 const GROUP_LABEL: Record<Group, string> = {
@@ -41,6 +45,9 @@ const GROUP_LABEL: Record<Group, string> = {
   alform: "알폼",
   insulation: "단열재(최상층)",
   pour: "타설",
+  form: "W·S거푸집(지하)",
+  shoring: "동바리",
+  strip: "거푸집 해체",
 };
 
 /** 상자 안 세로 글자 (반일 칸이 좁아 짧게). W철근 = 벽철근, S철근 = 슬래브철근 */
@@ -55,6 +62,10 @@ const STAGE_TEXT: Record<Stage, string> = {
   SLAB_MEP: "S기전",
   POUR: "타설",
   CURE: "양생",
+  FORM_WALL: "W거푸집",
+  FORM_SLAB: "S거푸집",
+  SHORING: "동바리",
+  FORM_STRIP: "해체",
 };
 
 const GROUP_STYLE: Record<Group, string> = {
@@ -65,6 +76,9 @@ const GROUP_STYLE: Record<Group, string> = {
   alform: "bg-sky-100 border-sky-500",
   insulation: "bg-lime-200 border-lime-600", // 타설(장미색)과 구별되게 연두
   pour: "bg-rose-100 border-rose-500",
+  form: "bg-orange-100 border-orange-500",
+  shoring: "bg-slate-200 border-slate-500",
+  strip: "bg-orange-50 border-orange-400 border-dashed",
 };
 
 const STAGE_TITLE: Record<Stage, string> = {
@@ -78,6 +92,10 @@ const STAGE_TITLE: Record<Stage, string> = {
   SLAB_MEP: "S기전(슬래브 기전·검측)",
   POUR: "타설",
   CURE: "양생",
+  FORM_WALL: "W거푸집(벽체 거푸집)",
+  FORM_SLAB: "S거푸집(바닥 거푸집)",
+  SHORING: "시스템 동바리",
+  FORM_STRIP: "거푸집 해체",
 };
 
 const STAGE_INDEX: Record<Stage, number> = {
@@ -91,7 +109,15 @@ const STAGE_INDEX: Record<Stage, number> = {
   SLAB_MEP: 7,
   POUR: 8,
   CURE: 9,
+  // 지하·저층 순서: 해체 → 벽 거푸집 → 벽 철근 → 기전 → 동바리 → 바닥 거푸집 → 바닥 철근 → 기전 → 타설
+  FORM_STRIP: -1,
+  FORM_WALL: 1.5,
+  SHORING: 4.2,
+  FORM_SLAB: 4.5,
 };
+
+/** 실적 층 표시: RF 같은 표기 그대로, 지하는 B1F */
+const actualFloorText = (w: { floor: number; floorLabel?: string }) => w.floorLabel ?? (w.floor < 0 ? `B${-w.floor}F` : `${w.floor}F`);
 
 /** 층 표시: 옥탑은 PH1·PH2, 그 외 42F */
 const floorLabel = (a: { floor: number; roof?: number }) => (a.roof ? `PH${a.roof}` : `${a.floor}F`);
@@ -148,7 +174,7 @@ function actualBoxes(date: string, label: string, works: ActualWork[], cont: (w:
   }
   const sorted = [...byStage.values()].sort((a, b) => STAGE_INDEX[a.stage] - STAGE_INDEX[b.stage]);
   // 툴팁에는 그날 적힌 층을 모두 보여 준다 (합친 칸도 원문 층을 확인할 수 있게)
-  const floorsOf = (stage: Stage) => [...new Set(works.filter((w) => w.stage === stage).map((w) => `${w.floor}F`))].join("·");
+  const floorsOf = (stage: Stage) => [...new Set(works.filter((w) => w.stage === stage).map(actualFloorText))].join("·");
   const t = (w: ActualWork) => `${date} 실적 · ${label} ${floorsOf(w.stage)} · ${STAGE_TITLE[w.stage]}`;
   if (sorted.length === 1) return [{ span: "DAY", group: STAGE_GROUP[sorted[0].stage], title: t(sorted[0]), text: textOf(sorted[0].stage, cont(sorted[0])) }];
   // 한 칸에 4개 이상이면 상자가 너무 좁아 글자는 숨긴다 (툴팁·칸 클릭 팝업으로 확인)
@@ -228,11 +254,23 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
     byDate.set(w.date, [...(byDate.get(w.date) ?? []), w]);
     actualDays.set(w.buildingId, byDate);
   }
-  for (const byDate of actualDays.values()) {
+  // 지하·저층(먹매김이 없는 공정): 그 동의 작업 층이 앞 실적 날과 달라진 날 칸 위에 층 라벨 ("B1F·1F")
+  const ugFloorLabel = new Map<string, string>();
+  for (const [id, byDate] of actualDays) {
     const dates = [...byDate.keys()].sort();
+    let prevKey = "";
     dates.forEach((date, i) => {
       const prev = i > 0 ? byDate.get(dates[i - 1])! : [];
       for (const w of byDate.get(date)!) if (prev.some((x) => same(x, w))) contActual.add(w);
+      const works = byDate.get(date)!;
+      if (works.some((w) => w.stage === "MARK") || !works.some((w) => w.floor < 2 || w.floorLabel != null)) {
+        prevKey = "";
+        return;
+      }
+      const floors = [...new Set([...works].sort((a, b) => a.floor - b.floor).map(actualFloorText))];
+      const key = floors.join("·");
+      if (key !== prevKey) ugFloorLabel.set(`${date}|${id}`, key);
+      prevKey = key;
     });
   }
   const asOf = data.asOf ?? null;
@@ -287,7 +325,13 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
                 // 사이클 시작(먹매김) 칸에 층 라벨 (옥탑은 PH1·PH2)
                 const markActual = actual?.find((w) => w.stage === "MARK");
                 const markPlan = am?.stage === "MARK" ? am : pm?.stage === "MARK" ? pm : undefined;
-                const startFloor = actual ? (markActual ? `${markActual.floor}F` : undefined) : markPlan ? floorLabel(markPlan) : undefined;
+                const startFloor = actual
+                  ? markActual
+                    ? actualFloorText(markActual)
+                    : ugFloorLabel.get(`${d.date}|${id}`)
+                  : markPlan
+                    ? floorLabel(markPlan)
+                    : undefined;
                 return (
                   <div
                     key={d.date}
@@ -320,6 +364,8 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
                 ? !(data.actual ?? []).some((a) => a.date === d.date && team.stages.includes(a.stage))
                 : !data.assignments.some((a) => a.date === d.date && team.stages.includes(a.stage)),
             ).map((d) => d.date);
+            // 그달 작업이 하루도 없는 팀(아직 현장에 없음 — 지하 공정 현장의 갱폼·알폼 등)은 줄을 숨긴다
+            if (idleDays.length === data.days.length) return null;
             const nth = new Map(idleDays.map((date, i) => [date, i + 1]));
             return (
               <div key={team.key} className="grid" style={gridCols}>

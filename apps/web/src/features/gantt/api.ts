@@ -32,7 +32,7 @@ export class GanttApiError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
+async function apiFetch<T>(path: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api/gantt${path}`, {
     ...init,
     credentials: "include",

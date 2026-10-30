@@ -5,7 +5,7 @@ export * from "./contracts/index.ts"
 export * from "./calendar/date.ts"
 export { getDayInfo, isWinterCuring, previousCraneDay } from "./calendar/calendar.ts"
 export { ALL_HALF_DAY_ON, ALL_HALF_DAY_OFF, SCENARIO_2026_10 } from "./rules/settings.ts"
-export { ROOFTOP_SEQUENCE, STAGES, STAGE_TEAM, STAGE_SLOTS, nextStage, type Team } from "./rules/stages.ts"
+export { ROOFTOP_SEQUENCE, UNDERGROUND_STAGES, STAGES, STAGE_TEAM, STAGE_SLOTS, nextStage, type Team } from "./rules/stages.ts"
 export {
   simulate,
   buildSlots,
@@ -18,4 +18,5 @@ export {
 export { periodStats, type TeamIdle } from "./simulator/stats.ts"
 export { renderText } from "./simulator/render.ts"
 export * from "./daily-report/parse-work-text.ts"
+export { isNumberedFormat, parseNumbered } from "./daily-report/parse-numbered.ts"
 export { progressFromReports, type Progress } from "./daily-report/progress.ts"
