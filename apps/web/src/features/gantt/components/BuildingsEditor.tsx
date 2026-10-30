@@ -154,7 +154,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
       ) : (
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs text-muted-foreground">
+            <tr className="text-center text-xs text-muted-foreground">
               <th className="pb-1 pr-2 whitespace-nowrap">동 번호</th>
               <th className="pb-1 pr-2 whitespace-nowrap">이름</th>
               <th className="pb-1 pr-2 whitespace-nowrap" title="지하 맨 아래층 (B3 까지면 3). 일보 없는 동의 지하 출발 층">지하</th>
@@ -162,10 +162,10 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
               <th className="pb-1 pr-2 font-normal">
                 {/* 코어 줄과 같은 칸 너비 — 헤더가 각 입력칸 바로 위에 온다 */}
                 <div className={CORE_GRID}>
-                  <span className="whitespace-nowrap font-medium">코어</span>
-                  <span className="whitespace-nowrap font-medium">세대</span>
-                  <span className="whitespace-nowrap font-medium">최상층</span>
-                  <span className="whitespace-nowrap font-medium">옥탑</span>
+                  <span className="whitespace-nowrap text-center font-medium">코어</span>
+                  <span className="whitespace-nowrap text-center font-medium">세대</span>
+                  <span className="whitespace-nowrap text-center font-medium">최상층</span>
+                  <span className="whitespace-nowrap text-center font-medium">옥탑</span>
                   <span />
                 </div>
               </th>
