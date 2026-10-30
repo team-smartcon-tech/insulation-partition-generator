@@ -15,11 +15,11 @@ const NAME: Record<Stage, string> = {
   MARK: "먹매김",
   GANGFORM: "갱폼인양",
   WALL_REBAR: "W철근(벽철근)",
-  WALL_MEP: "기전·검측(벽)",
+  WALL_MEP: "W기전(벽 기전·검측)",
   ALFORM: "알폼",
   TOP_INSULATION: "단열재(최상층)",
   SLAB_REBAR: "S철근(슬래브철근)",
-  SLAB_MEP: "기전·검측(슬래브)",
+  SLAB_MEP: "S기전(슬래브 기전·검측)",
   POUR: "타설",
   CURE: "양생",
 };
@@ -173,7 +173,7 @@ export default function CellReportDialog({ siteId, target, onClose }: { siteId: 
                 )}
                 {entries.some((e) => e.stage && !reflected(e)) ? (
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    제외: 순서 밖 기전(벽 기전은 W철근~알폼 전, 슬래브 기전은 S철근~타설 전만 인정)이거나, 다음 일보로 이어져 다음 날로 넘긴 기전입니다.
+                    제외: 순서 밖 기전(W기전은 W철근~알폼 전, S기전은 S철근~타설 전만 인정)이거나, 다음 일보로 이어져 다음 날로 넘긴 기전입니다.
                   </p>
                 ) : null}
               </section>

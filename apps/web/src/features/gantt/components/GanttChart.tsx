@@ -36,8 +36,8 @@ const STAGE_GROUP: Record<Stage, Group> = {
 const GROUP_LABEL: Record<Group, string> = {
   cure: "양생·먹매김",
   gangform: "갱폼",
-  rebar: "철근",
-  mep: "기전(오전)",
+  rebar: "W·S철근",
+  mep: "W·S기전",
   alform: "알폼",
   insulation: "단열재(최상층)",
   pour: "타설",
@@ -48,11 +48,11 @@ const STAGE_TEXT: Record<Stage, string> = {
   MARK: "먹매김",
   GANGFORM: "갱폼",
   WALL_REBAR: "W철근",
-  WALL_MEP: "기전",
+  WALL_MEP: "W기전",
   ALFORM: "알폼",
   TOP_INSULATION: "단열재",
   SLAB_REBAR: "S철근",
-  SLAB_MEP: "기전",
+  SLAB_MEP: "S기전",
   POUR: "타설",
   CURE: "양생",
 };
@@ -71,11 +71,11 @@ const STAGE_TITLE: Record<Stage, string> = {
   MARK: "양생·먹매김",
   GANGFORM: "갱폼인양",
   WALL_REBAR: "W철근(벽철근)",
-  WALL_MEP: "기전·검측(벽)",
+  WALL_MEP: "W기전(벽 기전·검측)",
   ALFORM: "알폼",
   TOP_INSULATION: "바닥단열재(최상층)",
   SLAB_REBAR: "S철근(슬래브철근)",
-  SLAB_MEP: "기전·검측(슬래브)",
+  SLAB_MEP: "S기전(슬래브 기전·검측)",
   POUR: "타설",
   CURE: "양생",
 };
@@ -361,7 +361,7 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
           </span>
         </div>
         <p>
-          칸 왼쪽 오전 · 오른쪽 오후. W철근 = 벽철근, S철근 = 슬래브철근 (배근 뒤 기전·검측). 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
+          칸 왼쪽 오전 · 오른쪽 오후. W철근·W기전 = 벽철근·벽 기전, S철근·S기전 = 슬래브철근·슬래브 기전. 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
            칸을 누르면 그날 그 동의 작업일보.{asOf ? ` 세로 선 왼쪽은 작업일보 실적(${asOf}까지, 또렷함), 오른쪽은 엔진 예정(연함).` : ""}
         </p>
       </div>
