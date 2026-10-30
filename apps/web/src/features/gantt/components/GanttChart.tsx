@@ -48,7 +48,7 @@ type Box = {
   group: Group;
   title: string;
   text?: string;
-  /** 실적처럼 반일 구분이 없는 날: 하루를 위에서부터 n 줄로 나눈 i 번째 (0부터) */
+  /** 실적처럼 반일 구분이 없는 날: 하루를 n 칸으로 나눈 i 번째 (0부터) */
   seg?: { i: number; n: number };
   /** 유휴 줄: 그달 몇 번째 유휴일인가 (가로 숫자) */
   count?: number;
@@ -114,26 +114,25 @@ function BoxEl({ box }: { box: Box }) {
   return (
     <div
       className={cn(
-        // 하루 칸 = 위 오전 · 아래 오후 (2026-10-30 사용자: 열이 아니라 행으로)
-        "absolute inset-x-0.5 rounded-md border",
+        "absolute inset-y-0 rounded-md border",
         GROUP_STYLE[box.group],
-        !seg && box.span === "DAY" && "inset-y-0",
-        !seg && box.span === "AM" && "top-0 bottom-1/2 mb-px",
-        !seg && box.span === "PM" && "top-1/2 bottom-0 mt-px",
+        !seg && box.span === "DAY" && "inset-x-0.5",
+        !seg && box.span === "AM" && "left-0.5 right-1/2 mr-px",
+        !seg && box.span === "PM" && "left-1/2 right-0.5 ml-px",
         (box.text || box.count != null) && "flex items-center justify-center overflow-hidden",
       )}
-      style={seg ? { top: `calc(${(seg.i / seg.n) * 100}% + 1px)`, height: `calc(${100 / seg.n}% - 2px)` } : undefined}
+      style={seg ? { left: `calc(${(seg.i / seg.n) * 100}% + 2px)`, width: `calc(${100 / seg.n}% - 3px)` } : undefined}
       title={box.title}
     >
       {box.count != null ? (
         <span className="select-none text-[10px] font-semibold leading-none tabular-nums text-foreground/70">{box.count}</span>
       ) : null}
       {box.text ? (
-        // 가로 글자, 줄바꿈 금지, 4글자 이상은 한 단계 작게
+        // 세로 글자는 넘치면 왼쪽 줄로 꺾여 "집 S거푸" 처럼 읽힌다 — 줄바꿈 금지, 4글자 이상은 한 단계 작게
         <span
           className={cn(
-            "select-none whitespace-nowrap font-medium leading-none tracking-tighter text-foreground/75",
-            box.text.length >= 4 ? "text-[9px]" : "text-[10px]",
+            "select-none whitespace-nowrap font-medium leading-none tracking-tighter text-foreground/75 [text-orientation:upright] [writing-mode:vertical-rl]",
+            box.text.length >= 4 ? "text-[8.5px]" : "text-[10px]",
           )}
         >
           {box.text}
@@ -283,7 +282,7 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
                 return (
                   <div
                     key={d.date}
-                    className={dayCell(d, "h-[4.75rem] cursor-pointer hover:bg-primary/5")}
+                    className={dayCell(d, "h-[4.25rem] cursor-pointer hover:bg-primary/5")}
                     title={`${label(id)} ${d.date} — 눌러서 작업일보 보기`}
                     onClick={() =>
                       setTarget({ date: d.date, buildingId: id, label: label(id), isActual: isActualDay(d.date), actual: actual ?? [], am, pm })
@@ -367,7 +366,7 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
           </span>
         </div>
         <p>
-          칸 위 오전 · 아래 오후. W철근·W기전 = 벽철근·벽 기전, S철근·S기전 = 슬래브철근·슬래브 기전. 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 위에서부터 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일, 알폼 대신 거푸집). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
+          칸 왼쪽 오전 · 오른쪽 오후. W철근·W기전 = 벽철근·벽 기전, S철근·S기전 = 슬래브철근·슬래브 기전. 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일, 알폼 대신 거푸집). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
            칸을 누르면 그날 그 동의 작업일보.{asOf ? ` 작업일보 실적(${asOf}까지)은 또렷하게, 그 뒤 엔진 예정은 연하게.` : ""} 채운 날짜 = 오늘.
         </p>
       </div>

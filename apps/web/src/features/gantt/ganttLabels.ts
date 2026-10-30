@@ -36,7 +36,7 @@ export const GROUP_LABEL: Record<Group, string> = {
   shoring: "시스템(동바리)",
 };
 
-/** 상자 안 글자 (반일 칸이 좁아 짧게). W철근 = 벽철근, S철근 = 슬래브철근 */
+/** 상자 안 세로 글자 (반일 칸이 좁아 짧게). W철근 = 벽철근, S철근 = 슬래브철근 */
 export const STAGE_TEXT: Record<Stage, string> = {
   MARK: "먹매김",
   GANGFORM: "갱폼",
