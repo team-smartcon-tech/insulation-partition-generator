@@ -41,15 +41,15 @@ const GROUP_LABEL: Record<Group, string> = {
   pour: "타설",
 };
 
-/** 상자 안 세로 글자 (반일 칸이 좁아 짧게). 철근 뒤 기전이 붙은 하루 상자는 철근 이름 */
+/** 상자 안 세로 글자 (반일 칸이 좁아 짧게). W철근 = 벽철근, S철근 = 슬래브철근 */
 const STAGE_TEXT: Record<Stage, string> = {
   MARK: "먹매김",
   GANGFORM: "갱폼",
-  WALL_REBAR: "벽철근",
+  WALL_REBAR: "W철근",
   WALL_MEP: "기전",
   ALFORM: "알폼",
   TOP_INSULATION: "단열재",
-  SLAB_REBAR: "슬래브",
+  SLAB_REBAR: "S철근",
   SLAB_MEP: "기전",
   POUR: "타설",
   CURE: "양생",
@@ -68,11 +68,11 @@ const GROUP_STYLE: Record<Group, string> = {
 const STAGE_TITLE: Record<Stage, string> = {
   MARK: "양생·먹매김",
   GANGFORM: "갱폼인양",
-  WALL_REBAR: "벽철근",
+  WALL_REBAR: "W철근(벽철근)",
   WALL_MEP: "기전·검측(벽)",
   ALFORM: "알폼",
   TOP_INSULATION: "바닥단열재(최상층)",
-  SLAB_REBAR: "슬래브철근",
+  SLAB_REBAR: "S철근(슬래브철근)",
   SLAB_MEP: "기전·검측(슬래브)",
   POUR: "타설",
   CURE: "양생",
@@ -94,22 +94,31 @@ const STAGE_INDEX: Record<Stage, number> = {
 /** 층 표시: 옥탑은 PH1·PH2, 그 외 42F */
 const floorLabel = (a: { floor: number; roof?: number }) => (a.roof ? `PH${a.roof}` : `${a.floor}F`);
 
-type Box = { span: "AM" | "PM" | "DAY"; group: Group; title: string; text?: string };
+type Box = {
+  span: "AM" | "PM" | "DAY";
+  group: Group;
+  title: string;
+  text?: string;
+  /** 실적처럼 반일 구분이 없는 날: 하루를 n 칸으로 나눈 i 번째 (0부터) */
+  seg?: { i: number; n: number };
+};
 
 /** 글자: 같은 작업이 여러 칸 이어지면(cont = 앞 칸과 같은 작업) 첫 칸에만 */
 const textOf = (stage: Stage, cont: boolean) => (cont ? undefined : STAGE_TEXT[stage]);
 
+/**
+ * 예정 하루 → 상자. 오전·오후가 같은 작업(알폼·단열재·옥탑 등)이면 하루 상자 하나, 아니면 반일 상자 둘.
+ * 철근 오전 + 기전 오후도 합치지 않는다 — W철근 → 기전 → 알폼 → S철근 → 기전 순서가 보여야 한다.
+ */
 function dayBoxes(date: string, label: string, am: Assignment | undefined, pm: Assignment | undefined, cont: (a: Assignment) => boolean): Box[] {
   const t = (a: Assignment, half: string) => `${date} ${half} · ${label} ${floorLabel(a)} · ${STAGE_TITLE[a.stage]}`;
   if (am && pm) {
-    const g1 = STAGE_GROUP[am.stage];
-    const g2 = STAGE_GROUP[pm.stage];
-    if (g1 === g2 || (g1 === "rebar" && g2 === "mep")) {
-      return [{ span: "DAY", group: g1, title: `${t(am, "오전")} / ${STAGE_TITLE[pm.stage]}`, text: textOf(am.stage, cont(am)) }];
+    if (am.stage === pm.stage) {
+      return [{ span: "DAY", group: STAGE_GROUP[am.stage], title: `${t(am, "오전·오후")}`, text: textOf(am.stage, cont(am)) }];
     }
     return [
-      { span: "AM", group: g1, title: t(am, "오전"), text: textOf(am.stage, cont(am)) },
-      { span: "PM", group: g2, title: t(pm, "오후"), text: textOf(pm.stage, cont(pm)) },
+      { span: "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: textOf(am.stage, cont(am)) },
+      { span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후"), text: textOf(pm.stage, cont(pm)) },
     ];
   }
   if (am) return [{ span: am.stage === "POUR" ? "DAY" : "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: textOf(am.stage, cont(am)) }];
@@ -117,37 +126,44 @@ function dayBoxes(date: string, label: string, am: Assignment | undefined, pm: A
   return [];
 }
 
+/**
+ * 실적 하루 → 상자. 일보에는 오전·오후가 없으므로 그날 적힌 공종을 사이클 순서대로 하루를 나눠 모두 그린다
+ * (예전에는 첫·마지막 두 개만 그려 가운데 공종이 빠졌다).
+ */
 function actualBoxes(date: string, label: string, works: ActualWork[], cont: (w: ActualWork) => boolean): Box[] {
-  const sorted = [...works].sort((a, b) => STAGE_INDEX[a.stage] - STAGE_INDEX[b.stage]);
+  const seen = new Set<string>();
+  const sorted = [...works]
+    .sort((a, b) => a.floor - b.floor || STAGE_INDEX[a.stage] - STAGE_INDEX[b.stage])
+    .filter((w) => {
+      const k = `${w.floor}|${w.stage}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
   const t = (w: ActualWork) => `${date} 실적 · ${label} ${w.floor}F · ${STAGE_TITLE[w.stage]}`;
   if (sorted.length === 1) return [{ span: "DAY", group: STAGE_GROUP[sorted[0].stage], title: t(sorted[0]), text: textOf(sorted[0].stage, cont(sorted[0])) }];
-  const [a, b] = [sorted[0], sorted[sorted.length - 1]];
-  const g1 = STAGE_GROUP[a.stage];
-  const g2 = STAGE_GROUP[b.stage];
-  if (g1 === g2 || (g1 === "rebar" && g2 === "mep")) {
-    return [{ span: "DAY", group: g1, title: sorted.map(t).join(" / "), text: textOf(a.stage, cont(a)) }];
-  }
-  return [
-    { span: "AM", group: g1, title: t(a), text: textOf(a.stage, cont(a)) },
-    { span: "PM", group: g2, title: t(b), text: textOf(b.stage, cont(b)) },
-  ];
+  return sorted.map((w, i) => ({ span: "DAY", group: STAGE_GROUP[w.stage], title: t(w), text: textOf(w.stage, cont(w)), seg: { i, n: sorted.length } }));
 }
 
 function BoxEl({ box }: { box: Box }) {
+  const seg = box.seg;
   return (
     <div
       className={cn(
         "absolute inset-y-0 rounded-md border",
         GROUP_STYLE[box.group],
-        box.span === "DAY" && "inset-x-0.5",
-        box.span === "AM" && "left-0.5 right-1/2 mr-px",
-        box.span === "PM" && "left-1/2 right-0.5 ml-px",
+        !seg && box.span === "DAY" && "inset-x-0.5",
+        !seg && box.span === "AM" && "left-0.5 right-1/2 mr-px",
+        !seg && box.span === "PM" && "left-1/2 right-0.5 ml-px",
         box.text && "flex items-center justify-center overflow-hidden",
       )}
+      style={seg ? { left: `calc(${(seg.i / seg.n) * 100}% + 2px)`, width: `calc(${100 / seg.n}% - 3px)` } : undefined}
       title={box.title}
     >
       {box.text ? (
-        <span className="select-none text-[10px] font-medium leading-none tracking-tighter text-foreground/75 [writing-mode:vertical-rl]">{box.text}</span>
+        <span className="select-none text-[10px] font-medium leading-none tracking-tighter text-foreground/75 [text-orientation:upright] [writing-mode:vertical-rl]">
+          {box.text}
+        </span>
       ) : null}
     </div>
   );
@@ -315,7 +331,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
           </span>
         </div>
         <p>
-          칸 왼쪽 오전 · 오른쪽 오후 (철근 뒤 기전·검측은 같은 날 오후). 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일).
+          칸 왼쪽 오전 · 오른쪽 오후. W철근 = 벽철근, S철근 = 슬래브철근 (배근 뒤 기전·검측). 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일).
           {asOf ? ` 세로 선 왼쪽은 작업일보 실적(${asOf}까지, 또렷함), 오른쪽은 엔진 예정(연함).` : ""}
         </p>
       </div>
