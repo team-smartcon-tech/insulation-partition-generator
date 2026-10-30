@@ -108,7 +108,8 @@ export function progressFromReports(
         buildingId: e.buildingNo,
         stage: e.stage,
         floor: e.floor ?? 0,
-        ...(e.floorLabel ? { floorLabel: e.floorLabel } : {}),
+        // 일보에 층이 없으면 0층이 아니라 「층?」 (근거 없는 층을 만들지 않는다)
+        ...(e.floorLabel ? { floorLabel: e.floorLabel } : e.floor == null ? { floorLabel: "층?" } : {}),
       })
     }
   }

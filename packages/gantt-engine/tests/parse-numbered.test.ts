@@ -99,6 +99,15 @@ ${s}
     assert.deepEqual(f("504동 B1F 바닥거푸집 타설대기"), [[-2, null]])
   })
 
+  it("층 표기: 지하1층·지상1층·붙여 쓴 B2F, 거푸집 제작은 설치 아님", () => {
+    const f = (s: string) =>
+      parseWorkText(`1. 형틀 공사 (10)\n* 형틀(5)\n- ${s}\n2. 철근 공사 (1)`).entries.map((e) => [e.floor, e.stage])
+    assert.deepEqual(f("505동 지하1층 벽체 거푸집 설치(12)"), [[-1, "FORM_WALL"]])
+    assert.deepEqual(f("504동 지상1층 바닥 거푸집설치(4)"), [[-1, "FORM_SLAB"]]) // 1F 바닥 → B1F
+    assert.deepEqual(f("502동: 2동B2F 벽체거푸집 설치 및 스라브거푸집제작 (18)"), [[-2, "FORM_WALL"], [-3, null]])
+    assert.deepEqual(f("501동 지하1층 거푸집 제작(20)"), [[-1, null]])
+  })
+
   it("「및」 구문은 각자 층과 벽/바닥, 공종 동사는 공유", () => {
     const e = parseWorkText(TEXT).entries.filter((x) => x.buildingNo === 503 && x.stage?.startsWith("FORM"))
     assert.deepEqual(e.map((x) => x.text), ["벽체 거푸집 설치", "바닥 거푸집 설치 (원문 1F)"])

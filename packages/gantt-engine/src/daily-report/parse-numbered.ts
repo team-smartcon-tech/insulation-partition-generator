@@ -33,7 +33,8 @@ const SUB_HEADER = /^\s*\*\s*(.+?)\s*(?:\(\s*[\d+\s]+\))?\s*$/
 const ITEM = /^\s*-\s*(.+?)\s*$/
 const HEADCOUNT_TAIL = /\s*\(\s*\d+\s*\)\s*$/
 /** 층: B1F, 1F, 37층, RF, PH, PIT */
-const FLOOR_TOKEN = /(?:^|[\s~,])(B?\d{1,3}\s*(?:F\b|층)|RF\b|PH\d*F?\b|PIT\b)/i
+// "지하1층"·"지상1층" 도, "2동B2F" 처럼 앞 글자에 붙은 층도 읽는다 (앞이 숫자·영문만 아니면)
+const FLOOR_TOKEN = /(?:^|[^0-9A-Za-z])((?:지하|지상)\s*\d{1,3}\s*층|B?\d{1,3}\s*(?:F\b|층)|RF\b|PH\d*F?\b|PIT\b)/i
 /** 줄 앞 동 목록: "501동", "502동, 503동", "501동~504동", "501,502동" */
 const LEADING_BUILDINGS = /^((?:\d{3,4}\s*동?\s*[,~∼]\s*)*\d{3,4}\s*동)\s*/
 
@@ -60,6 +61,8 @@ function kindOf(header: string): Kind | null {
 
 function parseFloorToken(tok: string): { floor: number | null; floorLabel?: string } {
   const t = tok.replace(/\s+/g, "").toUpperCase()
+  const ug = /^(지하|지상)(\d{1,3})층$/.exec(t)
+  if (ug) return { floor: ug[1] === "지하" ? -Number(ug[2]) : Number(ug[2]) }
   const m = /^(B?)(\d{1,3})(?:F|층)$/.exec(t)
   if (m) return { floor: m[1] ? -Number(m[2]) : Number(m[2]) }
   return { floor: null, floorLabel: t }
@@ -96,20 +99,22 @@ function stageFor(kind: Kind, sub: string, text: string, part: "wall" | "slab" |
     if (!/철근|배근|조립/.test(t)) return null
     return part === "slab" ? "SLAB_REBAR" : part === "wall" ? "WALL_REBAR" : null
   }
+  // 거푸집 제작·반입·운반은 설치가 아니다
+  if (/거푸집|형틀|폼/.test(t) && /제작|반입|운반|양중/.test(t)) return null
   if (/거푸집|형틀|폼/.test(t)) return part === "slab" ? "FORM_SLAB" : part === "wall" ? "FORM_WALL" : null
   return null
 }
 
 /** 문구에서 층 표기를 모두 지운다 ("B2F~B1F 면 보수" → "면 보수") */
 const stripFloors = (s: string) =>
-  s.replace(/(?:B?\d{1,3}\s*(?:F\b|층)|RF\b|PH\d*F?\b|PIT\b)(?:\s*[~∼]\s*(?:B?\d{1,3}\s*(?:F\b|층)|RF\b))?/gi, " ").replace(/\s+/g, " ").trim()
+  s.replace(/(?:(?:지하|지상)\s*\d{1,3}\s*층|B?\d{1,3}\s*(?:F\b|층)|RF\b|PH\d*F?\b|PIT\b)(?:\s*[~∼]\s*(?:B?\d{1,3}\s*(?:F\b|층)|RF\b))?/gi, " ").replace(/\s+/g, " ").trim()
 
 /** 한 층 아래 (0층은 없다: 1F → B1F(-1), B1F → B2F, 2F → 1F) */
 const storyBelow = (f: number) => (f === 1 ? -1 : f - 1)
 const floorName = (f: number) => (f < 0 ? `B${-f}F` : `${f}F`)
 
 const partOf = (s: string): "wall" | "slab" | null =>
-  /바닥|슬라브|슬래브|슬랩|지붕/.test(s) ? "slab" : /벽/.test(s) ? "wall" : null
+  /바닥|슬라브|슬래브|슬랩|스라브|지붕/.test(s) ? "slab" : /벽/.test(s) ? "wall" : null
 
 export function parseNumbered(rawText: string): ParsedWorkText {
   const entries: WorkEntry[] = []
@@ -138,7 +143,7 @@ export function parseNumbered(rawText: string): ParsedWorkText {
       const lb = LEADING_BUILDINGS.exec(seg)
       if (!lb) continue // 현장 관리, 반입 등 동이 없는 줄
       const nos = expandBuildings(lb[1])
-      const rest = seg.slice(lb[0].length).trim()
+      const rest = seg.slice(lb[0].length).replace(/^[:：]\s*/, "").trim()
       // "501동 주변 저수조 …", "503동 주변주차장 …" — 그 동이 아니라 옆 부대시설
       if (/^주변/.test(rest)) continue
 
@@ -146,7 +151,7 @@ export function parseNumbered(rawText: string): ParsedWorkText {
       const phrases = rest.split(/\s*및\s*/)
       // 마지막 구문에서 벽/바닥 뒤의 공종 동사만 ("주변 부대시설 벽체 거푸집 설치" → "거푸집 설치")
       const last = phrases[phrases.length - 1]
-      const verbTail = (/(?:벽체|벽|바닥|슬래브|슬라브|슬랩)\s*(.*)$/.exec(last)?.[1] ?? last).trim()
+      const verbTail = (/(?:벽체|벽|바닥|슬래브|슬라브|슬랩|스라브)\s*(.*)$/.exec(last)?.[1] ?? last).trim()
       let lastFloor: { floor: number | null; floorLabel?: string } | null = null
       const picked: { floor: number | null; floorLabel?: string; part: "wall" | "slab" | null; text: string }[] = []
       phrases.forEach((ph, i) => {
@@ -156,7 +161,9 @@ export function parseNumbered(rawText: string): ParsedWorkText {
         const part = partOf(ph)
         if (!part && !ft) return // "정리" 같은 꼬리 구문
         const own = stripFloors(ph)
-        const text = i === phrases.length - 1 ? own : `${own} ${verbTail}`.trim()
+        // 구문에 공종 단어가 이미 있으면("B2F 벽체거푸집 설치") 뒤 구문의 동사를 붙이지 않는다
+        const hasVerb = /거푸집|형틀|폼|철근|배근|타설|동바리|배관|박스|슬리브|스리브|이중관/.test(own)
+        const text = i === phrases.length - 1 || hasVerb ? own : `${own} ${verbTail}`.trim()
         picked.push({ ...(lastFloor ?? { floor: null }), part, text })
       })
       if (!picked.length) continue
