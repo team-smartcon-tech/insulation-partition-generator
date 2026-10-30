@@ -124,6 +124,11 @@
   body:has([data-print-root]) * {
     visibility: hidden;
   }
+  /* 인쇄 영역도 그 조상도 아닌 것(앱 헤더·탭·오른쪽 설정 카드 …)은 자리까지 뺀다.
+     visibility 만 숨기면 자리는 남아 설정 카드 길이만큼 빈 2쪽이 생겼다(2026-10-30). */
+  body:has([data-print-root]) *:not([data-print-root]):not([data-print-root] *):not(:has([data-print-root])) {
+    display: none !important;
+  }
   body:has([data-print-root]) [data-print-root],
   body:has([data-print-root]) [data-print-root] * {
     visibility: visible;
