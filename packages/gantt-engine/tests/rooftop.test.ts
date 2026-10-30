@@ -89,6 +89,16 @@ describe("옥탑 순서표", () => {
     }
   })
 
+  it("옥탑 거푸집 날은 알폼 유휴가 아니다 (알폼팀 몫)", () => {
+    const r = run(1)
+    const formDays = [...new Set(r.assignments.filter((a) => a.roof === 1 && a.stage === "ALFORM").map((a) => a.date))]
+    assert.equal(formDays.length, 6)
+    for (const d of formDays) {
+      const s = periodStats(r, calendar, d, d)
+      assert.equal(s.idle.alform.fullDays, 0, `${d} 알폼 유휴 아님`)
+    }
+  })
+
   it("옥탑은 기준층 타설·팀 유휴 집계에 들어가지 않는다", () => {
     const r = run(1)
     const s = periodStats(r, calendar, "2026-11-02", "2027-01-31")
