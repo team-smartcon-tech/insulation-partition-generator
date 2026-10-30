@@ -122,7 +122,7 @@ ${s}
 
   it("「및」 구문은 각자 층과 벽/바닥, 공종 동사는 공유", () => {
     const e = parseWorkText(TEXT).entries.filter((x) => x.buildingNo === 503 && x.stage?.startsWith("FORM"))
-    assert.deepEqual(e.map((x) => x.text), ["벽체 거푸집 설치", "바닥 거푸집 설치 (원문 1F)"])
+    assert.deepEqual(e.map((x) => x.text), ["벽체 거푸집 설치", "슬래브 거푸집 설치 (원문 1F 바닥)"])
   })
 })
 

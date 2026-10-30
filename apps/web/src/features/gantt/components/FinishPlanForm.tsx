@@ -60,13 +60,13 @@ export default function FinishPlanForm({
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   간격
-                  <NumInput className="w-[50px]" min={0} max={120} value={r.gapDays} aria-label={`${t.label} 간격`} onValue={(v) => set(t.key, { gapDays: v ?? 0 })} />일
+                  <NumInput className="w-[42px]" min={0} max={120} value={r.gapDays} aria-label={`${t.label} 간격`} onValue={(v) => set(t.key, { gapDays: v ?? 0 })} />일
                 </span>
                 <span className="flex items-center gap-1">
-                  <NumInput className="w-[50px]" min={1} max={20} value={r.floorsPerBatch} aria-label={`${t.label} 층 묶음`} onValue={(v) => set(t.key, { floorsPerBatch: v ?? 1 })} />층씩
+                  <NumInput className="w-[42px]" min={1} max={20} value={r.floorsPerBatch} aria-label={`${t.label} 층 묶음`} onValue={(v) => set(t.key, { floorsPerBatch: v ?? 1 })} />층씩
                 </span>
                 <span className="flex items-center gap-1">
-                  <NumInput className="w-[50px]" min={1} max={60} value={r.daysPerBatch} aria-label={`${t.label} 묶음당 작업일`} onValue={(v) => set(t.key, { daysPerBatch: v ?? 1 })} />일
+                  <NumInput className="w-[42px]" min={1} max={60} value={r.daysPerBatch} aria-label={`${t.label} 묶음당 작업일`} onValue={(v) => set(t.key, { daysPerBatch: v ?? 1 })} />일
                 </span>
               </div>
             </div>
