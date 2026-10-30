@@ -124,7 +124,7 @@ const actualFloorText = (w: { floor: number; floorLabel?: string }) => w.floorLa
 const isPour = (s: Stage) => s === "POUR" || s === "POUR_WALL" || s === "POUR_COLUMN";
 
 /** 층 표시: 옥탑은 PH1·PH2, 그 외 42F */
-const floorLabel = (a: { floor: number; roof?: number }) => (a.roof ? `PH${a.roof}` : `${a.floor}F`);
+const floorLabel = (a: { floor: number; roof?: number }) => (a.roof ? `PH${a.roof}` : a.floor < 0 ? `B${-a.floor}F` : `${a.floor}F`);
 
 type Box = {
   span: "AM" | "PM" | "DAY";
@@ -159,7 +159,7 @@ function dayBoxes(date: string, label: string, am: Assignment | undefined, pm: A
       { span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후"), text: planText(pm, cont(pm)) },
     ];
   }
-  if (am) return [{ span: am.stage === "POUR" ? "DAY" : "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: planText(am, cont(am)) }];
+  if (am) return [{ span: isPour(am.stage) ? "DAY" : "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: planText(am, cont(am)) }];
   if (pm) return [{ span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후"), text: planText(pm, cont(pm)) }];
   return [];
 }
@@ -256,6 +256,18 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
     if (p && same(p, a)) contPlan.add(a);
     prevPlan.set(a.buildingId, a);
   }
+  // 지하·저층 예정(먹매김 없음): 동별로 새 사이클 층을 시작하는 첫날에 층 라벨
+  const planStoryStart = new Map<string, Assignment>();
+  {
+    const seen = new Set<string>();
+    for (const a of [...data.assignments].sort((x, y) => x.date.localeCompare(y.date))) {
+      if (a.roof != null || !(a.floor < 2 || ["FORM_WALL", "FORM_SLAB", "SHORING", "POUR_WALL", "POUR_COLUMN"].includes(a.stage))) continue;
+      const k = `${a.buildingId}|${a.floor}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      planStoryStart.set(`${a.date}|${a.buildingId}`, a);
+    }
+  }
   // 실적은 반일 구분이 없어 날짜 단위로 본다: 그 동의 앞 실적 날짜에 같은 작업이 있으면 이어진 것
   const contActual = new Set<ActualWork>();
   const actualDays = new Map<number, Map<string, ActualWork[]>>();
@@ -334,7 +346,7 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
                 const boxes = isActualDay(d.date) && actual ? actualBoxes(d.date, label(id), actual, (w) => contActual.has(w)) : planned ? dayBoxes(d.date, label(id), am, pm, (a) => contPlan.has(a)) : [];
                 // 사이클 시작(먹매김) 칸에 층 라벨 (옥탑은 PH1·PH2)
                 const markActual = actual?.find((w) => w.stage === "MARK");
-                const markPlan = am?.stage === "MARK" ? am : pm?.stage === "MARK" ? pm : undefined;
+                const markPlan = am?.stage === "MARK" ? am : pm?.stage === "MARK" ? pm : planStoryStart.get(`${d.date}|${id}`);
                 const startFloor = actual
                   ? markActual
                     ? actualFloorText(markActual)

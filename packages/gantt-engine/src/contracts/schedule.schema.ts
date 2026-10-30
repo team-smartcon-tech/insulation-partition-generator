@@ -12,6 +12,32 @@ export const halfDayOptionsSchema = z.object({
   slabRebarPM: z.boolean(),
 })
 
+/**
+ * 지하·저층(재래식 거푸집) 공정 설정 (설계 §8-2, 2026-10-30 2안). 소요는 작업일(일요일 제외) 기준.
+ * 기본값은 남원주역세권 2차 2026-02~10 작업일보 실적의 동·층별 공종 작업일수 중앙값 — 현장에서 고친다.
+ */
+export const undergroundSettingsSchema = z.object({
+  durations: z.object({
+    wallRebar: z.number().int().min(1).max(60),
+    wallMep: z.number().int().min(0).max(60), // W철근과 병행
+    formWall: z.number().int().min(1).max(60),
+    shoring: z.number().int().min(0).max(60),
+    formSlab: z.number().int().min(1).max(60),
+    slabRebar: z.number().int().min(1).max(60),
+    slabMep: z.number().int().min(0).max(60), // S철근과 병행
+  }),
+  /** 벽·기둥을 바닥과 따로 먼저 타설(W타설 1일)하는가. 끄면 바닥 타설 때 함께 */
+  separateWallPour: z.boolean(),
+  /** 지하·저층이 끝나고 기준층 사이클(갱폼)을 시작하기까지 전환 작업일 (갱폼 설치 등, 가정값) */
+  transitionDays: z.number().int().min(0).max(60),
+})
+
+export const DEFAULT_UNDERGROUND_SETTINGS: z.infer<typeof undergroundSettingsSchema> = {
+  durations: { wallRebar: 6, wallMep: 6, formWall: 9, shoring: 4, formSlab: 6, slabRebar: 4, slabMep: 7 },
+  separateWallPour: false,
+  transitionDays: 10,
+}
+
 export const siteSettingsSchema = z.object({
   buildingCount: z.number().int().min(1).max(30),
   rebarTeams: z.number().int().min(1).max(10),
@@ -21,6 +47,8 @@ export const siteSettingsSchema = z.object({
   pourPerDay: z.number().int().min(1).max(10),
   halfDay: halfDayOptionsSchema,
   noPMOnlyStart: z.object({ rebar: z.boolean(), alform: z.boolean() }),
+  /** 지하·저층 공정. 없으면 DEFAULT_UNDERGROUND_SETTINGS */
+  underground: undergroundSettingsSchema.optional(),
 })
 
 export const calendarConfigSchema = z.object({
@@ -172,6 +200,8 @@ export const planResponseSchema = simulateResponseSchema.extend({
   reportDates: z.array(isoDateSchema),
   /** 예정을 계산하지 않은 동 — 지하·저층 공정 중이라 엔진(기준층 사이클)이 이어서 계산할 수 없다 */
   unplanned: z.array(z.number().int()).default([]),
+  /** 지하·저층 순서표(재래식)로 예정을 낸 동 */
+  underground: z.array(z.number().int()).default([]),
   /** 이 현장의 첫 작업일보 날짜. 보는 달에 쓸 실적이 없을 때 안내용 (일보가 아예 없으면 null) */
   firstReportDate: isoDateSchema.nullable().default(null),
 })
@@ -183,6 +213,7 @@ export type PlanResponse = z.infer<typeof planResponseSchema>
 
 export type HalfDayOptions = z.infer<typeof halfDayOptionsSchema>
 export type SiteSettings = z.infer<typeof siteSettingsSchema>
+export type UndergroundSettings = z.infer<typeof undergroundSettingsSchema>
 export type CalendarConfig = z.infer<typeof calendarConfigSchema>
 export type SimulateRequest = z.infer<typeof simulateRequestSchema>
 export type Stage = z.infer<typeof stageSchema>

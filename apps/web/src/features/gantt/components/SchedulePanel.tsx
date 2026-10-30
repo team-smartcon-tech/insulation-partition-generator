@@ -34,6 +34,8 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
   const noBuildings = saved.data && saved.data.buildings.length === 0;
   // 지하·저층 공정 중이라 예정을 계산하지 않은 동 (실적만 표시)
   const unplanned = d?.unplanned ?? [];
+  // 지하·저층 순서표(재래식)로 예정을 낸 동
+  const ugPlanned = d?.underground ?? [];
   const allUnplanned = d != null && unplanned.length > 0 && unplanned.length === d.buildingIds.length;
   // 이 달에 그릴 것이 없다 (일보가 있는 현장인데 첫 일보 이전 달 등)
   // (동 목록이 있어도 실적·예정이 하나도 없으면 빈 줄만 남으므로 같이 안내)
@@ -61,6 +63,11 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
                   : ""}
             {noBuildings && !unplanned.length && !nothing ? (
               <span className="ml-2 text-amber-700">설정 탭에서 동별 최상층을 넣으면 사이클 종료·단열재 단계가 반영됩니다.</span>
+            ) : null}
+            {ugPlanned.length && !nothing ? (
+              <span className="ml-2 text-sky-700">
+                {ugPlanned.map(labelOf).join("·")}: 지하·저층은 설정의 재래식 순서표로 예정, 기준층 시작부터 기준층 사이클.
+              </span>
             ) : null}
             {unplanned.length && !nothing ? (
               <span className="ml-2 text-amber-700">

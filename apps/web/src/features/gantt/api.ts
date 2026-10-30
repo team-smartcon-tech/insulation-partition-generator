@@ -60,6 +60,8 @@ export const buildingSchema = z.object({
   topFloor: z.number().int().min(1).max(80),
   hasRooftop: z.boolean(),
   currentFloor: z.number().int().min(0).nullable(),
+  /** 지하층 수 (B3 까지면 3). 일보 없는 동의 지하 출발 층. null = 모름 */
+  basementFloors: z.number().int().min(0).max(10).nullable().default(null),
 });
 export type Building = z.infer<typeof buildingSchema>;
 

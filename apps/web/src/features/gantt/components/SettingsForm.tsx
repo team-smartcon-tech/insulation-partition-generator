@@ -2,7 +2,7 @@
  * 현장 설정 폼 (설계 §5): 자원 용량 · 반일 투입(같은 날 오전→오후 연계) · 팀 운영 제약.
  * 값은 부모가 들고(controlled) 저장은 부모가 한다 — 공정표 탭에서는 "저장 없이 바꿔 보기", 설정 탭에서는 저장.
  */
-import type { SiteSettings } from "@ipg/gantt-engine";
+import { DEFAULT_UNDERGROUND_SETTINGS, type SiteSettings, type UndergroundSettings } from "@ipg/gantt-engine";
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -27,6 +27,29 @@ function Num({ label, value, options, onChange }: { label: string; value: number
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+/** 작업일 수 입력 (0~60) */
+function Days({ label, hint, value, onChange }: { label: string; hint?: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-sm">
+      <span>
+        <span className="block">{label}</span>
+        {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
+      </span>
+      <span className="flex items-center gap-1">
+        <input
+          type="number"
+          min={0}
+          max={60}
+          value={value}
+          onChange={(e) => e.target.value !== "" && onChange(Math.max(0, Math.min(60, Number(e.target.value))))}
+          className="h-8 w-16 rounded-md border border-input bg-card px-2 text-right text-sm tabular-nums"
+        />
+        <span className="w-4 text-xs text-muted-foreground">일</span>
+      </span>
     </label>
   );
 }
@@ -69,10 +92,38 @@ export default function SettingsForm({ value, onChange }: { value: SiteSettings;
         <Toggle label="알폼 오후 투입 (오후 + 다음날 오전)" checked={s.halfDay.alformPMStart} onChange={(v) => set({ halfDay: { ...s.halfDay, alformPMStart: v } })} />
         <Toggle label="슬래브철근 오후 가능" hint="기전·검측이 다음날 오전으로 밀림" checked={s.halfDay.slabRebarPM} onChange={(v) => set({ halfDay: { ...s.halfDay, slabRebarPM: v } })} />
       </Section>
+      <UndergroundSection value={s.underground ?? DEFAULT_UNDERGROUND_SETTINGS} onChange={(underground) => set({ underground })} />
       <Section title="팀 운영 제약">
         <Toggle label="철근팀 오후 단독 투입 불가" checked={s.noPMOnlyStart.rebar} onChange={(v) => set({ noPMOnlyStart: { ...s.noPMOnlyStart, rebar: v } })} />
         <Toggle label="알폼팀 오후 단독 투입 불가" checked={s.noPMOnlyStart.alform} onChange={(v) => set({ noPMOnlyStart: { ...s.noPMOnlyStart, alform: v } })} />
       </Section>
     </div>
+  );
+}
+
+/** 지하·저층(재래식) 공정 — 한 층 순서표의 공종별 작업일 (설계 §8-2 2안). 기본값 = 남원주 2차 실적 중앙값 */
+function UndergroundSection({ value, onChange }: { value: UndergroundSettings; onChange: (v: UndergroundSettings) => void }) {
+  const d = value.durations;
+  const setD = (patch: Partial<UndergroundSettings["durations"]>) => onChange({ ...value, durations: { ...d, ...patch } });
+  return (
+    <Section title="지하·저층 공정 (재래식, 한 층당 작업일)">
+      <p className="-mt-1 text-xs text-muted-foreground">
+        순서: W철근∥W기전 → W거푸집 → 시스템 → S거푸집 → S철근∥S기전 → S타설. ∥ 는 같은 날 시작해 병행. 기본값은 남원주 2차 일보 실적 중앙값.
+      </p>
+      <Days label="W철근" value={d.wallRebar} onChange={(v) => setD({ wallRebar: Math.max(1, v) })} />
+      <Days label="W기전" hint="W철근과 병행" value={d.wallMep} onChange={(v) => setD({ wallMep: v })} />
+      <Days label="W거푸집" value={d.formWall} onChange={(v) => setD({ formWall: Math.max(1, v) })} />
+      <Days label="시스템" hint="시스템 동바리" value={d.shoring} onChange={(v) => setD({ shoring: v })} />
+      <Days label="S거푸집" value={d.formSlab} onChange={(v) => setD({ formSlab: Math.max(1, v) })} />
+      <Days label="S철근" value={d.slabRebar} onChange={(v) => setD({ slabRebar: Math.max(1, v) })} />
+      <Days label="S기전" hint="S철근과 병행" value={d.slabMep} onChange={(v) => setD({ slabMep: v })} />
+      <Toggle
+        label="벽·기둥 분리 타설 (W타설 1일)"
+        hint="끄면 S타설 때 함께"
+        checked={value.separateWallPour}
+        onChange={(v) => onChange({ ...value, separateWallPour: v })}
+      />
+      <Days label="기준층 전환" hint="갱폼 설치 등 (가정값)" value={value.transitionDays} onChange={(v) => onChange({ ...value, transitionDays: v })} />
+    </Section>
   );
 }

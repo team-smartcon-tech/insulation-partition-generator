@@ -16,6 +16,17 @@ export {
   type SimulationResult,
 } from "./simulator/simulator.ts"
 export { periodStats, type TeamIdle } from "./simulator/stats.ts"
+export {
+  addWorkdays,
+  nextStory,
+  planUnderground,
+  undergroundSequence,
+  undergroundStateFromActual,
+  type UgAssignment,
+  type UgBuilding,
+  type UgResult,
+  type UgStep,
+} from "./simulator/underground.ts"
 export { renderText } from "./simulator/render.ts"
 export * from "./daily-report/parse-work-text.ts"
 export { isNumberedFormat, parseNumbered } from "./daily-report/parse-numbered.ts"

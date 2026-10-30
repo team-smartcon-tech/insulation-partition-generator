@@ -88,7 +88,7 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
   const remove = (i: number) => onChange(value.filter((_, j) => j !== i));
   const add = () => {
     const next = (value.at(-1)?.buildingNo ?? 400) + 1;
-    onChange([...value, { buildingNo: next, name: `${next}동`, baseFloor: 3, currentFloor: null, ...fromCores([{ top: 30, rooftop: 1 }]) } as Building]);
+    onChange([...value, { buildingNo: next, name: `${next}동`, baseFloor: 3, currentFloor: null, basementFloors: null, ...fromCores([{ top: 30, rooftop: 1 }]) } as Building]);
   };
   const setCores = (i: number, cores: Core[]) => update(i, fromCores(cores));
 
@@ -113,6 +113,7 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
             <tr className="text-left text-xs text-muted-foreground">
               <th className="pb-1 pr-2 whitespace-nowrap">동 번호</th>
               <th className="pb-1 pr-2 whitespace-nowrap">이름</th>
+              <th className="pb-1 pr-2 whitespace-nowrap" title="지하 맨 아래층 (B3 까지면 3). 일보 없는 동의 지하 출발 층">지하</th>
               <th className="pb-1 pr-2 whitespace-nowrap">기준층 시작</th>
               <th className="pb-1 pr-2 whitespace-nowrap">코어별 최상층 · 옥탑</th>
               <th className="pb-1 pr-2 whitespace-nowrap">현재 층</th>
@@ -135,6 +136,9 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
                       onChange={(e) => update(i, { name: e.target.value })}
                       onStep={(d) => update(i, { name: stepName(b.name, d) })}
                     />
+                  </td>
+                  <td className="py-1.5 pr-2 w-16">
+                    <NumInput min={0} max={10} value={b.basementFloors ?? null} placeholder="—" onValue={(v) => update(i, { basementFloors: v })} aria-label="지하층 수" />
                   </td>
                   <td className="py-1.5 pr-2 w-20">
                     <NumInput min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작" />

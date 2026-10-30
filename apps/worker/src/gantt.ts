@@ -22,8 +22,13 @@ import {
   simulate,
   simulateRequestSchema,
   siteSettingsSchema,
+  DEFAULT_UNDERGROUND_SETTINGS,
   UNDERGROUND_STAGES,
+  addWorkdays,
+  planUnderground,
+  undergroundStateFromActual,
   type BuildingState,
+  type UgBuilding,
   type DailyReport,
   type PlanResponse,
   type SimulateResponse,
@@ -186,6 +191,8 @@ export const buildingSchema = z
     topFloor: floorSchema.optional(),
     hasRooftop: z.boolean().default(false),
     currentFloor: z.number().int().min(0).nullable().default(null),
+    /** 지하층 수 (B3 까지면 3). 일보 없는 동의 지하 출발 층. null = 모름 */
+    basementFloors: z.number().int().min(0).max(10).nullable().default(null),
   })
   .refine((b) => b.coreTopFloors || b.topFloor != null, { message: "최상층이 없습니다." })
   .transform((b) => {
@@ -210,6 +217,7 @@ type BuildingRow = {
   top_floor: number;
   core_top_floors?: number[] | null;
   core_rooftop_floors?: number[] | null;
+  basement_floors?: number | null;
   has_rooftop: boolean;
   current_floor: number | null;
 };
@@ -227,6 +235,7 @@ const fromRow = (r: BuildingRow): Building => {
     topFloor: Math.max(...coreTopFloors),
     hasRooftop: coreRooftopFloors.some((n) => n > 0),
     currentFloor: r.current_floor ?? null,
+    basementFloors: r.basement_floors ?? null,
   };
 };
 
@@ -380,6 +389,7 @@ gantt.post("/plan", async (c) => {
         actual: [],
         reportDates,
         unplanned: [],
+        underground: [],
         firstReportDate,
       };
       return c.json(body);
@@ -402,6 +412,7 @@ gantt.post("/plan", async (c) => {
         actual: [],
         reportDates,
         unplanned: [],
+        underground: [],
         firstReportDate,
       };
       return c.json(body);
@@ -414,21 +425,36 @@ gantt.post("/plan", async (c) => {
     const rooftopOf = (b: Building) =>
       Math.max(0, ...b.coreTopFloors.map((t, i) => (t === b.topFloor ? b.coreRooftopFloors[i] ?? 0 : 0)));
     const rooftops = new Map(buildings.map((b) => [b.buildingNo, rooftopOf(b)]));
-    // 지하·저층 공정 중인 동은 예정을 계산하지 않는다 (엔진은 기준층 사이클만 — 설계 §8-2, 2026-10-30 1안: 실적만 표시).
-    // 판단: 그 동의 마지막 실적 날에 지하 공종(거푸집·동바리·해체)이 있거나, RF 같은 비숫자 층이거나, 기준층 시작보다 낮다.
+    // 지하·저층 공정 중인 동은 재래식 순서표로 예정을 낸다 (설계 §8-2, 2026-10-30 2안).
+    // 판단: 그 동의 마지막 실적 날에 지하 공종(거푸집·시스템·W/C타설)이 있거나, RF 같은 비숫자 층이거나, 기준층 시작보다 낮다.
+    // 지하가 끝나면(기준층 시작 바로 아래 층 S타설) 전환 작업일 뒤 기준층 엔진으로 넘긴다.
+    const ug = req.settings.underground ?? DEFAULT_UNDERGROUND_SETTINGS;
     const baseFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.baseFloor ?? 2;
-    const unplanned = new Set<number>();
+    const unplanned = new Set<number>(); // 지하 공정인데 위치를 못 읽은 동 (실적만)
+    const ugBuildings: UgBuilding[] = [];
     for (const b of progress.buildings) {
       const mine = progress.actual.filter((a) => a.buildingId === b.id);
       const lastDate = mine.at(-1)?.date;
       const lastDay = mine.filter((a) => a.date === lastDate);
       const top = Math.max(...lastDay.map((a) => a.floor));
-      if (lastDay.some((a) => UNDERGROUND_STAGES.includes(a.stage) || a.floorLabel != null) || top < baseFloorOf(b.id)) unplanned.add(b.id);
+      if (!(lastDay.some((a) => UNDERGROUND_STAGES.includes(a.stage) || a.floorLabel != null) || top < baseFloorOf(b.id))) continue;
+      const st = undergroundStateFromActual(progress.actual, b.id, baseFloorOf(b.id), ug);
+      if (st) ugBuildings.push(st);
+      else unplanned.add(b.id);
     }
+    // 일보에 없는 동 중 지하층 수가 있으면 지하 맨 아래층부터
+    for (const b of buildings) {
+      if (reported.has(b.buildingNo) || !b.basementFloors) continue;
+      ugBuildings.push({ id: b.buildingNo, story: -b.basementFloors, stepIndex: 0, doneDays: 0, baseFloor: b.baseFloor });
+    }
+    const ugIds = new Set(ugBuildings.map((b) => b.id));
+    const ugPlan = planUnderground({ calendar: req.calendar, settings: ug, from: planFrom, to: req.to, buildings: ugBuildings });
+    const topFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.topFloor ?? null;
+
     const initial: BuildingState[] = [
-      ...progress.initial.filter((b) => !unplanned.has(b.id)).map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
+      ...progress.initial.filter((b) => !unplanned.has(b.id) && !ugIds.has(b.id)).map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
       ...buildings
-        .filter((b) => !reported.has(b.buildingNo))
+        .filter((b) => !reported.has(b.buildingNo) && !ugIds.has(b.buildingNo))
         .map((b) => ({
           id: b.buildingNo,
           stage: "MARK" as const,
@@ -442,6 +468,20 @@ gantt.post("/plan", async (c) => {
           done: false,
           rooftopFloors: rooftops.get(b.buildingNo) ?? 0,
         })),
+      // 지하가 기간 안에 끝나는 동: 전환 작업일 뒤 기준층 시작 층 먹매김부터
+      ...[...ugPlan.finishedOn].map(([id, finished]) => ({
+        id,
+        stage: "MARK" as const,
+        readySlot: 0,
+        readyDate: addWorkdays(req.calendar, finished, ug.transitionDays),
+        prevEndSlot: -1,
+        lastPourDate: finished,
+        pours: 0,
+        floor: baseFloorOf(id),
+        topFloor: topFloorOf(id),
+        done: false,
+        rooftopFloors: rooftops.get(id) ?? 0,
+      })),
     ].sort((a, b) => a.id - b.id);
 
     const planned =
@@ -456,7 +496,7 @@ gantt.post("/plan", async (c) => {
         : null;
     const statsFrom = planFrom > req.from ? planFrom : req.from;
     // 화면 줄: 예정 계산하는 동 + 실적만 있는 동(지하·저층)
-    const allIds = [...new Set([...initial.map((b) => b.id), ...unplanned])].sort((a, b) => a - b);
+    const allIds = [...new Set([...initial.map((b) => b.id), ...ugIds, ...unplanned])].sort((a, b) => a - b);
     const empty = { fullDays: 0, halfDays: 0 };
     const labelOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.name ?? progress.buildings.find((x) => x.id === id)?.label ?? `${id}동`;
     const body: PlanResponse = {
@@ -464,9 +504,10 @@ gantt.post("/plan", async (c) => {
       to: req.to,
       days,
       buildingIds: allIds,
-      assignments: (planned?.assignments ?? [])
-        .filter((a) => a.date >= req.from && a.date <= req.to)
-        .map(({ date, half, buildingId, stage, floor, roof }) => ({ date, half, buildingId, stage, floor, roof })),
+      assignments: [
+        ...ugPlan.assignments,
+        ...(planned?.assignments ?? []).map(({ date, half, buildingId, stage, floor, roof }) => ({ date, half, buildingId, stage, floor, roof })),
+      ].filter((a) => a.date >= req.from && a.date <= req.to),
       stats: planned
         ? periodStats(planned, req.calendar, statsFrom, req.to)
         : { from: statsFrom, to: req.to, pours: 0, pourGapDays: 0, idle: { rebar: empty, alform: empty, gangform: empty } },
@@ -475,6 +516,7 @@ gantt.post("/plan", async (c) => {
       actual: progress.actual.filter((a) => a.date >= req.from && a.date <= req.to),
       reportDates,
       unplanned: [...unplanned].sort((a, b) => a - b),
+      underground: [...ugIds].sort((a, b) => a - b),
       firstReportDate,
     };
     return c.json(body);
@@ -538,6 +580,7 @@ gantt.put("/buildings/:siteId", async (c) => {
           cores: b.cores,
           core_top_floors: b.coreTopFloors,
           core_rooftop_floors: b.coreRooftopFloors,
+          basement_floors: b.basementFloors,
           base_floor: b.baseFloor,
           top_floor: b.topFloor,
           has_rooftop: b.hasRooftop,
@@ -552,6 +595,8 @@ gantt.put("/buildings/:siteId", async (c) => {
         // core_top_floors 칸이 아직 없음(마이그레이션 20261030090000 전) — 조용히 버리지 않고 알린다
         if (text.includes("core_top_floors"))
           throw new GanttError(500, "코어별 최상층 칸이 DB에 아직 없습니다. 마이그레이션(20261030090000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
+        if (text.includes("basement_floors"))
+          throw new GanttError(500, "지하층 수 칸이 DB에 아직 없습니다. 마이그레이션(20261030110000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
         if (text.includes("core_rooftop_floors"))
           throw new GanttError(500, "코어별 옥탑 층수 칸이 DB에 아직 없습니다. 마이그레이션(20261030100000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
         throw new GanttError(500, `동 저장 실패: ${text}`, "DATABASE_ERROR");
