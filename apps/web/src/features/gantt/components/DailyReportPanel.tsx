@@ -21,6 +21,7 @@ const STAGE_KEYWORDS: Record<Stage, RegExp> = {
   POUR: /타설/g,
   WALL_MEP: /배관|이중관|검측|기전/g,
   SLAB_MEP: /배관|이중관|검측|기전/g,
+  CURE: /양생/g,
 };
 
 const STAGE_TONE: Record<Stage, string> = {
@@ -33,6 +34,7 @@ const STAGE_TONE: Record<Stage, string> = {
   POUR: "bg-rose-100 text-rose-800",
   WALL_MEP: "bg-amber-100 text-amber-800",
   SLAB_MEP: "bg-amber-100 text-amber-800",
+  CURE: "bg-stone-100 text-stone-700",
 };
 
 function Highlight({ text, re }: { text: string; re: RegExp }) {

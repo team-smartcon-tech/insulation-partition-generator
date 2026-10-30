@@ -7,10 +7,11 @@ export const STAGES = [
   "WALL_REBAR", // 3 벽철근 6h (오전), 철근팀
   "WALL_MEP", // 3' 기전배관·검측 (자동)
   "ALFORM", // 4 알폼 1일 (반일 2칸 연속), 알폼팀
-  "TOP_INSULATION", // 4' 단열재 설치 — 최상층에만, 1·2호 세대, 알폼 뒤·슬래브철근 앞 (설계 §8-2). 반일 1칸, 팀 자원 없음(가정)
+  "TOP_INSULATION", // 4' 바닥단열재 — 최상층에만, 알폼 뒤·슬래브철근 앞 (설계 §8-2). 2일(반일 4칸), 팀 자원 없음(가정)
   "SLAB_REBAR", // 5 슬래브철근 4h, 철근팀
   "SLAB_MEP", // 5' 기전배관·검측 (자동)
   "POUR", // 6 타설 (오전, 그날 전체), 펌프카·레미콘
+  "CURE", // 7 양생 — 옥탑 순서표에서만 칸을 차지한다. 기준층 동절기 양생은 달력 규칙(먹매김과 같은 날)
 ] as const
 
 export type Stage = (typeof STAGES)[number]
@@ -33,10 +34,11 @@ export const STAGE_SLOTS: Record<Stage, number> = {
   WALL_REBAR: 1,
   WALL_MEP: 1,
   ALFORM: 2,
-  TOP_INSULATION: 1,
+  TOP_INSULATION: 4,
   SLAB_REBAR: 1,
   SLAB_MEP: 1,
   POUR: 1,
+  CURE: 2,
 }
 
 export const STAGE_LABEL: Record<Stage, string> = {
@@ -45,10 +47,11 @@ export const STAGE_LABEL: Record<Stage, string> = {
   WALL_REBAR: "벽철근",
   WALL_MEP: "기전·검측(벽)",
   ALFORM: "알폼",
-  TOP_INSULATION: "단열재(최상층)",
+  TOP_INSULATION: "바닥단열재(최상층)",
   SLAB_REBAR: "슬래브철근",
   SLAB_MEP: "기전·검측(슬래브)",
   POUR: "타설",
+  CURE: "양생",
 }
 
 /**
@@ -57,6 +60,22 @@ export const STAGE_LABEL: Record<Stage, string> = {
  */
 export function nextStage(stage: Stage, isTopFloor = false): Stage {
   if (stage === "ALFORM") return isTopFloor ? "TOP_INSULATION" : "SLAB_REBAR"
+  // 기준층 사이클은 타설에서 다시 먹매김으로. 양생(CURE)은 옥탑 순서표에서만 쓴다
+  if (stage === "POUR" || stage === "CURE") return "MARK"
   const i = STAGES.indexOf(stage)
-  return STAGES[(i + 1) % STAGES.length]
+  return STAGES[i + 1]
 }
+
+/**
+ * 옥탑 1개 층 순서표 (2026-10-30 사용자 기준). 합계 15일. 일 단위, 작업 가능일(일요일 제외)만 센다.
+ * 갱폼은 크레인 운행일에만, 타설은 타설 가능일에만 한다. 팀 용량은 쓰지 않는다(옥탑은 별도 작업조로 본다 — 가정).
+ */
+export const ROOFTOP_SEQUENCE: readonly { stage: Stage; days: number }[] = [
+  { stage: "MARK", days: 1 },
+  { stage: "GANGFORM", days: 2 },
+  { stage: "WALL_REBAR", days: 2 },
+  { stage: "ALFORM", days: 6 },
+  { stage: "SLAB_REBAR", days: 2 },
+  { stage: "POUR", days: 1 },
+  { stage: "CURE", days: 1 },
+]

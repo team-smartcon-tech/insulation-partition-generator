@@ -5,7 +5,7 @@ export * from "./contracts/index.ts"
 export * from "./calendar/date.ts"
 export { getDayInfo, isWinterCuring, previousCraneDay } from "./calendar/calendar.ts"
 export { ALL_HALF_DAY_ON, ALL_HALF_DAY_OFF, SCENARIO_2026_10 } from "./rules/settings.ts"
-export { STAGES, STAGE_TEAM, STAGE_SLOTS, nextStage, type Team } from "./rules/stages.ts"
+export { ROOFTOP_SEQUENCE, STAGES, STAGE_TEAM, STAGE_SLOTS, nextStage, type Team } from "./rules/stages.ts"
 export {
   simulate,
   buildSlots,

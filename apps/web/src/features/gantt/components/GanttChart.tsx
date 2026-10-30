@@ -1,7 +1,7 @@
 /**
  * 동별 간트 (설계 §7 "출력", 디자인 시안 2026-10-29). Smart-Gantt-Chart 저장소에서 이식.
  * - 하루 한 칸, 왼쪽 오전 · 오른쪽 오후. 작업이 있는 반일만 연한 상자. 철근 오전 + 기전 오후는 상자 하나.
- * - 사이클 시작(먹매김) 위에 층 라벨. 일요일 세로 띠. 유휴 줄은 온종일 유휴인 날만 상자.
+ * - 사이클 시작(먹매김) 위에 층 라벨(옥탑은 PH1·PH2). 날짜마다 세로 구분선, 일요일 세로 띠. 유휴 줄은 온종일 유휴인 날만 상자.
  * - 실적(작업일보, asOf 까지)은 또렷하게, 예정(엔진)은 연하게. 둘 사이에 세로 선.
  */
 import type {
@@ -28,6 +28,7 @@ const STAGE_GROUP: Record<Stage, Group> = {
   SLAB_REBAR: "rebar",
   SLAB_MEP: "mep",
   POUR: "pour",
+  CURE: "cure",
 };
 
 const GROUP_LABEL: Record<Group, string> = {
@@ -36,7 +37,7 @@ const GROUP_LABEL: Record<Group, string> = {
   rebar: "철근",
   mep: "기전(오전)",
   alform: "알폼",
-  insulation: "단열재(최상층)",
+  insulation: "바닥단열재(최상층)",
   pour: "타설",
 };
 
@@ -56,10 +57,11 @@ const STAGE_TITLE: Record<Stage, string> = {
   WALL_REBAR: "벽철근",
   WALL_MEP: "기전·검측(벽)",
   ALFORM: "알폼",
-  TOP_INSULATION: "단열재(최상층)",
+  TOP_INSULATION: "바닥단열재(최상층)",
   SLAB_REBAR: "슬래브철근",
   SLAB_MEP: "기전·검측(슬래브)",
   POUR: "타설",
+  CURE: "양생",
 };
 
 const STAGE_INDEX: Record<Stage, number> = {
@@ -72,12 +74,16 @@ const STAGE_INDEX: Record<Stage, number> = {
   SLAB_REBAR: 6,
   SLAB_MEP: 7,
   POUR: 8,
+  CURE: 9,
 };
+
+/** 층 표시: 옥탑은 PH1·PH2, 그 외 42F */
+const floorLabel = (a: { floor: number; roof?: number }) => (a.roof ? `PH${a.roof}` : `${a.floor}F`);
 
 type Box = { span: "AM" | "PM" | "DAY"; group: Group; title: string };
 
 function dayBoxes(date: string, label: string, am?: Assignment, pm?: Assignment): Box[] {
-  const t = (a: Assignment, half: string) => `${date} ${half} · ${label} ${a.floor}F · ${STAGE_TITLE[a.stage]}`;
+  const t = (a: Assignment, half: string) => `${date} ${half} · ${label} ${floorLabel(a)} · ${STAGE_TITLE[a.stage]}`;
   if (am && pm) {
     const g1 = STAGE_GROUP[am.stage];
     const g2 = STAGE_GROUP[pm.stage];
@@ -150,7 +156,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
   const month = Number(data.from.slice(5, 7));
   const gridCols = { gridTemplateColumns: `4.5rem repeat(${data.days.length}, minmax(0, 1fr))` };
   const dayCell = (d: DayInfo, extra?: string) =>
-    cn("relative min-w-0", d.isSunday && "bg-muted", isPlanStart(d.date) && "border-l-2 border-primary/60", extra);
+    cn("relative min-w-0 border-r border-border/50", d.isSunday && "bg-muted", isPlanStart(d.date) && "border-l-2 border-l-primary/60", extra);
 
   const pourDates = new Set([
     ...data.assignments.filter((a) => a.stage === "POUR").map((a) => a.date),
@@ -164,7 +170,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
           <div className="grid" style={gridCols}>
             <div />
             {data.days.map((d) => (
-              <div key={d.date} className={cn("text-center text-[11px]", d.isSunday && "text-red-600", d.isSaturday && "text-sky-600")}>
+              <div key={d.date} className={cn("border-r border-border/50 text-center text-[11px]", d.isSunday && "text-red-600", d.isSaturday && "text-sky-600")}>
                 {d.isSunday ? "일" : d.isSaturday ? "토" : ""}
               </div>
             ))}
@@ -174,7 +180,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
             {data.days.map((d) => (
               <div
                 key={d.date}
-                className={cn("text-center tabular-nums", (d.isSunday || d.isHoliday) && "font-semibold text-red-600")}
+                className={cn("border-r border-border/50 text-center tabular-nums", (d.isSunday || d.isHoliday) && "font-semibold text-red-600")}
                 title={d.isHoliday ? `${d.date} 공휴일` : d.date}
               >
                 {Number(d.date.slice(8))}
@@ -191,17 +197,14 @@ export default function GanttChart({ data }: { data: GanttData }) {
                 const pm = get(d.date, "PM", id);
                 const planned = !isActualDay(d.date);
                 const boxes = isActualDay(d.date) && actual ? actualBoxes(d.date, label(id), actual) : planned ? dayBoxes(d.date, label(id), am, pm) : [];
-                const startFloor = actual
-                  ? actual.find((w) => w.stage === "MARK")?.floor
-                  : am?.stage === "MARK"
-                    ? am.floor
-                    : pm?.stage === "MARK"
-                      ? pm.floor
-                      : undefined;
+                // 사이클 시작(먹매김) 칸에 층 라벨 (옥탑은 PH1·PH2)
+                const markActual = actual?.find((w) => w.stage === "MARK");
+                const markPlan = am?.stage === "MARK" ? am : pm?.stage === "MARK" ? pm : undefined;
+                const startFloor = actual ? (markActual ? `${markActual.floor}F` : undefined) : markPlan ? floorLabel(markPlan) : undefined;
                 return (
                   <div key={d.date} className={dayCell(d, "h-14")}>
                     {startFloor !== undefined ? (
-                      <div className="absolute left-0.5 top-0.5 text-[10px] leading-none text-muted-foreground">{startFloor}F</div>
+                      <div className="absolute left-0.5 top-0.5 whitespace-nowrap text-[10px] leading-none text-muted-foreground">{startFloor}</div>
                     ) : null}
                     <div className={cn("absolute inset-x-0 bottom-1.5 top-4", planned && asOf !== null && "opacity-60")}>
                       {boxes.map((b, i) => (
@@ -264,7 +267,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
           </span>
         </div>
         <p>
-          칸 왼쪽 오전 · 오른쪽 오후 (철근 뒤 기전·검측은 같은 날 오후). 층 라벨은 사이클 시작(먹매김) 위치.
+          칸 왼쪽 오전 · 오른쪽 오후 (철근 뒤 기전·검측은 같은 날 오후). 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일).
           {asOf ? ` 세로 선 왼쪽은 작업일보 실적(${asOf}까지, 또렷함), 오른쪽은 엔진 예정(연함).` : ""}
         </p>
       </div>

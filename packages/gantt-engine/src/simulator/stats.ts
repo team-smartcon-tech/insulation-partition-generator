@@ -35,11 +35,13 @@ export function periodStats(
   from: IsoDate,
   to: IsoDate,
 ): PeriodStats {
+  // 옥탑은 별도 작업조로 보고 팀 유휴·타설 집계에서 뺀다 (기준층 사이클만 센다)
+  const base = result.assignments.filter((a) => a.roof == null)
   const inRange = (a: Assignment) => a.date >= from && a.date <= to
   const days = dateRange(from, to)
 
-  const pours = result.assignments.filter((a) => inRange(a) && a.stage === "POUR").length
-  const pourDates = new Set(result.assignments.filter((a) => a.stage === "POUR").map((a) => a.date))
+  const pours = base.filter((a) => inRange(a) && a.stage === "POUR").length
+  const pourDates = new Set(base.filter((a) => a.stage === "POUR").map((a) => a.date))
   const pourGapDays = days.filter(
     (d) => getDayInfo(calendar, d).pourAllowed && !pourDates.has(d),
   ).length
@@ -50,7 +52,7 @@ export function periodStats(
     for (const d of days) {
       if (!teamCanWork(calendar, team, d)) continue
       const halves = new Set(
-        result.assignments
+        base
           .filter((a) => a.date === d && STAGE_TEAM[a.stage] === team)
           .map((a) => a.half),
       )

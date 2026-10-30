@@ -12,6 +12,7 @@ const SHORT: Record<Stage, string> = {
   SLAB_REBAR: "슬",
   SLAB_MEP: "검",
   POUR: "타",
+  CURE: "양",
 }
 
 export function renderText(result: SimulationResult): string {

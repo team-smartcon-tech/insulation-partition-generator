@@ -4,7 +4,7 @@
 import { addDays, dateRange, type IsoDate } from "../calendar/date.ts"
 import { getDayInfo, type CalendarConfig, type DayInfo } from "../calendar/calendar.ts"
 import type { SiteSettings } from "../rules/settings.ts"
-import { STAGES, STAGE_TEAM, nextStage, type Stage, type Team } from "../rules/stages.ts"
+import { ROOFTOP_SEQUENCE, STAGES, STAGE_TEAM, nextStage, type Stage, type Team } from "../rules/stages.ts"
 
 export type Half = "AM" | "PM"
 
@@ -16,8 +16,10 @@ export type Assignment = {
   half: Half
   buildingId: number
   stage: Stage
-  /** 그 동의 몇 번째 층 사이클인가 (1부터) */
+  /** 그 동의 몇 번째 층 사이클인가 (1부터). 옥탑이면 최상층 + 옥탑 층 */
   floor: number
+  /** 옥탑 몇 번째 층인가 (1 = PH1). 기준층 사이클이면 없음 */
+  roof?: number
 }
 
 export type BuildingState = {
@@ -40,6 +42,8 @@ export type BuildingState = {
   topFloor?: number | null
   /** 최상층 타설까지 끝남 */
   done?: boolean
+  /** 옥탑 층수. 최상층 타설 다음 날부터 옥탑 순서표(ROOFTOP_SEQUENCE)를 층마다 붙인다. 0/없음 = 옥탑 없음 */
+  rooftopFloors?: number
 }
 
 export type SimulationInput = {
@@ -141,6 +145,7 @@ export function simulate(input: SimulationInput): SimulationResult {
   // 단계가 차지하는 반일 칸 수. 알폼은 1일(2칸). 철근 병행이 꺼지면 벽·슬래브도 각 하루(2칸).
   const stageSpan = (stage: Stage): number => {
     if (stage === "ALFORM") return 2
+    if (stage === "TOP_INSULATION") return 4 // 바닥단열재 2일
     if ((stage === "WALL_REBAR" || stage === "SLAB_REBAR") && !settings.rebarWallAndSlabSameDay)
       return 2
     return 1
@@ -209,6 +214,8 @@ export function simulate(input: SimulationInput): SimulationResult {
         return true
       case "POUR":
         return slot.half === "AM" && slot.day.pourAllowed
+      case "CURE":
+        return false // 옥탑 순서표 전용
     }
   }
 
@@ -274,6 +281,38 @@ export function simulate(input: SimulationInput): SimulationResult {
       assign(b, slot)
     }
   }
+
+  // 옥탑: 최상층 타설이 끝난 동마다 그 다음 날부터 옥탑 순서표를 일 단위로 붙인다.
+  // 기준층 자원(팀 용량)과 따로 돈다고 보고 bySlot 에 넣지 않는다 — 다른 동의 배정을 막지 않는다.
+  // 출발 상태에서 이미 끝난 동(실적상 최상층 타설 완료)도 마지막 타설일에서 이어 붙이고, 기간 안 것만 남긴다.
+  const slotsByDate = new Map<IsoDate, Slot[]>()
+  for (const s of slots) slotsByDate.set(s.date, [...(slotsByDate.get(s.date) ?? []), s])
+  for (const b of buildings) {
+    const roofs = b.rooftopFloors ?? 0
+    if (!b.done || roofs <= 0 || !b.lastPourDate || b.topFloor == null) continue
+    let date = addDays(b.lastPourDate, 1)
+    for (let roof = 1; roof <= roofs; roof++) {
+      for (const step of ROOFTOP_SEQUENCE) {
+        for (let k = 0; k < step.days; k++) {
+          // 그 단계를 할 수 있는 다음 날까지 넘긴다 (일요일 휴무, 갱폼=크레인 운행일, 타설=타설 가능일)
+          for (;;) {
+            if (date > input.to) break
+            const day = getDayInfo(calendar, date)
+            const ok = day.workable && (step.stage !== "GANGFORM" || day.craneAllowed) && (step.stage !== "POUR" || day.pourAllowed)
+            if (ok) break
+            date = addDays(date, 1)
+          }
+          if (date > input.to) break
+          for (const s of slotsByDate.get(date) ?? []) {
+            if (step.stage === "POUR" && s.half === "PM") continue // 타설은 오전 칸(그날 전체)
+            assignments.push({ slotIndex: s.index, date, half: s.half, buildingId: b.id, stage: step.stage, floor: b.topFloor + roof, roof })
+          }
+          date = addDays(date, 1)
+        }
+      }
+    }
+  }
+  assignments.sort((x, y) => x.slotIndex - y.slotIndex || x.buildingId - y.buildingId)
 
   return { slots, assignments, buildings }
 }

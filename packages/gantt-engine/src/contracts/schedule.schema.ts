@@ -49,6 +49,7 @@ export const stageSchema = z.enum([
   "SLAB_REBAR",
   "SLAB_MEP",
   "POUR",
+  "CURE",
 ])
 
 export const halfSchema = z.enum(["AM", "PM"])
@@ -59,6 +60,8 @@ export const assignmentSchema = z.object({
   buildingId: z.number().int(),
   stage: stageSchema,
   floor: z.number().int(),
+  /** 옥탑 몇 번째 층인가 (1 = PH1). 기준층 사이클이면 없음 */
+  roof: z.number().int().min(1).optional(),
 })
 
 export const dayInfoSchema = z.object({
@@ -119,10 +122,11 @@ export const STAGE_LABEL: Record<z.infer<typeof stageSchema>, string> = {
   WALL_REBAR: "벽철근",
   WALL_MEP: "기전·검측(벽)",
   ALFORM: "알폼",
-  TOP_INSULATION: "단열재(최상층)",
+  TOP_INSULATION: "바닥단열재(최상층)",
   SLAB_REBAR: "슬래브철근",
   SLAB_MEP: "기전·검측(슬래브)",
   POUR: "타설",
+  CURE: "양생",
 }
 
 // ── 현장 실적 기반 계획 (작업일보 → 출발 상태 → 예정) ────────────────────────

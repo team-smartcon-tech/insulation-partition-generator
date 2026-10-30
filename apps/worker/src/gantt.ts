@@ -314,7 +314,7 @@ gantt.post("/simulate", async (c) => {
     buildingIds: result.buildings.map((b) => b.id),
     assignments: result.assignments
       .filter((a) => a.date >= req.from && a.date <= req.to)
-      .map(({ date, half, buildingId, stage, floor }) => ({ date, half, buildingId, stage, floor })),
+      .map(({ date, half, buildingId, stage, floor, roof }) => ({ date, half, buildingId, stage, floor, roof })),
     stats: periodStats(result, req.calendar, req.from, req.to),
   };
   return c.json(body);
@@ -363,7 +363,7 @@ gantt.post("/plan", async (c) => {
         buildingIds: warm.buildings.map((b) => b.id),
         assignments: warm.assignments
           .filter((a) => a.date >= req.from && a.date <= req.to)
-          .map(({ date, half, buildingId, stage, floor }) => ({ date, half, buildingId, stage, floor })),
+          .map(({ date, half, buildingId, stage, floor, roof }) => ({ date, half, buildingId, stage, floor, roof })),
         stats: periodStats(warm, req.calendar, req.from, req.to),
         asOf: null,
         buildings: warm.buildings.map((b) => ({ id: b.id, label: `${b.id}동` })),
@@ -376,8 +376,12 @@ gantt.post("/plan", async (c) => {
     // 예정 출발일: 마지막 실적 다음 날. 실적이 없으면 오늘부터
     const planFrom = progress.asOf ? addDays(progress.asOf, 1) : upTo;
     const reported = new Set(progress.buildings.map((b) => b.id));
+    // 동의 옥탑 층수 = 가장 높은 코어(가장 늦게 끝나는 코어)의 옥탑 층수. 같은 높이면 큰 쪽
+    const rooftopOf = (b: Building) =>
+      Math.max(0, ...b.coreTopFloors.map((t, i) => (t === b.topFloor ? b.coreRooftopFloors[i] ?? 0 : 0)));
+    const rooftops = new Map(buildings.map((b) => [b.buildingNo, rooftopOf(b)]));
     const initial: BuildingState[] = [
-      ...progress.initial,
+      ...progress.initial.map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
       ...buildings
         .filter((b) => !reported.has(b.buildingNo))
         .map((b) => ({
@@ -391,6 +395,7 @@ gantt.post("/plan", async (c) => {
           floor: b.currentFloor ?? b.baseFloor,
           topFloor: b.topFloor,
           done: false,
+          rooftopFloors: rooftops.get(b.buildingNo) ?? 0,
         })),
     ].sort((a, b) => a.id - b.id);
 
@@ -414,7 +419,7 @@ gantt.post("/plan", async (c) => {
       buildingIds: initial.map((b) => b.id),
       assignments: (planned?.assignments ?? [])
         .filter((a) => a.date >= req.from && a.date <= req.to)
-        .map(({ date, half, buildingId, stage, floor }) => ({ date, half, buildingId, stage, floor })),
+        .map(({ date, half, buildingId, stage, floor, roof }) => ({ date, half, buildingId, stage, floor, roof })),
       stats: planned
         ? periodStats(planned, req.calendar, statsFrom, req.to)
         : { from: statsFrom, to: req.to, pours: 0, pourGapDays: 0, idle: { rebar: empty, alform: empty, gangform: empty } },
