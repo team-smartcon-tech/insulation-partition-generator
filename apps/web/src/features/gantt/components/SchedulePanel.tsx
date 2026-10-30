@@ -35,6 +35,9 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
   // 지하·저층 공정 중이라 예정을 계산하지 않은 동 (실적만 표시)
   const unplanned = d?.unplanned ?? [];
   const allUnplanned = d != null && unplanned.length > 0 && unplanned.length === d.buildingIds.length;
+  // 이 달에 그릴 것이 없다 (일보가 있는 현장인데 첫 일보 이전 달 등)
+  // (동 목록이 있어도 실적·예정이 하나도 없으면 빈 줄만 남으므로 같이 안내)
+  const nothing = d != null && d.assignments.length === 0 && (d.actual ?? []).length === 0;
   const labelOf = (id: number) => d?.buildings?.find((b) => b.id === id)?.label ?? `${id}동`;
 
   return (
@@ -43,7 +46,9 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
           <p className="text-sm text-muted-foreground">
             <b className="text-foreground">{siteName}</b>
-            {d?.asOf
+            {nothing
+              ? ` · 이 달에는 작업일보 실적이 없습니다${d?.firstReportDate ? ` (첫 일보 ${d.firstReportDate})` : ""}.`
+              : d?.asOf
               ? d.asOf < d.from
                 ? ` · ${d.asOf}까지의 작업일보 실적에서 이어서 계산한 예정입니다.`
                 : ` · 작업일보 실적은 ${d.asOf}까지, 그 다음 날부터는 엔진 예정입니다.`
@@ -52,7 +57,7 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
                 : d
                   ? " · 작업일보가 없어 설정 탭의 동 목록(현재 층)에서 출발한 예정입니다."
                   : ""}
-            {noBuildings && !unplanned.length ? (
+            {noBuildings && !unplanned.length && !nothing ? (
               <span className="ml-2 text-amber-700">설정 탭에서 동별 최상층을 넣으면 사이클 종료·단열재 단계가 반영됩니다.</span>
             ) : null}
             {unplanned.length ? (
@@ -74,6 +79,11 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
 
         {plan.isError ? (
           <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">{(plan.error as Error).message}</div>
+        ) : d && nothing ? (
+          <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+            이 달에는 공정표에 그릴 작업일보 실적이 없습니다.
+            {d.firstReportDate ? ` 이 현장의 첫 작업일보는 ${d.firstReportDate} 입니다.` : ""}
+          </div>
         ) : d ? (
           <>
             <div className={allUnplanned ? "hidden" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>

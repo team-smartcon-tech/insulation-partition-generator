@@ -168,6 +168,8 @@ export const planResponseSchema = simulateResponseSchema.extend({
   reportDates: z.array(isoDateSchema),
   /** 예정을 계산하지 않은 동 — 지하·저층 공정 중이라 엔진(기준층 사이클)이 이어서 계산할 수 없다 */
   unplanned: z.array(z.number().int()).default([]),
+  /** 이 현장의 첫 작업일보 날짜. 보는 달에 쓸 실적이 없을 때 안내용 (일보가 아예 없으면 null) */
+  firstReportDate: isoDateSchema.nullable().default(null),
 })
 
 export type PlanRequest = z.infer<typeof planRequestSchema>

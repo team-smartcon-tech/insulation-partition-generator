@@ -355,6 +355,37 @@ gantt.post("/plan", async (c) => {
     const days = dateRange(req.from, req.to).map((d) => getDayInfo(req.calendar, d));
     const reportDates = reports.filter((r) => r.date >= req.from).map((r) => r.date);
 
+    // 이 현장의 첫 작업일보 날짜 — 보는 달에 쓸 실적이 없을 때 안내용
+    const firstReportDate = await (async () => {
+      const r = await dcrRest(
+        c.env,
+        `/daily_reports?select=report_date&site_id=eq.${encodeURIComponent(req.siteId)}&aggregation_status=in.(completed,aggregating,pending)&order=report_date.asc&limit=1`,
+      );
+      const rows = (await r.json()) as { report_date: string }[];
+      return rows[0] ? String(rows[0].report_date).slice(0, 10) : null;
+    })();
+
+    // 일보가 있는 현장인데 이 달까지 쓸 실적이 없다(첫 일보 이전 달 등) — 예시를 그리지 않고 빈 공정표로 안내 (2026-10-30 사용자 요청)
+    if (!progress.asOf && buildings.length === 0 && firstReportDate) {
+      const empty = { fullDays: 0, halfDays: 0 };
+      const body: PlanResponse = {
+        from: req.from,
+        to: req.to,
+        days,
+        buildingIds: [],
+        assignments: [],
+        stats: { from: req.from, to: req.to, pours: 0, pourGapDays: 0, idle: { rebar: empty, alform: empty, gangform: empty } },
+        asOf: null,
+        buildings: [],
+        actual: [],
+        reportDates,
+        unplanned: [],
+        firstReportDate,
+      };
+      return c.json(body);
+    }
+
+    // 일보가 아예 없는 현장 — 예시 시뮬레이션
     if (!progress.asOf && buildings.length === 0) {
       const warm = simulate({ settings: req.settings, calendar: req.calendar, from: addDays(req.from, -30), to: req.to });
       const body: PlanResponse = {
@@ -371,6 +402,7 @@ gantt.post("/plan", async (c) => {
         actual: [],
         reportDates,
         unplanned: [],
+        firstReportDate,
       };
       return c.json(body);
     }
@@ -443,6 +475,7 @@ gantt.post("/plan", async (c) => {
       actual: progress.actual.filter((a) => a.date >= req.from && a.date <= req.to),
       reportDates,
       unplanned: [...unplanned].sort((a, b) => a - b),
+      firstReportDate,
     };
     return c.json(body);
   } catch (err) {
