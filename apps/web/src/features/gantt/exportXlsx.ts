@@ -134,9 +134,13 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
     x.value = cell.text;
     x.font = { size: 8, italic: cell.planned, color: { argb: cell.planned ? "FF475569" : "FF0F172A" } };
     x.alignment = { horizontal: "center", vertical: "middle", wrapText: true, shrinkToFit: false };
-    x.fill = fill(`FF${f.bg}`);
+    // 합친 칸은 첫 칸에만 테두리를 주면 오른쪽 외곽선이 빠진다 — 범위의 모든 칸에 바깥 테두리
     const b = thin(`FF${f.border}`);
-    x.border = { top: b, bottom: b, left: b, right: b };
+    for (let cc = c1; cc <= c2; cc++) {
+      const y = ws.getCell(row, cc);
+      y.fill = fill(`FF${f.bg}`);
+      y.border = { top: b, bottom: b, ...(cc === c1 ? { left: b } : {}), ...(cc === c2 ? { right: b } : {}) };
+    }
   };
 
   let row = 5;

@@ -98,6 +98,46 @@
   65% { opacity: 0.55; }
   100% { transform: translateX(140%) rotate(8deg); opacity: 0; }
 }
+/* 스마트 공정표 인쇄 (공정표 탭 「인쇄」 버튼, 2026-10-30).
+   ⚠ 이 블록을 파일 맨 끝에 두면 Tailwind 가 끝에 붙이는 @property 등록(68개)이 전부 이 @media print 안으로 들어가
+   화면에서 --tw-border-style 등이 등록되지 않고 모든 테두리가 사라진다(2026-10-30 실제 발생). 파일 중간에 둔다.
+   [data-print-root] 만 보이게 하고 앱 헤더·탭·설정 패널은 숨긴다. A3 가로, 배경색(공종 색) 그대로. */
+/* 인쇄 용지 — 인쇄할 때만 쓰인다 */
+@page {
+  size: A3 landscape;
+  margin: 8mm;
+}
+
+@media print {
+  /* 인쇄 보험: 테두리 모양 변수를 실선으로 직접 준다. border-dashed 같은 클래스는 우선순위가 높아 그대로 점선. */
+  *,
+  ::before,
+  ::after {
+    --tw-border-style: solid;
+  }
+  html,
+  body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body:has([data-print-root]) * {
+    visibility: hidden;
+  }
+  body:has([data-print-root]) [data-print-root],
+  body:has([data-print-root]) [data-print-root] * {
+    visibility: visible;
+  }
+  body:has([data-print-root]) [data-print-root] {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+  }
+  [data-print-root] .overflow-x-auto {
+    overflow: visible !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* 인라인 style 로 건 애니메이션을 끄는 자리라 !important 가 필요하다.
      (@media 안이라 아래 '최상위 !important 금지' 주의사항에 걸리지 않는다) */
@@ -604,34 +644,4 @@
    떨어져 안 보였다. 흰 글자는 명시적으로 지킨다. */
 .ipg-dark .text-white {
   color: #fff;
-}
-
-/* 스마트 공정표 인쇄 (공정표 탭 「인쇄」 버튼, 2026-10-30).
-   [data-print-root] 만 보이게 하고 앱 헤더·탭·설정 패널은 숨긴다. A3 가로, 배경색(공종 색) 그대로. */
-@media print {
-  @page {
-    size: A3 landscape;
-    margin: 8mm;
-  }
-  html,
-  body {
-    background: #fff !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  body:has([data-print-root]) * {
-    visibility: hidden;
-  }
-  body:has([data-print-root]) [data-print-root],
-  body:has([data-print-root]) [data-print-root] * {
-    visibility: visible;
-  }
-  body:has([data-print-root]) [data-print-root] {
-    position: absolute;
-    inset: 0 auto auto 0;
-    width: 100%;
-  }
-  [data-print-root] .overflow-x-auto {
-    overflow: visible !important;
-  }
 }
