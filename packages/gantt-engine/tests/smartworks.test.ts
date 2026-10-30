@@ -1,7 +1,7 @@
 // 스마트웍스 동/라인 → 코어 (2026-10-30 사용자 확인 규칙: 2세대마다 1코어, 높은 세대까지)
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { buildingNoOf, groupLinesToCores } from "../src/index.ts"
+import { buildingNoOf, groupLinesToCoreGroups, groupLinesToCores } from "../src/index.ts"
 
 describe("라인 → 코어 (2라인 = 1코어, 높이는 둘 중 높은 쪽)", () => {
   it("화성남양1차 101동: 5·6호 높이가 달라도 높은 5호까지 3코어", () => {
@@ -23,6 +23,11 @@ describe("라인 → 코어 (2라인 = 1코어, 높이는 둘 중 높은 쪽)", 
   it("3세대 이하 동은 1코어 (남원주 1차 405동 40,40,40)", () => {
     assert.deepEqual(groupLinesToCores([40, 40, 40]), [40])
     assert.deepEqual(groupLinesToCores([25, 27, 26]), [27])
+  })
+    it("코어별 세대수 = 묶인 라인 수", () => {
+    assert.deepEqual(groupLinesToCoreGroups([42, 42, 42, 37, 37]), [{ top: 42, units: 3 }, { top: 37, units: 2 }])
+    assert.deepEqual(groupLinesToCoreGroups([18, 18, 21, 21, 17, 16]).map((c) => c.units), [2, 2, 2])
+    assert.deepEqual(groupLinesToCoreGroups([40, 40, 40]), [{ top: 40, units: 3 }])
   })
     it("동 번호", () => {
     assert.equal(buildingNoOf("501동"), 501)

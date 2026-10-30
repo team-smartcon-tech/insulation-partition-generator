@@ -56,6 +56,8 @@ export const buildingSchema = z.object({
   coreTopFloors: z.array(z.number().int().min(1).max(80)).min(1).max(8),
   /** 코어별 옥탑 층수(0 = 없음). coreTopFloors 와 같은 순서·길이. hasRooftop = 하나라도 > 0 */
   coreRooftopFloors: z.array(z.number().int().min(0).max(10)).max(8),
+  /** 코어별 세대수 (한 층에서 그 코어가 맡는 세대 수, 0 = 모름) */
+  coreUnits: z.array(z.number().int().min(0).max(10)).max(8).default([]),
   baseFloor: z.number().int().min(1),
   topFloor: z.number().int().min(1).max(80),
   hasRooftop: z.boolean(),
@@ -108,6 +110,7 @@ const smartworksBuildingsSchema = z.object({
       name: z.string(),
       lineTops: z.array(z.number()),
       coreTopFloors: z.array(z.number().int().min(1).max(80)).min(1),
+      coreUnits: z.array(z.number().int()).default([]),
     }),
   ),
 });

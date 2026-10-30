@@ -25,7 +25,7 @@ import {
   DEFAULT_UNDERGROUND_SETTINGS,
   UNDERGROUND_STAGES,
   buildingNoOf,
-  groupLinesToCores,
+  groupLinesToCoreGroups,
   addWorkdays,
   planUnderground,
   undergroundStateFromActual,
@@ -189,6 +189,8 @@ export const buildingSchema = z
     coreTopFloors: z.array(floorSchema).min(1).max(8).optional(),
     /** 코어별 옥탑 층수(0 = 없음). coreTopFloors 와 같은 순서·길이. 없으면 hasRooftop 기준 1/0 */
     coreRooftopFloors: z.array(z.number().int().min(0).max(10)).max(8).optional(),
+    /** 코어별 세대수 (한 층에서 그 코어가 맡는 세대 수, 0 = 모름). coreTopFloors 와 같은 순서·길이 */
+    coreUnits: z.array(z.number().int().min(0).max(10)).max(8).optional(),
     baseFloor: z.number().int().min(1).default(3),
     topFloor: floorSchema.optional(),
     hasRooftop: z.boolean().default(false),
@@ -200,8 +202,10 @@ export const buildingSchema = z
   .transform((b) => {
     const coreTopFloors = b.coreTopFloors ?? Array.from({ length: b.cores }, () => b.topFloor as number);
     const coreRooftopFloors = coreTopFloors.map((_, i) => b.coreRooftopFloors?.[i] ?? (b.hasRooftop ? 1 : 0));
+    const coreUnits = coreTopFloors.map((_, i) => b.coreUnits?.[i] ?? 0);
     return {
       ...b,
+      coreUnits,
       cores: coreTopFloors.length,
       coreTopFloors,
       topFloor: Math.max(...coreTopFloors),
@@ -220,6 +224,7 @@ type BuildingRow = {
   core_top_floors?: number[] | null;
   core_rooftop_floors?: number[] | null;
   basement_floors?: number | null;
+  core_units?: number[] | null;
   has_rooftop: boolean;
   current_floor: number | null;
 };
@@ -233,6 +238,7 @@ const fromRow = (r: BuildingRow): Building => {
     cores: coreTopFloors.length,
     coreTopFloors,
     coreRooftopFloors,
+    coreUnits: coreTopFloors.map((_, i) => r.core_units?.[i] ?? 0),
     baseFloor: r.base_floor,
     topFloor: Math.max(...coreTopFloors),
     hasRooftop: coreRooftopFloors.some((n) => n > 0),
@@ -319,7 +325,8 @@ gantt.get("/smartworks-buildings/:siteId", async (c) => {
         const mine = rooms.filter((r) => r.building_id === b.id && Number.isFinite(Number(r.floor)));
         const lines = [...new Set(mine.map((r) => String(r.line)))].sort((x, y) => x.localeCompare(y, "ko", { numeric: true }));
         const lineTops = lines.map((l) => Math.max(...mine.filter((r) => String(r.line) === l).map((r) => Number(r.floor))));
-        return { buildingNo: buildingNoOf(b.name), name: b.name, lineTops, coreTopFloors: groupLinesToCores(lineTops) };
+        const groups = groupLinesToCoreGroups(lineTops);
+        return { buildingNo: buildingNoOf(b.name), name: b.name, lineTops, coreTopFloors: groups.map((g) => g.top), coreUnits: groups.map((g) => g.units) };
       })
       .filter((b): b is typeof b & { buildingNo: number } => b.buildingNo != null && b.coreTopFloors.length > 0)
       .sort((x, y) => x.buildingNo - y.buildingNo);
@@ -618,6 +625,7 @@ gantt.put("/buildings/:siteId", async (c) => {
           core_top_floors: b.coreTopFloors,
           core_rooftop_floors: b.coreRooftopFloors,
           basement_floors: b.basementFloors,
+          core_units: b.coreUnits,
           base_floor: b.baseFloor,
           top_floor: b.topFloor,
           has_rooftop: b.hasRooftop,
@@ -632,6 +640,8 @@ gantt.put("/buildings/:siteId", async (c) => {
         // core_top_floors 칸이 아직 없음(마이그레이션 20261030090000 전) — 조용히 버리지 않고 알린다
         if (text.includes("core_top_floors"))
           throw new GanttError(500, "코어별 최상층 칸이 DB에 아직 없습니다. 마이그레이션(20261030090000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
+        if (text.includes("core_units"))
+          throw new GanttError(500, "코어별 세대수 칸이 DB에 아직 없습니다. 마이그레이션(20261030120000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
         if (text.includes("basement_floors"))
           throw new GanttError(500, "지하층 수 칸이 DB에 아직 없습니다. 마이그레이션(20261030110000)을 먼저 적용해야 합니다.", "DATABASE_ERROR");
         if (text.includes("core_rooftop_floors"))

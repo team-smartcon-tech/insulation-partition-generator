@@ -15,12 +15,15 @@ const MAX_CORES = 8;
 /** 이름 안의 첫 숫자를 d 만큼 올리고 내린다 ("401동" → "402동"). 숫자가 없으면 그대로 */
 const stepName = (name: string, d: number) => name.replace(/\d+/, (m) => String(Math.max(0, Number(m) + d)).padStart(m.length, "0"));
 
-type Core = { top: number; rooftop: number };
-const coresOf = (b: Building): Core[] => b.coreTopFloors.map((top, k) => ({ top, rooftop: b.coreRooftopFloors[k] ?? 0 }));
+/** units = 그 코어가 한 층에서 맡는 세대 수 (0 = 모름) */
+type Core = { top: number; rooftop: number; units?: number };
+const coresOf = (b: Building): Core[] =>
+  b.coreTopFloors.map((top, k) => ({ top, rooftop: b.coreRooftopFloors[k] ?? 0, units: b.coreUnits?.[k] ?? 0 }));
 /** 코어 목록 → 동 필드 (코어 수·동 최상층·옥탑 여부를 같이 맞춘다) */
 const fromCores = (cores: Core[]): Partial<Building> => ({
   coreTopFloors: cores.map((c) => c.top),
   coreRooftopFloors: cores.map((c) => c.rooftop),
+  coreUnits: cores.map((c) => c.units ?? 0),
   cores: cores.length,
   topFloor: Math.max(...cores.map((c) => c.top)),
   hasRooftop: cores.some((c) => c.rooftop > 0),
@@ -60,7 +63,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
         if (!s) return b;
         updated++;
         const roofs = b.coreRooftopFloors.length === s.coreTopFloors.length ? b.coreRooftopFloors : s.coreTopFloors.map(() => Math.max(0, ...b.coreRooftopFloors));
-        return { ...b, ...fromCores(s.coreTopFloors.map((top, k) => ({ top, rooftop: roofs[k] ?? 0 }))) };
+        return { ...b, ...fromCores(s.coreTopFloors.map((top, k) => ({ top, rooftop: roofs[k] ?? 0, units: s.coreUnits[k] ?? 0 }))) };
       });
       for (const s of sw) {
         if (merged.some((b) => b.buildingNo === s.buildingNo)) continue;
@@ -72,7 +75,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
           baseFloor: template?.baseFloor ?? 3,
           basementFloors: template?.basementFloors ?? 0,
           currentFloor: null,
-          ...fromCores(s.coreTopFloors.map((top) => ({ top, rooftop }))),
+          ...fromCores(s.coreTopFloors.map((top, k) => ({ top, rooftop, units: s.coreUnits[k] ?? 0 }))),
         } as Building);
       }
       merged.sort((a, b) => a.buildingNo - b.buildingNo);
@@ -188,6 +191,16 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                         return (
                           <div key={k} className="flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
                             <span className="w-10 shrink-0 font-medium text-foreground">{k + 1}코어</span>
+                            <NumInput
+                              className="w-12"
+                              min={0}
+                              max={10}
+                              value={c.units ? c.units : null}
+                              placeholder="–"
+                              aria-label={`${b.name} ${k + 1}코어 세대수`}
+                              onValue={(v) => set({ units: v ?? 0 })}
+                            />
+                            <span className="mr-2">세대</span>
                             <span>최상층</span>
                             <NumInput
                               className="w-16"

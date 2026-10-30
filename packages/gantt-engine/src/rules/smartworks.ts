@@ -7,19 +7,25 @@
 
 /** 라인별 최고층(라인 순서대로) → 코어별 최상층. linesPerCore 기본 2 */
 export function groupLinesToCores(lineTops: number[], linesPerCore = 2): number[] {
+  return groupLinesToCoreGroups(lineTops, linesPerCore).map((g) => g.top)
+}
+
+/** 라인별 최고층 → 코어별 { 최상층, 세대수(맡는 라인 수) } */
+export function groupLinesToCoreGroups(lineTops: number[], linesPerCore = 2): { top: number; units: number }[] {
+  const g = (lines: number[]) => ({ top: Math.max(...lines), units: lines.length })
   // 5세대 동은 코어 2개 (2026-10-30 사용자 확인). 3+2 / 2+3 중 묶음 안 높이가 더 고른 쪽 — 같으면 3+2
   //   남원주 1차 401동 42,42,42|37,37 → 42·37, 402동 37,37|42,42,42 → 37·42 (직접 입력값과 같음)
   // 한 층 3세대 이하 동은 코어 1개 (2026-10-30 사용자 확인: 남원주 1차 405동 3세대 = 1코어)
-  if (lineTops.length > 0 && lineTops.length <= 3) return [Math.max(...lineTops)]
+  if (lineTops.length > 0 && lineTops.length <= 3) return [g(lineTops)]
   if (lineTops.length === 5) {
     const spread = (g: number[]) => Math.max(...g) - Math.min(...g)
     const a = [lineTops.slice(0, 3), lineTops.slice(3)]
     const b = [lineTops.slice(0, 2), lineTops.slice(2)]
     const pick = spread(b[0]) + spread(b[1]) < spread(a[0]) + spread(a[1]) ? b : a
-    return pick.map((g) => Math.max(...g))
+    return pick.map(g)
   }
-  const cores: number[] = []
-  for (let i = 0; i < lineTops.length; i += linesPerCore) cores.push(Math.max(...lineTops.slice(i, i + linesPerCore)))
+  const cores: { top: number; units: number }[] = []
+  for (let i = 0; i < lineTops.length; i += linesPerCore) cores.push(g(lineTops.slice(i, i + linesPerCore)))
   return cores
 }
 
