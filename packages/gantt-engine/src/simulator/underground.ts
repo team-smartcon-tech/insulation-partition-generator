@@ -16,14 +16,20 @@ import type { Half } from "./simulator.ts"
 export type UgStep = { stage: Stage; days: number; parallel?: boolean; pour?: boolean }
 
 /** 설정 → 한 층 순서표 */
-export function undergroundSequence(settings: UndergroundSettings = DEFAULT_UNDERGROUND_SETTINGS): UgStep[] {
-  const d = settings.durations
+/**
+ * 설정 → 한 층 순서표. story 가 1 이상이면 저층(lowRise) 값, 지하(B층)면 지하 값.
+ * 저층 설정이 없으면 지하 값을 쓴다.
+ */
+export function undergroundSequence(settings: UndergroundSettings = DEFAULT_UNDERGROUND_SETTINGS, story = -1): UgStep[] {
+  const low = story >= 1 && settings.lowRise ? settings.lowRise : null
+  const d = low ? low.durations : settings.durations
+  const separateWallPour = low ? low.separateWallPour : settings.separateWallPour
   const steps: UgStep[] = [
     { stage: "WALL_REBAR", days: d.wallRebar },
     { stage: "WALL_MEP", days: d.wallMep, parallel: true },
     { stage: "FORM_WALL", days: d.formWall },
   ]
-  if (settings.separateWallPour) steps.push({ stage: "POUR_WALL", days: 1, pour: true })
+  if (separateWallPour) steps.push({ stage: "POUR_WALL", days: 1, pour: true })
   steps.push(
     { stage: "SHORING", days: d.shoring },
     { stage: "FORM_SLAB", days: d.formSlab },
@@ -64,7 +70,7 @@ export function planUnderground(input: {
   to: IsoDate
   buildings: UgBuilding[]
 }): UgResult {
-  const seq = undergroundSequence(input.settings)
+  const seqOf = (story: number) => undergroundSequence(input.settings, story)
   const workdays = dateRange(input.from, input.to).filter((d) => getDayInfo(input.calendar, d).workable)
   const pourOk = (d: IsoDate) => getDayInfo(input.calendar, d).pourAllowed
   const assignments: UgAssignment[] = []
@@ -76,6 +82,7 @@ export function planUnderground(input: {
     let stepIndex = b.stepIndex
     let doneDays = b.doneDays
     while (story < b.baseFloor && w < workdays.length) {
+      const seq = seqOf(story) // 지하·저층 순서표가 다르다
       // 그룹: 지금 공종 + 뒤에 붙은 병행 공종들
       const group: { step: UgStep; days: number }[] = []
       let i = stepIndex
@@ -141,16 +148,18 @@ export function undergroundStateFromActual(
   baseFloor: number,
   settings?: UndergroundSettings,
 ): UgBuilding | null {
-  const seq = undergroundSequence(settings)
-  const idx = (s: Stage) => seq.findIndex((x) => x.stage === s)
-  const mine = actual.filter((a) => a.buildingId === buildingId && a.floorLabel == null && idx(a.stage) >= 0)
+  const known = new Set([...undergroundSequence(settings, -1), ...undergroundSequence(settings, 1)].map((x) => x.stage))
+  const mine = actual.filter((a) => a.buildingId === buildingId && a.floorLabel == null && known.has(a.stage))
   if (!mine.length) return null
   const last = mine.reduce((m, a) => (a.date > m ? a.date : m), mine[0].date)
   const recent = mine.filter((a) => a.date >= addDays(last, -14))
   const story = Math.max(...recent.map((a) => a.floor))
   const onStory = mine.filter((a) => a.floor === story)
+  const seq = undergroundSequence(settings, story)
+  const idx = (s: Stage) => seq.findIndex((x) => x.stage === s)
   // 공종 위치는 최근 14일 실적으로만 — 구역별 일부 타설처럼 예전 실적이 앞서 나가 있으면 층을 건너뛴다(504동 9/23 일부 타설)
   let stepIndex = Math.max(...recent.filter((a) => a.floor === story).map((a) => idx(a.stage)))
+  if (stepIndex < 0) stepIndex = 0 // 그 층 순서표에 없는 공종뿐(예: 분리 타설 설정이 지하·저층에서 다름)
   // 병행 공종(W기전·S기전)에 와 있으면 그 짝(배근)부터 본다
   while (stepIndex > 0 && seq[stepIndex].parallel) stepIndex--
   const doneDays = new Set(onStory.filter((a) => a.stage === seq[stepIndex].stage).map((a) => a.date)).size

@@ -62,6 +62,27 @@ describe("지하 예정", () => {
   })
 })
 
+describe("지하·저층 순서표 분리", () => {
+  const settings = {
+    ...DEFAULT_UNDERGROUND_SETTINGS,
+    lowRise: { durations: { ...DEFAULT_UNDERGROUND_SETTINGS.durations, formWall: 3 }, separateWallPour: true },
+  }
+  it("B층은 지하 값, 1층부터 저층 값", () => {
+    assert.equal(undergroundSequence(settings, -1).find((s) => s.stage === "FORM_WALL")?.days, DEFAULT_UNDERGROUND_SETTINGS.durations.formWall)
+    assert.equal(undergroundSequence(settings, 1).find((s) => s.stage === "FORM_WALL")?.days, 3)
+    assert.ok(!undergroundSequence(settings, -1).some((s) => s.stage === "POUR_WALL"))
+    assert.ok(undergroundSequence(settings, 1).some((s) => s.stage === "POUR_WALL"))
+  })
+  it("예정: B1 은 지하 일수, 1F 는 저층 일수", () => {
+    const r = planUnderground({ calendar, settings, from: "2026-11-02", to: "2027-03-31", buildings: [{ id: 1, story: -1, stepIndex: 0, doneDays: 0, baseFloor: 2 }] })
+    const days = (floor: number, st: string) => new Set(r.assignments.filter((a) => a.floor === floor && a.stage === st).map((a) => a.date)).size
+    assert.equal(days(-1, "FORM_WALL"), DEFAULT_UNDERGROUND_SETTINGS.durations.formWall)
+    assert.equal(days(1, "FORM_WALL"), 3)
+    assert.equal(days(1, "POUR_WALL"), 1)
+    assert.equal(days(-1, "POUR_WALL"), 0)
+  })
+})
+
 describe("실적 → 지하 위치", () => {
   const A = (date: string, stage: string, floor: number) => ({ date, buildingId: 501, stage: stage as never, floor })
   it("최근 가장 높은 층의 가장 뒤 공종, 순서표 일수 다 했으면 다음 공종", () => {

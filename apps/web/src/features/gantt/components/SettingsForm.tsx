@@ -95,29 +95,63 @@ export default function SettingsForm({ value, onChange }: { value: SiteSettings;
   );
 }
 
-/** 지하·저층(재래식) 공정 — 한 층 순서표의 공종별 작업일 (설계 §8-2 2안). 기본값 = 남원주 2차 실적 중앙값 */
-function UndergroundSection({ value, onChange }: { value: UndergroundSettings; onChange: (v: UndergroundSettings) => void }) {
-  const d = value.durations;
-  const setD = (patch: Partial<UndergroundSettings["durations"]>) => onChange({ ...value, durations: { ...d, ...patch } });
+/**
+ * 지하층 · 저층(1층~기준층 시작 전) 공정 — 재래식 한 층 순서표의 공종별 작업일 (설계 §8-2 2안).
+ * 지하와 저층은 따로 둔다(2026-10-30 사용자 요청). 지하 기본값 = 남원주 2차 실적 중앙값, 저층 기본값은 아직 근거가 없어 지하와 같다.
+ */
+type UgDurations = UndergroundSettings["durations"];
+
+function SequenceFields({
+  d,
+  separateWallPour,
+  onDurations,
+  onSeparate,
+}: {
+  d: UgDurations;
+  separateWallPour: boolean;
+  onDurations: (patch: Partial<UgDurations>) => void;
+  onSeparate: (v: boolean) => void;
+}) {
   return (
-    <Section title="지하·저층 공정 (재래식, 한 층당 작업일)">
-      <p className="-mt-1 text-xs text-muted-foreground">
-        순서: W철근∥W기전 → W거푸집 → 시스템 → S거푸집 → S철근∥S기전 → S타설. ∥ 는 같은 날 시작해 병행. 기본값은 남원주 2차 일보 실적 중앙값.
-      </p>
-      <Days label="W철근" min={1} value={d.wallRebar} onChange={(v) => setD({ wallRebar: v })} />
-      <Days label="W기전" hint="W철근과 병행" value={d.wallMep} onChange={(v) => setD({ wallMep: v })} />
-      <Days label="W거푸집" min={1} value={d.formWall} onChange={(v) => setD({ formWall: v })} />
-      <Days label="시스템" hint="시스템 동바리" value={d.shoring} onChange={(v) => setD({ shoring: v })} />
-      <Days label="S거푸집" min={1} value={d.formSlab} onChange={(v) => setD({ formSlab: v })} />
-      <Days label="S철근" min={1} value={d.slabRebar} onChange={(v) => setD({ slabRebar: v })} />
-      <Days label="S기전" hint="S철근과 병행" value={d.slabMep} onChange={(v) => setD({ slabMep: v })} />
-      <Toggle
-        label="벽·기둥 분리 타설 (W타설 1일)"
-        hint="끄면 S타설 때 함께"
-        checked={value.separateWallPour}
-        onChange={(v) => onChange({ ...value, separateWallPour: v })}
-      />
-      <Days label="기준층 전환" hint="갱폼 설치 등 (가정값)" value={value.transitionDays} onChange={(v) => onChange({ ...value, transitionDays: v })} />
-    </Section>
+    <>
+      <Days label="W철근" min={1} value={d.wallRebar} onChange={(v) => onDurations({ wallRebar: v })} />
+      <Days label="W기전" hint="W철근과 병행" value={d.wallMep} onChange={(v) => onDurations({ wallMep: v })} />
+      <Days label="W거푸집" min={1} value={d.formWall} onChange={(v) => onDurations({ formWall: v })} />
+      <Days label="시스템" hint="시스템 동바리" value={d.shoring} onChange={(v) => onDurations({ shoring: v })} />
+      <Days label="S거푸집" min={1} value={d.formSlab} onChange={(v) => onDurations({ formSlab: v })} />
+      <Days label="S철근" min={1} value={d.slabRebar} onChange={(v) => onDurations({ slabRebar: v })} />
+      <Days label="S기전" hint="S철근과 병행" value={d.slabMep} onChange={(v) => onDurations({ slabMep: v })} />
+      <Toggle label="벽·기둥 분리 타설 (W타설 1일)" hint="끄면 S타설 때 함께" checked={separateWallPour} onChange={onSeparate} />
+    </>
+  );
+}
+
+function UndergroundSection({ value, onChange }: { value: UndergroundSettings; onChange: (v: UndergroundSettings) => void }) {
+  // 저장된 설정에 저층 값이 없으면 엔진은 지하 값을 쓴다 — 화면도 같은 값을 보여 준다
+  const low = value.lowRise ?? { durations: value.durations, separateWallPour: value.separateWallPour };
+  return (
+    <>
+      <Section title="지하층 공정 (재래식, 한 층당 작업일)">
+        <p className="-mt-1 text-xs text-muted-foreground">
+          순서: W철근∥W기전 → W거푸집 → 시스템 → S거푸집 → S철근∥S기전 → S타설. ∥ 는 같은 날 시작해 병행. 기본값은 남원주 2차 일보 실적 중앙값.
+        </p>
+        <SequenceFields
+          d={value.durations}
+          separateWallPour={value.separateWallPour}
+          onDurations={(patch) => onChange({ ...value, durations: { ...value.durations, ...patch } })}
+          onSeparate={(v) => onChange({ ...value, separateWallPour: v })}
+        />
+      </Section>
+      <Section title="저층 공정 (1층 ~ 기준층 시작 전, 한 층당 작업일)">
+        <p className="-mt-1 text-xs text-muted-foreground">필로티·상가 등. 순서는 지하와 같고 일수만 따로. 따로 넣기 전에는 지하 값과 같다.</p>
+        <SequenceFields
+          d={low.durations}
+          separateWallPour={low.separateWallPour}
+          onDurations={(patch) => onChange({ ...value, lowRise: { ...low, durations: { ...low.durations, ...patch } } })}
+          onSeparate={(v) => onChange({ ...value, lowRise: { ...low, separateWallPour: v } })}
+        />
+        <Days label="기준층 전환" hint="저층 끝 → 갱폼 설치 등 (가정값)" value={value.transitionDays} onChange={(v) => onChange({ ...value, transitionDays: v })} />
+      </Section>
+    </>
   );
 }

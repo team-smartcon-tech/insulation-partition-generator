@@ -16,6 +16,16 @@ export const halfDayOptionsSchema = z.object({
  * 지하·저층(재래식 거푸집) 공정 설정 (설계 §8-2, 2026-10-30 2안). 소요는 작업일(일요일 제외) 기준.
  * 기본값은 남원주역세권 2차 2026-02~10 작업일보 실적의 동·층별 공종 작업일수 중앙값 — 현장에서 고친다.
  */
+const ugDurationsSchema = z.object({
+  wallRebar: z.number().int().min(1).max(60),
+  wallMep: z.number().int().min(0).max(60), // W철근과 병행
+  formWall: z.number().int().min(1).max(60),
+  shoring: z.number().int().min(0).max(60),
+  formSlab: z.number().int().min(1).max(60),
+  slabRebar: z.number().int().min(1).max(60),
+  slabMep: z.number().int().min(0).max(60), // S철근과 병행
+})
+
 export const undergroundSettingsSchema = z.object({
   durations: z.object({
     wallRebar: z.number().int().min(1).max(60),
@@ -30,12 +40,22 @@ export const undergroundSettingsSchema = z.object({
   separateWallPour: z.boolean(),
   /** 지하·저층이 끝나고 기준층 사이클(갱폼)을 시작하기까지 전환 작업일 (갱폼 설치 등, 가정값) */
   transitionDays: z.number().int().min(0).max(60),
+  /**
+   * 저층(1층 ~ 기준층 시작 바로 아래 층) 순서표. 지하(durations·separateWallPour)와 따로 (2026-10-30 사용자 요청).
+   * 없으면 지하 값을 쓴다. 필로티·상가처럼 층고·기둥이 달라 소요가 다르다.
+   */
+  lowRise: z.object({ durations: ugDurationsSchema, separateWallPour: z.boolean() }).optional(),
 })
 
 export const DEFAULT_UNDERGROUND_SETTINGS: z.infer<typeof undergroundSettingsSchema> = {
   durations: { wallRebar: 6, wallMep: 6, formWall: 9, shoring: 4, formSlab: 6, slabRebar: 4, slabMep: 7 },
   separateWallPour: false,
   transitionDays: 10,
+  // 저층 실적 근거가 아직 없어 지하와 같은 값으로 시작 (현장에서 고친다)
+  lowRise: {
+    durations: { wallRebar: 6, wallMep: 6, formWall: 9, shoring: 4, formSlab: 6, slabRebar: 4, slabMep: 7 },
+    separateWallPour: false,
+  },
 }
 
 export const siteSettingsSchema = z.object({
