@@ -1,7 +1,7 @@
 // 마감 간트 (2026-10-30)
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { buildFinishGantt, finishTradeOf, floorRangeText } from "../src/index.ts"
+import { buildFinishGantt, finishTradeOf, floorListText, floorRangeText } from "../src/index.ts"
 
 describe("공종 이름 맞추기", () => {
   it("현장마다 다른 이름을 공종으로", () => {
@@ -49,9 +49,26 @@ describe("실적·예정 막대", () => {
     rooms,
     works,
     today: "2026-10-30",
+    gapDays: 3,
   })
   const row = g.buildings[0].rows[0]
-  it("완료일이 3일 넘게 끊기면 새 막대, 막대 층 범위", () => {
+  it("기본은 완료일마다 따로, 층별 세대", () => {
+    const daily = buildFinishGantt({
+      types: [{ id: "T", name: "내장-단열재", index: 0 }],
+      buildings: [{ id: "b", buildingNo: 101, name: "101동" }],
+      rooms,
+      works: [...works, { roomId: "8-1", typeId: "T", date: "2026-10-01" }],
+      today: "2026-10-30",
+    }).buildings[0].rows[0]
+    assert.equal(daily.actual.length, 6)
+    assert.deepEqual(daily.actual[0].floorUnits, [
+      { floor: 8, units: 1 },
+      { floor: 5, units: 1 },
+    ])
+    assert.equal(floorListText(daily.actual[0].floorUnits!.map((x) => x.floor)), "5·8F")
+    assert.equal(floorListText([12, 14, 15, -1]), "B1·12·14~15F")
+  })
+  it("gapDays 3: 완료일이 3일 넘게 끊기면 새 막대, 막대 층 범위", () => {
     assert.deepEqual(
       row.actual.map((b) => [b.start, b.end, floorRangeText(b.floorFrom, b.floorTo), b.units]),
       [

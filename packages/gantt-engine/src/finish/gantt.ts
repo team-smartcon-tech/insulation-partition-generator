@@ -75,7 +75,29 @@ export function finishTradeOf(name: string): FinishTradeKey | null {
   return null
 }
 
-export type FinishBar = { start: IsoDate; end: IsoDate; floorFrom: number; floorTo: number; units: number }
+export type FinishBar = {
+  start: IsoDate
+  end: IsoDate
+  floorFrom: number
+  floorTo: number
+  units: number
+  /** 실적 막대: 층별 완료 세대 (높은 층부터). 스마트웍스 마감입력 칸과 그대로 맞춰 보려고 */
+  floorUnits?: { floor: number; units: number }[]
+}
+
+/** 층 목록 → "12·14~15F" (이어진 층은 묶고, 끊긴 층은 · 로) */
+export function floorListText(floors: number[]): string {
+  const fs = [...new Set(floors)].sort((a, b) => a - b)
+  const parts: string[] = []
+  const f = (n: number) => (n < 0 ? `B${-n}` : String(n))
+  for (let i = 0; i < fs.length; ) {
+    let j = i
+    while (j + 1 < fs.length && fs[j + 1] === fs[j] + 1) j++
+    parts.push(i === j ? f(fs[i]) : `${f(fs[i])}~${f(fs[j])}`)
+    i = j + 1
+  }
+  return parts.length ? `${parts.join("·")}F` : ""
+}
 export type FinishGanttRow = {
   trade: FinishTradeKey
   /** 이 공종으로 맞춘 스마트웍스 공종 이름들 */
@@ -100,10 +122,10 @@ export function buildFinishGantt(input: {
   rooms: FinishRoomIn[]
   works: FinishWorkIn[]
   today: IsoDate
-  /** 실적 막대를 끊는 간격(일). 기본 3 — 주말·하루 쉼은 이어 본다 */
+  /** 실적 막대를 끊는 간격(일). 기본 0 = 완료일마다 따로 (스마트웍스 마감입력 날짜와 그대로 맞게, 2026-10-30) */
   gapDays?: number
 }): FinishGantt {
-  const gap = input.gapDays ?? 3
+  const gap = input.gapDays ?? 0
   const tradeOfType = new Map<string, FinishTradeKey>()
   const namesOf = new Map<FinishTradeKey, Set<string>>()
   for (const t of input.types) {
@@ -159,8 +181,12 @@ export function buildFinishGantt(input: {
             cur.floorFrom = Math.min(cur.floorFrom, r.floor)
             cur.floorTo = Math.max(cur.floorTo, r.floor)
             cur.units++
-          } else actual.push({ start: d, end: d, floorFrom: r.floor, floorTo: r.floor, units: 1 })
+            const fu = cur.floorUnits!.find((x) => x.floor === r.floor)
+            if (fu) fu.units++
+            else cur.floorUnits!.push({ floor: r.floor, units: 1 })
+          } else actual.push({ start: d, end: d, floorFrom: r.floor, floorTo: r.floor, units: 1, floorUnits: [{ floor: r.floor, units: 1 }] })
         }
+        for (const a of actual) a.floorUnits!.sort((x, y) => y.floor - x.floor)
         const done = finished.length
         const total = mine.length
         const recent = finished.filter((x) => x.d > since).length

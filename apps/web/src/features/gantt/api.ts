@@ -139,7 +139,14 @@ const finishStatSchema = z.object({
   status: z.enum(["done", "progress", "stalled", "blocked", "idle"]),
   blockedBy: z.string().optional(),
 });
-const finishBarSchema = z.object({ start: z.string(), end: z.string(), floorFrom: z.number(), floorTo: z.number(), units: z.number() });
+const finishBarSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+  floorFrom: z.number(),
+  floorTo: z.number(),
+  units: z.number(),
+  floorUnits: z.array(z.object({ floor: z.number(), units: z.number() })).optional(),
+});
 export type FinishBarT = z.infer<typeof finishBarSchema>;
 const finishResponseSchema = z.object({
   siteId: z.string(),

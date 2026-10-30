@@ -4,7 +4,7 @@
  * - 예정 막대(연한 점선): 남은 층을 선행 공종·간격·층 묶음 규칙으로 (엔진 planFinishBuilding, 오른쪽 설정 카드).
  * - 오늘 세로선. 일요일 띠, 공휴일 빨간 날짜, 날짜 세로줄은 골조 간트와 같다.
  */
-import { FINISH_TRADES, dateRange, floorRangeText, getDayInfo, type FinishPlanRow } from "@ipg/gantt-engine";
+import { FINISH_TRADES, dateRange, floorListText, floorRangeText, getDayInfo, type FinishPlanRow } from "@ipg/gantt-engine";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { FinishBarT, FinishReportsResponse, FinishResponse } from "../api";
@@ -184,13 +184,15 @@ export default function FinishGantt({
                           {(sw?.actual ?? []).map((bar, i) => {
                             const p = place(bar);
                             if (!p) return null;
-                            const label = floorRangeText(bar.floorFrom, bar.floorTo);
+                            const fu = bar.floorUnits ?? [];
+                            const label = fu.length ? floorListText(fu.map((x) => x.floor)) : floorRangeText(bar.floorFrom, bar.floorTo);
+                            const detail = fu.map((x) => `${floorRangeText(x.floor, x.floor)} ${x.units}세대`).join(", ");
                             return (
                               <div key={`a${i}`} className="absolute" style={{ left: p.left, width: p.width, top: bottomTop, height: LANE }}>
                                 <div className="truncate whitespace-nowrap text-[10px] leading-[11px] text-slate-600">✓{label}</div>
                                 <div
                                   className="h-1.5 rounded-full bg-slate-600"
-                                  title={`${b.name} ${t.label} ${label} · ${md(bar.start)}~${md(bar.end)} · ${bar.units}세대 완료 (스마트웍스 세대 기록)`}
+                                  title={`${b.name} ${t.label} · ${bar.start === bar.end ? md(bar.start) : `${md(bar.start)}~${md(bar.end)}`} · ${bar.units}세대 완료 (스마트웍스 마감입력)${detail ? `\n${detail}` : ""}`}
                                 />
                               </div>
                             );
@@ -235,7 +237,7 @@ export default function FinishGantt({
           <span className="inline-block h-3 w-4 rounded-sm border border-dashed border-slate-400 bg-slate-100" />
           예정(선행 공종·간격·층 묶음 규칙)
         </span>
-        <span>위 = 일보 작업(작업일보 마감 줄, 3일 안에 이어지면 한 막대) · 아래 = 세대 완료·예정 · 막대 위 = 층 범위 · 세로선 = 오늘 · 칸을 누르면 그날 작업일보</span>
+        <span>위 = 일보 작업(작업일보 마감 줄, 3일 안에 이어지면 한 막대) · 아래 = ✓ 그날 완료한 층(스마트웍스 마감입력 날짜)·예정 · 막대 위 = 층 범위 · 세로선 = 오늘 · 칸을 누르면 그날 작업일보</span>
       </div>
     </div>
   );

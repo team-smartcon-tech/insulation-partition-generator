@@ -50,6 +50,7 @@ export {
   FINISH_TRADES,
   buildFinishGantt,
   finishTradeOf,
+  floorListText,
   floorRangeText,
   type FinishBar,
   type FinishGantt,

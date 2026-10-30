@@ -51,7 +51,12 @@ export default function FinishCellDialog({
   const title = `${target.buildingName} · ${target.trade.label}`;
   const bars = [
     ...target.report.map((b) => ({ kind: "일보 작업", tone: "bg-violet-100 text-violet-800", b, note: b.days ? `일보 ${b.days}일` : "" })),
-    ...target.actual.map((b) => ({ kind: "세대 완료", tone: "bg-slate-200 text-slate-800", b, note: `${b.units}세대 (스마트웍스)` })),
+    ...target.actual.map((b) => ({
+      kind: "세대 완료",
+      tone: "bg-slate-200 text-slate-800",
+      b,
+      note: `${b.units}세대 (스마트웍스 마감입력${b.floorUnits?.length ? `: ${b.floorUnits.map((x) => `${floorRangeText(x.floor, x.floor)} ${x.units}`).join(", ")}` : ""})`,
+    })),
     ...target.plan.map((b) => ({ kind: "예정", tone: "bg-stone-100 text-stone-600", b, note: `남은 ${b.units}세대 (선행·층 묶음 규칙)` })),
   ];
 
