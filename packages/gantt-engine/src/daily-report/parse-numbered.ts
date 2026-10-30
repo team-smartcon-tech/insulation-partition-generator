@@ -170,7 +170,17 @@ export function parseNumbered(rawText: string): ParsedWorkText {
     if (!it || !kind || sub === "skip") continue
     const body = it[1].replace(HEADCOUNT_TAIL, "").trim()
 
-    for (const seg of splitSegments(body)) {
+    // "101동, 102동, 103동, 104동, 지하주차장, 공용부: 골조 : 102동 2코어 옥탑 벽체 배관" — 앞은 그 팀 담당 범위,
+    // 실제 작업은 마지막 「:」 뒤. 뒤에 동 번호가 있으면 뒤만 읽는다 (부산장안 2026-10)
+    // 「항목 : 내용」 이 여러 개 이어진 줄("…: 골조 : 102동 옥탑1층 슬라브배관 입선 : 102동 단위세대 …")은 「골조 :」 뒤 ~ 다음 「항목 :」 앞만
+    const framing = /골조\s*[:：]\s*(.*?)(?=\s+[가-힣A-Za-z/]+\s*[:：]|$)/.exec(body)
+    const lastColon = Math.max(body.lastIndexOf(":"), body.lastIndexOf("："))
+    const work = framing
+      ? framing[1].trim()
+      : lastColon >= 0 && /\d{3,4}\s*동/.test(body.slice(lastColon + 1))
+        ? body.slice(lastColon + 1).trim()
+        : body
+    for (const seg of splitSegments(work)) {
       const lb = LEADING_BUILDINGS.exec(seg)
       if (!lb) continue // 현장 관리, 반입 등 동이 없는 줄
       const nos = expandBuildings(lb[1])
@@ -187,12 +197,25 @@ export function parseNumbered(rawText: string): ParsedWorkText {
       const verbTail = (/(?:벽체|벽|바닥|슬래브|슬라브|슬랩|스라브)\s*(.*)$/.exec(last)?.[1] ?? last).trim()
       let lastFloor: { floor: number | null; floorLabel?: string } | null = null
       const picked: { floor: number | null; floorLabel?: string; part: "wall" | "slab" | null; text: string }[] = []
+      // 옥탑: 「옥탑 2층」 「옥탑 RF」 「옥탑 슬라브」 는 일반 층이 아니다 — 「옥탑2층」 「옥탑RF」 「옥탑」 표기로 두고
+      // 일반 층 규칙(아래 층 사이클)도 쓰지 않는다 (부산장안 2026-10: 「옥탑 2층」 이 2층, 「옥탑 슬라브(1F)」 가 B1 로 읽혔다)
+      const roofOf = (ph: string): string | null => {
+        if (!/옥탑/.test(ph)) return null
+        const n = /옥탑\s*(\d{1,2})\s*(?:층|F\b)/i.exec(ph) ?? /(?:^|[^0-9A-Za-z])(\d{1,2})\s*(?:층|F\b)/i.exec(ph.slice(ph.indexOf("옥탑")))
+        // 옥탑은 5층 이하 — 「1코어 옥탑 …, 2코어 22층 …」 의 22층은 옥탑 층이 아니다
+        if (n && Number(n[1]) <= 5) return `옥탑${n[1]}층`
+        if (/RF\b|지붕/.test(ph)) return "옥탑RF"
+        return "옥탑"
+      }
+      const restRoof = roofOf(rest)
       phrases.forEach((ph, i) => {
         if (/주변/.test(ph)) return // 옆 부대시설
-        const ft = FLOOR_TOKEN.exec(ph)
-        if (ft) lastFloor = parseFloorToken(ft[1])
+        const roof = roofOf(ph) ?? (restRoof && /층|F\b/.test(ph) ? null : restRoof)
+        const ft = roof ? null : FLOOR_TOKEN.exec(ph)
+        if (roof) lastFloor = { floor: null, floorLabel: roof }
+        else if (ft) lastFloor = parseFloorToken(ft[1])
         const part = partOf(ph)
-        if (!part && !ft) return // "정리" 같은 꼬리 구문
+        if (!part && !ft && !roof) return // "정리" 같은 꼬리 구문
         const own = stripFloors(ph)
         // 구문에 공종 단어가 이미 있으면("B2F 벽체거푸집 설치") 뒤 구문의 동사를 붙이지 않는다
         const hasVerb = /거푸집|형틀|폼|철근|배근|타설|동바리|배관|박스|슬리브|스리브|이중관/.test(own)

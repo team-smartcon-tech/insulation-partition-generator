@@ -245,6 +245,8 @@ export const planResponseSchema = simulateResponseSchema.extend({
   underground: z.array(z.number().int()).default([]),
   /** 최상층을 몰라 기준층 예정을 그리지 않은 동 (설정 탭 동 목록에 최상층 입력 필요) */
   noTopFloor: z.array(z.number().int()).default([]),
+  /** 옥탑 공사 중이라 실적만 보여 주는 동 */
+  rooftopPhase: z.array(z.number().int()).default([]),
   /** 동 목록에 없는 동 번호라 공정표에서 뺀 것 (일보 오타 등) */
   ignoredBuildings: z.array(z.number().int()).default([]),
   /** 이 현장의 첫 작업일보 날짜. 보는 달에 쓸 실적이 없을 때 안내용 (일보가 아예 없으면 null) */

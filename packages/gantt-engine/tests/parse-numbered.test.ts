@@ -164,3 +164,29 @@ describe("● 제목 양식 (평택고덕P1 1차 2026-10-30 일보 모양)", () 
     assert.deepEqual(e.map((x) => x.buildingNo), [504, 505])
   })
 })
+
+describe("옥탑·담당 범위 (부산장안 2026-10 일보 모양)", () => {
+  const f = (line: string) =>
+    parseWorkText(`▶ 철근콘크리트공사(38명)\n- ${line}\n▶ 내장공사(15명)\n- 101동 11~15층 천정`).entries.map((e) => [e.buildingNo, e.floorLabel ?? e.floor, e.stage])
+  it("「옥탑 RF 바닥 타설」 → 옥탑RF S타설 (일반 층·아래 층 규칙 아님)", () => {
+    assert.deepEqual(f("101동 옥탑 RF 바닥 타설(3명)"), [[101, "옥탑RF", "POUR"]])
+  })
+  it("「1코어 옥탑 2층 벽체 거푸집 해체정리」 → 옥탑2층 (해체라 공정 아님)", () => {
+    assert.deepEqual(f("102동 1코어 옥탑 2층 벽체 거푸집 해체정리"), [[102, "옥탑2층", null]])
+  })
+  it("「옥탑 벽체 철근 배근」 → 옥탑 W철근", () => {
+    assert.deepEqual(f("101동 옥탑 벽체 철근 배근(2명)"), [[101, "옥탑", "WALL_REBAR"]])
+  })
+  it("담당 범위 목록 뒤 「골조 : 102동 …」 은 102동만", () => {
+    const e = parseWorkText(
+      "▶ 철근콘크리트공사(3명)\n- 0동 관리\n▶ 전기공사(5명)\n- 101동, 102동, 103동, 104동, 지하주차장, 공용부: 골조 : 102동 2코어 옥탑 벽체 배관, 입선작업",
+    ).entries
+    assert.deepEqual(e.map((x) => [x.buildingNo, x.floorLabel ?? x.floor, x.stage]), [[102, "옥탑", "WALL_MEP"]])
+  })
+  it("「항목 : 내용」 이 이어진 줄은 「골조 :」 부분만 (부산장안 10/14 원문)", () => {
+    const e = parseWorkText(
+      "▶ 철근콘크리트공사(3명)\n- 0동 관리\n▶ 전기배관배선공사(1)\n  - 101동,102동,103동,104동,지하주차장,: 골조 : 102동 옥탑1층 슬라브배관 입선 : 102동 단위세대 전기입선, 통신입선작업 분전반설치: PK 분전반속판 설치 (1)",
+    ).entries
+    assert.deepEqual(e.map((x) => [x.buildingNo, x.floorLabel ?? x.floor, x.stage]), [[102, "옥탑1층", "SLAB_MEP"]])
+  })
+})

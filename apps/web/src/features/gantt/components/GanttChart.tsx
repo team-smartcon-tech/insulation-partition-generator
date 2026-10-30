@@ -199,10 +199,18 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
   for (const [id, byDate] of actualDays) {
     const dates = [...byDate.keys()].sort();
     let maxSeen = -Infinity;
+    let roofSeen = "";
     dates.forEach((date, i) => {
       const prev = i > 0 ? byDate.get(dates[i - 1])! : [];
       for (const w of byDate.get(date)!) if (prev.some((x) => same(x, w))) contActual.add(w);
       const numeric = byDate.get(date)!.filter((w) => w.floorLabel == null);
+      // 옥탑 공사: 숫자 층이 없고 「옥탑…」 표기만 있으면 그 표기가 바뀐 날 라벨 (부산장안)
+      const roof = byDate.get(date)!.find((w) => w.floorLabel?.startsWith("옥탑"));
+      if (!numeric.length && roof) {
+        if (roofSeen !== roof.floorLabel) actualStoryLabel.set(`${date}|${id}`, roof.floorLabel!);
+        roofSeen = roof.floorLabel!;
+        return;
+      }
       if (!numeric.length) return;
       const top = numeric.reduce((m, w) => (w.floor > m.floor ? w : m));
       if (top.floor > maxSeen) {

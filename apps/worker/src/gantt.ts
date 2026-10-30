@@ -449,6 +449,7 @@ gantt.post("/plan", async (c) => {
         unplanned: [],
         underground: [],
         noTopFloor: [],
+        rooftopPhase: [],
         ignoredBuildings: [],
         firstReportDate,
       };
@@ -474,6 +475,7 @@ gantt.post("/plan", async (c) => {
         unplanned: [],
         underground: [],
         noTopFloor: [],
+        rooftopPhase: [],
         ignoredBuildings: [],
         firstReportDate,
       };
@@ -493,13 +495,21 @@ gantt.post("/plan", async (c) => {
     const ug = req.settings.underground ?? DEFAULT_UNDERGROUND_SETTINGS;
     const baseFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.baseFloor ?? 2;
     const unplanned = new Set<number>(); // 지하 공정인데 위치를 못 읽은 동 (실적만)
+    const rooftopPhase = new Set<number>(); // 옥탑 공사 중인 동 (실적만)
     const ugBuildings: UgBuilding[] = [];
     for (const b of progress.buildings) {
       const mine = progress.actual.filter((a) => a.buildingId === b.id);
       const lastDate = mine.at(-1)?.date;
       const lastDay = mine.filter((a) => a.date === lastDate);
       const top = Math.max(...lastDay.map((a) => a.floor));
-      if (!(lastDay.some((a) => UNDERGROUND_STAGES.includes(a.stage) || a.floorLabel != null) || top < baseFloorOf(b.id))) continue;
+      // 옥탑 공사 중(마지막 실적 날에 「옥탑…」 층) — 지하가 아니다. 실적만 보여 준다 (부산장안 2026-10)
+      if (lastDay.some((a) => a.floorLabel?.startsWith("옥탑"))) {
+        rooftopPhase.add(b.id);
+        continue;
+      }
+      const numeric = lastDay.filter((a) => a.floorLabel == null);
+      const topNum = numeric.length ? Math.max(...numeric.map((a) => a.floor)) : top;
+      if (!(lastDay.some((a) => UNDERGROUND_STAGES.includes(a.stage) || (a.floorLabel != null && a.floorLabel !== "층?")) || topNum < baseFloorOf(b.id))) continue;
       const st = undergroundStateFromActual(progress.actual, b.id, baseFloorOf(b.id), ug);
       if (st) ugBuildings.push(st);
       else unplanned.add(b.id);
@@ -514,7 +524,7 @@ gantt.post("/plan", async (c) => {
     const topFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.topFloor ?? null;
 
     const initial: BuildingState[] = [
-      ...progress.initial.filter((b) => !unplanned.has(b.id) && !ugIds.has(b.id)).map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
+      ...progress.initial.filter((b) => !unplanned.has(b.id) && !ugIds.has(b.id) && !rooftopPhase.has(b.id)).map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
       ...buildings
         .filter((b) => !reported.has(b.buildingNo) && !ugIds.has(b.buildingNo))
         .map((b) => ({
@@ -561,7 +571,7 @@ gantt.post("/plan", async (c) => {
         : null;
     const statsFrom = planFrom > req.from ? planFrom : req.from;
     // 화면 줄: 예정 계산하는 동 + 실적만 있는 동(지하·저층)
-    const allIds = [...new Set([...initial.map((b) => b.id), ...ugIds, ...unplanned])].sort((a, b) => a - b);
+    const allIds = [...new Set([...initial.map((b) => b.id), ...ugIds, ...unplanned, ...rooftopPhase])].sort((a, b) => a - b);
     const empty = { fullDays: 0, halfDays: 0 };
     const labelOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.name ?? progress.buildings.find((x) => x.id === id)?.label ?? `${id}동`;
     const body: PlanResponse = {
@@ -583,6 +593,7 @@ gantt.post("/plan", async (c) => {
       unplanned: [...unplanned].sort((a, b) => a - b),
       underground: [...ugIds].sort((a, b) => a - b),
       noTopFloor: noTopFloor.sort((a, b) => a - b),
+      rooftopPhase: [...rooftopPhase].sort((a, b) => a - b),
       ignoredBuildings: [...ignoredSet].sort((a, b) => a - b),
       firstReportDate,
     };
