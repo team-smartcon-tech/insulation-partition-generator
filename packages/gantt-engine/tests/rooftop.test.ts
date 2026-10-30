@@ -89,6 +89,13 @@ describe("옥탑 순서표", () => {
     }
   })
 
+  it("옥탑 갱폼·철근 날은 갱폼·철근 유휴가 아니다", () => {
+    const r = run(1)
+    const days = (stage: string) => [...new Set(r.assignments.filter((a) => a.roof === 1 && a.stage === stage).map((a) => a.date))]
+    for (const d of days("GANGFORM")) assert.equal(periodStats(r, calendar, d, d).idle.gangform.fullDays, 0, `${d} 갱폼`)
+    for (const d of [...days("WALL_REBAR"), ...days("SLAB_REBAR")]) assert.equal(periodStats(r, calendar, d, d).idle.rebar.fullDays, 0, `${d} 철근`)
+  })
+
   it("옥탑 거푸집 날은 알폼 유휴가 아니다 (알폼팀 몫)", () => {
     const r = run(1)
     const formDays = [...new Set(r.assignments.filter((a) => a.roof === 1 && a.stage === "ALFORM").map((a) => a.date))]

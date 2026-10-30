@@ -314,14 +314,11 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
           <div className="mt-1 border-t-2 border-border" />
           {IDLE_TEAMS.map((team) => {
             // 유휴일 = 그달 그 팀 작업이 하나도 없는 날. 일요일·공휴일 포함(팀 체류 기준, 설계 §5 "일요일 포함 월 허용 유휴").
-            // 상자 안 숫자는 그달 몇 번째 유휴일인지. 옥탑은 별도 작업조라 팀 작업으로 세지 않되,
-            // 옥탑 거푸집은 알폼팀 몫이라 알폼 작업일로 센다.
+            // 상자 안 숫자는 그달 몇 번째 유휴일인지. 옥탑 갱폼·철근·거푸집도 그 팀 작업일로 센다.
             const idleDays = data.days.filter((d) =>
               isActualDay(d.date)
                 ? !(data.actual ?? []).some((a) => a.date === d.date && team.stages.includes(a.stage))
-                : !data.assignments.some(
-                    (a) => a.date === d.date && (a.roof == null || team.key === "alform") && team.stages.includes(a.stage),
-                  ),
+                : !data.assignments.some((a) => a.date === d.date && team.stages.includes(a.stage)),
             ).map((d) => d.date);
             const nth = new Map(idleDays.map((date, i) => [date, i + 1]));
             return (

@@ -35,11 +35,10 @@ export function periodStats(
   from: IsoDate,
   to: IsoDate,
 ): PeriodStats {
-  // 옥탑은 별도 작업조로 보고 타설·철근·갱폼 집계에서 뺀다 (기준층 사이클만 센다).
-  // 단 옥탑 거푸집은 알폼팀이 하므로 알폼 유휴에서는 작업일로 센다 (2026-10-30 사용자 결정)
+  // 타설 횟수·타설 공백은 기준층 사이클만 센다(옥탑 타설은 뺀다).
+  // 팀 유휴는 옥탑 작업도 그 팀 작업일로 센다 — 옥탑 갱폼·철근·거푸집도 갱폼·철근·알폼팀 몫 (2026-10-30 사용자 결정)
   const base = result.assignments.filter((a) => a.roof == null)
-  const teamWork = (team: Exclude<Team, "pour">) =>
-    team === "alform" ? result.assignments.filter((a) => a.roof == null || a.stage === "ALFORM") : base
+  const teamWork = (_team: Exclude<Team, "pour">) => result.assignments
   const inRange = (a: Assignment) => a.date >= from && a.date <= to
   const days = dateRange(from, to)
 
