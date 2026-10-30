@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { useDailyReports } from "../hooks";
 import { addDays, koreanDate, todayKst, weekdayEn } from "../dates";
 
-const STAGE_ORDER: Stage[] = ["MARK", "GANGFORM", "FORM_WALL", "WALL_REBAR", "ALFORM", "SHORING", "FORM_SLAB", "TOP_INSULATION", "SLAB_REBAR", "POUR", "WALL_MEP", "SLAB_MEP"];
+const STAGE_ORDER: Stage[] = ["MARK", "GANGFORM", "FORM_WALL", "WALL_REBAR", "ALFORM", "SHORING", "FORM_SLAB", "TOP_INSULATION", "SLAB_REBAR", "POUR_COLUMN", "POUR_WALL", "POUR", "WALL_MEP", "SLAB_MEP"];
 
 const STAGE_KEYWORDS: Record<Stage, RegExp> = {
   MARK: /먹매김|먹메김/g,
@@ -25,6 +25,8 @@ const STAGE_KEYWORDS: Record<Stage, RegExp> = {
   FORM_WALL: /거푸집|형틀/g,
   FORM_SLAB: /거푸집|형틀/g,
   SHORING: /동바리|시스템/g,
+  POUR_WALL: /타설/g,
+  POUR_COLUMN: /타설/g,
 };
 
 const STAGE_TONE: Record<Stage, string> = {
@@ -41,6 +43,8 @@ const STAGE_TONE: Record<Stage, string> = {
   FORM_WALL: "bg-sky-100 text-sky-800",
   FORM_SLAB: "bg-sky-100 text-sky-800",
   SHORING: "bg-slate-200 text-slate-700",
+  POUR_WALL: "bg-rose-100 text-rose-800",
+  POUR_COLUMN: "bg-rose-100 text-rose-800",
 };
 
 function Highlight({ text, re }: { text: string; re: RegExp }) {

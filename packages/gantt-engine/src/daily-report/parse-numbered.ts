@@ -18,11 +18,11 @@
 //   6. 설비 공사 (4)
 //   - 504동, 505동 1F 바닥 슬리브 설치(2)
 //
-// 읽는 것: 형틀(벽·바닥 거푸집 설치, 시스템 동바리)·철근·콘크리트(타설)·전기/설비(벽·바닥 박스·슬리브·배관 → 기전).
+// 읽는 것: 형틀(벽·바닥 거푸집 설치, 시스템 동바리)·철근·콘크리트(타설: 벽체·합벽 W / 기둥 C / 바닥 S)·전기/설비(벽·바닥 박스·슬리브·배관 → 기전).
 // 줄 끝 "(8)" 은 투입 인원이라 버린다. "502동, 503동", "501동~504동" 은 동마다 한 줄씩.
 // "B1F 벽체 및 1F 바닥 거푸집 설치" 처럼 「및」 으로 묶인 것은 벽·바닥을 나눠 각자의 층으로 읽는다.
 import type { Stage, WorkEntry } from "../contracts/index.ts"
-import type { ParsedWorkText } from "./parse-work-text.ts"
+import { NOT_POURED, pourStage, type ParsedWorkText } from "./parse-work-text.ts"
 
 type Kind = "form" | "rebar" | "concrete" | "mep"
 
@@ -86,7 +86,7 @@ function stageFor(kind: Kind, sub: string, text: string, part: "wall" | "slab" |
     if (!/박스|슬리브|스리브|배관|이중관|매립|검측/.test(t)) return null
     return part === "slab" ? "SLAB_MEP" : part === "wall" ? "WALL_MEP" : null
   }
-  if (/타설/.test(t)) return "POUR"
+  if (/타설/.test(t)) return NOT_POURED.test(t) ? null : pourStage(t, part)
   if (kind === "concrete") return null // 면 보수·양생 등
   // 해체(거푸집·동바리 모두)는 공정 단계가 아니다
   if (/해체/.test(t) || /해체/.test(sub)) return null

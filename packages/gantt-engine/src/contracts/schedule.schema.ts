@@ -54,6 +54,8 @@ export const stageSchema = z.enum([
   "FORM_WALL",
   "FORM_SLAB",
   "SHORING",
+  "POUR_WALL",
+  "POUR_COLUMN",
 ])
 
 export const halfSchema = z.enum(["AM", "PM"])
@@ -129,11 +131,13 @@ export const STAGE_LABEL: Record<z.infer<typeof stageSchema>, string> = {
   TOP_INSULATION: "바닥단열재(최상층)",
   SLAB_REBAR: "슬래브철근",
   SLAB_MEP: "기전·검측(슬래브)",
-  POUR: "타설",
+  POUR: "S타설(바닥 타설)",
   CURE: "양생",
   FORM_WALL: "벽체 거푸집",
   FORM_SLAB: "바닥 거푸집",
   SHORING: "시스템",
+  POUR_WALL: "W타설(벽체·합벽 타설)",
+  POUR_COLUMN: "C타설(기둥 타설)",
 }
 
 // ── 현장 실적 기반 계획 (작업일보 → 출발 상태 → 예정) ────────────────────────

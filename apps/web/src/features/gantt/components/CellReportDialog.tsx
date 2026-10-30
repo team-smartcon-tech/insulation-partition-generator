@@ -20,11 +20,13 @@ const NAME: Record<Stage, string> = {
   TOP_INSULATION: "단열재(최상층)",
   SLAB_REBAR: "S철근(슬래브철근)",
   SLAB_MEP: "S기전(슬래브 기전·검측)",
-  POUR: "타설",
+  POUR: "S타설(바닥 타설)",
   CURE: "양생",
   FORM_WALL: "W거푸집(벽체 거푸집)",
   FORM_SLAB: "S거푸집(바닥 거푸집)",
   SHORING: "시스템(시스템 동바리)",
+  POUR_WALL: "W타설(벽체·합벽 타설)",
+  POUR_COLUMN: "C타설(기둥 타설)",
 };
 
 export type CellTarget = {

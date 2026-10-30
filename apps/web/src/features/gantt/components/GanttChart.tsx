@@ -34,6 +34,8 @@ const STAGE_GROUP: Record<Stage, Group> = {
   FORM_WALL: "form",
   FORM_SLAB: "form",
   SHORING: "shoring",
+  POUR_WALL: "pour",
+  POUR_COLUMN: "pour",
 };
 
 const GROUP_LABEL: Record<Group, string> = {
@@ -43,7 +45,7 @@ const GROUP_LABEL: Record<Group, string> = {
   mep: "W·S기전",
   alform: "알폼",
   insulation: "단열재(최상층)",
-  pour: "타설",
+  pour: "W·C·S타설",
   form: "W·S거푸집(지하)",
   shoring: "시스템(동바리)",
 };
@@ -58,11 +60,13 @@ const STAGE_TEXT: Record<Stage, string> = {
   TOP_INSULATION: "단열재",
   SLAB_REBAR: "S철근",
   SLAB_MEP: "S기전",
-  POUR: "타설",
+  POUR: "S타설",
   CURE: "양생",
   FORM_WALL: "W거푸집",
   FORM_SLAB: "S거푸집",
   SHORING: "시스템",
+  POUR_WALL: "W타설",
+  POUR_COLUMN: "C타설",
 };
 
 const GROUP_STYLE: Record<Group, string> = {
@@ -86,11 +90,13 @@ const STAGE_TITLE: Record<Stage, string> = {
   TOP_INSULATION: "바닥단열재(최상층)",
   SLAB_REBAR: "S철근(슬래브철근)",
   SLAB_MEP: "S기전(슬래브 기전·검측)",
-  POUR: "타설",
+  POUR: "S타설(바닥 타설)",
   CURE: "양생",
   FORM_WALL: "W거푸집(벽체 거푸집)",
   FORM_SLAB: "S거푸집(바닥 거푸집)",
   SHORING: "시스템(시스템 동바리)",
+  POUR_WALL: "W타설(벽체·합벽 타설)",
+  POUR_COLUMN: "C타설(기둥 타설)",
 };
 
 const STAGE_INDEX: Record<Stage, number> = {
@@ -107,11 +113,15 @@ const STAGE_INDEX: Record<Stage, number> = {
   // 지하·저층 순서: 벽 거푸집 → 벽 철근 → 기전 → 시스템 → 바닥 거푸집 → 바닥 철근 → 기전 → 타설
   FORM_WALL: 1.5,
   SHORING: 4.2,
+  POUR_COLUMN: 3.5, // 벽 기전 뒤 기둥·벽 타설(분리 타설)
+  POUR_WALL: 3.6,
   FORM_SLAB: 4.5,
 };
 
 /** 실적 층 표시: RF 같은 표기 그대로, 지하는 B1F */
 const actualFloorText = (w: { floor: number; floorLabel?: string }) => w.floorLabel ?? (w.floor < 0 ? `B${-w.floor}F` : `${w.floor}F`);
+
+const isPour = (s: Stage) => s === "POUR" || s === "POUR_WALL" || s === "POUR_COLUMN";
 
 /** 층 표시: 옥탑은 PH1·PH2, 그 외 42F */
 const floorLabel = (a: { floor: number; roof?: number }) => (a.roof ? `PH${a.roof}` : `${a.floor}F`);
@@ -283,8 +293,8 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
     cn("relative min-w-0 border-r border-border/50", d.isSunday && "bg-muted", isPlanStart(d.date) && "border-l-2 border-l-primary/60", extra);
 
   const pourDates = new Set([
-    ...data.assignments.filter((a) => a.stage === "POUR").map((a) => a.date),
-    ...(data.actual ?? []).filter((a) => a.stage === "POUR").map((a) => a.date),
+    ...data.assignments.filter((a) => isPour(a.stage)).map((a) => a.date),
+    ...(data.actual ?? []).filter((a) => isPour(a.stage)).map((a) => a.date),
   ]);
 
   return (

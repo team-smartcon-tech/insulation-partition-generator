@@ -36,6 +36,21 @@ export function sectionOf(header: string): Section | null {
   return null
 }
 
+/**
+ * 타설 구분 (2026-10-30 사용자 결정): 벽체·합벽 → W타설(POUR_WALL), 기둥 → C타설(POUR_COLUMN), 바닥(그 외) → S타설(POUR).
+ * 기준층 사이클의 타설은 바닥 타설이라 POUR 그대로.
+ */
+/** 실제 타설이 아닌 문구: "타설대기", "타설 전 잔손보기", "타설 준비" */
+export const NOT_POURED = /타설(?:대기|전|준비)|잔손/
+
+export function pourStage(text: string, part: "wall" | "slab" | null): Stage {
+  const t = text.replace(/\s+/g, "")
+  if (part === "slab" || /바닥|슬라브|슬래브|슬랩/.test(t)) return "POUR"
+  if (/기둥/.test(t)) return "POUR_COLUMN"
+  if (part === "wall" || /합벽|벽/.test(t)) return "POUR_WALL"
+  return "POUR"
+}
+
 /** 작업 문구 → 기준층 단계. 구간에 따라 읽는 규칙이 다르다. */
 export function stageOf(text: string, section: Section = "structure"): Stage | null {
   const t = text.replace(/\s+/g, "")
@@ -45,7 +60,7 @@ export function stageOf(text: string, section: Section = "structure"): Stage | n
   if (section === "structure") {
     if (/먹매김|먹메김/.test(t)) return "MARK"
     if (/갱폼|갱품/.test(t)) return "GANGFORM"
-    if (/타설/.test(t)) return "POUR"
+    if (/타설/.test(t)) return NOT_POURED.test(t) ? null : pourStage(t, isSlab ? "slab" : isWall ? "wall" : null)
     if (/알폼|알루미늄폼|알루미늄거푸집/.test(t)) return "ALFORM"
     if (/단열재/.test(t)) return "TOP_INSULATION" // 최상층 전용 (설계 §8-2)
     // 골조 구간의 "철근배관" 은 철근 배근으로 본다 — 기전은 전기·설비 구간에 따로 적힌다.

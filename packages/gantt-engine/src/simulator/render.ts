@@ -16,6 +16,8 @@ const SHORT: Record<Stage, string> = {
   FORM_WALL: "벽",
   FORM_SLAB: "바",
   SHORING: "시",
+  POUR_WALL: "W",
+  POUR_COLUMN: "C",
 }
 
 export function renderText(result: SimulationResult): string {

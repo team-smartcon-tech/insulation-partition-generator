@@ -16,10 +16,12 @@ export const STAGES = [
   "FORM_WALL", // 벽체 거푸집 설치
   "FORM_SLAB", // 바닥 거푸집 설치
   "SHORING", // 시스템 동바리 (화면 표기 「시스템」). 거푸집 해체는 공정 단계가 아니다 (2026-10-30 사용자 결정)
+  "POUR_WALL", // W타설 — 벽체·합벽 타설 (지하·저층 실적). 바닥 타설(S타설)은 POUR
+  "POUR_COLUMN", // C타설 — 기둥 타설 (지하·저층 실적)
 ] as const
 
 /** 지하·저층 전용 단계 (예정 계산 안 함) */
-export const UNDERGROUND_STAGES: readonly Stage[] = ["FORM_WALL", "FORM_SLAB", "SHORING"]
+export const UNDERGROUND_STAGES: readonly Stage[] = ["FORM_WALL", "FORM_SLAB", "SHORING", "POUR_WALL", "POUR_COLUMN"]
 
 export type Stage = (typeof STAGES)[number]
 
@@ -49,6 +51,8 @@ export const STAGE_SLOTS: Record<Stage, number> = {
   FORM_WALL: 2,
   FORM_SLAB: 2,
   SHORING: 2,
+  POUR_WALL: 1,
+  POUR_COLUMN: 1,
 }
 
 export const STAGE_LABEL: Record<Stage, string> = {
@@ -60,11 +64,13 @@ export const STAGE_LABEL: Record<Stage, string> = {
   TOP_INSULATION: "바닥단열재(최상층)",
   SLAB_REBAR: "슬래브철근",
   SLAB_MEP: "기전·검측(슬래브)",
-  POUR: "타설",
+  POUR: "S타설(바닥 타설)",
   CURE: "양생",
   FORM_WALL: "벽체 거푸집",
   FORM_SLAB: "바닥 거푸집",
   SHORING: "시스템",
+  POUR_WALL: "W타설(벽체·합벽 타설)",
+  POUR_COLUMN: "C타설(기둥 타설)",
 }
 
 /**
