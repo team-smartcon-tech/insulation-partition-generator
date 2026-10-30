@@ -5,10 +5,12 @@
  * - 오늘 세로선. 일요일 띠, 공휴일 빨간 날짜, 날짜 세로줄은 골조 간트와 같다.
  */
 import { FINISH_TRADES, dateRange, floorRangeText, getDayInfo, type FinishPlanRow } from "@ipg/gantt-engine";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { FinishBarT, FinishReportsResponse, FinishResponse } from "../api";
 import { monthRange } from "../dates";
 import { CALENDAR } from "../hooks";
+import FinishCellDialog, { type FinishCellTarget } from "./FinishCellDialog";
 
 type Gantt = FinishResponse["gantt"];
 
@@ -32,6 +34,8 @@ export default function FinishGantt({
   reports,
   month,
   asOf,
+  siteId,
+  topFloorOf,
 }: {
   gantt: Gantt;
   /** 동 → 공종별 예정 막대 (planFinishBuilding: 선행·층 묶음 규칙) */
@@ -40,7 +44,11 @@ export default function FinishGantt({
   reports: FinishReportsResponse["rows"];
   month: string;
   asOf: string;
+  siteId: string | null;
+  /** 「~최상층」 해석용 (설정 탭 동 목록) */
+  topFloorOf: (buildingNo: number) => number | null;
 }) {
+  const [target, setTarget] = useState<FinishCellTarget | null>(null);
   const { from, to } = monthRange(month);
   const days = dateRange(from, to).map((d) => getDayInfo(CALENDAR, d));
   const n = days.length;
@@ -129,7 +137,26 @@ export default function FinishGantt({
                           </span>
                           {pct != null ? <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{pct}%</span> : null}
                         </div>
-                        <div className="relative" style={{ gridColumn: `span ${n}`, height }}>
+                        <div
+                          className="relative cursor-pointer hover:bg-primary/5"
+                          style={{ gridColumn: `span ${n}`, height }}
+                          onClick={(e) => {
+                            // 누른 가로 위치 → 날짜 칸
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const k = Math.min(n - 1, Math.max(0, Math.floor(((e.clientX - rect.left) / rect.width) * n)));
+                            const date = days[k].date;
+                            const on = (x: FinishBarT) => x.start <= date && date <= x.end;
+                            setTarget({
+                              date,
+                              buildingNo: b.buildingNo,
+                              buildingName: b.name,
+                              trade: t,
+                              report: report.filter(on),
+                              actual: (sw?.actual ?? []).filter(on),
+                              plan: plan.filter(on),
+                            });
+                          }}
+                        >
                           {/* 날짜 칸 배경 (세로줄·일요일) */}
                           <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }}>
                             {days.map((d) => (
@@ -192,6 +219,7 @@ export default function FinishGantt({
           })}
         </div>
       </div>
+      {target ? <FinishCellDialog siteId={siteId} target={target} topFloorOf={topFloorOf} onClose={() => setTarget(null)} /> : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         {[...new Set(gantt.trades.map((t) => t.group))].map((g) => (
           <span key={g} className="inline-flex items-center gap-1.5">
@@ -207,7 +235,7 @@ export default function FinishGantt({
           <span className="inline-block h-3 w-4 rounded-sm border border-dashed border-slate-400 bg-slate-100" />
           예정(선행 공종·간격·층 묶음 규칙)
         </span>
-        <span>위 = 일보 작업(작업일보 마감 줄, 3일 안에 이어지면 한 막대) · 아래 = 세대 완료·예정 · 막대 위 = 층 범위 · 세로선 = 오늘</span>
+        <span>위 = 일보 작업(작업일보 마감 줄, 3일 안에 이어지면 한 막대) · 아래 = 세대 완료·예정 · 막대 위 = 층 범위 · 세로선 = 오늘 · 칸을 누르면 그날 작업일보</span>
       </div>
     </div>
   );

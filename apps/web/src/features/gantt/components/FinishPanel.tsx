@@ -164,7 +164,15 @@ export default function FinishPanel({
 
       {view === "gantt" ? (
         d.gantt.trades.length ? (
-          <FinishGantt gantt={d.gantt} plans={plans} reports={reportsQ.data?.rows ?? []} month={month} asOf={d.asOf} />
+          <FinishGantt
+            gantt={d.gantt}
+            plans={plans}
+            reports={reportsQ.data?.rows ?? []}
+            month={month}
+            asOf={d.asOf}
+            siteId={siteId}
+            topFloorOf={(no) => saved.data?.buildings.find((x) => x.buildingNo === no)?.topFloor ?? null}
+          />
         ) : (
           <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
             이 현장 스마트웍스 마감 공종 중 간트 공종(내장·PL창호·유리·타일·방통·가구·도배·마루)에 맞는 것이 없습니다.

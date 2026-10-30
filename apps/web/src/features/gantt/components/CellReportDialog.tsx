@@ -10,6 +10,7 @@ import type { ActualWork, Assignment, Stage, WorkEntry } from "@ipg/gantt-engine
 import { cn } from "@/lib/utils";
 import { koreanDate } from "../dates";
 import { useDailyReports } from "../hooks";
+import ReportMentionLines from "./ReportMentionLines";
 
 const NAME: Record<Stage, string> = {
   MARK: "먹매김",
@@ -48,43 +49,6 @@ const nameOf = (a: { stage: Stage; roof?: number }) => (a.stage === "ALFORM" && 
 const floorText = (a: { floor: number | null; roof?: number; floorLabel?: string }) =>
   a.roof ? `PH${a.roof}` : a.floorLabel ? a.floorLabel : a.floor == null ? "층 없음" : a.floor < 0 ? `B${-a.floor}F` : `${a.floor}F`;
 
-/** 원문에서 그 동 번호가 나오는 줄만, 바로 위 구간 제목("* 전기(20)")과 함께 */
-function linesFor(rawText: string, buildingNo: number): { header: string | null; lines: string[] }[] {
-  const mention = new RegExp(`(^|[^\\d])${buildingNo}(?!\\d)`);
-  const out: { header: string | null; lines: string[] }[] = [];
-  let header: string | null = null;
-  for (const line of rawText.split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t) continue;
-    if (/^[*•■▶]/.test(t) || /^\[.*\]$/.test(t)) {
-      header = t.replace(/^[*•■▶]\s*/, "");
-      continue;
-    }
-    if (!mention.test(t)) continue;
-    const last = out.at(-1);
-    if (last && last.header === header) last.lines.push(t);
-    else out.push({ header, lines: [t] });
-  }
-  return out;
-}
-
-function MentionHighlight({ text, buildingNo }: { text: string; buildingNo: number }) {
-  const parts = text.split(new RegExp(`(${buildingNo}\\s*동?)`));
-  return (
-    <>
-      {parts.map((p, i) =>
-        i % 2 === 1 ? (
-          <mark key={i} className="rounded-sm bg-yellow-200 px-0.5 text-foreground">
-            {p}
-          </mark>
-        ) : (
-          <span key={i}>{p}</span>
-        ),
-      )}
-    </>
-  );
-}
-
 export default function CellReportDialog({ siteId, target, onClose }: { siteId: string | null; target: CellTarget; onClose: () => void }) {
   const q = useDailyReports(siteId, target.date, target.date);
   const report = q.data?.reports[0] ?? null;
@@ -99,7 +63,6 @@ export default function CellReportDialog({ siteId, target, onClose }: { siteId: 
   const reflected = (e: WorkEntry) =>
     // 시스템 동바리는 바닥 사이클에 맞춰 층을 옮길 수 있어(엔진 alignShoringToSlab) 공종만 본다
     e.stage != null && target.actual.some((a) => a.stage === e.stage && (a.floor === (e.floor ?? 0) || a.stage === "SHORING"));
-  const raw = report ? linesFor(report.rawText, target.buildingId) : [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={onClose}>
@@ -190,22 +153,7 @@ export default function CellReportDialog({ siteId, target, onClose }: { siteId: 
 
               <section>
                 <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">작업일보 원문 ({target.label} 언급 줄)</h3>
-                {raw.length ? (
-                  <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3 leading-6">
-                    {raw.map((g, i) => (
-                      <div key={i}>
-                        {g.header ? <p className="text-xs font-semibold text-muted-foreground">{g.header}</p> : null}
-                        {g.lines.map((l, j) => (
-                          <p key={j} className="break-keep">
-                            <MentionHighlight text={l} buildingNo={target.buildingId} />
-                          </p>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground">원문에 이 동이 나오지 않습니다.</p>
-                )}
+                <ReportMentionLines rawText={report.rawText} buildingNo={target.buildingId} label="이 동" />
                 <p className="mt-1 text-xs text-muted-foreground">
                   스마트웍스 작업일보 · 상태 {report.status} · 읽기 전용
                 </p>
