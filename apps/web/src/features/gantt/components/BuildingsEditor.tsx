@@ -89,7 +89,7 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
   const add = () => {
     // 비어 있으면 101동부터 (예전 401 은 남원주 1차 기준값이었다), 아니면 마지막 동 + 1
     const next = (value.at(-1)?.buildingNo ?? 100) + 1;
-    onChange([...value, { buildingNo: next, name: `${next}동`, baseFloor: 3, currentFloor: null, basementFloors: null, ...fromCores([{ top: 30, rooftop: 1 }]) } as Building]);
+    onChange([...value, { buildingNo: next, name: `${next}동`, baseFloor: 3, currentFloor: null, basementFloors: 0, ...fromCores([{ top: 30, rooftop: 1 }]) } as Building]);
   };
   /** 동 번호를 바꾸면 이름 속 같은 번호도 바꾼다 ("401동" → "101동", "401동(A)" → "101동(A)"). 이름에 옛 번호가 없으면 그대로 */
   const setNo = (i: number, no: number) => {
@@ -146,7 +146,7 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
                     />
                   </td>
                   <td className="py-1.5 pr-2 w-16">
-                    <NumInput min={0} max={10} value={b.basementFloors ?? null} placeholder="—" onValue={(v) => update(i, { basementFloors: v })} aria-label="지하층 수" />
+                    <NumInput min={0} max={10} value={b.basementFloors ?? 0} onValue={(v) => update(i, { basementFloors: v ?? 0 })} aria-label="지하층 수" />
                   </td>
                   <td className="py-1.5 pr-2 w-20">
                     <NumInput min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작" />
