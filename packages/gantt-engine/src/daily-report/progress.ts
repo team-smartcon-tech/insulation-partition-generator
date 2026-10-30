@@ -25,6 +25,39 @@ export type Progress = {
 
 const order = (s: Stage) => STAGES.indexOf(s)
 
+/** 배근 → 그 뒤 기전 (W철근 → 벽 기전, S철근 → 슬래브 기전) */
+const MEP_AFTER: Partial<Record<Stage, Stage>> = { WALL_REBAR: "WALL_MEP", SLAB_REBAR: "SLAB_MEP" }
+
+/**
+ * 일보에는 배근과 기전이 같은 날 함께 적히는 일이 많다(배근 시작과 동시에 배관 착수).
+ * 기전이 그 동의 다음 일보에도 이어지면 배근 날의 기전은 빼고 다음 날부터 기전으로 본다
+ * — 순서는 배근 → 기전이다 (2026-10-30 사용자 확인: 403동 10/2 W철근·기전, 10/3 기전 → 기전은 10/3).
+ * 그날로 끝나는 기전은 그대로 둔다(오전 배근 → 오후 기전, 설계 §3). 제자리에서 actual 을 고친다.
+ */
+function deferContinuedMep(actual: ActualWork[]): void {
+  const dates = new Map<number, IsoDate[]>()
+  for (const a of actual) {
+    const list = dates.get(a.buildingId) ?? []
+    if (list.at(-1) !== a.date) list.push(a.date)
+    dates.set(a.buildingId, list)
+  }
+  const drop = new Set<ActualWork>()
+  for (const [id, ds] of dates) {
+    ds.forEach((date, i) => {
+      const next = ds[i + 1]
+      if (!next) return
+      const today = actual.filter((a) => a.buildingId === id && a.date === date)
+      const tomorrow = actual.filter((a) => a.buildingId === id && a.date === next)
+      for (const [rebar, mep] of Object.entries(MEP_AFTER) as [Stage, Stage][]) {
+        if (!today.some((a) => a.stage === rebar)) continue
+        if (!tomorrow.some((a) => a.stage === mep)) continue
+        for (const a of today) if (a.stage === mep) drop.add(a)
+      }
+    })
+  }
+  for (let i = actual.length - 1; i >= 0; i--) if (drop.has(actual[i])) actual.splice(i, 1)
+}
+
 /**
  * @param reports 날짜 오름차순이 아니어도 된다. 동 번호가 없는 줄(부대시설)은 뺀다.
  * @param upTo 이 날짜까지만 실적으로 본다 (보통 오늘). 그 뒤 일보는 무시.
@@ -44,6 +77,7 @@ export function progressFromReports(
     }
   }
   actual.sort((a, b) => a.date.localeCompare(b.date) || a.buildingId - b.buildingId)
+  deferContinuedMep(actual)
 
   const ids = [...new Set(actual.map((a) => a.buildingId))].sort((a, b) => a - b)
   const buildings = ids.map((id) => ({ id, label: `${id}동` }))
