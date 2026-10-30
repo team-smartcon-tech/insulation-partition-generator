@@ -16,8 +16,9 @@ const MAX_CORES = 8;
 const stepName = (name: string, d: number) => name.replace(/\d+/, (m) => String(Math.max(0, Number(m) + d)).padStart(m.length, "0"));
 
 /** 코어 칸 너비: 코어 | 세대 | 최상층 | 옥탑 | 삭제·코어 추가 — 헤더와 코어 줄이 같이 쓴다 */
-// 입력란 너비(2026-10-30 사용자 지정): 세대 50 · 최상층 60 · 옥탑 50px. 다른 칸은 td 너비 = 입력란 + 오른쪽 여백 8px
-const CORE_GRID = "grid grid-cols-[2.75rem_50px_60px_50px_auto] items-center gap-x-1.5";
+// 열 너비는 그대로, 입력란만 사용자 지정 너비로 가운데 (2026-10-30): 동번호 60 · 이름 80 · 지하 50 · 기준층 시작 50 ·
+// 세대 50 · 최상층 60 · 옥탑 50 · 현재 층 100px
+const CORE_GRID = "grid grid-cols-[2.75rem_3.5rem_4.25rem_4.25rem_auto] items-center gap-x-1.5";
 
 /** units = 그 코어가 한 층에서 맡는 세대 수 (0 = 모름) */
 type Core = { top: number; rooftop: number; units?: number };
@@ -180,22 +181,23 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
               const multi = cores.length > 1;
               return (
                 <tr key={i} className="border-t border-border/60 align-top">
-                  <td className="py-1.5 pr-2 w-[68px]">
-                    <NumInput min={1} value={b.buildingNo} onValue={(v) => setNo(i, v ?? b.buildingNo)} aria-label="동 번호" />
+                  <td className="py-1.5 pr-2 w-20">
+                    <NumInput className="mx-auto w-[60px]" min={1} value={b.buildingNo} onValue={(v) => setNo(i, v ?? b.buildingNo)} aria-label="동 번호" />
                   </td>
-                  <td className="py-1.5 pr-2 w-[88px]">
+                  <td className="py-1.5 pr-2 w-28">
                     <StepInput
+                      className="mx-auto w-[80px]"
                       value={b.name}
                       aria-label="이름"
                       onChange={(e) => update(i, { name: e.target.value })}
                       onStep={(d) => update(i, { name: stepName(b.name, d) })}
                     />
                   </td>
-                  <td className="py-1.5 pr-2 w-[58px]">
-                    <NumInput min={0} max={10} value={b.basementFloors ?? 0} onValue={(v) => update(i, { basementFloors: v ?? 0 })} aria-label="지하층 수" />
+                  <td className="py-1.5 pr-2 w-16">
+                    <NumInput className="mx-auto w-[50px]" min={0} max={10} value={b.basementFloors ?? 0} onValue={(v) => update(i, { basementFloors: v ?? 0 })} aria-label="지하층 수" />
                   </td>
-                  <td className="py-1.5 pr-2 w-[58px]">
-                    <NumInput min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작" />
+                  <td className="py-1.5 pr-2 w-20">
+                    <NumInput className="mx-auto w-[50px]" min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작" />
                   </td>
                   <td className="py-1.5 pr-2">
                     <div className="space-y-1">
@@ -205,6 +207,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                           <div key={k} className={`${CORE_GRID} whitespace-nowrap text-xs text-muted-foreground`}>
                             <span className="font-medium text-foreground">{k + 1}코어</span>
                             <NumInput
+                              className="mx-auto w-[50px]"
                               min={0}
                               max={10}
                               value={c.units ? c.units : null}
@@ -212,8 +215,8 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                               aria-label={`${b.name} ${k + 1}코어 세대수`}
                               onValue={(v) => set({ units: v ?? 0 })}
                             />
-                            <NumInput min={1} max={80} value={c.top} aria-label={`${b.name} ${k + 1}코어 최상층`} onValue={(v) => set({ top: v ?? c.top })} />
-                            <NumInput min={0} max={10} value={c.rooftop} aria-label={`${b.name} ${k + 1}코어 옥탑 층수`} onValue={(v) => set({ rooftop: v ?? c.rooftop })} />
+                            <NumInput className="mx-auto w-[60px]" min={1} max={80} value={c.top} aria-label={`${b.name} ${k + 1}코어 최상층`} onValue={(v) => set({ top: v ?? c.top })} />
+                            <NumInput className="mx-auto w-[50px]" min={0} max={10} value={c.rooftop} aria-label={`${b.name} ${k + 1}코어 옥탑 층수`} onValue={(v) => set({ rooftop: v ?? c.rooftop })} />
                             <div className="flex items-center">
                             {/* 코어가 하나면 X 는 숨기되 자리는 남겨 "코어 추가" 위치를 맞춘다 */}
                             <Button
@@ -243,8 +246,8 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                       })}
                     </div>
                   </td>
-                  <td className="py-1.5 pr-2 w-[108px]">
-                    <NumInput min={0} value={b.currentFloor} placeholder="일보 우선" onValue={(v) => update(i, { currentFloor: v })} aria-label="현재 층" />
+                  <td className="py-1.5 pr-2 w-24">
+                    <NumInput className="mx-auto w-[100px]" min={0} value={b.currentFloor} placeholder="일보 우선" onValue={(v) => update(i, { currentFloor: v })} aria-label="현재 층" />
                   </td>
                   <td className="py-1.5 text-right">
                     <Button variant="ghost" size="icon-sm" title={`${b.name} 삭제`} aria-label={`${b.name} 삭제`} onClick={() => remove(i)}>
