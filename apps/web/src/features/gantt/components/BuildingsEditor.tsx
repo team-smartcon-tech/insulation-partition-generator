@@ -3,9 +3,11 @@
  * 같은 동이라도 코어마다 최상층·옥탑이 다를 수 있어, 동 한 줄 안에 코어를 세로로 쌓는다(동을 두 줄로 넣지 않는다).
  * 동의 최상층 = 코어 중 가장 높은 층. 최상층이 있어야 11월 이후 계획이 맞는다(최상층 타설 뒤 사이클에서 빠짐).
  */
-import { Plus, Trash2, X } from "lucide-react";
+import { useState } from "react";
+import { Download, Plus, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import type { Building } from "../api";
+import { listSmartworksBuildings, type Building } from "../api";
 import { NumInput, StepInput } from "./StepInput";
 
 const MAX_CORES = 8;
@@ -30,7 +32,54 @@ const renumber = (name: string, from: number, to: number) => {
   return re.test(name) ? name.replace(re, `$1${to}`) : name;
 };
 
-export default function BuildingsEditor({ value, onChange }: { value: Building[]; onChange: (next: Building[]) => void }) {
+export default function BuildingsEditor({ value, onChange, siteId = null }: { value: Building[]; onChange: (next: Building[]) => void; siteId?: string | null }) {
+  // 스마트웍스에서 불러오기: 동·코어별 최상층을 채운다. 지하·기준층 시작·옥탑·이름은 있는 동은 그대로, 새 동은 마지막 동 값 복사.
+  // 스마트웍스에 없는 동은 지우지 않는다. 화면에만 채우고 저장은 「저장」 버튼으로.
+  const [importing, setImporting] = useState(false);
+  const importFromSmartworks = async () => {
+    if (!siteId) return;
+    setImporting(true);
+    try {
+      const { buildings: sw } = await listSmartworksBuildings(siteId);
+      if (!sw.length) {
+        toast.info("스마트웍스 동/라인 설정에 이 현장 동 정보가 없습니다.");
+        return;
+      }
+      const template = value.at(-1);
+      let added = 0;
+      let updated = 0;
+      const merged: Building[] = value.map((b) => {
+        const s = sw.find((x) => x.buildingNo === b.buildingNo);
+        if (!s) return b;
+        updated++;
+        const roofs = b.coreRooftopFloors.length === s.coreTopFloors.length ? b.coreRooftopFloors : s.coreTopFloors.map(() => Math.max(0, ...b.coreRooftopFloors));
+        return { ...b, ...fromCores(s.coreTopFloors.map((top, k) => ({ top, rooftop: roofs[k] ?? 0 }))) };
+      });
+      for (const s of sw) {
+        if (merged.some((b) => b.buildingNo === s.buildingNo)) continue;
+        added++;
+        const rooftop = template ? Math.max(0, ...template.coreRooftopFloors) : 1;
+        merged.push({
+          buildingNo: s.buildingNo,
+          name: s.name,
+          baseFloor: template?.baseFloor ?? 3,
+          basementFloors: template?.basementFloors ?? 0,
+          currentFloor: null,
+          ...fromCores(s.coreTopFloors.map((top) => ({ top, rooftop }))),
+        } as Building);
+      }
+      merged.sort((a, b) => a.buildingNo - b.buildingNo);
+      onChange(merged);
+      const kept = value.filter((b) => !sw.some((x) => x.buildingNo === b.buildingNo)).length;
+      toast.success(
+        `스마트웍스에서 ${sw.length}개 동을 불러왔습니다 (새 동 ${added}, 최상층 갱신 ${updated}${kept ? `, 스마트웍스에 없는 동 ${kept}개는 그대로` : ""}). 「저장」을 눌러야 반영됩니다.`,
+      );
+    } catch (e) {
+      toast.error(`스마트웍스 불러오기 실패: ${(e as Error).message}`);
+    } finally {
+      setImporting(false);
+    }
+  };
   const update = (i: number, patch: Partial<Building>) => onChange(value.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   const remove = (i: number) => onChange(value.filter((_, j) => j !== i));
   const add = () => {
@@ -62,9 +111,22 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
             동 번호는 작업일보의 "401동"과 같아야 합니다. 코어마다 최상층·옥탑이 다르면 그 동 안에서 "코어 추가"를 누르세요. 옥탑 0층 = 없음.
           </p>
         </div>
-        <Button variant="outline" size="sm" className="shrink-0" onClick={add}>
-          <Plus /> 동 추가
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          {siteId ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={importFromSmartworks}
+              disabled={importing}
+              title="스마트웍스 옵션마감 「동/라인 설정」 에서 동 목록·코어별 최상층 가져오기 (지하·기준층 시작·옥탑은 그대로)"
+            >
+              <Download /> {importing ? "불러오는 중…" : "스마트웍스에서 불러오기"}
+            </Button>
+          ) : null}
+          <Button variant="outline" size="sm" onClick={add}>
+            <Plus /> 동 추가
+          </Button>
+        </div>
       </div>
       {value.length === 0 ? (
         <p className="rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">아직 동이 없습니다. "동 추가"로 시작하세요.</p>

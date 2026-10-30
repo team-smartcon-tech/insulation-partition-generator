@@ -24,6 +24,8 @@ import {
   siteSettingsSchema,
   DEFAULT_UNDERGROUND_SETTINGS,
   UNDERGROUND_STAGES,
+  buildingNoOf,
+  groupLinesToCores,
   addWorkdays,
   planUnderground,
   undergroundStateFromActual,
@@ -287,6 +289,41 @@ const fail = (c: { json: (b: unknown, s: number) => Response }, err: unknown) =>
 gantt.get("/sites", async (c) => {
   try {
     return c.json({ sites: await listSites(c.env) });
+  } catch (err) {
+    return fail(c, err);
+  }
+});
+
+/**
+ * GET /smartworks-buildings/:siteId — 스마트웍스 옵션마감 「동/라인 설정」 에서 동 목록·코어별 최상층 (읽기 전용).
+ * golgudo_building(동) + golgudo_rooms(세대: 동·층·라인)에서 라인별 최고층 → 이웃 같은 높이 라인을 한 코어로.
+ * 지하층 수·기준층 시작·옥탑은 스마트웍스에 없다 — 화면에서 기존 값 유지·직접 입력.
+ */
+gantt.get("/smartworks-buildings/:siteId", async (c) => {
+  const siteId = c.req.param("siteId");
+  try {
+    const bRes = await dcrRest(c.env, `/golgudo_building?site_id=eq.${encodeURIComponent(siteId)}&select=id,name&order=name.asc`);
+    const rows = (await bRes.json()) as { id: string; name: string }[];
+    const rooms: { building_id: string; floor: number | string; line: number | string }[] = [];
+    for (let offset = 0; offset < 50_000; offset += 1000) {
+      const r = await dcrRest(
+        c.env,
+        `/golgudo_rooms?site_id=eq.${encodeURIComponent(siteId)}&deleted_at=is.null&select=building_id,floor,line&order=building_id.asc,line.asc,floor.asc&limit=1000&offset=${offset}`,
+      );
+      const page = (await r.json()) as typeof rooms;
+      rooms.push(...page);
+      if (page.length < 1000) break;
+    }
+    const buildings = rows
+      .map((b) => {
+        const mine = rooms.filter((r) => r.building_id === b.id && Number.isFinite(Number(r.floor)));
+        const lines = [...new Set(mine.map((r) => String(r.line)))].sort((x, y) => x.localeCompare(y, "ko", { numeric: true }));
+        const lineTops = lines.map((l) => Math.max(...mine.filter((r) => String(r.line) === l).map((r) => Number(r.floor))));
+        return { buildingNo: buildingNoOf(b.name), name: b.name, lineTops, coreTopFloors: groupLinesToCores(lineTops) };
+      })
+      .filter((b): b is typeof b & { buildingNo: number } => b.buildingNo != null && b.coreTopFloors.length > 0)
+      .sort((x, y) => x.buildingNo - y.buildingNo);
+    return c.json({ siteId, buildings });
   } catch (err) {
     return fail(c, err);
   }

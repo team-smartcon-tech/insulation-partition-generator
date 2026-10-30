@@ -99,6 +99,22 @@ export const saveSettings = (siteId: string, settings: SiteSettings) =>
     { method: "PUT", body: JSON.stringify({ settings }) },
   );
 
+/** 스마트웍스 옵션마감 「동/라인 설정」 의 동 목록·코어별 최상층 (읽기 전용) */
+const smartworksBuildingsSchema = z.object({
+  siteId: z.string(),
+  buildings: z.array(
+    z.object({
+      buildingNo: z.number().int(),
+      name: z.string(),
+      lineTops: z.array(z.number()),
+      coreTopFloors: z.array(z.number().int().min(1).max(80)).min(1),
+    }),
+  ),
+});
+export type SmartworksBuilding = z.infer<typeof smartworksBuildingsSchema>["buildings"][number];
+export const listSmartworksBuildings = (siteId: string) =>
+  apiFetch(`/smartworks-buildings/${encodeURIComponent(siteId)}`, smartworksBuildingsSchema);
+
 export const saveBuildings = (siteId: string, buildings: Building[]) =>
   apiFetch(
     `/buildings/${encodeURIComponent(siteId)}`,

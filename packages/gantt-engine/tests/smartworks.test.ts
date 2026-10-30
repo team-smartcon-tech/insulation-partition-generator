@@ -1,0 +1,16 @@
+// 스마트웍스 동/라인 → 코어 (2026-10-30 실제 값)
+import assert from "node:assert/strict"
+import { describe, it } from "node:test"
+import { buildingNoOf, groupLinesToCores } from "../src/index.ts"
+
+describe("라인 → 코어", () => {
+  it("이웃한 라인 최고층이 같으면 한 코어", () => {
+    assert.deepEqual(groupLinesToCores([35, 35, 39, 39, 37, 37]), [35, 39, 37]) // 남원주 2차 501동
+    assert.deepEqual(groupLinesToCores([42, 42, 42, 37, 37]), [42, 37]) // 남원주 1차 401동 (직접 입력과 같음)
+    assert.deepEqual(groupLinesToCores([24, 24, 24, 24]), [24]) // 화성남양1차 101동
+  })
+  it("동 번호", () => {
+    assert.equal(buildingNoOf("501동"), 501)
+    assert.equal(buildingNoOf("근생동"), null)
+  })
+})

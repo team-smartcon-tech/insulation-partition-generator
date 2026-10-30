@@ -78,6 +78,7 @@ export default function SettingsPanel({ siteId, siteName }: { siteId: string | n
         />
         <div className="min-w-0 space-y-4">
           <BuildingsEditor
+            siteId={siteId}
             value={buildings}
             onChange={(next) => {
               setBuildings(next);
