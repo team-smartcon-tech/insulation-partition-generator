@@ -232,7 +232,11 @@ export function parseNumbered(rawText: string): ParsedWorkText {
         // 먹매김은 그 층 바닥 위 작업이라 옮기지 않는다
         const toStoryBelow = p.part === "slab" && stage !== "SHORING" && stage !== "MARK" && p.floor != null
         const floor = toStoryBelow ? storyBelow(p.floor!) : p.floor
-        const text = toStoryBelow ? `${p.text} (원문 ${floorName(p.floor!)})` : p.text
+        // 옮긴 줄은 「바닥」 을 「슬래브」 로 고쳐 쓰고 원문 층·단어를 붙인다: 「7F 바닥 철근 배근」 → 「6F 슬래브철근 배근 (원문 7F 바닥)」 (2026-10-30 사용자)
+        const word = /바닥|슬래브|슬라브/.exec(p.text)?.[0] ?? "바닥"
+        const text = toStoryBelow
+          ? `${p.text.replace(/(?:바닥|슬라브)\s*철근/g, "슬래브철근").replace(/바닥\s*/g, "슬래브 ").replace(/슬라브/g, "슬래브").trim()} (원문 ${floorName(p.floor!)} ${word})`
+          : p.text
         for (const no of nos) {
           entries.push({
             building: `${no}동`,
