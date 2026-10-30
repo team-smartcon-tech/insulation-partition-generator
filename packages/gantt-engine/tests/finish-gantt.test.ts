@@ -22,6 +22,8 @@ describe("공종 이름 맞추기", () => {
     assert.equal(m("타일-욕실벽타일"), "tile")
     assert.equal(m("방통2차"), "screed")
     assert.equal(m("1차 방통청소"), null)
+    assert.equal(m("욕실방수"), "waterproof")
+    assert.equal(m("옥상방수"), null)
     assert.equal(m("주방가구공사"), "kitchen")
     assert.equal(m("일반가구(침실1)"), "furniture")
     assert.equal(m("가구공사"), "furniture")
@@ -81,8 +83,10 @@ describe("실적·예정 막대", () => {
     assert.equal(row.perWeek, 1) // 최근 4주(10/2 이후) 4세대 ÷ 4
     assert.deepEqual(row.forecast, { start: "2026-10-31", end: "2026-11-13", floorFrom: 8, floorTo: 8, units: 2 })
   })
-  it("간트 공종은 맞춘 것만", () => {
-    assert.deepEqual(g.trades.map((t) => t.label), ["단열"])
+  it("간트 공종은 맞춘 것 + 늘 두는 공종(타일, 스마트웍스에 없어도 예정용 줄)", () => {
+    assert.deepEqual(g.trades.map((t) => t.label), ["단열", "타일"])
+    const tile = g.buildings[0].rows.find((r) => r.trade === "tile")!
+    assert.deepEqual([tile.done, tile.total, tile.sources], [0, 8, []])
   })
 })
 
@@ -145,6 +149,8 @@ describe("코어 단위", () => {
     assert.deepEqual(b.rows.map((r) => [r.trade, r.core, r.done, r.total]), [
       ["ceilingGypsum", 1, 2, 4],
       ["ceilingGypsum", 2, 1, 4],
+      ["tile", 1, 0, 4],
+      ["tile", 2, 0, 4],
     ])
     assert.deepEqual(b.rows[0].floors.map((f) => [f.floor, f.done, f.units]), [[1, 2, 2], [2, 0, 2]])
   })

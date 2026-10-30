@@ -1,1 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" width="320" height="180"><rect width="320" height="180" fill="#ffffff"/><rect x="40" y="48" width="64" height="18" rx="4" fill="#0a63b8"/><rect x="60" y="76" width="84" height="18" rx="4" fill="#5fa8ea"/><rect x="92" y="104" width="60" height="18" rx="4" fill="#ff9f43"/><text x="172" y="86" font-family="Pretendard, Apple SD Gothic Neo, sans-serif" font-size="30" font-weight="700" fill="#0f2f55">스마트 공정표</text><text x="172" y="112" font-family="Pretendard, Apple SD Gothic Neo, sans-serif" font-size="13" fill="#6b7a90">Smart Gantt · 골조 공정 자동 재산정</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000" role="img" aria-label="스마트 공정표 — Smart Gantt">
+  <title>스마트 공정표</title>
+  <!--
+    카드 썸네일 규격: 16:10 (1600x1000) 흰 바탕에 로고를 가운데 두고 여백을 준다 (logo-tc-rental.svg 와 같은 규격).
+    예전 320x180 판은 제목이 그림 오른쪽 끝을 넘어가 카드에서 잘렸다.
+  -->
+  <rect width="1600" height="1000" fill="#FFFFFF"/>
+
+  <!-- 내용 bbox(x40 y48 w352 h74)를 가로 약 62% 크기로 중앙에 앉힌다 -->
+  <g transform="translate(195 262) scale(2.8)">
+    <rect x="40" y="48" width="64" height="18" rx="4" fill="#0a63b8"/>
+    <rect x="60" y="76" width="84" height="18" rx="4" fill="#5fa8ea"/>
+    <rect x="92" y="104" width="60" height="18" rx="4" fill="#ff9f43"/>
+    <text x="172" y="86" font-family="Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="700" fill="#0f2f55">스마트 공정표</text>
+    <text x="172" y="112" font-family="Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="13" fill="#6b7a90">Smart Gantt · 골조 공정 자동 재산정</text>
+  </g>
+</svg>

@@ -1,11 +1,12 @@
 /**
  * 마감 공정표 간트 (2026-10-30, 골조 공정표와 같은 방식). 한 달, 날짜 칸 × 동·공종 줄.
- * - 실적 막대(진함): 스마트웍스 세대 완료일을 이어 붙인 구간, 위에 층 범위("5~6F").
- * - 예정 막대(연한 점선): 남은 층을 선행 공종·간격·층 묶음 규칙으로 (엔진 planFinishBuilding, 오른쪽 설정 카드).
+ * - 막대 모양은 골조 간트(GanttChart)와 같다 (2026-10-30): 연한 바탕 + 진한 테두리의 둥근 상자, 글자(층 범위)는 상자 안,
+ *   날짜 칸 안쪽으로 2px 띄움. 예정은 같은 상자를 흐리게(opacity-60) — 골조의 「실적 또렷 · 예정 연하게」 규칙.
+ * - 위: 일보 작업(작업일보 마감 줄). 아래: ✓ 세대 완료(스마트웍스, 회색 상자)·예정(남은 층, 엔진 planFinishBuilding).
  * - 코어 단위 (2026-10-30): 동이 코어로 나뉘면 공종 줄도 코어마다(같은 공종의 코어 줄은 붙여서). 일보 「N코어」 는 그 코어 줄에만.
  * - 오늘은 날짜 머리줄 칸을 채워 표시(세로선 대신). 요일은 월~일 모두. 일요일 띠, 공휴일 빨간 날짜, 날짜 세로줄은 골조 간트와 같다.
  */
-import { FINISH_TRADES, dateRange, floorListText, floorRangeText, getDayInfo, type FinishPlanRow } from "@ipg/gantt-engine";
+import { FINISH_TRADES, dateRange, floorListText, floorRangeText, getDayInfo, hasFinishPlan, type FinishPlanRow } from "@ipg/gantt-engine";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { FinishBarT, FinishReportsResponse, FinishResponse } from "../api";
@@ -15,18 +16,60 @@ import FinishCellDialog, { type FinishCellTarget } from "./FinishCellDialog";
 
 type Gantt = FinishResponse["gantt"];
 
-/** 공종 묶음 색 (실적 / 예정) */
-const GROUP_TONE: Record<string, { solid: string; light: string; legend: string }> = {
-  내장: { solid: "bg-violet-400 border-violet-600", light: "bg-violet-100 border-violet-400", legend: "bg-violet-400" },
-  PL창호: { solid: "bg-emerald-400 border-emerald-600", light: "bg-emerald-100 border-emerald-400", legend: "bg-emerald-400" },
-  유리: { solid: "bg-cyan-400 border-cyan-600", light: "bg-cyan-100 border-cyan-400", legend: "bg-cyan-400" },
-  타일: { solid: "bg-orange-400 border-orange-600", light: "bg-orange-100 border-orange-400", legend: "bg-orange-400" },
-  방통: { solid: "bg-rose-400 border-rose-600", light: "bg-rose-100 border-rose-400", legend: "bg-rose-400" },
-  가구: { solid: "bg-amber-400 border-amber-600", light: "bg-amber-100 border-amber-400", legend: "bg-amber-400" },
-  도배: { solid: "bg-lime-400 border-lime-600", light: "bg-lime-100 border-lime-400", legend: "bg-lime-400" },
-  마루: { solid: "bg-stone-400 border-stone-600", light: "bg-stone-100 border-stone-400", legend: "bg-stone-400" },
+/** 공종 묶음 색 — 골조 간트 GROUP_STYLE 과 같은 단계(바탕 -100, 테두리 -500) */
+const GROUP_TONE: Record<string, string> = {
+  내장: "bg-violet-100 border-violet-500",
+  PL창호: "bg-emerald-100 border-emerald-500",
+  유리: "bg-cyan-100 border-cyan-500",
+  타일: "bg-orange-100 border-orange-500",
+  방수: "bg-sky-100 border-sky-500",
+  방통: "bg-rose-100 border-rose-500",
+  가구: "bg-amber-100 border-amber-500",
+  도배: "bg-lime-200 border-lime-600",
+  마루: "bg-stone-100 border-stone-400",
 };
 const toneOf = (group: string) => GROUP_TONE[group] ?? GROUP_TONE["마루"];
+/** ✓ 세대 완료(스마트웍스) 상자 */
+const DONE_TONE = "bg-slate-100 border-slate-500";
+/** 코어로 나뉜 동의 공종명 칸 너비 (나머지는 코어·% 칸) */
+const TRADE_W = "4.75rem";
+
+/** 기간이 겹치는 막대를 칸(줄 안의 단)에 나눈다 — 시작 순으로, 비어 있는 가장 위 칸. laneOf 는 넘긴 순서 그대로 */
+function stackLanes(bars: { start: string; end: string }[]): { laneOf: number[]; count: number } {
+  const ends: string[] = [];
+  const laneOf = new Array<number>(bars.length);
+  const order = bars.map((_, i) => i).sort((x, y) => bars[x].start.localeCompare(bars[y].start));
+  for (const i of order) {
+    let k = ends.findIndex((e) => e < bars[i].start);
+    if (k < 0) k = ends.push(bars[i].end) - 1;
+    else ends[k] = bars[i].end;
+    laneOf[i] = k;
+  }
+  return { laneOf, count: ends.length };
+}
+
+/** 골조 간트 BoxEl 과 같은 상자: 날짜 칸 안쪽 2px, 둥근 테두리, 글자는 안에 한 줄 */
+function Bar({ left, width, top, height, tone, text, title, faded }: {
+  left: string;
+  width: string;
+  top: number;
+  height: number;
+  tone: string;
+  text: string;
+  title: string;
+  faded?: boolean;
+}) {
+  return (
+    <div className="absolute" style={{ left, width, top, height }}>
+      <div
+        className={cn("absolute inset-x-0.5 inset-y-[3px] flex items-center overflow-hidden rounded-md border px-1", tone, faded && "opacity-60")}
+        title={title}
+      >
+        <span className="select-none truncate whitespace-nowrap text-[10px] font-medium leading-none tracking-tighter text-foreground/75">{text}</span>
+      </div>
+    </div>
+  );
+}
 const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
 
 export default function FinishGantt({
@@ -61,6 +104,8 @@ export default function FinishGantt({
   const n = days.length;
   const idx = (d: string) => days.findIndex((x) => x.date === d);
   const gridCols = { gridTemplateColumns: `9rem repeat(${n}, minmax(0, 1fr))` };
+  // 코어로 나뉜 동: 왼쪽 9rem = 공종명(코어 줄 합친 칸) TRADE_W + 코어·% 칸
+  const coreRowCols = { gridTemplateColumns: `calc(9rem - ${TRADE_W}) repeat(${n}, minmax(0, 1fr))` };
   const dayCell = (d: (typeof days)[number]) => cn("border-r border-border/50", d.isSunday && "bg-muted");
 
   /** 막대를 이 달 칸 위치로 (달 밖이면 null, 걸치면 잘라서) */
@@ -107,8 +152,12 @@ export default function FinishGantt({
             const swOf = new Map(b.rows.map((r) => [keyOf(r.trade, r.core), r]));
             const coreList: (number | null)[] = b.cores.length ? b.cores.map((c) => c.core) : [null];
             const linesOf = new Map(b.cores.map((c) => [c.core, c]));
-            // 줄: 스마트웍스 공종 + 일보에만 나온 공종, 화면 순서(FINISH_TRADES)대로 × 코어. 막대가 하나라도 있는 줄만
-            const rows = FINISH_TRADES.filter((t) => b.rows.some((r) => r.trade === t.key) || myReports.some((r) => r.trade === t.key))
+            // 줄: 스마트웍스 공종, 화면 순서(FINISH_TRADES)대로 × 코어. ✓ 세대 완료나 예정이 있는 줄만 — 둘 다 달과 상관없어
+            // 어느 달을 봐도 공종 구분이 같다 (2026-10-30 사용자: 10월 이전도 11월과 같게). 그 달 작업일보는 이 줄 위에만 그리고,
+            // 일보에만 나온 공종(줄 없음)은 그리지 않는다 — 예전에는 일보 있는 달만 줄이 늘어 달마다 구분이 달랐다.
+            // 예정 규칙이 없는 공종(창짝설치·유리·몰딩·주방가구·일반가구)은 줄도 그리지 않는다 (2026-10-30 사용자: 공정표에서도 뺀다)
+            const rows = FINISH_TRADES.filter((t) => hasFinishPlan(t.key))
+              .filter((t) => b.rows.some((r) => r.trade === t.key))
               .flatMap((t) =>
                 coreList.map((core) => ({
                   key: keyOf(t.key, core),
@@ -123,7 +172,16 @@ export default function FinishGantt({
                   plan: planOf.get(keyOf(t.key, core)) ?? [],
                 })),
               )
-              .filter((r) => r.report.length || r.sw?.actual.length || r.plan.length);
+              .filter((r) => r.sw?.actual.length || r.plan.length);
+            // 코어로 나뉜 동: 공종명은 그 공종의 코어 줄들을 세로로 합친 칸 하나(가운데), 옆 칸에 「N코어 %」.
+            // 두 칸 너비 합 = 9rem 이라 날짜 칸은 다른 동과 같은 자리.
+            const cored = rows.some((r) => r.core != null);
+            const groups: (typeof rows)[] = [];
+            for (const r of rows) {
+              const last = groups[groups.length - 1];
+              if (cored && last && last[0].trade.key === r.trade.key) last.push(r);
+              else groups.push([r]);
+            }
             return (
               <div key={b.buildingNo} className="border-b-2 border-border">
                 <div className="grid bg-muted/40" style={gridCols}>
@@ -135,28 +193,25 @@ export default function FinishGantt({
                 {rows.length === 0 ? (
                   <div className="px-1 py-2 text-[11px] text-muted-foreground">이 동은 아직 해당 공종 마감 기록이 없습니다.</div>
                 ) : (
-                  rows.map(({ key, trade: t, core, sw, report, plan }, ri) => {
+                  groups.map((group) => {
+                    const renderRow = ({ key, trade: t, core, sw, report, plan }: (typeof rows)[number], gi: number) => {
                     const coreInfo = core != null ? linesOf.get(core) : undefined;
-                    const firstOfTrade = ri === 0 || rows[ri - 1].trade.key !== t.key;
                     const tone = toneOf(t.group);
                     const pct = sw?.total ? Math.round((sw.done / sw.total) * 100) : null;
-                    // 일보 작업 막대: 기간이 겹치면 아래 칸으로 (칸 = 22px)
+                    // 일보 작업 막대: 기간이 겹치면 아래 칸으로 (칸 = 26px)
                     const visible = report.filter((x) => place(x));
-                    const laneEnds: string[] = [];
-                    const laneOf = visible.map((bar) => {
-                      let k = laneEnds.findIndex((e) => e < bar.start);
-                      if (k < 0) {
-                        k = laneEnds.length;
-                        laneEnds.push(bar.end);
-                      } else laneEnds[k] = bar.end;
-                      return k;
-                    });
-                    const LANE = 22;
-                    const lanes = laneEnds.length;
-                    const height = lanes * LANE + LANE;
+                    const { laneOf, count: lanes } = stackLanes(visible);
+                    // 예정도 팀이 여럿이면(동시에 두 묶음) 겹친다 → 아래 칸으로. ✓ 세대 완료는 예정과 기간이 겹치지 않아 첫 칸
+                    const planLane = stackLanes(plan.filter((x) => place(x)));
+                    const LANE = 26;
+                    const height = lanes * LANE + Math.max(1, planLane.count) * LANE;
                     const bottomTop = lanes * LANE;
                     return (
-                      <div key={key} className={cn("grid border-t", firstOfTrade ? "border-border/40" : "border-dashed border-border/30")} style={gridCols}>
+                      <div
+                        key={key}
+                        className={cn("grid", cored ? gi > 0 && "border-t border-dashed border-border/30" : "border-t border-border/40")}
+                        style={cored ? coreRowCols : gridCols}
+                      >
                         <div
                           className="flex items-center justify-between gap-1 px-1"
                           title={[
@@ -168,11 +223,14 @@ export default function FinishGantt({
                             .filter(Boolean)
                             .join("\n")}
                         >
-                          <span className="truncate">
-                            {core == null ? <span className="text-muted-foreground">{t.group === t.label ? "" : `${t.group} · `}</span> : null}
-                            {firstOfTrade || core == null ? t.label : <span className="text-muted-foreground/60">〃</span>}
-                            {core != null ? <span className="ml-1 text-[10px] text-muted-foreground">{core}코어</span> : null}
-                          </span>
+                          {core != null ? (
+                            <span className="text-[10px] text-muted-foreground">{core}코어</span>
+                          ) : (
+                            <span className="truncate">
+                              <span className="text-muted-foreground">{t.group === t.label ? "" : `${t.group} · `}</span>
+                              {t.label}
+                            </span>
+                          )}
                           {pct != null ? <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{pct}%</span> : null}
                         </div>
                         <div
@@ -218,13 +276,16 @@ export default function FinishGantt({
                             const p = place(bar)!;
                             const label = floorRangeText(bar.floorFrom, bar.floorTo);
                             return (
-                              <div key={`r${i}`} className="absolute" style={{ left: p.left, width: p.width, top: laneOf[i] * LANE, height: LANE }}>
-                                <div className="truncate whitespace-nowrap text-[10px] leading-[11px] text-foreground/85">{p.clippedStart ? `…${label}` : label}</div>
-                                <div
-                                  className={cn("h-2.5 rounded-sm border", tone.solid)}
-                                  title={`${b.name} ${t.label} ${label} 작업 · ${md(bar.start)}~${md(bar.end)} (일보 ${bar.days}일)\n${bar.texts.join("\n")}`}
-                                />
-                              </div>
+                              <Bar
+                                key={`r${i}`}
+                                left={p.left}
+                                width={p.width}
+                                top={laneOf[i] * LANE}
+                                height={LANE}
+                                tone={tone}
+                                text={p.clippedStart ? `…${label}` : label}
+                                title={`${b.name} ${t.label} ${label} 작업 · ${md(bar.start)}~${md(bar.end)} (일보 ${bar.days}일)\n${bar.texts.join("\n")}`}
+                              />
                             );
                           })}
                           {/* 아래: 세대 완료 기록(스마트웍스) + 예정 */}
@@ -235,30 +296,50 @@ export default function FinishGantt({
                             const label = fu.length ? floorListText(fu.map((x) => x.floor)) : floorRangeText(bar.floorFrom, bar.floorTo);
                             const detail = fu.map((x) => `${floorRangeText(x.floor, x.floor)} ${x.units}세대`).join(", ");
                             return (
-                              <div key={`a${i}`} className="absolute" style={{ left: p.left, width: p.width, top: bottomTop, height: LANE }}>
-                                <div className="truncate whitespace-nowrap text-[10px] leading-[11px] text-slate-600">✓{label}</div>
-                                <div
-                                  className="h-1.5 rounded-full bg-slate-600"
-                                  title={`${b.name} ${t.label} · ${bar.start === bar.end ? md(bar.start) : `${md(bar.start)}~${md(bar.end)}`} · ${bar.units}세대 완료 (스마트웍스 마감입력)${detail ? `\n${detail}` : ""}`}
-                                />
-                              </div>
+                              <Bar
+                                key={`a${i}`}
+                                left={p.left}
+                                width={p.width}
+                                top={bottomTop}
+                                height={LANE}
+                                tone={DONE_TONE}
+                                text={`✓${label}`}
+                                title={`${b.name} ${t.label} · ${bar.start === bar.end ? md(bar.start) : `${md(bar.start)}~${md(bar.end)}`} · ${bar.units}세대 완료 (스마트웍스 마감입력)${detail ? `\n${detail}` : ""}`}
+                              />
                             );
                           })}
-                          {plan.map((bar, i) => {
-                            const p = place(bar);
-                            if (!p) return null;
+                          {plan.filter((x) => place(x)).map((bar, i) => {
+                            const p = place(bar)!;
                             const label = floorRangeText(bar.floorFrom, bar.floorTo);
                             return (
-                              <div key={`p${i}`} className="absolute" style={{ left: p.left, width: p.width, top: bottomTop, height: LANE }}>
-                                <div className="truncate whitespace-nowrap text-[10px] italic leading-[11px] text-muted-foreground">{label}</div>
-                                <div
-                                  className={cn("h-2.5 rounded-sm border border-dashed", tone.light)}
-                                  title={`${b.name} ${t.label} ${label} 예정 · ${md(bar.start)}~${md(bar.end)} · 남은 ${bar.units}세대 (선행·층 묶음 규칙)`}
-                                />
-                              </div>
+                              <Bar
+                                key={`p${i}`}
+                                left={p.left}
+                                width={p.width}
+                                top={bottomTop + planLane.laneOf[i] * LANE}
+                                height={LANE}
+                                tone={tone}
+                                faded
+                                text={label}
+                                title={`${b.name} ${t.label} ${label} 예정 · ${md(bar.start)}~${md(bar.end)} · 남은 ${bar.units}세대 (선행·층 묶음 규칙)`}
+                              />
                             );
                           })}
                         </div>
+                      </div>
+                    );
+                    };
+                    if (!cored) return renderRow(group[0], 0);
+                    const t = group[0].trade;
+                    return (
+                      <div key={t.key} className="grid border-t border-border/40" style={{ gridTemplateColumns: `${TRADE_W} minmax(0, 1fr)` }}>
+                        <div
+                          className="flex items-center border-r border-border/30 px-1"
+                          title={t.group === t.label ? t.label : `${t.group} · ${t.label}`}
+                        >
+                          <span className="truncate">{t.label}</span>
+                        </div>
+                        <div>{group.map(renderRow)}</div>
                       </div>
                     );
                   })
@@ -270,21 +351,21 @@ export default function FinishGantt({
       </div>
       {target ? <FinishCellDialog siteId={siteId} target={target} topFloorOf={topFloorOf} onClose={() => setTarget(null)} /> : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {[...new Set(gantt.trades.map((t) => t.group))].map((g) => (
+        {[...new Set(gantt.trades.filter((t) => hasFinishPlan(t.key)).map((t) => t.group))].map((g) => (
           <span key={g} className="inline-flex items-center gap-1.5">
-            <span className={cn("inline-block h-3 w-4 rounded-sm", toneOf(g).legend)} />
+            <span className={cn("inline-block h-3.5 w-4 rounded border", toneOf(g))} />
             {g}
           </span>
         ))}
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-1.5 w-4 rounded-full bg-slate-600" />
+          <span className={cn("inline-block h-3.5 w-4 rounded border", DONE_TONE)} />
           ✓ 세대 완료(스마트웍스)
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-3 w-4 rounded-sm border border-dashed border-slate-400 bg-slate-100" />
+          <span className={cn("inline-block h-3.5 w-4 rounded border opacity-60", toneOf("내장"))} />
           예정(선행 공종·간격·층 묶음 규칙)
         </span>
-        <span>위 = 일보 작업(작업일보 마감 줄, 3일 안에 이어지면 한 막대) · 아래 = ✓ 그날 완료한 층(스마트웍스 마감입력 날짜)·예정 · 막대 위 = 층 범위 · 채운 날짜 = 오늘 · 칸을 누르면 그날 작업일보</span>
+        <span>위 = 일보 작업(작업일보 마감 줄, 3일 안에 이어지면 한 막대) · 아래 = ✓ 그날 완료한 층(스마트웍스 마감입력 날짜)·예정 · 상자 안 = 층 범위 · 일보 작업·세대 완료는 또렷하게, 예정은 연하게 · 채운 날짜 = 오늘 · 칸을 누르면 그날 작업일보</span>
       </div>
     </div>
   );

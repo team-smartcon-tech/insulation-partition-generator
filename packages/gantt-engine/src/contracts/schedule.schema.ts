@@ -81,6 +81,10 @@ export const undergroundZoneSchema = z.object({
  */
 export const finishTradePlanSchema = z.object({
   pred: z.string().nullable(),
+  /** 골조 선행 층수 — N 이면 그 묶음 최고층 + N 층 S타설 다음 날부터 (창틀 5: 1~5층 창틀은 골조 10층 타설 후). null·없음 = 골조 안 봄 */
+  frameLead: z.number().int().min(0).max(30).nullable().optional(),
+  /** 팀 수 (동·코어마다). N 팀이면 묶음 N 개를 동시에 — 아래층 묶음부터 가장 먼저 비는 팀이 맡는다. 없으면 1 */
+  teams: z.number().int().min(1).max(5).optional(),
   gapDays: z.number().int().min(0).max(120),
   floorsPerBatch: z.number().int().min(1).max(20),
   daysPerBatch: z.number().int().min(1).max(60),

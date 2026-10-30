@@ -1,7 +1,7 @@
 // 마감 공정표 간트 (2026-10-30, 사용자 요청: 하남교산OT 「건축 예정공정표(실적관리)」 처럼 동 × 공종 줄에 「5~6F 단열재」 막대).
 //
 // 공종은 우선 아래만 (사용자 지정):
-//   내장 — 단열, 경량벽체, 벽석고, 천장석고, 걸레받이, 몰딩 / PL창호 — 창틀설치, 창짝설치 / 유리 / 타일 / 방통 / 주방가구 / 일반가구 / 도배 / 마루
+//   PL창호 — 창틀설치, 창짝설치 / 내장 — 단열, 경량벽체, 벽석고, 천장석고, 걸레받이, 몰딩 / 유리 / 타일 / 방수 / 방통 / 주방가구 / 일반가구 / 도배 / 마루
 // 스마트웍스 공종 이름은 현장마다 달라 이름 규칙으로 맞춘다. 「내장공사」「PL창호공사」 처럼 한 덩어리 이름은 세부를 알 수 없어 「(구분 없음)」 줄.
 //
 // 세대 완료 = 그 동에서 쓰인 세부 공종(타일 거실·욕실…)이 모두 끝난 날.
@@ -54,6 +54,7 @@ export type FinishTradeKey =
   | "pvcAll"
   | "glass"
   | "tile"
+  | "waterproof"
   | "screed"
   | "kitchen"
   | "furniture"
@@ -64,6 +65,9 @@ export type FinishTrade = { key: FinishTradeKey; group: string; label: string }
 
 /** 화면 순서 (사용자 지정 순) */
 export const FINISH_TRADES: readonly FinishTrade[] = [
+  { key: "windowFrame", group: "PL창호", label: "창틀설치" },
+  { key: "windowSash", group: "PL창호", label: "창짝설치" },
+  { key: "pvcAll", group: "PL창호", label: "PL창틀" }, // 「PL창호공사」 처럼 창틀·창짝 구분 없는 이름 (2026-10-30 사용자: PL창틀로 표시)
   { key: "insulation", group: "내장", label: "단열" },
   { key: "lightWall", group: "내장", label: "경량벽체" },
   { key: "wallGypsum", group: "내장", label: "벽석고" },
@@ -71,17 +75,18 @@ export const FINISH_TRADES: readonly FinishTrade[] = [
   { key: "baseboard", group: "내장", label: "걸레받이" },
   { key: "molding", group: "내장", label: "몰딩" },
   { key: "interiorAll", group: "내장", label: "내장(구분 없음)" },
-  { key: "windowFrame", group: "PL창호", label: "창틀설치" },
-  { key: "windowSash", group: "PL창호", label: "창짝설치" },
-  { key: "pvcAll", group: "PL창호", label: "PL창호(구분 없음)" },
   { key: "glass", group: "유리", label: "유리" },
   { key: "tile", group: "타일", label: "타일" },
+  { key: "waterproof", group: "방수", label: "방수" },
   { key: "screed", group: "방통", label: "방통" },
   { key: "kitchen", group: "가구", label: "주방가구" },
   { key: "furniture", group: "가구", label: "일반가구" },
   { key: "wallpaper", group: "도배", label: "도배" },
   { key: "flooring", group: "마루", label: "마루" },
 ]
+
+/** 스마트웍스에 맞는 공종이 없어도 줄을 두는 공종 — 세대(층·라인)로 줄을 만들어 예정만 낸다 (2026-10-30 사용자: 타일 추가) */
+export const ALWAYS_FINISH_TRADES: ReadonlySet<FinishTradeKey> = new Set(["tile"])
 
 /** 공종 이름 → 마감 간트 공종 (맞는 것이 없으면 null). 먼저 맞는 규칙이 이긴다 */
 export function finishTradeOf(name: string): FinishTradeKey | null {
@@ -96,6 +101,7 @@ export function finishTradeOf(name: string): FinishTradeKey | null {
   if (/일반가구|시스템가구|^가구공사$/.test(n)) return "furniture"
   if (/마루/.test(n)) return "flooring"
   if (/방통|방바닥/.test(n)) return /청소|타일/.test(n) ? null : "screed"
+  if (/방수/.test(n)) return /외벽|옥상|지붕|지하/.test(n) ? null : "waterproof"
   if (/타일/.test(n)) return "tile"
   if (/천정|천장/.test(n)) return /욕실|EV/.test(n) ? null : "ceilingGypsum"
   if (/석고/.test(n)) return "wallGypsum"
@@ -194,7 +200,7 @@ export function buildFinishGantt(input: {
       }
     }
   }
-  const trades = FINISH_TRADES.filter((t) => namesOf.has(t.key))
+  const trades = FINISH_TRADES.filter((t) => namesOf.has(t.key) || ALWAYS_FINISH_TRADES.has(t.key))
   const since = addDays(input.today, -28)
 
   const buildings = input.buildings
