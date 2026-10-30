@@ -145,5 +145,10 @@ describe("지하층 구역 (설정 저장)", () => {
       ["501동 지하", 2, [501], ""],
     ])
     assert.equal(siteSettingsSchema.safeParse({ ...DEFAULT_SITE_SETTINGS, zones: [{ id: "x", name: "", basementFloors: 1 }] }).success, false)
+    // 팀 없이 저장된 예전 구역은 A팀, 팀 목록은 따로 저장
+    assert.deepEqual(p.zones?.map((z) => z.team), ["A", "A"])
+    const q = siteSettingsSchema.parse({ ...DEFAULT_SITE_SETTINGS, zones: [{ ...zones[0], team: "B" }], formTeams: ["A", "B", "C"] })
+    assert.equal(q.zones?.[0].team, "B")
+    assert.deepEqual(q.formTeams, ["A", "B", "C"])
   })
 })

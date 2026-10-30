@@ -59,7 +59,7 @@ export const DEFAULT_UNDERGROUND_SETTINGS: z.infer<typeof undergroundSettingsSch
 }
 
 /**
- * 지하층 구역 (2026-10-30 사용자 요청: 동 목록과 별도로 지하층 구역별 순서). 배열 순서 = 시공 순서.
+ * 지하층 구역 (2026-10-30 사용자 요청: 동 목록과 별도로 지하층 구역별 순서, 형틀 팀별로 묶음). 같은 팀 안에서 배열 순서 = 시공 순서.
  * 지금은 입력·저장만 — 구역 순서로 지하 예정을 내는 계산은 다음 단계(설계 §8-2 「지하는 구역 단위」).
  */
 export const undergroundZoneSchema = z.object({
@@ -71,6 +71,8 @@ export const undergroundZoneSchema = z.object({
   /** 관련 동 번호 (없으면 주차장 등 동 밖 구역) */
   buildingNos: z.array(z.number().int().min(1)).max(30).default([]),
   memo: z.string().max(200).default(""),
+  /** 맡는 형틀(거푸집) 팀 — 같은 팀 구역은 이 배열 순서대로 돈다 (2026-10-30 사용자 요청: A팀·B팀으로 묶기) */
+  team: z.string().min(1).max(10).default("A"),
 })
 
 export const siteSettingsSchema = z.object({
@@ -84,8 +86,10 @@ export const siteSettingsSchema = z.object({
   noPMOnlyStart: z.object({ rebar: z.boolean(), alform: z.boolean() }),
   /** 지하·저층 공정. 없으면 DEFAULT_UNDERGROUND_SETTINGS */
   underground: undergroundSettingsSchema.optional(),
-  /** 지하층 구역별 순서 (배열 순서 = 시공 순서) */
+  /** 지하층 구역별 순서 (배열 순서 = 시공 순서, 같은 팀 안에서) */
   zones: z.array(undergroundZoneSchema).max(50).optional(),
+  /** 지하 형틀(거푸집) 팀 이름 목록 ("A", "B"). 구역이 없는 팀도 남겨 두려고 따로 둔다 */
+  formTeams: z.array(z.string().min(1).max(10)).max(10).optional(),
 })
 
 export const calendarConfigSchema = z.object({

@@ -85,10 +85,11 @@ export default function SettingsPanel({ siteId, siteName }: { siteId: string | n
             }}
           />
           <ZonesEditor
-            value={settings.zones ?? []}
+            zones={settings.zones ?? []}
+            formTeams={settings.formTeams}
             buildings={buildings}
-            onChange={(zones) => {
-              setSettings({ ...settings, zones });
+            onChange={(zones, formTeams) => {
+              setSettings({ ...settings, zones, formTeams });
               setDirty(true);
             }}
           />
