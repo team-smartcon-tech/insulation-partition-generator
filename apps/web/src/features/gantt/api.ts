@@ -124,3 +124,38 @@ export const saveBuildings = (siteId: string, buildings: Building[]) =>
     z.object({ siteId: z.string(), buildings: z.array(buildingSchema) }),
     { method: "PUT", body: JSON.stringify({ buildings }) },
   );
+
+/** 마감 공정표 (스마트웍스 옵션마감 세대별 마감 완료 → 동 × 층 × 공종, 읽기 전용) */
+const finishStatSchema = z.object({
+  typeId: z.string(),
+  done: z.number(),
+  total: z.number(),
+  lead: z.number().nullable(),
+  tail: z.number().nullable(),
+  first: z.string().nullable(),
+  last: z.string().nullable(),
+  perWeek: z.number(),
+  forecast: z.string().nullable(),
+  status: z.enum(["done", "progress", "stalled", "blocked", "idle"]),
+  blockedBy: z.string().optional(),
+});
+const finishResponseSchema = z.object({
+  siteId: z.string(),
+  asOf: z.string(),
+  needsBuildings: z.boolean(),
+  missingInSmartworks: z.array(z.number()).default([]),
+  types: z.array(z.object({ id: z.string(), name: z.string(), inProgress: z.boolean() })),
+  sequences: z.array(z.object({ from: z.string(), to: z.string() })),
+  buildings: z.array(
+    z.object({
+      buildingNo: z.number(),
+      name: z.string(),
+      floors: z.array(z.object({ floor: z.number(), units: z.number() })),
+      cells: z.array(z.object({ typeId: z.string(), floor: z.number(), done: z.number(), last: z.string().nullable() })),
+      stats: z.array(finishStatSchema),
+    }),
+  ),
+});
+export type FinishResponse = z.infer<typeof finishResponseSchema>;
+export type FinishStat = z.infer<typeof finishStatSchema>;
+export const getFinish = (siteId: string) => apiFetch(`/finish/${encodeURIComponent(siteId)}`, finishResponseSchema);

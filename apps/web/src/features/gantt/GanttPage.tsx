@@ -6,19 +6,21 @@
  * 현장은 상단에서 고르고 브라우저에 기억한다. 규칙의 1차 소스는 docs/gantt/설계.md.
  */
 import { useEffect, useMemo, useState } from "react";
-import { CalendarRange, ClipboardList, Settings2 } from "lucide-react";
+import { CalendarRange, PaintRoller, ClipboardList, Settings2 } from "lucide-react";
 import ToolShell from "@/features/tcRental/components/ToolShell";
 import { cn } from "@/lib/utils";
 import { useSites } from "./hooks";
 import DailyReportPanel from "./components/DailyReportPanel";
 import SitePicker from "./components/SitePicker";
 import SchedulePanel from "./components/SchedulePanel";
+import FinishPanel from "./components/FinishPanel";
 import SettingsPanel from "./components/SettingsPanel";
 
-type Tab = "reports" | "schedule" | "settings";
+type Tab = "reports" | "schedule" | "finish" | "settings";
 const TABS: { id: Tab; label: string; icon: typeof ClipboardList }[] = [
   { id: "reports", label: "작업일보", icon: ClipboardList },
-  { id: "schedule", label: "공정표", icon: CalendarRange },
+  { id: "schedule", label: "골조 공정표", icon: CalendarRange },
+  { id: "finish", label: "마감 공정표", icon: PaintRoller },
   { id: "settings", label: "설정", icon: Settings2 },
 ];
 const SITE_KEY = "gantt.siteId";
@@ -93,6 +95,8 @@ export default function GanttPage() {
           <DailyReportPanel key={siteId ?? ""} siteId={siteId} siteName={site?.name ?? ""} initialDate={site?.lastReportDate ?? null} />
         ) : tab === "schedule" ? (
           <SchedulePanel siteId={siteId} siteName={site?.name ?? ""} actionsSlot={tabActions} />
+        ) : tab === "finish" ? (
+          <FinishPanel siteId={siteId} siteName={site?.name ?? ""} actionsSlot={tabActions} onGoSettings={() => setTab("settings")} />
         ) : (
           <SettingsPanel siteId={siteId} siteName={site?.name ?? ""} />
         )}

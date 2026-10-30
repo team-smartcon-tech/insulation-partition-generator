@@ -24,6 +24,7 @@ import {
   siteSettingsSchema,
   DEFAULT_UNDERGROUND_SETTINGS,
   UNDERGROUND_STAGES,
+  aggregateFinish,
   buildingNoOf,
   groupLinesToCoreGroups,
   addWorkdays,
@@ -331,6 +332,67 @@ gantt.get("/smartworks-buildings/:siteId", async (c) => {
       .filter((b): b is typeof b & { buildingNo: number } => b.buildingNo != null && b.coreTopFloors.length > 0)
       .sort((x, y) => x.buildingNo - y.buildingNo);
     return c.json({ siteId, buildings });
+  } catch (err) {
+    return fail(c, err);
+  }
+});
+
+/** 스마트웍스 표를 1000행씩 끝까지 (PostgREST limit/offset) */
+async function dcrAll<T>(env: Env, path: string, max = 100_000): Promise<T[]> {
+  const out: T[] = [];
+  for (let offset = 0; offset < max; offset += 1000) {
+    const r = await dcrRest(env, `${path}${path.includes("?") ? "&" : "?"}limit=1000&offset=${offset}`);
+    const page = (await r.json()) as T[];
+    out.push(...page);
+    if (page.length < 1000) break;
+  }
+  return out;
+}
+
+/**
+ * GET /finish/:siteId — 마감 공정표 (2026-10-30). 스마트웍스 옵션마감 세대별 마감 완료 기록(읽기 전용)을
+ * 동 × 층 × 공종 진척과 공종별 요약으로 모은다 (packages/gantt-engine aggregateFinish).
+ * 동은 설정 탭 동 목록에 있는 것만 — 목록이 없으면 needsBuildings 로 안내.
+ */
+gantt.get("/finish/:siteId", async (c) => {
+  const siteId = c.req.param("siteId");
+  const sid = encodeURIComponent(siteId);
+  try {
+    const saved = await loadBuildings(c.env, siteId);
+    const today = todayKst();
+    if (!saved.length) return c.json({ siteId, asOf: today, needsBuildings: true, types: [], sequences: [], buildings: [] });
+    const listed = new Set(saved.map((b) => b.buildingNo));
+    const [bRows, tRows, qRows, rRows, wRows] = await Promise.all([
+      dcrAll<{ id: string; name: string }>(c.env, `/golgudo_building?site_id=eq.${sid}&select=id,name&order=name.asc`),
+      dcrAll<{ id: string; work_type: string; index: number; is_deleted: boolean | null; include_in_progress: boolean | null }>(
+        c.env,
+        `/golgudo_finish_types?site_id=eq.${sid}&select=id,work_type,index,is_deleted,include_in_progress&order=index.asc`,
+      ),
+      dcrAll<{ prerequisite_key: string; successor_key: string }>(c.env, `/golgudo_finish_sequences?site_id=eq.${sid}&select=prerequisite_key,successor_key`),
+      dcrAll<{ id: string; building_id: string; floor: number | string; line: number | string; is_void: boolean | null }>(
+        c.env,
+        `/golgudo_rooms?site_id=eq.${sid}&deleted_at=is.null&select=id,building_id,floor,line,is_void&order=id.asc`,
+      ),
+      dcrAll<{ room_id: string; work_type_id: string; finished_at: string | null }>(
+        c.env,
+        `/golgudo_works?site_id=eq.${sid}&select=room_id,work_type_id,finished_at&order=room_id.asc,work_type_id.asc`,
+      ),
+    ]);
+    const buildings = bRows
+      .map((b) => ({ id: b.id, buildingNo: buildingNoOf(b.name) ?? -1, name: saved.find((x) => x.buildingNo === buildingNoOf(b.name))?.name ?? b.name }))
+      .filter((b) => listed.has(b.buildingNo));
+    const result = aggregateFinish({
+      types: tRows.map((t) => ({ id: t.id, name: t.work_type, index: t.index, deleted: !!t.is_deleted, inProgress: t.include_in_progress !== false })),
+      sequences: qRows.map((q) => ({ prerequisite: q.prerequisite_key, successor: q.successor_key })),
+      buildings,
+      rooms: rRows
+        .filter((r) => Number.isFinite(Number(r.floor)))
+        .map((r) => ({ id: r.id, buildingId: r.building_id, floor: Number(r.floor), line: String(r.line), isVoid: !!r.is_void })),
+      works: wRows.filter((w) => w.finished_at).map((w) => ({ roomId: w.room_id, typeId: w.work_type_id, date: String(w.finished_at).slice(0, 10) })),
+      today,
+    });
+    const missing = saved.filter((b) => !buildings.some((x) => x.buildingNo === b.buildingNo)).map((b) => b.buildingNo);
+    return c.json({ siteId, asOf: today, needsBuildings: false, missingInSmartworks: missing, ...result });
   } catch (err) {
     return fail(c, err);
   }

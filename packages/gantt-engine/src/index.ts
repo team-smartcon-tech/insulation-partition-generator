@@ -32,3 +32,17 @@ export * from "./daily-report/parse-work-text.ts"
 export { isNumberedFormat, parseNumbered } from "./daily-report/parse-numbered.ts"
 export { progressFromReports, type Progress } from "./daily-report/progress.ts"
 export { buildingNoOf, groupLinesToCoreGroups, groupLinesToCores } from "./rules/smartworks.ts"
+export {
+  aggregateFinish,
+  orderFinishTypes,
+  type FinishBuilding,
+  type FinishBuildingIn,
+  type FinishCell,
+  type FinishResult,
+  type FinishRoomIn,
+  type FinishSeqIn,
+  type FinishType,
+  type FinishTypeIn,
+  type FinishTypeStat,
+  type FinishWorkIn,
+} from "./finish/aggregate.ts"

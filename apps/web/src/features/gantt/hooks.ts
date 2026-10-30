@@ -4,6 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KR_HOLIDAYS_2026_Q4, type SiteSettings } from "@ipg/gantt-engine";
 import {
+  getFinish,
   getSettings,
   listDailyReports,
   listSites,
@@ -23,7 +24,18 @@ export const ganttKeys = {
     [...ganttKeys.all, "plan", siteId, from, to, settings] as const,
   simulate: (from: string, to: string, settings: SiteSettings) =>
     [...ganttKeys.all, "simulate", from, to, settings] as const,
+  finish: (siteId: string) => [...ganttKeys.all, "finish", siteId] as const,
 };
+
+/** 마감 공정표 (스마트웍스 세대별 마감 완료 집계) */
+export function useFinish(siteId: string | null) {
+  return useQuery({
+    queryKey: ganttKeys.finish(siteId ?? ""),
+    queryFn: () => getFinish(siteId as string),
+    enabled: Boolean(siteId),
+    staleTime: 5 * 60_000,
+  });
+}
 
 /** 달력. 공휴일은 아직 2026-10 만 상수 — 현장 달력(DB)으로 옮길 예정 */
 export const CALENDAR = { holidays: [...KR_HOLIDAYS_2026_Q4] };
