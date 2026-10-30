@@ -87,8 +87,16 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
   const update = (i: number, patch: Partial<Building>) => onChange(value.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   const remove = (i: number) => onChange(value.filter((_, j) => j !== i));
   const add = () => {
-    const next = (value.at(-1)?.buildingNo ?? 400) + 1;
+    // 비어 있으면 101동부터 (예전 401 은 남원주 1차 기준값이었다), 아니면 마지막 동 + 1
+    const next = (value.at(-1)?.buildingNo ?? 100) + 1;
     onChange([...value, { buildingNo: next, name: `${next}동`, baseFloor: 3, currentFloor: null, basementFloors: null, ...fromCores([{ top: 30, rooftop: 1 }]) } as Building]);
+  };
+  /** 동 번호를 바꾸면 이름 속 같은 번호도 바꾼다 ("401동" → "101동", "401동(A)" → "101동(A)"). 이름에 옛 번호가 없으면 그대로 */
+  const setNo = (i: number, no: number) => {
+    const b = value[i];
+    const re = new RegExp(`(^|[^\d])${b.buildingNo}(?!\d)`);
+    const name = re.test(b.name) ? b.name.replace(re, `$1${no}`) : b.name;
+    update(i, { buildingNo: no, name });
   };
   const setCores = (i: number, cores: Core[]) => update(i, fromCores(cores));
 
@@ -127,7 +135,7 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
               return (
                 <tr key={i} className="border-t border-border/60 align-top">
                   <td className="py-1.5 pr-2 w-20">
-                    <NumInput min={1} value={b.buildingNo} onValue={(v) => update(i, { buildingNo: v ?? b.buildingNo })} aria-label="동 번호" />
+                    <NumInput min={1} value={b.buildingNo} onValue={(v) => setNo(i, v ?? b.buildingNo)} aria-label="동 번호" />
                   </td>
                   <td className="py-1.5 pr-2 w-28">
                     <StepInput
