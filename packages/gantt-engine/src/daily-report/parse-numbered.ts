@@ -104,6 +104,10 @@ function stageFor(kind: Kind, sub: string, text: string, part: "wall" | "slab" |
 const stripFloors = (s: string) =>
   s.replace(/(?:B?\d{1,3}\s*(?:F\b|층)|RF\b|PH\d*F?\b|PIT\b)(?:\s*[~∼]\s*(?:B?\d{1,3}\s*(?:F\b|층)|RF\b))?/gi, " ").replace(/\s+/g, " ").trim()
 
+/** 한 층 아래 (0층은 없다: 1F → B1F(-1), B1F → B2F, 2F → 1F) */
+const storyBelow = (f: number) => (f === 1 ? -1 : f - 1)
+const floorName = (f: number) => (f < 0 ? `B${-f}F` : `${f}F`)
+
 const partOf = (s: string): "wall" | "slab" | null =>
   /바닥|슬라브|슬래브|슬랩|지붕/.test(s) ? "slab" : /벽/.test(s) ? "wall" : null
 
@@ -160,13 +164,18 @@ export function parseNumbered(rawText: string): ParsedWorkText {
       for (const p of picked) {
         const stage = stageFor(kind, sub, p.text, p.part)
         if (kind === "mep" && !stage) continue // 배선·가설등 같은 것은 골조와 무관
+        // 이 양식의 「NF 바닥」 은 그 층 바닥 슬래브 = 아래층 천장 → 아래층 사이클 (1F 바닥 → B1F, B1F 바닥 → B2F).
+        // 바닥 거푸집·철근·기전·타설만. 벽·시스템 동바리는 원문 층 그대로, RF 처럼 숫자 없는 층도 그대로 (2026-10-30 사용자 확인)
+        const toStoryBelow = p.part === "slab" && stage !== "SHORING" && p.floor != null
+        const floor = toStoryBelow ? storyBelow(p.floor!) : p.floor
+        const text = toStoryBelow ? `${p.text} (원문 ${floorName(p.floor!)})` : p.text
         for (const no of nos) {
           entries.push({
             building: `${no}동`,
             buildingNo: no,
-            floor: p.floor,
+            floor,
             ...(p.floorLabel ? { floorLabel: p.floorLabel } : {}),
-            text: p.text,
+            text,
             stage,
           })
         }

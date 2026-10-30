@@ -50,15 +50,15 @@ describe("번호 양식 해석", () => {
     assert.deepEqual(rows(), [
       [501, "RF", "FORM_SLAB"],
       [503, -1, "FORM_WALL"],
-      [503, 1, "FORM_SLAB"],
+      [503, -1, "FORM_SLAB"], // 1F 바닥 → B1F 사이클
       [504, "RF", "FORM_SLAB"],
-      [503, -1, "SHORING"],
+      [503, -1, "SHORING"], // 동바리는 원문 층
       [502, -2, null],
-      [501, 1, "SLAB_REBAR"],
+      [501, -1, "SLAB_REBAR"], // 1F 바닥 철근 → B1F
       [504, "RF", "POUR"],
+      [504, -2, "SLAB_MEP"], // B1F 바닥 박스 → B2F
       [504, -1, "SLAB_MEP"],
-      [504, 1, "SLAB_MEP"],
-      [505, 1, "SLAB_MEP"],
+      [505, -1, "SLAB_MEP"],
     ])
   })
 
@@ -78,8 +78,19 @@ ${s}
     assert.deepEqual(t("* 해체/정리(7)\n- 503동 B1F 시스템 동바리 해체(7)"), [null])
   })
 
+  it("바닥은 아래층 사이클: 2F 바닥 → 1F, 1F 바닥 → B1F, B2F 바닥 → B3F", () => {
+    const f = (s: string) => parseWorkText(`1. 형틀 공사 (10)
+* 형틀(5)
+- ${s}(5)
+2. 철근 공사 (1)`).entries.map((e) => e.floor)
+    assert.deepEqual(f("505동 2F 바닥 거푸집 설치"), [1])
+    assert.deepEqual(f("505동 1F 바닥 거푸집 설치"), [-1])
+    assert.deepEqual(f("505동 B2F 바닥 거푸집 설치"), [-3])
+    assert.deepEqual(f("505동 B2F 벽체 거푸집 설치"), [-2])
+  })
+
   it("「및」 구문은 각자 층과 벽/바닥, 공종 동사는 공유", () => {
     const e = parseWorkText(TEXT).entries.filter((x) => x.buildingNo === 503 && x.stage?.startsWith("FORM"))
-    assert.deepEqual(e.map((x) => x.text), ["벽체 거푸집 설치", "바닥 거푸집 설치"])
+    assert.deepEqual(e.map((x) => x.text), ["벽체 거푸집 설치", "바닥 거푸집 설치 (원문 1F)"])
   })
 })
