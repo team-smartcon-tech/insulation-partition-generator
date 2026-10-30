@@ -3,6 +3,7 @@
  * 값은 부모가 들고(controlled) 저장은 부모가 한다 — 공정표 탭에서는 "저장 없이 바꿔 보기", 설정 탭에서는 저장.
  */
 import { DEFAULT_UNDERGROUND_SETTINGS, type SiteSettings, type UndergroundSettings } from "@ipg/gantt-engine";
+import { NumInput } from "./StepInput";
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -31,26 +32,19 @@ function Num({ label, value, options, onChange }: { label: string; value: number
   );
 }
 
-/** 작업일 수 입력 (0~60) */
-function Days({ label, hint, value, onChange }: { label: string; hint?: string; value: number; onChange: (v: number) => void }) {
+/** 작업일 수 입력 — 동 목록 카드와 같은 화살표 칸 (NumInput) */
+function Days({ label, hint, value, min = 0, onChange }: { label: string; hint?: string; value: number; min?: number; onChange: (v: number) => void }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-sm">
+    <div className="flex items-center justify-between gap-2 text-sm">
       <span>
         <span className="block">{label}</span>
         {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
       </span>
       <span className="flex items-center gap-1">
-        <input
-          type="number"
-          min={0}
-          max={60}
-          value={value}
-          onChange={(e) => e.target.value !== "" && onChange(Math.max(0, Math.min(60, Number(e.target.value))))}
-          className="h-8 w-16 rounded-md border border-input bg-card px-2 text-right text-sm tabular-nums"
-        />
+        <NumInput className="w-16" min={min} max={60} value={value} aria-label={label} onValue={(v) => v != null && onChange(v)} />
         <span className="w-4 text-xs text-muted-foreground">일</span>
       </span>
-    </label>
+    </div>
   );
 }
 
@@ -110,12 +104,12 @@ function UndergroundSection({ value, onChange }: { value: UndergroundSettings; o
       <p className="-mt-1 text-xs text-muted-foreground">
         순서: W철근∥W기전 → W거푸집 → 시스템 → S거푸집 → S철근∥S기전 → S타설. ∥ 는 같은 날 시작해 병행. 기본값은 남원주 2차 일보 실적 중앙값.
       </p>
-      <Days label="W철근" value={d.wallRebar} onChange={(v) => setD({ wallRebar: Math.max(1, v) })} />
+      <Days label="W철근" min={1} value={d.wallRebar} onChange={(v) => setD({ wallRebar: v })} />
       <Days label="W기전" hint="W철근과 병행" value={d.wallMep} onChange={(v) => setD({ wallMep: v })} />
-      <Days label="W거푸집" value={d.formWall} onChange={(v) => setD({ formWall: Math.max(1, v) })} />
+      <Days label="W거푸집" min={1} value={d.formWall} onChange={(v) => setD({ formWall: v })} />
       <Days label="시스템" hint="시스템 동바리" value={d.shoring} onChange={(v) => setD({ shoring: v })} />
-      <Days label="S거푸집" value={d.formSlab} onChange={(v) => setD({ formSlab: Math.max(1, v) })} />
-      <Days label="S철근" value={d.slabRebar} onChange={(v) => setD({ slabRebar: Math.max(1, v) })} />
+      <Days label="S거푸집" min={1} value={d.formSlab} onChange={(v) => setD({ formSlab: v })} />
+      <Days label="S철근" min={1} value={d.slabRebar} onChange={(v) => setD({ slabRebar: v })} />
       <Days label="S기전" hint="S철근과 병행" value={d.slabMep} onChange={(v) => setD({ slabMep: v })} />
       <Toggle
         label="벽·기둥 분리 타설 (W타설 1일)"
