@@ -94,7 +94,7 @@ export default function BuildingsEditor({ value, onChange }: { value: Building[]
   /** 동 번호를 바꾸면 이름 속 같은 번호도 바꾼다 ("401동" → "101동", "401동(A)" → "101동(A)"). 이름에 옛 번호가 없으면 그대로 */
   const setNo = (i: number, no: number) => {
     const b = value[i];
-    const re = new RegExp(`(^|[^\d])${b.buildingNo}(?!\d)`);
+    const re = new RegExp(`(^|[^0-9])${b.buildingNo}(?![0-9])`);
     const name = re.test(b.name) ? b.name.replace(re, `$1${no}`) : b.name;
     update(i, { buildingNo: no, name });
   };
