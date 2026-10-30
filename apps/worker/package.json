@@ -9,8 +9,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ipg/gantt-engine": "workspace:*",
     "hono": "^4.6.14",
-    "jose": "^5.9.6"
+    "jose": "^5.9.6",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",

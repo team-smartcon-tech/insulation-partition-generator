@@ -14,7 +14,9 @@
   // 로컬/dev 는 apps/worker/.dev.vars 에서 DCR_BASE_URL=https://dcr-app-dev.jogh.workers.dev 로 덮어써 dcr-dev 로 향하게 한다.
   // (서비스 바인딩을 쓰려면 아래 services 주석 해제 — 동일 계정이라 가능. 그 경우 DCR_APP 이 DCR_BASE_URL 보다 우선.)
   "vars": {
-    "DCR_BASE_URL": "https://dcr-app.jogh.workers.dev"
+    "DCR_BASE_URL": "https://dcr-app.jogh.workers.dev",
+    // 스마트 공정표가 작업일보를 읽는 스마트웍스(dcr-app) Supabase. 공개 OK. 키는 secret DCR_SUPABASE_SERVICE_ROLE_KEY.
+    "DCR_SUPABASE_URL": "https://shdsgyzzwtteqdbhkvny.supabase.co"
   },
   // 동일 계정(Smarttech) dcr-app 으로의 서버-투-서버 로그인 프록시.
   // 동일 계정 workers.dev 간 공개 URL fetch 는 응답을 제대로 못 받는 경우가 있어 서비스 바인딩을 사용.
