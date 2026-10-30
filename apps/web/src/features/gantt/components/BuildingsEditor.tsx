@@ -17,8 +17,8 @@ const stepName = (name: string, d: number) => name.replace(/\d+/, (m) => String(
 
 /** 코어 칸 너비: 코어 | 세대 | 최상층 | 옥탑 | 삭제·코어 추가 — 헤더와 코어 줄이 같이 쓴다 */
 // 입력란 너비(2026-10-30 사용자 지정): 동번호 60 · 이름 80 · 지하 50 · 기준층 시작 50 · 세대 50 · 최상층 60 · 옥탑 50 · 현재 층 100px.
-// 입력란 사이 간격은 모두 8px(열 오른쪽 여백 pr-2 기준) — 열 너비 = 입력란 + 8px, 코어 묶음은 칸 = 입력란, 간격 8px(gap-x-2)
-const CORE_GRID = "grid grid-cols-[2.75rem_50px_60px_50px_auto] items-center gap-x-2";
+// 입력란 사이 간격은 모두 12px(열 오른쪽 여백 pr-3 기준) — 열 너비 = 입력란 + 12px, 코어 묶음은 칸 = 입력란, 간격 12px(gap-x-3)
+const CORE_GRID = "grid grid-cols-[2.75rem_50px_60px_50px_auto] items-center gap-x-3";
 
 /** units = 그 코어가 한 층에서 맡는 세대 수 (0 = 모름) */
 type Core = { top: number; rooftop: number; units?: number };
@@ -157,11 +157,11 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
         <table className="w-full text-sm">
           <thead>
             <tr className="text-center text-xs text-muted-foreground">
-              <th className="pb-1 pr-2 whitespace-nowrap">동 번호</th>
-              <th className="pb-1 pr-2 whitespace-nowrap">이름</th>
-              <th className="pb-1 pr-2 whitespace-nowrap" title="지하 맨 아래층 (B3 까지면 3). 일보 없는 동의 지하 출발 층">지하</th>
-              <th className="pb-1 pr-2 whitespace-nowrap">기준층 시작</th>
-              <th className="pb-1 pr-2 font-normal">
+              <th className="pb-1 pr-3 whitespace-nowrap">동 번호</th>
+              <th className="pb-1 pr-3 whitespace-nowrap">이름</th>
+              <th className="pb-1 pr-3 whitespace-nowrap" title="지하 맨 아래층 (B3 까지면 3). 일보 없는 동의 지하 출발 층">지하</th>
+              <th className="pb-1 pr-3 whitespace-nowrap">기준층 시작</th>
+              <th className="pb-1 pr-3 font-normal">
                 {/* 코어 줄과 같은 칸 너비 — 헤더가 각 입력칸 바로 위에 온다 */}
                 <div className={CORE_GRID}>
                   <span className="whitespace-nowrap text-center font-medium">코어</span>
@@ -171,7 +171,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                   <span />
                 </div>
               </th>
-              <th className="pb-1 pr-2 whitespace-nowrap">현재 층</th>
+              <th className="pb-1 pr-3 whitespace-nowrap">현재 층</th>
               <th className="pb-1" />
             </tr>
           </thead>
@@ -181,10 +181,10 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
               const multi = cores.length > 1;
               return (
                 <tr key={i} className="border-t border-border/60 align-top">
-                  <td className="py-1.5 pr-2 w-[68px]">
+                  <td className="py-1.5 pr-3 w-[72px]">
                     <NumInput min={1} value={b.buildingNo} onValue={(v) => setNo(i, v ?? b.buildingNo)} aria-label="동 번호" />
                   </td>
-                  <td className="py-1.5 pr-2 w-[88px]">
+                  <td className="py-1.5 pr-3 w-[92px]">
                     <StepInput
                       value={b.name}
                       aria-label="이름"
@@ -192,13 +192,13 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                       onStep={(d) => update(i, { name: stepName(b.name, d) })}
                     />
                   </td>
-                  <td className="py-1.5 pr-2 w-[58px]">
+                  <td className="py-1.5 pr-3 w-[62px]">
                     <NumInput min={0} max={10} value={b.basementFloors ?? 0} onValue={(v) => update(i, { basementFloors: v ?? 0 })} aria-label="지하층 수" />
                   </td>
-                  <td className="py-1.5 pr-2 w-[58px]">
+                  <td className="py-1.5 pr-3 w-[62px]">
                     <NumInput min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작" />
                   </td>
-                  <td className="py-1.5 pr-2">
+                  <td className="py-1.5 pr-3">
                     <div className="space-y-1">
                       {cores.map((c, k) => {
                         const set = (patch: Partial<Core>) => setCores(i, cores.map((x, j) => (j === k ? { ...x, ...patch } : x)));
@@ -244,7 +244,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                       })}
                     </div>
                   </td>
-                  <td className="py-1.5 pr-2 w-[108px]">
+                  <td className="py-1.5 pr-3 w-[112px]">
                     <NumInput min={0} value={b.currentFloor} placeholder="일보 우선" onValue={(v) => update(i, { currentFloor: v })} aria-label="현재 층" />
                   </td>
                   <td className="py-1.5 text-right">
