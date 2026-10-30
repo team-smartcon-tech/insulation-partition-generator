@@ -382,7 +382,11 @@ gantt.get("/finish/:siteId", async (c) => {
       ),
     ]);
     const buildings = bRows
-      .map((b) => ({ id: b.id, buildingNo: buildingNoOf(b.name) ?? -1, name: saved.find((x) => x.buildingNo === buildingNoOf(b.name))?.name ?? b.name }))
+      .map((b) => {
+        const s = saved.find((x) => x.buildingNo === buildingNoOf(b.name));
+        // 코어 단위 마감 (2026-10-30): 설정 동 목록의 코어 수·코어별 세대수로 라인을 코어에 나눈다
+        return { id: b.id, buildingNo: buildingNoOf(b.name) ?? -1, name: s?.name ?? b.name, cores: s?.cores, coreUnits: s?.coreUnits };
+      })
       .filter((b) => listed.has(b.buildingNo));
     const types = tRows.map((t) => ({ id: t.id, name: t.work_type, index: t.index, deleted: !!t.is_deleted, inProgress: t.include_in_progress !== false }));
     const rooms = rRows

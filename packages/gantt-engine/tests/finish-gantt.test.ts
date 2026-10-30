@@ -1,7 +1,7 @@
 // 마감 간트 (2026-10-30)
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { buildFinishGantt, finishTradeOf, floorListText, floorRangeText } from "../src/index.ts"
+import { buildFinishGantt, finishTradeOf, floorListText, floorRangeText, splitLinesToCores } from "../src/index.ts"
 
 describe("공종 이름 맞추기", () => {
   it("현장마다 다른 이름을 공종으로", () => {
@@ -107,5 +107,45 @@ describe("세부 공종이 여러 개인 공종 (울산다운2차 타일 거실�
     const row = g.buildings[0].rows[0]
     assert.equal(row.done, 1)
     assert.equal(row.actual[0].start, "2026-10-12") // 둘 다 끝난 날
+  })
+})
+
+describe("코어 단위", () => {
+  it("설정 코어별 세대수(합 = 라인 수)대로, 비었으면 스마트웍스 라인 높이 규칙", () => {
+    const lines = ["1", "2", "3", "4", "5"]
+    const tops = [24, 24, 24, 24, 24]
+    assert.deepEqual(splitLinesToCores(lines, tops, 2, [2, 3]).map((c) => [c.core, c.lines.join(""), c.source]), [
+      [1, "12", "settings"],
+      [2, "345", "settings"],
+    ])
+    // 부산장안 101동: 세대수 비어 있음 → 5세대 = 3+2
+    assert.deepEqual(splitLinesToCores(lines, tops, 2, [0, 0]).map((c) => [c.core, c.lines.join(""), c.source]), [
+      [1, "123", "smartworks"],
+      [2, "45", "smartworks"],
+    ])
+    // 동 목록 코어 수와 다르면 동 전체
+    assert.deepEqual(splitLinesToCores(lines, tops, 3, []), [])
+    // 3세대 이하 = 1코어 → 나누지 않음
+    assert.deepEqual(splitLinesToCores(["1", "2", "3"], [10, 10, 10], 1, [3]), [])
+  })
+  it("공종 줄이 코어마다, 완료도 그 코어 세대만", () => {
+    const rooms = [1, 2].flatMap((f) => ["1", "2", "3", "4"].map((l) => ({ id: `${f}-${l}`, buildingId: "b", floor: f, line: l })))
+    const g = buildFinishGantt({
+      types: [{ id: "T", name: "내장-천정", index: 0 }],
+      buildings: [{ id: "b", buildingNo: 101, name: "101동", cores: 2, coreUnits: [2, 2] }],
+      rooms,
+      works: [
+        { roomId: "1-1", typeId: "T", date: "2026-10-16" },
+        { roomId: "1-2", typeId: "T", date: "2026-10-16" },
+        { roomId: "1-3", typeId: "T", date: "2026-10-18" },
+      ],
+      today: "2026-10-30",
+    })
+    const b = g.buildings[0]
+    assert.deepEqual(b.rows.map((r) => [r.trade, r.core, r.done, r.total]), [
+      ["ceilingGypsum", 1, 2, 4],
+      ["ceilingGypsum", 2, 1, 4],
+    ])
+    assert.deepEqual(b.rows[0].floors.map((f) => [f.floor, f.done, f.units]), [[1, 2, 2], [2, 0, 2]])
   })
 })

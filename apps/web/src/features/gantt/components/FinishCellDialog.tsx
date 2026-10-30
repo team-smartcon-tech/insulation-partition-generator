@@ -17,6 +17,9 @@ export type FinishCellTarget = {
   date: string;
   buildingNo: number;
   buildingName: string;
+  /** 코어 번호(null = 동 전체)와 그 코어 라인 */
+  core: number | null;
+  coreLines: string[];
   trade: { key: string; group: string; label: string };
   /** 그 날짜에 걸친 막대들 */
   report: (FinishBarT & { days?: number })[];
@@ -47,8 +50,13 @@ export default function FinishCellDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const items = report ? parseFinishReport(report.rawText, topFloorOf).filter((x) => x.buildingNo === target.buildingNo) : [];
-  const title = `${target.buildingName} · ${target.trade.label}`;
+  const items = report
+    ? parseFinishReport(report.rawText, topFloorOf).filter(
+        (x) => x.buildingNo === target.buildingNo && (target.core == null || x.core == null || x.core === target.core),
+      )
+    : [];
+  const coreText = target.core != null ? ` ${target.core}코어(${target.coreLines.map((l) => `${l}호`).join("·")})` : "";
+  const title = `${target.buildingName}${coreText} · ${target.trade.label}`;
   const bars = [
     ...target.report.map((b) => ({ kind: "일보 작업", tone: "bg-violet-100 text-violet-800", b, note: b.days ? `일보 ${b.days}일` : "" })),
     ...target.actual.map((b) => ({
@@ -131,6 +139,9 @@ export default function FinishCellDialog({
                           <span>
                             {floorRangeText(it.floorFrom, it.floorTo)} {it.text}
                           </span>
+                          {target.core != null ? (
+                            <span className="text-xs text-muted-foreground">{it.core != null ? `${it.core}코어` : "코어 표기 없음(동 전체)"}</span>
+                          ) : null}
                         </li>
                       );
                     })}

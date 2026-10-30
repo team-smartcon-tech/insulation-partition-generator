@@ -8,16 +8,18 @@
 //     - 401동, 403동 26-30F 단열재 양중        → 양중은 시공이 아니라 뺀다
 // 골조 구간(골조·철근콘크리트·형틀·철근·콘크리트)은 읽지 않는다 — 최상층 「단열재 설치」 같은 골조 줄과 섞이지 않게.
 // 같은 동·공종·같은 층 범위가 gap 일 안에 이어지면 막대 하나(작업 기간). 「~최상층」 은 동 최상층으로.
+// 「1코어」「1, 2코어」 가 있으면 그 코어 줄에만(2026-10-30 코어 단위). 없으면 core = null = 동 전체(모든 코어 줄에 보인다).
 import type { IsoDate } from "../calendar/date.ts"
 import { finishTradeOf, type FinishBar, type FinishTradeKey } from "./gantt.ts"
 
-export type FinishReportItem = { buildingNo: number; trade: FinishTradeKey; floorFrom: number; floorTo: number; text: string }
+export type FinishReportItem = { buildingNo: number; trade: FinishTradeKey; core: number | null; floorFrom: number; floorTo: number; text: string }
 
 const HEADER = /^\s*(?:[*●■◆○▶◎▣]|\d+\s*\.)\s*(.+)$/
 // 읽지 않는 구간: 골조(최상층 단열재 설치 등과 섞임)·전기/설비(「천정 배관」 이 천장석고로 잡힘)·토목·관리 인원
 const FRAMING = /골조|철근콘크리트|형틀|철근|콘크리트|토공|토목|파일|흙막이|가설|직원|직영|안전|장비|타워|경비|미화|전기|설비|기계|소방|통신|환기|배관|가스/
 const NOT_WORK = /양중|반입|운반|인양|정리|청소|보수|해체|철거|검측|측량|먹매김|잔손|보양/
 const BUILDINGS = /(\d{3,4})\s*동/g
+const CORES = /((?:\d\s*[,·]\s*)*\d)\s*코어/
 // 층 범위: "11~15층", "16-20F", "21~최상층", "7F" … (B 층 포함)
 const RANGE = /(B?\d{1,3})\s*(?:F|층)?\s*[~∼-]\s*(B?\d{1,3}\s*(?:F|층)|최상층|옥탑)|(?:^|[^\dA-Za-z])(B?\d{1,3})\s*(?:F\b|층)/gi
 
@@ -44,7 +46,9 @@ export function parseFinishReport(rawText: string, topFloorOf: (buildingNo: numb
       if (nos.length) lastNos = nos
       if (!lastNos.length) continue
       if (NOT_WORK.test(seg)) continue
-      const body = seg.replace(BUILDINGS, " ").replace(/\d+\s*코어/g, " ")
+      const cm = CORES.exec(seg)
+      const cores: (number | null)[] = cm ? [...new Set(cm[1].split(/\s*[,·]\s*/).map(Number))] : [null]
+      const body = seg.replace(BUILDINGS, " ").replace(new RegExp(CORES.source, "g"), " ")
       const trade = finishTradeOf(body.replace(/\(\d+명?\)/g, "").replace(/(B?\d{1,3}\s*(?:F|층)?\s*[~∼-]\s*)?(B?\d{1,3}\s*(?:F|층)|최상층)/gi, " ").trim())
       if (!trade) continue
       // 층 범위: 조각 안의 모든 층 표기를 모아 최소~최대
@@ -59,7 +63,7 @@ export function parseFinishReport(rawText: string, topFloorOf: (buildingNo: numb
       for (const no of lastNos) {
         const fs = floors.map((f) => (f === "top" ? topFloorOf(no) : f)).filter((f): f is number => f != null && Number.isFinite(f))
         if (!fs.length) continue
-        out.push({ buildingNo: no, trade, floorFrom: Math.min(...fs), floorTo: Math.max(...fs), text: seg.trim() })
+        for (const core of cores) out.push({ buildingNo: no, trade, core, floorFrom: Math.min(...fs), floorTo: Math.max(...fs), text: seg.trim() })
       }
     }
   }
@@ -67,7 +71,7 @@ export function parseFinishReport(rawText: string, topFloorOf: (buildingNo: numb
 }
 
 export type FinishReportBar = FinishBar & { days: number; texts: string[] }
-export type FinishReportRow = { buildingNo: number; trade: FinishTradeKey; bars: FinishReportBar[] }
+export type FinishReportRow = { buildingNo: number; trade: FinishTradeKey; core: number | null; bars: FinishReportBar[] }
 
 const dayDiff = (a: IsoDate, b: IsoDate) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000)
 
@@ -81,8 +85,8 @@ export function buildFinishReportBars(
   for (const r of [...reports].sort((a, b) => a.date.localeCompare(b.date))) {
     const seen = new Set<string>()
     for (const it of parseFinishReport(r.rawText, topFloorOf)) {
-      const key = `${it.buildingNo}|${it.trade}`
-      const row = rows.get(key) ?? { buildingNo: it.buildingNo, trade: it.trade, bars: [] }
+      const key = `${it.buildingNo}|${it.trade}|${it.core ?? ""}`
+      const row = rows.get(key) ?? { buildingNo: it.buildingNo, trade: it.trade, core: it.core, bars: [] }
       rows.set(key, row)
       const dup = `${key}|${it.floorFrom}|${it.floorTo}`
       if (seen.has(dup)) continue // 같은 날 같은 범위 두 번(전기·설비 등)
@@ -99,5 +103,5 @@ export function buildFinishReportBars(
       } else row.bars.push({ start: r.date, end: r.date, floorFrom: it.floorFrom, floorTo: it.floorTo, units: 0, days: 1, texts: [it.text] })
     }
   }
-  return [...rows.values()].sort((a, b) => a.buildingNo - b.buildingNo)
+  return [...rows.values()].sort((a, b) => a.buildingNo - b.buildingNo || (a.core ?? 0) - (b.core ?? 0))
 }

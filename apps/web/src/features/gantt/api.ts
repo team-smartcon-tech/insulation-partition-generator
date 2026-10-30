@@ -172,9 +172,13 @@ const finishResponseSchema = z.object({
         z.object({
           buildingNo: z.number(),
           name: z.string(),
+          /** 코어별 라인 (코어 1개면 빈 배열) */
+          cores: z.array(z.object({ core: z.number(), lines: z.array(z.string()), source: z.string() })).default([]),
           rows: z.array(
             z.object({
               trade: z.string(),
+              /** 코어 번호, null = 동 전체 */
+              core: z.number().nullable().default(null),
               sources: z.array(z.string()),
               done: z.number(),
               total: z.number(),
@@ -202,6 +206,8 @@ const finishReportsSchema = z.object({
     z.object({
       buildingNo: z.number(),
       trade: z.string(),
+      /** 일보에 「N코어」 가 있으면 그 코어, 없으면 null = 동 전체 */
+      core: z.number().nullable().default(null),
       bars: z.array(finishBarSchema.extend({ days: z.number(), texts: z.array(z.string()) })),
     }),
   ),

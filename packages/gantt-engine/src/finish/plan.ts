@@ -8,6 +8,7 @@
 // 선행 층 완료일 = 실적(그 층 마지막 세대 완료일)이 있으면 실적, 없으면 선행 공종의 예정.
 // 선행이 없는 공종(창틀 등)은 그 동에서 이미 시작했을 때만 예정을 낸다 — 골조 중인 동에 마감 예정이 나오지 않게.
 // 선행 공종이 이 현장에 없으면(스마트웍스 공종 없음) 그 선행의 선행으로 올라간다.
+// 코어 단위 (2026-10-30): 동이 코어로 나뉘어 있으면 코어마다 따로 — 선행도 같은 코어의 그 층을 본다.
 import { addDays, type IsoDate } from "../calendar/date.ts"
 import { getDayInfo, type CalendarConfig } from "../calendar/calendar.ts"
 import type { FinishPlanSettings, FinishTradePlan } from "../contracts/index.ts"
@@ -54,7 +55,7 @@ function nthWorkday(cal: CalendarConfig, start: IsoDate, n: number): IsoDate {
   return x
 }
 
-export type FinishPlanRow = { trade: string; bars: FinishBar[] }
+export type FinishPlanRow = { trade: string; core: number | null; bars: FinishBar[] }
 
 /** 한 동의 예정 (공종별 묶음 막대). 계획 기간은 today 다음 날부터 horizonDays 까지 */
 export function planFinishBuilding(
@@ -64,8 +65,21 @@ export function planFinishBuilding(
   today: IsoDate,
   horizonDays = 540,
 ): FinishPlanRow[] {
-  const present = new Set<string>(building.rows.map((r) => r.trade))
-  const rowOf = new Map<string, FinishGanttBuilding["rows"][number]>(building.rows.map((r) => [r.trade, r]))
+  const cores = [...new Set(building.rows.map((r) => r.core))]
+  return cores.flatMap((core) => planRows(building.rows.filter((r) => r.core === core), settings, calendar, today, horizonDays))
+}
+
+/** 한 코어(또는 동 전체) 공종 줄들의 예정 */
+function planRows(
+  rows: FinishGanttBuilding["rows"],
+  settings: FinishPlanSettings | undefined,
+  calendar: CalendarConfig,
+  today: IsoDate,
+  horizonDays: number,
+): FinishPlanRow[] {
+  const core = rows[0]?.core ?? null
+  const present = new Set<string>(rows.map((r) => r.trade))
+  const rowOf = new Map<string, FinishGanttBuilding["rows"][number]>(rows.map((r) => [r.trade, r]))
   const limit = addDays(today, horizonDays)
   /** 선행 공종 (이 현장에 없으면 그 선행의 선행으로) */
   const predOf = (key: string): string | null => {
@@ -121,10 +135,10 @@ export function planFinishBuilding(
       }
     }
     visiting.delete(key)
-    out.push({ trade: key, bars })
+    out.push({ trade: key, core, bars })
     return ends
   }
 
-  for (const r of building.rows) plan(r.trade)
-  return building.rows.map((r) => out.find((o) => o.trade === r.trade) ?? { trade: r.trade, bars: [] })
+  for (const r of rows) plan(r.trade)
+  return rows.map((r) => out.find((o) => o.trade === r.trade) ?? { trade: r.trade, core, bars: [] })
 }

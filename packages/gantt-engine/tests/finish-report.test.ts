@@ -61,3 +61,18 @@ describe("일보 작업 막대", () => {
     ])
   })
 })
+
+describe("마감 줄 코어", () => {
+  it("「1코어」「1, 2코어」 는 그 코어만, 없으면 동 전체(null)", () => {
+    const text = "▶ 내장공사(15명)\n- 102동 1코어 16~20층 단열재\n- 103동 1, 2코어 5~6층 천정\n- 104동 7층 경량"
+    assert.deepEqual(
+      parseFinishReport(text, () => 30).map((x) => [x.buildingNo, x.trade, x.core, x.floorFrom, x.floorTo]),
+      [
+        [102, "insulation", 1, 16, 20],
+        [103, "ceilingGypsum", 1, 5, 6],
+        [103, "ceilingGypsum", 2, 5, 6],
+        [104, "lightWall", null, 7, 7],
+      ],
+    )
+  })
+})

@@ -2,6 +2,7 @@
  * 마감 공정표 간트 (2026-10-30, 골조 공정표와 같은 방식). 한 달, 날짜 칸 × 동·공종 줄.
  * - 실적 막대(진함): 스마트웍스 세대 완료일을 이어 붙인 구간, 위에 층 범위("5~6F").
  * - 예정 막대(연한 점선): 남은 층을 선행 공종·간격·층 묶음 규칙으로 (엔진 planFinishBuilding, 오른쪽 설정 카드).
+ * - 코어 단위 (2026-10-30): 동이 코어로 나뉘면 공종 줄도 코어마다(같은 공종의 코어 줄은 붙여서). 일보 「N코어」 는 그 코어 줄에만.
  * - 오늘 세로선. 일요일 띠, 공휴일 빨간 날짜, 날짜 세로줄은 골조 간트와 같다.
  */
 import { FINISH_TRADES, dateRange, floorListText, floorRangeText, getDayInfo, type FinishPlanRow } from "@ipg/gantt-engine";
@@ -92,12 +93,28 @@ export default function FinishGantt({
           </div>
 
           {gantt.buildings.map((b) => {
-            const planOf = new Map((plans.get(b.buildingNo) ?? []).map((p) => [p.trade, p.bars]));
-            const reportOf = new Map(reports.filter((x) => x.buildingNo === b.buildingNo).map((x) => [x.trade, x.bars]));
-            const swOf = new Map(b.rows.map((r) => [r.trade, r]));
-            // 줄: 스마트웍스 공종 + 일보에만 나온 공종, 화면 순서(FINISH_TRADES)대로. 막대가 하나라도 있는 줄만
-            const rows = FINISH_TRADES.filter((t) => swOf.has(t.key) || reportOf.has(t.key))
-              .map((t) => ({ trade: t, sw: swOf.get(t.key), report: reportOf.get(t.key) ?? [], plan: planOf.get(t.key) ?? [] }))
+            const keyOf = (trade: string, core: number | null) => `${trade}|${core ?? ""}`;
+            const planOf = new Map((plans.get(b.buildingNo) ?? []).map((p) => [keyOf(p.trade, p.core), p.bars]));
+            const myReports = reports.filter((x) => x.buildingNo === b.buildingNo);
+            const swOf = new Map(b.rows.map((r) => [keyOf(r.trade, r.core), r]));
+            const coreList: (number | null)[] = b.cores.length ? b.cores.map((c) => c.core) : [null];
+            const linesOf = new Map(b.cores.map((c) => [c.core, c]));
+            // 줄: 스마트웍스 공종 + 일보에만 나온 공종, 화면 순서(FINISH_TRADES)대로 × 코어. 막대가 하나라도 있는 줄만
+            const rows = FINISH_TRADES.filter((t) => b.rows.some((r) => r.trade === t.key) || myReports.some((r) => r.trade === t.key))
+              .flatMap((t) =>
+                coreList.map((core) => ({
+                  key: keyOf(t.key, core),
+                  trade: t,
+                  core,
+                  sw: swOf.get(keyOf(t.key, core)),
+                  // 일보: 그 코어 줄 + 코어 표기 없는 줄(동 전체)
+                  report: myReports
+                    .filter((r) => r.trade === t.key && (core == null || r.core == null || r.core === core))
+                    .flatMap((r) => r.bars)
+                    .sort((x, y) => x.start.localeCompare(y.start)),
+                  plan: planOf.get(keyOf(t.key, core)) ?? [],
+                })),
+              )
               .filter((r) => r.report.length || r.sw?.actual.length || r.plan.length);
             return (
               <div key={b.buildingNo} className="border-b-2 border-border">
@@ -110,7 +127,9 @@ export default function FinishGantt({
                 {rows.length === 0 ? (
                   <div className="px-1 py-2 text-[11px] text-muted-foreground">이 동은 아직 해당 공종 마감 기록이 없습니다.</div>
                 ) : (
-                  rows.map(({ trade: t, sw, report, plan }) => {
+                  rows.map(({ key, trade: t, core, sw, report, plan }, ri) => {
+                    const coreInfo = core != null ? linesOf.get(core) : undefined;
+                    const firstOfTrade = ri === 0 || rows[ri - 1].trade.key !== t.key;
                     const tone = toneOf(t.group);
                     const pct = sw?.total ? Math.round((sw.done / sw.total) * 100) : null;
                     // 일보 작업 막대: 기간이 겹치면 아래 칸으로 (칸 = 22px)
@@ -129,11 +148,22 @@ export default function FinishGantt({
                     const height = lanes * LANE + LANE;
                     const bottomTop = lanes * LANE;
                     return (
-                      <div key={t.key} className="grid border-t border-border/40" style={gridCols}>
-                        <div className="flex items-center justify-between gap-1 px-1" title={sw ? `스마트웍스 공종: ${sw.sources.join(", ")}` : "스마트웍스 공종 없음 (일보만)"}>
+                      <div key={key} className={cn("grid border-t", firstOfTrade ? "border-border/40" : "border-dashed border-border/30")} style={gridCols}>
+                        <div
+                          className="flex items-center justify-between gap-1 px-1"
+                          title={[
+                            sw ? `스마트웍스 공종: ${sw.sources.join(", ")}` : "스마트웍스 공종 없음 (일보만)",
+                            coreInfo
+                              ? `${core}코어 = ${coreInfo.lines.map((l) => `${l}호`).join("·")} 라인 (${coreInfo.source === "settings" ? "설정 코어별 세대수" : "스마트웍스 라인 높이로 나눔"})`
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join("\n")}
+                        >
                           <span className="truncate">
-                            <span className="text-muted-foreground">{t.group === t.label ? "" : `${t.group} · `}</span>
-                            {t.label}
+                            {core == null ? <span className="text-muted-foreground">{t.group === t.label ? "" : `${t.group} · `}</span> : null}
+                            {firstOfTrade || core == null ? t.label : <span className="text-muted-foreground/60">〃</span>}
+                            {core != null ? <span className="ml-1 text-[10px] text-muted-foreground">{core}코어</span> : null}
                           </span>
                           {pct != null ? <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{pct}%</span> : null}
                         </div>
@@ -150,6 +180,8 @@ export default function FinishGantt({
                               date,
                               buildingNo: b.buildingNo,
                               buildingName: b.name,
+                              core,
+                              coreLines: coreInfo?.lines ?? [],
                               trade: t,
                               report: report.filter(on),
                               actual: (sw?.actual ?? []).filter(on),

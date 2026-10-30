@@ -6,8 +6,9 @@ import { KR_HOLIDAYS_2026_Q4, planFinishBuilding, type FinishGanttBuilding } fro
 const cal = { holidays: [...KR_HOLIDAYS_2026_Q4] }
 const floors = (done: Record<number, string | null>) =>
   [1, 2, 3, 4].map((f) => ({ floor: f, units: 2, done: done[f] ? 2 : 0, last: done[f] ?? null }))
-const row = (trade: string, f: ReturnType<typeof floors>) => ({
+const row = (trade: string, f: ReturnType<typeof floors>, core: number | null = null) => ({
   trade: trade as never,
+  core,
   sources: [],
   done: f.reduce((s, x) => s + x.done, 0),
   total: 8,
@@ -21,6 +22,7 @@ describe("마감 예정", () => {
   const b: FinishGanttBuilding = {
     buildingNo: 101,
     name: "101동",
+    cores: [],
     rows: [
       row("windowFrame", floors({ 1: "2026-10-20", 2: "2026-10-22", 3: null, 4: null })), // 3·4층 남음
       row("insulation", floors({ 1: "2026-10-27", 2: null, 3: null, 4: null })),
@@ -47,5 +49,24 @@ describe("마감 예정", () => {
     const b2: FinishGanttBuilding = { ...b, rows: [row("windowFrame", floors({})), row("insulation", floors({}))] }
     const p2 = planFinishBuilding(b2, settings, cal, "2026-10-30")
     assert.deepEqual(p2.map((x) => x.bars.length), [0, 0])
+  })
+  it("코어마다 따로: 선행도 같은 코어의 층을 본다", () => {
+    const b3: FinishGanttBuilding = {
+      buildingNo: 101,
+      name: "101동",
+      cores: [],
+      rows: [
+        row("windowFrame", floors({ 1: "2026-10-20", 2: "2026-10-20", 3: "2026-10-20", 4: "2026-10-20" }), 1),
+        row("insulation", floors({ 1: "2026-10-27" }), 1),
+        row("windowFrame", floors({ 1: "2026-10-20", 2: null, 3: null, 4: null }), 2),
+        row("insulation", floors({ 1: "2026-10-27" }), 2),
+      ],
+    }
+    const p3 = planFinishBuilding(b3, settings, cal, "2026-10-30")
+    assert.deepEqual(p3.map((x) => [x.trade, x.core]), [["windowFrame", 1], ["insulation", 1], ["windowFrame", 2], ["insulation", 2]])
+    const ins = (core: number) => p3.find((x) => x.trade === "insulation" && x.core === core)!.bars.map((x) => [x.floorFrom, x.start])
+    // 1코어: 창틀 다 끝남 → 2층부터 바로. 2코어: 2층 창틀 예정(11/3) + 3일 뒤
+    assert.deepEqual(ins(1)[0], [2, "2026-10-31"])
+    assert.deepEqual(ins(2)[0], [2, "2026-11-07"])
   })
 })

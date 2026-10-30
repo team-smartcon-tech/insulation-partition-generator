@@ -6,9 +6,40 @@
 //
 // 세대 완료 = 그 동에서 쓰인 세부 공종(타일 거실·욕실…)이 모두 끝난 날.
 // 실적 막대: 그 공종을 끝낸 세대의 완료일을 날짜순으로 이어 붙이고, 3일 넘게 끊기면 새 막대. 막대 이름 = 그 세대들의 층 범위("5~6F").
+// 코어 단위 (2026-10-30 사용자: 「마감작업은 코어 단위로 움직인다」): 동의 라인(호)을 코어로 나눠 공종 줄도 코어마다.
+//   코어 나누기 = 설정 동 목록의 코어별 세대수(합 = 라인 수일 때). 비었으면 스마트웍스 라인 높이 규칙(groupLinesToCoreGroups,
+//   「스마트웍스에서 불러오기」와 같음) — 그 코어 수가 동 목록 코어 수와 다르면 동 전체 한 줄.
 // 예정 막대: 남은 세대가 있고 최근 4주 속도가 주당 1세대 이상이면, 내일부터 남은 세대 ÷ 속도까지. 층 범위 = 아직 다 끝나지 않은 층.
 import { addDays, type IsoDate } from "../calendar/date.ts"
+import { groupLinesToCoreGroups } from "../rules/smartworks.ts"
 import type { FinishBuildingIn, FinishRoomIn, FinishTypeIn, FinishWorkIn } from "./aggregate.ts"
+
+/** 마감 간트 동 입력: 설정 동 목록의 코어 수·코어별 세대수(모르면 0) */
+export type FinishGanttBuildingIn = FinishBuildingIn & { cores?: number; coreUnits?: number[] }
+export type FinishCore = { core: number; lines: string[]; source: "settings" | "smartworks" }
+
+/** 동 라인 → 코어. 코어 1개(또는 못 나누면) 빈 배열 */
+export function splitLinesToCores(lines: string[], lineTops: number[], cores?: number, coreUnits?: number[]): FinishCore[] {
+  let units: number[] | null = null
+  let source: FinishCore["source"] = "settings"
+  const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0)
+  if (coreUnits && coreUnits.length > 1 && coreUnits.every((u) => u > 0) && sum(coreUnits) === lines.length) units = coreUnits
+  else if (lines.length) {
+    const g = groupLinesToCoreGroups(lineTops).map((x) => x.units)
+    if (g.length > 1 && (cores == null || cores === g.length)) {
+      units = g
+      source = "smartworks"
+    }
+  }
+  if (!units) return []
+  const out: FinishCore[] = []
+  let i = 0
+  units.forEach((u, k) => {
+    out.push({ core: k + 1, lines: lines.slice(i, i + u), source })
+    i += u
+  })
+  return out
+}
 
 export type FinishTradeKey =
   | "insulation"
@@ -100,6 +131,8 @@ export function floorListText(floors: number[]): string {
 }
 export type FinishGanttRow = {
   trade: FinishTradeKey
+  /** 코어 번호(1부터). 동을 코어로 못 나누면 null = 동 전체 */
+  core: number | null
   /** 이 공종으로 맞춘 스마트웍스 공종 이름들 */
   sources: string[]
   done: number
@@ -111,14 +144,14 @@ export type FinishGanttRow = {
   /** 층별 완료 (낮은 층부터). last = 그 층 마지막 완료일 (다 끝났으면 그 층 완료일) */
   floors: { floor: number; units: number; done: number; last: IsoDate | null }[]
 }
-export type FinishGanttBuilding = { buildingNo: number; name: string; rows: FinishGanttRow[] }
+export type FinishGanttBuilding = { buildingNo: number; name: string; cores: FinishCore[]; rows: FinishGanttRow[] }
 export type FinishGantt = { trades: FinishTrade[]; buildings: FinishGanttBuilding[] }
 
 const dayDiff = (a: IsoDate, b: IsoDate) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000)
 
 export function buildFinishGantt(input: {
   types: FinishTypeIn[]
-  buildings: FinishBuildingIn[]
+  buildings: FinishGanttBuildingIn[]
   rooms: FinishRoomIn[]
   works: FinishWorkIn[]
   today: IsoDate
@@ -166,8 +199,14 @@ export function buildFinishGantt(input: {
 
   const buildings = input.buildings
     .map((b) => {
-      const mine = rooms.filter((r) => r.buildingId === b.id)
-      const rows: FinishGanttRow[] = trades.map((t) => {
+      const all = rooms.filter((r) => r.buildingId === b.id)
+      const lines = [...new Set(all.map((r) => r.line))].sort((x, y) => x.localeCompare(y, "ko", { numeric: true }))
+      const lineTops = lines.map((l) => Math.max(...all.filter((r) => r.line === l).map((r) => r.floor)))
+      const cores = splitLinesToCores(lines, lineTops, b.cores, b.coreUnits)
+      const slices: { core: number | null; mine: FinishRoomIn[] }[] = cores.length
+        ? cores.map((c) => ({ core: c.core, mine: all.filter((r) => c.lines.includes(r.line)) }))
+        : [{ core: null, mine: all }]
+      const rows: FinishGanttRow[] = trades.flatMap((t) => slices.map(({ core, mine }): FinishGanttRow => {
         const finished = mine
           .map((r) => ({ r, d: doneAt.get(`${r.id}|${t.key}`) }))
           .filter((x): x is { r: FinishRoomIn; d: IsoDate } => !!x.d)
@@ -209,9 +248,9 @@ export function buildFinishGantt(input: {
           const ds = fr.map((r) => doneAt.get(`${r.id}|${t.key}`)).filter((d): d is IsoDate => !!d)
           return { floor: f, units: fr.length, done: ds.length, last: ds.length ? ds.reduce((m, d) => (d > m ? d : m)) : null }
         })
-        return { trade: t.key, sources: [...(namesOf.get(t.key) ?? [])], done, total, perWeek, actual, forecast, floors }
-      })
-      return { buildingNo: b.buildingNo, name: b.name, rows }
+        return { trade: t.key, core, sources: [...(namesOf.get(t.key) ?? [])], done, total, perWeek, actual, forecast, floors }
+      }))
+      return { buildingNo: b.buildingNo, name: b.name, cores, rows }
     })
     .sort((x, y) => x.buildingNo - y.buildingNo)
 
