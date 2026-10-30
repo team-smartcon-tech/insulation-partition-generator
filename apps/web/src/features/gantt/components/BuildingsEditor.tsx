@@ -36,6 +36,13 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
   // 스마트웍스에서 불러오기: 동·코어별 최상층을 채운다. 지하·기준층 시작·옥탑·이름은 있는 동은 그대로, 새 동은 마지막 동 값 복사.
   // 스마트웍스에 없는 동은 지우지 않는다. 화면에만 채우고 저장은 「저장」 버튼으로.
   const [importing, setImporting] = useState(false);
+  // 옥탑 일괄: 모든 동·모든 코어의 옥탑 층수를 한 번에 (동별·코어별로 다시 고칠 수 있다)
+  const [bulkRoof, setBulkRoof] = useState<number>(() => value.at(-1)?.coreRooftopFloors[0] ?? 1);
+  const applyBulkRoof = () => {
+    if (!value.length) return;
+    onChange(value.map((b) => ({ ...b, ...fromCores(coresOf(b).map((c) => ({ ...c, rooftop: bulkRoof }))) })));
+    toast.success(`모든 동·코어의 옥탑을 ${bulkRoof}층으로 바꿨습니다. 「저장」을 눌러야 반영됩니다.`);
+  };
   const importFromSmartworks = async () => {
     if (!siteId) return;
     setImporting(true);
@@ -111,7 +118,15 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
             동 번호는 작업일보의 "401동"과 같아야 합니다. 코어마다 최상층·옥탑이 다르면 그 동 안에서 "코어 추가"를 누르세요. 옥탑 0층 = 없음.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+          <div className="mr-1 flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-xs text-muted-foreground" title="모든 동·코어의 옥탑 층수를 한 번에 바꿉니다 (0 = 없음)">
+            <span className="whitespace-nowrap">옥탑 일괄</span>
+            <NumInput className="w-14" min={0} max={10} value={bulkRoof} aria-label="옥탑 일괄 층수" onValue={(v) => setBulkRoof(v ?? 0)} />
+            <span>층</span>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={applyBulkRoof} disabled={!value.length}>
+              모두 적용
+            </Button>
+          </div>
           {siteId ? (
             <Button
               variant="outline"
