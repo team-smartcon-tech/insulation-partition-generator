@@ -65,6 +65,9 @@ export default function SchedulePanel({
   const unplanned = d?.unplanned ?? [];
   // 지하·저층 순서표(재래식)로 예정을 낸 동
   const ugPlanned = d?.underground ?? [];
+  // 최상층을 몰라 기준층 예정을 그리지 않은 동 / 동 목록에 없어 뺀 동 번호(일보 오타 등)
+  const noTop = d?.noTopFloor ?? [];
+  const ignored = d?.ignoredBuildings ?? [];
   const allUnplanned = d != null && unplanned.length > 0 && unplanned.length === d.buildingIds.length;
   // 이 달에 그릴 것이 없다 (일보가 있는 현장인데 첫 일보 이전 달 등)
   // (동 목록이 있어도 실적·예정이 하나도 없으면 빈 줄만 남으므로 같이 안내)
@@ -130,6 +133,16 @@ export default function SchedulePanel({
             {ugPlanned.length && !nothing ? (
               <span className="ml-2 text-sky-700">
                 {ugPlanned.map(labelOf).join("·")}: 지하·저층은 설정의 재래식 순서표로 예정, 기준층 시작부터 기준층 사이클.
+              </span>
+            ) : null}
+            {noTop.length ? (
+              <span className="ml-2 font-medium text-amber-700">
+                최상층 미입력({noTop.map(labelOf).join("·")}): 기준층 예정을 그리지 않습니다. 설정 탭 동 목록에서 최상층을 넣어 주세요(「스마트웍스에서 불러오기」).
+              </span>
+            ) : null}
+            {ignored.length ? (
+              <span className="ml-2 text-slate-500">
+                동 목록에 없는 {ignored.map((n) => `${n}동`).join("·")} 기록은 공정표에서 뺐습니다(일보 오타일 수 있음, 작업일보 탭 원문에는 그대로).
               </span>
             ) : null}
             {unplanned.length && !nothing ? (

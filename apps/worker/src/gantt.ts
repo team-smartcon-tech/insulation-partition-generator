@@ -404,7 +404,21 @@ gantt.post("/plan", async (c) => {
       loadBuildings(c.env, req.siteId),
     ]);
     const topFloors = new Map(buildings.map((b) => [b.buildingNo, b.topFloor]));
-    const progress = progressFromReports(reports, actualTo, topFloors);
+    // 동 목록이 저장된 현장은 목록에 없는 동 번호(일보 오타 — 평택고덕 「3111동」 = 3611동)를 공정표에서 뺀다.
+    // 작업일보 탭 원문에는 그대로 보인다 (2026-10-30)
+    const listed = new Set(buildings.map((b) => b.buildingNo));
+    const ignoredSet = new Set<number>();
+    const reportsForPlan = listed.size
+      ? reports.map((r) => ({
+          ...r,
+          entries: r.entries.filter((e) => {
+            if (e.buildingNo == null || listed.has(e.buildingNo)) return true;
+            if (e.stage) ignoredSet.add(e.buildingNo);
+            return false;
+          }),
+        }))
+      : reports;
+    const progress = progressFromReports(reportsForPlan, actualTo, topFloors);
     const days = dateRange(req.from, req.to).map((d) => getDayInfo(req.calendar, d));
     const reportDates = reports.filter((r) => r.date >= req.from).map((r) => r.date);
 
@@ -434,6 +448,8 @@ gantt.post("/plan", async (c) => {
         reportDates,
         unplanned: [],
         underground: [],
+        noTopFloor: [],
+        ignoredBuildings: [],
         firstReportDate,
       };
       return c.json(body);
@@ -457,6 +473,8 @@ gantt.post("/plan", async (c) => {
         reportDates,
         unplanned: [],
         underground: [],
+        noTopFloor: [],
+        ignoredBuildings: [],
         firstReportDate,
       };
       return c.json(body);
@@ -528,14 +546,17 @@ gantt.post("/plan", async (c) => {
       })),
     ].sort((a, b) => a.id - b.id);
 
+    // 최상층을 모르는 동은 기준층 예정을 그리지 않는다(끝없이 올라가 67층 같은 예정이 나왔다). 실적·지하 예정은 그대로, 화면에 「최상층 미입력」 안내
+    const noTopFloor = initial.filter((b) => b.topFloor == null).map((b) => b.id);
+    const initialWithTop = initial.filter((b) => b.topFloor != null);
     const planned =
-      planFrom <= req.to
+      planFrom <= req.to && initialWithTop.length
         ? simulate({
-            settings: { ...req.settings, buildingCount: initial.length },
+            settings: { ...req.settings, buildingCount: initialWithTop.length },
             calendar: req.calendar,
             from: planFrom,
             to: req.to,
-            initial,
+            initial: initialWithTop,
           })
         : null;
     const statsFrom = planFrom > req.from ? planFrom : req.from;
@@ -561,6 +582,8 @@ gantt.post("/plan", async (c) => {
       reportDates,
       unplanned: [...unplanned].sort((a, b) => a - b),
       underground: [...ugIds].sort((a, b) => a - b),
+      noTopFloor: noTopFloor.sort((a, b) => a - b),
+      ignoredBuildings: [...ignoredSet].sort((a, b) => a - b),
       firstReportDate,
     };
     return c.json(body);

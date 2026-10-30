@@ -16,7 +16,7 @@ const MAX_CORES = 8;
 const stepName = (name: string, d: number) => name.replace(/\d+/, (m) => String(Math.max(0, Number(m) + d)).padStart(m.length, "0"));
 
 /** 코어 칸 너비: 코어 | 세대 | 최상층 | 옥탑 | 삭제·코어 추가 — 헤더와 코어 줄이 같이 쓴다 */
-// 입력란 너비(2026-10-30 사용자 지정): 동번호 60 · 이름 80 · 지하 50 · 기준층 시작 50 · 세대 50 · 최상층 60 · 옥탑 50 · 현재 층 100px.
+// 입력란 너비(2026-10-30 사용자 지정): 동번호 80 · 이름 80 · 지하 50 · 기준층 시작 50 · 세대 50 · 최상층 60 · 옥탑 50 · 현재 층 100px.
 // 입력란 사이 간격은 모두 12px(열 오른쪽 여백 pr-3 기준) — 열 너비 = 입력란 + 12px, 코어 묶음은 칸 = 입력란, 간격 12px(gap-x-3)
 const CORE_GRID = "grid grid-cols-[2.75rem_50px_60px_50px_auto] items-center gap-x-3";
 
@@ -223,7 +223,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
               const multi = cores.length > 1;
               return (
                 <tr key={i} className="border-t border-border/60 align-top">
-                  <td className="py-1.5 pr-3 w-[72px]">
+                  <td className="py-1.5 pr-3 w-[92px]">
                     <NumInput min={1} value={b.buildingNo} onValue={(v) => setNo(i, v ?? b.buildingNo)} aria-label="동 번호" />
                   </td>
                   <td className="py-1.5 pr-3 w-[92px]">
