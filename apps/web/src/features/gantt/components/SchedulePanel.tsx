@@ -3,6 +3,7 @@
  * 저장된 현장 설정을 기본으로 쓰고, 패널에서 바꾼 값은 이 화면에서만 적용된다(저장은 설정 탭).
  */
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { DEFAULT_SITE_SETTINGS, type SiteSettings } from "@ipg/gantt-engine";
 import { toast } from "sonner";
@@ -40,7 +41,16 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-export default function SchedulePanel({ siteId, siteName }: { siteId: string | null; siteName: string }) {
+export default function SchedulePanel({
+  siteId,
+  siteName,
+  actionsSlot = null,
+}: {
+  siteId: string | null;
+  siteName: string;
+  /** 탭 줄 오른쪽 자리 — 엑셀·인쇄 버튼을 여기에 그린다 (GanttPage) */
+  actionsSlot?: HTMLElement | null;
+}) {
   const [month, setMonth] = useState(todayKst().slice(0, 7));
   const saved = useSettings(siteId);
   const [override, setOverride] = useState<SiteSettings | null>(null);
@@ -82,8 +92,20 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
   };
   const labelOf = (id: number) => d?.buildings?.find((b) => b.id === id)?.label ?? `${id}동`;
 
+  const actions = (
+    <>
+      <Button variant="outline" size="sm" onClick={onExcel} disabled={!d || saving} title="공정표 엑셀 저장 (.xlsx)">
+        <ExcelIcon className="size-4 text-emerald-700" /> {saving ? "저장 중…" : "엑셀"}
+      </Button>
+      <Button variant="outline" size="sm" onClick={onPrint} disabled={!d} title="공정표 인쇄 (A3 가로)">
+        <PrintIcon /> 인쇄
+      </Button>
+    </>
+  );
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+      {actionsSlot ? createPortal(actions, actionsSlot) : null}
       {/* 인쇄 영역: 현장·월 머리줄, 요약 카드, 간트, 범례 (index.css @media print 의 [data-print-root]) */}
       <div className="min-w-0 space-y-4" data-print-root>
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
@@ -169,12 +191,6 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
                 <RotateCcw /> 저장값으로
               </Button>
             ) : null}
-            <Button variant="outline" size="sm" onClick={onExcel} disabled={!d || saving} title="공정표 엑셀 저장 (.xlsx)">
-              <ExcelIcon className="size-4 text-emerald-700" /> {saving ? "저장 중…" : "엑셀"}
-            </Button>
-            <Button variant="outline" size="sm" onClick={onPrint} disabled={!d} title="공정표 인쇄 (A3 가로)">
-              <PrintIcon /> 인쇄
-            </Button>
           </div>
         </div>
         <SettingsForm value={settings} onChange={setOverride} />

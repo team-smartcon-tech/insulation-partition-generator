@@ -24,6 +24,7 @@ const SITE_KEY = "gantt.siteId";
 
 export default function GanttPage() {
   const sites = useSites();
+  const [tabActions, setTabActions] = useState<HTMLDivElement | null>(null);
   const [tab, setTab] = useState<Tab>("schedule");
   const [siteId, setSiteId] = useState<string | null>(() => {
     try {
@@ -90,6 +91,8 @@ export default function GanttPage() {
               <t.icon className="size-4" /> {t.label}
             </button>
           ))}
+          {/* 탭 줄 오른쪽: 탭 화면이 버튼을 끼워 넣는 자리 (공정표 탭의 엑셀·인쇄) */}
+          <div ref={setTabActions} className="ml-auto flex items-center gap-1 pb-1" />
         </div>
 
         {sites.isError ? (
@@ -97,7 +100,7 @@ export default function GanttPage() {
         ) : tab === "reports" ? (
           <DailyReportPanel key={siteId ?? ""} siteId={siteId} siteName={site?.name ?? ""} initialDate={site?.lastReportDate ?? null} />
         ) : tab === "schedule" ? (
-          <SchedulePanel siteId={siteId} siteName={site?.name ?? ""} />
+          <SchedulePanel siteId={siteId} siteName={site?.name ?? ""} actionsSlot={tabActions} />
         ) : (
           <SettingsPanel siteId={siteId} siteName={site?.name ?? ""} />
         )}
