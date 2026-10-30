@@ -2,7 +2,7 @@
  * 현장 설정 폼 (설계 §5): 자원 용량 · 반일 투입(같은 날 오전→오후 연계) · 팀 운영 제약.
  * 값은 부모가 들고(controlled) 저장은 부모가 한다 — 공정표 탭에서는 "저장 없이 바꿔 보기", 설정 탭에서는 저장.
  */
-import { DEFAULT_UNDERGROUND_SETTINGS, type SiteSettings, type UndergroundSettings } from "@ipg/gantt-engine";
+import { DEFAULT_UNDERGROUND_SETTINGS, gangformCaps, type SiteSettings, type UndergroundSettings } from "@ipg/gantt-engine";
 import { NumInput } from "./StepInput";
 
 function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -67,16 +67,14 @@ export default function SettingsForm({ value, onChange }: { value: SiteSettings;
       <Section title="자원 용량">
         <Num label="철근팀" value={s.rebarTeams} options={counts(3, "팀")} onChange={(v) => set({ rebarTeams: Number(v) })} />
         <Num label="알폼팀" value={s.alformTeams} options={counts(3, "팀")} onChange={(v) => set({ alformTeams: Number(v) })} />
+        {/* 갱폼팀 + 팀당 N동/일 (2026-10-30). 예전 「반일 N동」 저장값은 팀당 2N동/일로 보인다(결과 같음) */}
+        <Num label="갱폼팀" value={s.gangformTeams ?? 1} options={counts(3, "팀")} onChange={(v) => set({ gangformTeams: Number(v) })} />
         <Num
-          label="갱폼인양 단위"
-          value={s.gangform.per}
-          options={[
-            { value: "day", label: "하루 N동" },
-            { value: "slot", label: "반일 N동" },
-          ]}
-          onChange={(v) => set({ gangform: { ...s.gangform, per: v === "day" ? "day" : "slot" } })}
+          label="갱폼인양 N/일 (팀당)"
+          value={gangformCaps(s).perTeamPerDay}
+          options={counts(4, "동/일")}
+          onChange={(v) => set({ gangform: { per: "day", count: Number(v) } })}
         />
-        <Num label="갱폼인양 N" value={s.gangform.count} options={counts(3, "동")} onChange={(v) => set({ gangform: { ...s.gangform, count: Number(v) } })} />
         <Num label="1일 타설" value={s.pourPerDay} options={counts(3, "동")} onChange={(v) => set({ pourPerDay: Number(v) })} />
         <Toggle label="철근팀 벽 오전 + 슬래브 오후 병행" hint="끄면 벽·슬래브가 각 하루" checked={s.rebarWallAndSlabSameDay} onChange={(v) => set({ rebarWallAndSlabSameDay: v })} />
       </Section>
