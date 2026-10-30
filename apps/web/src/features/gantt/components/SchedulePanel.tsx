@@ -167,7 +167,7 @@ export default function SchedulePanel({
           </div>
         ) : d ? (
           <>
-            <div className={allUnplanned ? "hidden" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>
+            <div className={allUnplanned ? "hidden" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4 print:grid-cols-4"}>
               <Stat label={d.asOf ? "예정 타설" : "타설"} value={`${d.stats.pours}회`} sub={d.asOf ? `${d.stats.from}부터 월말까지` : undefined} />
               <Stat label="타설 공백" value={`${d.stats.pourGapDays}일`} />
               <Stat label="알폼 온종일 유휴" value={`${d.stats.idle.alform.fullDays}일`} sub={`반일 ${d.stats.idle.alform.halfDays}일`} />
