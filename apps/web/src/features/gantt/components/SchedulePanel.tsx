@@ -93,9 +93,12 @@ export default function SchedulePanel({
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
       {actionsSlot ? createPortal(actions, actionsSlot) : null}
-      {/* 인쇄 영역: 현장·월 머리줄, 요약 카드, 간트, 범례 (index.css @media print 의 [data-print-root]) */}
+      {/* 인쇄 영역: 제목(인쇄만), 간트, 범례. 머리줄·요약 카드는 화면만 (index.css @media print 의 [data-print-root]) */}
       <div className="min-w-0 space-y-4" data-print-root>
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
+        <h1 className="hidden text-center text-2xl font-bold print:block">
+          {siteName} {Number(month.slice(0, 4))}년 {Number(month.slice(5))}월 예정공정표
+        </h1>
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 print:hidden">
           <p className="min-w-0 flex-1 text-sm text-muted-foreground">
             <b className="text-foreground">{siteName}</b>
             {nothing && unplanned.length
@@ -167,7 +170,7 @@ export default function SchedulePanel({
           </div>
         ) : d ? (
           <>
-            <div className={allUnplanned ? "hidden" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4 print:grid-cols-4"}>
+            <div className={allUnplanned ? "hidden" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4 print:hidden"}>
               <Stat label={d.asOf ? "예정 타설" : "타설"} value={`${d.stats.pours}회`} sub={d.asOf ? `${d.stats.from}부터 월말까지` : undefined} />
               <Stat label="타설 공백" value={`${d.stats.pourGapDays}일`} />
               <Stat label="알폼 온종일 유휴" value={`${d.stats.idle.alform.fullDays}일`} sub={`반일 ${d.stats.idle.alform.halfDays}일`} />
