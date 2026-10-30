@@ -276,23 +276,23 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
     byDate.set(w.date, [...(byDate.get(w.date) ?? []), w]);
     actualDays.set(w.buildingId, byDate);
   }
-  // 지하·저층(먹매김이 없는 공정): 그 동의 작업 층이 앞 실적 날과 달라진 날 칸 위에 층 라벨 ("B1F·1F")
-  const ugFloorLabel = new Map<string, string>();
+  // 실적 층 라벨: 동별로 사이클 층이 처음 올라간 날(그달 첫 실적 날 포함)에 그 층.
+  // 그날 층 = 숫자 층 실적 중 가장 높은 층 — 아래층에 섞인 기록(다른 층 시스템 동바리 등)이나 RF·「층?」 으로는 라벨을 바꾸지 않는다.
+  // 먹매김이 없는 일보(화성·지하 현장)도 층이 보이게 (2026-10-30)
+  const actualStoryLabel = new Map<string, string>();
   for (const [id, byDate] of actualDays) {
     const dates = [...byDate.keys()].sort();
-    let prevKey = "";
+    let maxSeen = -Infinity;
     dates.forEach((date, i) => {
       const prev = i > 0 ? byDate.get(dates[i - 1])! : [];
       for (const w of byDate.get(date)!) if (prev.some((x) => same(x, w))) contActual.add(w);
-      const works = byDate.get(date)!;
-      if (works.some((w) => w.stage === "MARK") || !works.some((w) => w.floor < 2 || w.floorLabel != null)) {
-        prevKey = "";
-        return;
+      const numeric = byDate.get(date)!.filter((w) => w.floorLabel == null);
+      if (!numeric.length) return;
+      const top = numeric.reduce((m, w) => (w.floor > m.floor ? w : m));
+      if (top.floor > maxSeen) {
+        actualStoryLabel.set(`${date}|${id}`, actualFloorText(top));
+        maxSeen = top.floor;
       }
-      const floors = [...new Set([...works].sort((a, b) => a.floor - b.floor).map(actualFloorText))];
-      const key = floors.join("·");
-      if (key !== prevKey) ugFloorLabel.set(`${date}|${id}`, key);
-      prevKey = key;
     });
   }
   const asOf = data.asOf ?? null;
@@ -345,12 +345,9 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
                 const planned = !isActualDay(d.date);
                 const boxes = isActualDay(d.date) && actual ? actualBoxes(d.date, label(id), actual, (w) => contActual.has(w)) : planned ? dayBoxes(d.date, label(id), am, pm, (a) => contPlan.has(a)) : [];
                 // 사이클 시작(먹매김) 칸에 층 라벨 (옥탑은 PH1·PH2)
-                const markActual = actual?.find((w) => w.stage === "MARK");
                 const markPlan = am?.stage === "MARK" ? am : pm?.stage === "MARK" ? pm : planStoryStart.get(`${d.date}|${id}`);
                 const startFloor = actual
-                  ? markActual
-                    ? actualFloorText(markActual)
-                    : ugFloorLabel.get(`${d.date}|${id}`)
+                  ? actualStoryLabel.get(`${d.date}|${id}`)
                   : markPlan
                     ? floorLabel(markPlan)
                     : undefined;
