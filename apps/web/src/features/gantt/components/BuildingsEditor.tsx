@@ -16,7 +16,8 @@ const MAX_CORES = 8;
 const stepName = (name: string, d: number) => name.replace(/\d+/, (m) => String(Math.max(0, Number(m) + d)).padStart(m.length, "0"));
 
 /** 코어 칸 너비: 코어 | 세대 | 최상층 | 옥탑 | 삭제·코어 추가 — 헤더와 코어 줄이 같이 쓴다 */
-const CORE_GRID = "grid grid-cols-[2.75rem_3.5rem_4.25rem_4.25rem_auto] items-center gap-x-1.5";
+// 입력란 너비(2026-10-30 사용자 지정): 세대 50 · 최상층 60 · 옥탑 50px. 다른 칸은 td 너비 = 입력란 + 오른쪽 여백 8px
+const CORE_GRID = "grid grid-cols-[2.75rem_50px_60px_50px_auto] items-center gap-x-1.5";
 
 /** units = 그 코어가 한 층에서 맡는 세대 수 (0 = 모름) */
 type Core = { top: number; rooftop: number; units?: number };
@@ -179,10 +180,10 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
               const multi = cores.length > 1;
               return (
                 <tr key={i} className="border-t border-border/60 align-top">
-                  <td className="py-1.5 pr-2 w-20">
+                  <td className="py-1.5 pr-2 w-[68px]">
                     <NumInput min={1} value={b.buildingNo} onValue={(v) => setNo(i, v ?? b.buildingNo)} aria-label="동 번호" />
                   </td>
-                  <td className="py-1.5 pr-2 w-28">
+                  <td className="py-1.5 pr-2 w-[88px]">
                     <StepInput
                       value={b.name}
                       aria-label="이름"
@@ -190,10 +191,10 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                       onStep={(d) => update(i, { name: stepName(b.name, d) })}
                     />
                   </td>
-                  <td className="py-1.5 pr-2 w-16">
+                  <td className="py-1.5 pr-2 w-[58px]">
                     <NumInput min={0} max={10} value={b.basementFloors ?? 0} onValue={(v) => update(i, { basementFloors: v ?? 0 })} aria-label="지하층 수" />
                   </td>
-                  <td className="py-1.5 pr-2 w-20">
+                  <td className="py-1.5 pr-2 w-[58px]">
                     <NumInput min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작" />
                   </td>
                   <td className="py-1.5 pr-2">
@@ -242,7 +243,7 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                       })}
                     </div>
                   </td>
-                  <td className="py-1.5 pr-2 w-24">
+                  <td className="py-1.5 pr-2 w-[108px]">
                     <NumInput min={0} value={b.currentFloor} placeholder="일보 우선" onValue={(v) => update(i, { currentFloor: v })} aria-label="현재 층" />
                   </td>
                   <td className="py-1.5 text-right">
