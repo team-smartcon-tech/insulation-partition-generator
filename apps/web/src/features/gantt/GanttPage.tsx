@@ -11,6 +11,7 @@ import ToolShell from "@/features/tcRental/components/ToolShell";
 import { cn } from "@/lib/utils";
 import { useSites } from "./hooks";
 import DailyReportPanel from "./components/DailyReportPanel";
+import SitePicker from "./components/SitePicker";
 import SchedulePanel from "./components/SchedulePanel";
 import SettingsPanel from "./components/SettingsPanel";
 
@@ -57,22 +58,13 @@ export default function GanttPage() {
       actions={
         <div className="flex items-center gap-2">
           <span className="hidden text-[10px] font-semibold tracking-widest text-slate-400 sm:block">PROJECT</span>
-          <select
-            value={siteId ?? ""}
-            onChange={(e) => setSiteId(e.target.value || null)}
-            className="h-9 max-w-[22rem] truncate rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-800"
-            aria-label="현장 선택"
-            disabled={sites.isPending}
-          >
-            {sites.isPending ? <option value="">현장 불러오는 중…</option> : null}
-            {sites.isError ? <option value="">현장 목록을 못 불러옴</option> : null}
-            {(sites.data?.sites ?? []).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-                {s.lastReportDate ? ` · 최근 ${s.lastReportDate.slice(5)}` : " · 일보 없음"}
-              </option>
-            ))}
-          </select>
+          <SitePicker
+            sites={sites.data?.sites ?? []}
+            value={siteId}
+            onChange={(id) => setSiteId(id)}
+            loading={sites.isPending}
+            error={sites.isError}
+          />
         </div>
       }
     >
