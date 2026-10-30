@@ -173,7 +173,9 @@ export default function DailyReportPanel({ siteId, siteName, initialDate }: { si
             </div>
             {matched.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                {hasText ? '원문에 "* 골조" 구간이 없거나 줄 모양이 달라 읽지 못했습니다.' : "이 날짜의 일보에 작업 내용이 없습니다."}
+                {hasText
+                  ? "원문에서 골조 공사 구간(골조·철근콘크리트·형틀·철근 등)을 찾지 못했거나, 동·층·공종으로 읽을 줄이 없습니다."
+                  : "이 날짜의 일보에 작업 내용이 없습니다."}
               </div>
             ) : (
               <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">

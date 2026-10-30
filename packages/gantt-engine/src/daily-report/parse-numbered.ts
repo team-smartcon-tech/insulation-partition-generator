@@ -28,6 +28,9 @@ type Kind = "form" | "rebar" | "concrete" | "mep"
 
 /** "1. 형틀 공사 (133)", "2. 철근공사", "3. 전기" */
 const NUMBERED_HEADER = /^\s*\d+\s*\.\s*(.+?)\s*(?:\(\s*\d+\s*\))?\s*$/
+/** "● 철근콘크리트공사 (124)" — 기호로 시작하는 공사 제목 (평택고덕P1 1차, 2026-10-30) */
+const BULLET_HEADER = /^\s*[●■◆○▶◎]\s*(.+?)\s*(?:\(\s*[\d+\s]+\))?\s*$/
+const headerOf = (line: string) => NUMBERED_HEADER.exec(line) ?? BULLET_HEADER.exec(line)
 /** "* 형틀(100)" 같은 하위 제목 */
 const SUB_HEADER = /^\s*\*\s*(.+?)\s*(?:\(\s*[\d+\s]+\))?\s*$/
 const ITEM = /^\s*-\s*(.+?)\s*$/
@@ -36,13 +39,37 @@ const HEADCOUNT_TAIL = /\s*\(\s*\d+\s*\)\s*$/
 // "지하1층"·"지상1층" 도, "2동B2F" 처럼 앞 글자에 붙은 층도 읽는다 (앞이 숫자·영문만 아니면)
 const FLOOR_TOKEN = /(?:^|[^0-9A-Za-z])((?:지하|지상)\s*\d{1,3}\s*층|B?\d{1,3}\s*(?:F\b|층)|RF\b|PH\d*F?\b|PIT\b)/i
 /** 줄 앞 동 목록: "501동", "502동, 503동", "501동~504동", "501,502동" */
-const LEADING_BUILDINGS = /^((?:\d{3,4}\s*동?\s*[,~∼]\s*)*\d{3,4}\s*동)\s*/
+const LEADING_BUILDINGS = /^((?:\d{3,4}\s*동?\s*[,~∼-]\s*)*\d{3,4}\s*동)\s*/
+/** 동 번호만 있는 조각 ("504동", "3610-3611동") */
+const ONLY_BUILDINGS = /^(?:\d{3,4}\s*동?\s*[,~∼-]\s*)*\d{3,4}\s*동$/
 
-/** 이 양식인가: 줄 앞에 "1. … 공사" 같은 번호 제목이 둘 이상 */
+/**
+ * 한 줄을 작업 조각으로: 「/」 로 나누고, 「,」 뒤에 동 번호가 오면 거기서도 나눈다
+ * ("3611동 … 마감, 3605동 … 설치"). 동 번호만 있는 조각은 다음 조각과 다시 붙인다 ("504동, 505동 1F 바닥 슬리브").
+ */
+function splitSegments(body: string): string[] {
+  const out: string[] = []
+  for (const part of body.split(/\s*\/\s*/)) {
+    const pieces = part.split(/\s*,\s*(?=\d{3,4}\s*동|\d{3,4}\s*[~∼-]\s*\d{3,4}\s*동)/)
+    let carry = ""
+    for (const p of pieces) {
+      const cur = carry ? `${carry}, ${p}` : p
+      if (ONLY_BUILDINGS.test(cur.trim())) carry = cur
+      else {
+        out.push(cur)
+        carry = ""
+      }
+    }
+    if (carry) out.push(carry)
+  }
+  return out
+}
+
+/** 이 양식인가: 줄 앞에 "1. … 공사" / "● … 공사" 같은 공사 제목이 둘 이상 */
 export function isNumberedFormat(rawText: string): boolean {
   let n = 0
   for (const line of rawText.split(/\r?\n/)) {
-    const m = NUMBERED_HEADER.exec(line)
+    const m = headerOf(line)
     if (m && /공사|형틀|철근|전기|설비|콘크리트/.test(m[1])) n++
     if (n >= 2) return true
   }
@@ -73,7 +100,7 @@ function expandBuildings(s: string): number[] {
   const nums: number[] = []
   const parts = s.replace(/동/g, "").split(/\s*,\s*/)
   for (const p of parts) {
-    const r = /^(\d{3,4})\s*[~∼]\s*(\d{3,4})$/.exec(p.trim())
+    const r = /^(\d{3,4})\s*[~∼-]\s*(\d{3,4})$/.exec(p.trim())
     if (r) {
       const [a, b] = [Number(r[1]), Number(r[2])]
       for (let i = Math.min(a, b); i <= Math.max(a, b) && i - Math.min(a, b) < 20; i++) nums.push(i)
@@ -127,7 +154,7 @@ export function parseNumbered(rawText: string): ParsedWorkText {
   let sub = ""
 
   for (const line of rawText.split(/\r?\n/)) {
-    const h = NUMBERED_HEADER.exec(line)
+    const h = headerOf(line)
     if (h && !ITEM.test(line)) {
       kind = kindOf(h[1])
       sub = ""
@@ -143,13 +170,15 @@ export function parseNumbered(rawText: string): ParsedWorkText {
     if (!it || !kind || sub === "skip") continue
     const body = it[1].replace(HEADCOUNT_TAIL, "").trim()
 
-    for (const seg of body.split(/\s*\/\s*/)) {
+    for (const seg of splitSegments(body)) {
       const lb = LEADING_BUILDINGS.exec(seg)
       if (!lb) continue // 현장 관리, 반입 등 동이 없는 줄
       const nos = expandBuildings(lb[1])
       const rest = seg.slice(lb[0].length).replace(/^[:：]\s*/, "").trim()
       // "501동 주변 저수조 …", "503동 주변주차장 …" — 그 동이 아니라 옆 부대시설
       if (/^주변/.test(rest)) continue
+      // "3610-3611동 사이 기초 …" — 두 동 사이 구역이지 그 동이 아니다
+      if (/^사이/.test(rest)) continue
 
       // 「및」 으로 묶인 구문: 각 구문의 벽/바닥·층을 따로. 공종 동사(거푸집 설치·철근 조립…)는 마지막 구문에서 공유
       const phrases = rest.split(/\s*및\s*/)

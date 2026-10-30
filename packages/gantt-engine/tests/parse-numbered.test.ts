@@ -125,3 +125,42 @@ ${s}
     assert.deepEqual(e.map((x) => x.text), ["벽체 거푸집 설치", "바닥 거푸집 설치 (원문 1F)"])
   })
 })
+
+describe("● 제목 양식 (평택고덕P1 1차 2026-10-30 일보 모양)", () => {
+  const TEXT = `▣ 주요작업사항 (2026. 10. 30. 금, 날씨 : 흐림, 8~19℃)
+총 인원 : 172 명
+
+● 철근콘크리트공사 (124)
+-  3606동 B2F 거푸집 하부마감
+- 3611동 주변주차장 B1F 외벽 거푸집 마감, 3611동 주변주차장 RF 보 거푸집 설치, 3605동 B1F 벽체 거푸집 설치
+- 3604동 B1F DH보 설치
+- 3610-3611동 사이 기초 철근 배근, 3606동 B1F 슬래브 철근 배근, 3602동 주변주차장 기초 철근 배근, 3611동 1F 보 철근 배근, 3609동 기초 철근 배근
+- 3608동 B1F 벽체 철근 배근
+- 3608동 B1F 외부 비계 설치
+
+● 파일항타 (12)
+- 3601동, 3608동, 3609동 주변 주차장 터파기
+
+* 장비 : 공기압축기(21.m) 1대, B/H(06w) 2대
+
+● 토공사 (7)`
+  const rows = () => parseWorkText(TEXT).entries.filter((e) => e.stage).map((e) => [e.buildingNo, e.floor, e.stage])
+
+  it("● 철근콘크리트공사 를 골조로 읽고, 쉼표로 이어 쓴 동을 나눈다", () => {
+    assert.equal(isNumberedFormat(TEXT), true)
+    assert.deepEqual(rows(), [
+      [3605, -1, "FORM_WALL"],
+      [3606, -2, "SLAB_REBAR"], // B1F 슬래브 = B2 천장
+      [3608, -1, "WALL_REBAR"],
+    ])
+  })
+  it("주변주차장·두 동 사이·파일항타 구간은 넣지 않는다", () => {
+    const e = parseWorkText(TEXT).entries
+    assert.ok(!e.some((x) => /주변|사이|터파기/.test(x.text)))
+    assert.ok(!e.some((x) => x.buildingNo === 3610 || x.buildingNo === 3601))
+  })
+  it("동 번호만 있는 쉼표 조각은 다음 조각과 붙인다 (504동, 505동 1F 바닥 슬리브)", () => {
+    const e = parseWorkText("1. 형틀 공사 (1)\n6. 설비 공사 (4)\n- 504동, 505동 1F 바닥 슬리브 설치(2)").entries
+    assert.deepEqual(e.map((x) => x.buildingNo), [504, 505])
+  })
+})
