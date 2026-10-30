@@ -101,6 +101,8 @@ type Box = {
   text?: string;
   /** 실적처럼 반일 구분이 없는 날: 하루를 n 칸으로 나눈 i 번째 (0부터) */
   seg?: { i: number; n: number };
+  /** 유휴 줄: 그달 몇 번째 유휴일인가 (가로 숫자) */
+  count?: number;
 };
 
 /** 글자: 같은 작업이 여러 칸 이어지면(cont = 앞 칸과 같은 작업) 첫 칸에만 */
@@ -156,11 +158,14 @@ function BoxEl({ box }: { box: Box }) {
         !seg && box.span === "DAY" && "inset-x-0.5",
         !seg && box.span === "AM" && "left-0.5 right-1/2 mr-px",
         !seg && box.span === "PM" && "left-1/2 right-0.5 ml-px",
-        box.text && "flex items-center justify-center overflow-hidden",
+        (box.text || box.count != null) && "flex items-center justify-center overflow-hidden",
       )}
       style={seg ? { left: `calc(${(seg.i / seg.n) * 100}% + 2px)`, width: `calc(${100 / seg.n}% - 3px)` } : undefined}
       title={box.title}
     >
+      {box.count != null ? (
+        <span className="select-none text-[10px] font-semibold leading-none tabular-nums text-foreground/70">{box.count}</span>
+      ) : null}
       {box.text ? (
         <span className="select-none text-[10px] font-medium leading-none tracking-tighter text-foreground/75 [text-orientation:upright] [writing-mode:vertical-rl]">
           {box.text}
@@ -170,10 +175,10 @@ function BoxEl({ box }: { box: Box }) {
   );
 }
 
-const IDLE_TEAMS: { key: string; label: string; group: Group; stages: Stage[]; canWork: (d: DayInfo) => boolean }[] = [
-  { key: "gangform", label: "갱폼 유휴", group: "gangform", stages: ["GANGFORM"], canWork: (d) => d.craneAllowed },
-  { key: "rebar", label: "철근 유휴", group: "rebar", stages: ["WALL_REBAR", "SLAB_REBAR"], canWork: (d) => d.workable },
-  { key: "alform", label: "알폼 유휴", group: "alform", stages: ["ALFORM"], canWork: (d) => d.workable },
+const IDLE_TEAMS: { key: string; label: string; group: Group; stages: Stage[] }[] = [
+  { key: "gangform", label: "갱폼 유휴", group: "gangform", stages: ["GANGFORM"] },
+  { key: "rebar", label: "철근 유휴", group: "rebar", stages: ["WALL_REBAR", "SLAB_REBAR"] },
+  { key: "alform", label: "알폼 유휴", group: "alform", stages: ["ALFORM"] },
 ];
 
 export default function GanttChart({ data }: { data: GanttData }) {
@@ -219,7 +224,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
   const isPlanStart = (date: string) => asOf !== null && date > asOf && !data.days.some((d) => d.date > asOf && d.date < date);
 
   const month = Number(data.from.slice(5, 7));
-  const gridCols = { gridTemplateColumns: `4.5rem repeat(${data.days.length}, minmax(0, 1fr))` };
+  const gridCols = { gridTemplateColumns: `5.5rem repeat(${data.days.length}, minmax(0, 1fr))` };
   const dayCell = (d: DayInfo, extra?: string) =>
     cn("relative min-w-0 border-r border-border/50", d.isSunday && "bg-muted", isPlanStart(d.date) && "border-l-2 border-l-primary/60", extra);
 
@@ -283,24 +288,36 @@ export default function GanttChart({ data }: { data: GanttData }) {
           ))}
 
           <div className="mt-1 border-t-2 border-border" />
-          {IDLE_TEAMS.map((team) => (
-            <div key={team.key} className="grid" style={gridCols}>
-              <div className="flex items-center text-[11px] text-muted-foreground">{team.label}</div>
-              {data.days.map((d) => {
-                const busy = isActualDay(d.date)
-                  ? (data.actual ?? []).some((a) => a.date === d.date && team.stages.includes(a.stage))
-                  : data.assignments.some((a) => a.date === d.date && team.stages.includes(a.stage));
-                const idle = team.canWork(d) && !busy;
-                return (
-                  <div key={d.date} className={dayCell(d, "h-7")}>
-                    <div className="absolute inset-x-0 inset-y-1">
-                      {idle ? <BoxEl box={{ span: "DAY", group: team.group, title: `${d.date} ${team.label}` }} /> : null}
+          {IDLE_TEAMS.map((team) => {
+            // 유휴일 = 그달 그 팀 작업이 하나도 없는 날. 일요일·공휴일 포함(팀 체류 기준, 설계 §5 "일요일 포함 월 허용 유휴").
+            // 상자 안 숫자는 그달 몇 번째 유휴일인지. 옥탑은 별도 작업조라 팀 작업으로 세지 않는다.
+            const idleDays = data.days.filter((d) =>
+              isActualDay(d.date)
+                ? !(data.actual ?? []).some((a) => a.date === d.date && team.stages.includes(a.stage))
+                : !data.assignments.some((a) => a.date === d.date && a.roof == null && team.stages.includes(a.stage)),
+            ).map((d) => d.date);
+            const nth = new Map(idleDays.map((date, i) => [date, i + 1]));
+            return (
+              <div key={team.key} className="grid" style={gridCols}>
+                <div className="flex items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground">
+                  {team.label}
+                  <b className="font-semibold tabular-nums text-foreground">{idleDays.length}일</b>
+                </div>
+                {data.days.map((d) => {
+                  const n = nth.get(d.date);
+                  return (
+                    <div key={d.date} className={dayCell(d, "h-7")}>
+                      <div className="absolute inset-x-0 inset-y-1">
+                        {n != null ? (
+                          <BoxEl box={{ span: "DAY", group: team.group, title: `${d.date} ${team.label} · 이달 ${n}일째${d.isSunday ? " (일요일)" : d.isHoliday ? " (공휴일)" : ""}`, count: n }} />
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+                  );
+                })}
+              </div>
+            );
+          })}
           <div className="grid" style={gridCols}>
             <div className="flex items-center text-[11px] text-muted-foreground">타설 없음</div>
             {data.days.map((d) => (
@@ -332,7 +349,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
           </span>
         </div>
         <p>
-          칸 왼쪽 오전 · 오른쪽 오후. W철근 = 벽철근, S철근 = 슬래브철근 (배근 뒤 기전·검측). 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일).
+          칸 왼쪽 오전 · 오른쪽 오후. W철근 = 벽철근, S철근 = 슬래브철근 (배근 뒤 기전·검측). 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
           {asOf ? ` 세로 선 왼쪽은 작업일보 실적(${asOf}까지, 또렷함), 오른쪽은 엔진 예정(연함).` : ""}
         </p>
       </div>
