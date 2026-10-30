@@ -104,7 +104,7 @@ export default function SitePicker({
       </button>
 
       {open ? (
-        <div className="absolute right-0 z-50 mt-1 w-[24rem] max-w-[90vw] overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
+        <div className="absolute inset-x-0 z-50 mt-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
           <div className="flex items-center gap-2 border-b border-slate-200 px-2">
             <Search className="size-4 shrink-0 text-slate-400" />
             <input
@@ -125,7 +125,7 @@ export default function SitePicker({
                   setOpen(false);
                 }
               }}
-              placeholder="현장 검색 (초성 가능: ㅎㅅㄴㅇ)"
+              placeholder="현장 검색 (초성: ㅎㅅㄴㅇ)"
               className="h-9 w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
               aria-label="현장 검색"
             />
