@@ -25,6 +25,7 @@ import {
   DEFAULT_UNDERGROUND_SETTINGS,
   UNDERGROUND_STAGES,
   aggregateFinish,
+  buildFinishGantt,
   buildingNoOf,
   groupLinesToCoreGroups,
   addWorkdays,
@@ -360,7 +361,8 @@ gantt.get("/finish/:siteId", async (c) => {
   try {
     const saved = await loadBuildings(c.env, siteId);
     const today = todayKst();
-    if (!saved.length) return c.json({ siteId, asOf: today, needsBuildings: true, types: [], sequences: [], buildings: [] });
+    if (!saved.length)
+      return c.json({ siteId, asOf: today, needsBuildings: true, types: [], sequences: [], buildings: [], gantt: { trades: [], buildings: [] } });
     const listed = new Set(saved.map((b) => b.buildingNo));
     const [bRows, tRows, qRows, rRows, wRows] = await Promise.all([
       dcrAll<{ id: string; name: string }>(c.env, `/golgudo_building?site_id=eq.${sid}&select=id,name&order=name.asc`),
@@ -381,18 +383,23 @@ gantt.get("/finish/:siteId", async (c) => {
     const buildings = bRows
       .map((b) => ({ id: b.id, buildingNo: buildingNoOf(b.name) ?? -1, name: saved.find((x) => x.buildingNo === buildingNoOf(b.name))?.name ?? b.name }))
       .filter((b) => listed.has(b.buildingNo));
+    const types = tRows.map((t) => ({ id: t.id, name: t.work_type, index: t.index, deleted: !!t.is_deleted, inProgress: t.include_in_progress !== false }));
+    const rooms = rRows
+      .filter((r) => Number.isFinite(Number(r.floor)))
+      .map((r) => ({ id: r.id, buildingId: r.building_id, floor: Number(r.floor), line: String(r.line), isVoid: !!r.is_void }));
+    const works = wRows.filter((w) => w.finished_at).map((w) => ({ roomId: w.room_id, typeId: w.work_type_id, date: String(w.finished_at).slice(0, 10) }));
     const result = aggregateFinish({
-      types: tRows.map((t) => ({ id: t.id, name: t.work_type, index: t.index, deleted: !!t.is_deleted, inProgress: t.include_in_progress !== false })),
+      types,
       sequences: qRows.map((q) => ({ prerequisite: q.prerequisite_key, successor: q.successor_key })),
       buildings,
-      rooms: rRows
-        .filter((r) => Number.isFinite(Number(r.floor)))
-        .map((r) => ({ id: r.id, buildingId: r.building_id, floor: Number(r.floor), line: String(r.line), isVoid: !!r.is_void })),
-      works: wRows.filter((w) => w.finished_at).map((w) => ({ roomId: w.room_id, typeId: w.work_type_id, date: String(w.finished_at).slice(0, 10) })),
+      rooms,
+      works,
       today,
     });
+    // 간트(골조 공정표처럼 날짜 × 동·공종 막대): 사용자 지정 공종만 (engine finish/gantt)
+    const gantt = buildFinishGantt({ types, buildings, rooms, works, today });
     const missing = saved.filter((b) => !buildings.some((x) => x.buildingNo === b.buildingNo)).map((b) => b.buildingNo);
-    return c.json({ siteId, asOf: today, needsBuildings: false, missingInSmartworks: missing, ...result });
+    return c.json({ siteId, asOf: today, needsBuildings: false, missingInSmartworks: missing, ...result, gantt });
   } catch (err) {
     return fail(c, err);
   }

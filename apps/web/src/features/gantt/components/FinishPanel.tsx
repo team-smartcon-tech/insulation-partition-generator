@@ -11,6 +11,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { FinishResponse, FinishStat } from "../api";
 import { useFinish } from "../hooks";
+import { shiftMonth, todayKst } from "../dates";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import FinishGantt from "./FinishGantt";
 import { ExcelIcon, PrintIcon } from "./icons";
 
 type Building = FinishResponse["buildings"][number];
@@ -49,6 +52,9 @@ export default function FinishPanel({
   const q = useFinish(siteId);
   const d = q.data;
   const [bno, setBno] = useState<number | null>(null);
+  // 기본은 간트(골조 공정표와 같은 한 달 보기), 진척표는 보조
+  const [view, setView] = useState<"gantt" | "matrix">("gantt");
+  const [month, setMonth] = useState(todayKst().slice(0, 7));
   useEffect(() => setBno(null), [siteId]);
   const b: Building | undefined = d?.buildings.find((x) => x.buildingNo === bno) ?? d?.buildings[0];
   const typeName = useMemo(() => new Map((d?.types ?? []).map((t) => [t.id, t.name])), [d]);
@@ -114,27 +120,60 @@ export default function FinishPanel({
             <span className="ml-2 text-slate-500">스마트웍스 동/라인 설정에 없는 동: {d.missingInSmartworks.map((n) => `${n}동`).join("·")}</span>
           ) : null}
         </p>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 print:hidden">
-          {d.buildings.map((x) => (
-            <button
-              key={x.buildingNo}
-              type="button"
-              onClick={() => setBno(x.buildingNo)}
-              className={cn(
-                "h-8 rounded-md border px-2.5 text-sm tabular-nums",
-                x.buildingNo === b?.buildingNo ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:border-primary/50",
-              )}
-            >
-              {x.name}
-            </button>
-          ))}
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex rounded-md border border-border p-0.5 print:hidden">
+            {(["gantt", "matrix"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={cn("h-7 rounded px-2.5 text-sm", view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+              >
+                {v === "gantt" ? "간트" : "진척표"}
+              </button>
+            ))}
+          </div>
+          {view === "gantt" ? (
+            <>
+              <Button variant="outline" size="icon" aria-label="전달" className="print:hidden" onClick={() => setMonth(shiftMonth(month, -1))}>
+                <ChevronLeft />
+              </Button>
+              <span className="min-w-24 text-center text-sm font-medium tabular-nums">{month.replace("-", "년 ")}월</span>
+              <Button variant="outline" size="icon" aria-label="다음달" className="print:hidden" onClick={() => setMonth(shiftMonth(month, 1))}>
+                <ChevronRight />
+              </Button>
+            </>
+          ) : null}
         </div>
       </div>
 
-      {!b ? (
+      {view === "gantt" ? (
+        d.gantt.trades.length ? (
+          <FinishGantt gantt={d.gantt} month={month} asOf={d.asOf} />
+        ) : (
+          <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
+            이 현장 스마트웍스 마감 공종 중 간트 공종(내장·PL창호·유리·타일·방통·가구·도배·마루)에 맞는 것이 없습니다.
+          </p>
+        )
+      ) : !b ? (
         <p className="text-sm text-muted-foreground">스마트웍스 동/라인 설정에서 이 현장 동을 찾지 못했습니다.</p>
       ) : (
         <>
+          <div className="flex flex-wrap items-center gap-1 print:hidden">
+            {d.buildings.map((x) => (
+              <button
+                key={x.buildingNo}
+                type="button"
+                onClick={() => setBno(x.buildingNo)}
+                className={cn(
+                  "h-8 rounded-md border px-2.5 text-sm tabular-nums",
+                  x.buildingNo === b.buildingNo ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:border-primary/50",
+                )}
+              >
+                {x.name}
+              </button>
+            ))}
+          </div>
           <section className="rounded-lg border border-border bg-card p-3">
             <div className="mb-2 flex items-baseline justify-between gap-2 px-1">
               <h3 className="text-sm font-semibold">

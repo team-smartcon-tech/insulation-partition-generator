@@ -139,6 +139,8 @@ const finishStatSchema = z.object({
   status: z.enum(["done", "progress", "stalled", "blocked", "idle"]),
   blockedBy: z.string().optional(),
 });
+const finishBarSchema = z.object({ start: z.string(), end: z.string(), floorFrom: z.number(), floorTo: z.number(), units: z.number() });
+export type FinishBarT = z.infer<typeof finishBarSchema>;
 const finishResponseSchema = z.object({
   siteId: z.string(),
   asOf: z.string(),
@@ -155,6 +157,29 @@ const finishResponseSchema = z.object({
       stats: z.array(finishStatSchema),
     }),
   ),
+  /** 간트 (날짜 × 동·공종 막대) */
+  gantt: z
+    .object({
+      trades: z.array(z.object({ key: z.string(), group: z.string(), label: z.string() })),
+      buildings: z.array(
+        z.object({
+          buildingNo: z.number(),
+          name: z.string(),
+          rows: z.array(
+            z.object({
+              trade: z.string(),
+              sources: z.array(z.string()),
+              done: z.number(),
+              total: z.number(),
+              perWeek: z.number(),
+              actual: z.array(finishBarSchema),
+              forecast: finishBarSchema.nullable(),
+            }),
+          ),
+        }),
+      ),
+    })
+    .default({ trades: [], buildings: [] }),
 });
 export type FinishResponse = z.infer<typeof finishResponseSchema>;
 export type FinishStat = z.infer<typeof finishStatSchema>;

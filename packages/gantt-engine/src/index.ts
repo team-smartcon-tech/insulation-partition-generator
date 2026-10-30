@@ -46,3 +46,15 @@ export {
   type FinishTypeStat,
   type FinishWorkIn,
 } from "./finish/aggregate.ts"
+export {
+  FINISH_TRADES,
+  buildFinishGantt,
+  finishTradeOf,
+  floorRangeText,
+  type FinishBar,
+  type FinishGantt,
+  type FinishGanttBuilding,
+  type FinishGanttRow,
+  type FinishTrade,
+  type FinishTradeKey,
+} from "./finish/gantt.ts"
