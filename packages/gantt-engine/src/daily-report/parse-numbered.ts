@@ -93,6 +93,10 @@ function stageFor(kind: Kind, sub: string, text: string, part: "wall" | "slab" |
   if (kind === "concrete") return null // 면 보수·양생 등
   // 해체(거푸집·동바리 모두)는 공정 단계가 아니다
   if (/해체/.test(t) || /해체/.test(sub)) return null
+  // 기준층 공종 (화성남양1차 「- 104동 6층 알폼 설치」 「- 103동 4층 갱폼 인상」) — 거푸집(폼) 규칙보다 먼저
+  if (/먹매김|먹메김/.test(t)) return "MARK"
+  if (/갱폼|갱품/.test(t)) return /인상|인양/.test(t) && !/판넬|패널|소음/.test(t) ? "GANGFORM" : null
+  if (/알폼|알루미늄폼|알루미늄거푸집/.test(t)) return /타이|정리|제거|반입|양중/.test(t) ? null : "ALFORM"
   // 동바리는 시스템 동바리만 — 줄에 「시스템」 이 있거나 「* 시스템」 구간 아래. 그 외 동바리는 공정 단계로 보지 않는다
   if (/동바리|시스템/.test(t) || /시스템/.test(sub)) return /동바리/.test(t) && (/시스템/.test(t) || /시스템/.test(sub)) ? "SHORING" : null
   if (/철근/.test(t) || kind === "rebar") {
@@ -173,7 +177,8 @@ export function parseNumbered(rawText: string): ParsedWorkText {
         if (kind === "mep" && !stage) continue // 배선·가설등 같은 것은 골조와 무관
         // 이 양식의 「NF 바닥」 은 그 층 바닥 슬래브 = 아래층 천장 → 아래층 사이클 (1F 바닥 → B1F, B1F 바닥 → B2F).
         // 바닥 거푸집·철근·기전·타설만. 벽·시스템 동바리는 원문 층 그대로, RF 처럼 숫자 없는 층도 그대로 (2026-10-30 사용자 확인)
-        const toStoryBelow = p.part === "slab" && stage !== "SHORING" && p.floor != null
+        // 먹매김은 그 층 바닥 위 작업이라 옮기지 않는다
+        const toStoryBelow = p.part === "slab" && stage !== "SHORING" && stage !== "MARK" && p.floor != null
         const floor = toStoryBelow ? storyBelow(p.floor!) : p.floor
         const text = toStoryBelow ? `${p.text} (원문 ${floorName(p.floor!)})` : p.text
         for (const no of nos) {

@@ -108,6 +108,18 @@ ${s}
     assert.deepEqual(f("501동 지하1층 거푸집 제작(20)"), [[-1, null]])
   })
 
+  it("기준층 공종 (화성남양1차 2026-10 일보 모양): 알폼·갱폼 인상·벽체/바닥 철근·바닥 타설", () => {
+    const f = (s: string) =>
+      parseWorkText(`1. 철근콘크리트공사 (118+2)\n- 형틀 (9)\n\n- ${s}\n2. 견출공사 (7)`).entries.map((e) => [e.floor, e.stage])
+    assert.deepEqual(f("104동 6층 알폼 설치"), [[6, "ALFORM"]])
+    assert.deepEqual(f("103동 4층 갱폼 인상"), [[4, "GANGFORM"]])
+    assert.deepEqual(f("105동 6층 벽체 철근 배근"), [[6, "WALL_REBAR"]])
+    assert.deepEqual(f("101동 8층 바닥 철근 배근"), [[7, "SLAB_REBAR"]]) // 8층 바닥 = 7층 천장
+    assert.deepEqual(f("106동 5층 바닥 타설"), [[4, "POUR"]])
+    assert.deepEqual(f("101동 6층 세대내 알폼 타이 제거"), [[6, null]])
+    assert.deepEqual(f("102동 갱폼 소음방지판넬 설치"), [])
+  })
+
   it("「및」 구문은 각자 층과 벽/바닥, 공종 동사는 공유", () => {
     const e = parseWorkText(TEXT).entries.filter((x) => x.buildingNo === 503 && x.stage?.startsWith("FORM"))
     assert.deepEqual(e.map((x) => x.text), ["벽체 거푸집 설치", "바닥 거푸집 설치 (원문 1F)"])
