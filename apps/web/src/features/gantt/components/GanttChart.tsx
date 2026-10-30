@@ -12,7 +12,9 @@ import type {
   SimulateResponse,
   Stage,
 } from "@ipg/gantt-engine";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
+import CellReportDialog, { type CellTarget } from "./CellReportDialog";
 
 export type GanttData = SimulateResponse & Partial<Pick<PlanResponse, "asOf" | "buildings" | "actual">>;
 
@@ -181,7 +183,9 @@ const IDLE_TEAMS: { key: string; label: string; group: Group; stages: Stage[] }[
   { key: "alform", label: "알폼 유휴", group: "alform", stages: ["ALFORM"] },
 ];
 
-export default function GanttChart({ data }: { data: GanttData }) {
+export default function GanttChart({ data, siteId = null }: { data: GanttData; siteId?: string | null }) {
+  // 칸을 누르면 그날 그 동의 작업일보 팝업
+  const [target, setTarget] = useState<CellTarget | null>(null);
   const byCell = new Map<string, Assignment>();
   for (const a of data.assignments) byCell.set(`${a.date}|${a.half}|${a.buildingId}`, a);
   const get = (date: string, half: "AM" | "PM", id: number) => byCell.get(`${date}|${half}|${id}`);
@@ -235,6 +239,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
 
   return (
     <div className="space-y-3">
+      {target ? <CellReportDialog siteId={siteId} target={target} onClose={() => setTarget(null)} /> : null}
       <div className="overflow-x-auto rounded-lg border border-border bg-card p-3">
         <div className="min-w-[960px] text-xs">
           <div className="grid" style={gridCols}>
@@ -272,7 +277,14 @@ export default function GanttChart({ data }: { data: GanttData }) {
                 const markPlan = am?.stage === "MARK" ? am : pm?.stage === "MARK" ? pm : undefined;
                 const startFloor = actual ? (markActual ? `${markActual.floor}F` : undefined) : markPlan ? floorLabel(markPlan) : undefined;
                 return (
-                  <div key={d.date} className={dayCell(d, "h-[4.25rem]")}>
+                  <div
+                    key={d.date}
+                    className={dayCell(d, "h-[4.25rem] cursor-pointer hover:bg-primary/5")}
+                    title={`${label(id)} ${d.date} — 눌러서 작업일보 보기`}
+                    onClick={() =>
+                      setTarget({ date: d.date, buildingId: id, label: label(id), isActual: isActualDay(d.date), actual: actual ?? [], am, pm })
+                    }
+                  >
                     {startFloor !== undefined ? (
                       <div className="absolute left-0.5 top-0.5 whitespace-nowrap text-[10px] leading-none text-muted-foreground">{startFloor}</div>
                     ) : null}
@@ -350,7 +362,7 @@ export default function GanttChart({ data }: { data: GanttData }) {
         </div>
         <p>
           칸 왼쪽 오전 · 오른쪽 오후. W철근 = 벽철근, S철근 = 슬래브철근 (배근 뒤 기전·검측). 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
-          {asOf ? ` 세로 선 왼쪽은 작업일보 실적(${asOf}까지, 또렷함), 오른쪽은 엔진 예정(연함).` : ""}
+           칸을 누르면 그날 그 동의 작업일보.{asOf ? ` 세로 선 왼쪽은 작업일보 실적(${asOf}까지, 또렷함), 오른쪽은 엔진 예정(연함).` : ""}
         </p>
       </div>
     </div>

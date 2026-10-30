@@ -74,7 +74,7 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
               <Stat label="철근 / 갱폼 온종일 유휴" value={`${d.stats.idle.rebar.fullDays} / ${d.stats.idle.gangform.fullDays}일`} />
             </div>
             <div className={plan.isFetching ? "opacity-70" : ""}>
-              <GanttChart data={d} />
+              <GanttChart data={d} siteId={siteId} />
             </div>
           </>
         ) : (
