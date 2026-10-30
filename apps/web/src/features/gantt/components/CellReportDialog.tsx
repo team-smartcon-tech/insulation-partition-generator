@@ -97,7 +97,8 @@ export default function CellReportDialog({ siteId, target, onClose }: { siteId: 
 
   const entries: WorkEntry[] = (report?.entries ?? []).filter((e) => e.buildingNo === target.buildingId);
   const reflected = (e: WorkEntry) =>
-    e.stage != null && target.actual.some((a) => a.stage === e.stage && a.floor === (e.floor ?? 0));
+    // 시스템 동바리는 바닥 사이클에 맞춰 층을 옮길 수 있어(엔진 alignShoringToSlab) 공종만 본다
+    e.stage != null && target.actual.some((a) => a.stage === e.stage && (a.floor === (e.floor ?? 0) || a.stage === "SHORING"));
   const raw = report ? linesFor(report.rawText, target.buildingId) : [];
 
   return (

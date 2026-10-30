@@ -5,7 +5,9 @@ import {
   DEFAULT_UNDERGROUND_SETTINGS,
   KR_HOLIDAYS_2026_Q4,
   getDayInfo,
+  parseWorkText,
   planUnderground,
+  progressFromReports,
   undergroundSequence,
   undergroundStateFromActual,
 } from "../src/index.ts"
@@ -84,5 +86,27 @@ describe("실적 → 지하 위치", () => {
   it("진행 중이면 남은 일수", () => {
     const st = undergroundStateFromActual([A("2026-10-28", "FORM_WALL", -1), A("2026-10-29", "FORM_WALL", -1)], 501, 2)
     assert.deepEqual(st, { id: 501, story: -1, stepIndex: 2, doneDays: 2, baseFloor: 2 })
+  })
+})
+
+describe("시스템 동바리 층 맞추기", () => {
+  const rep = (date: string, text: string) => {
+    const { entries, unmatched } = parseWorkText(text)
+    return { id: date, siteId: "s", date, status: "pending", rawText: text, entries, unmatched }
+  }
+  const H = "1. 형틀 공사 (10)\n* 형틀(5)\n"
+  it("504동: 「1F 시스템」 앞날 「지상1층 바닥 거푸집」(=B1 사이클)이 있으면 B1F", () => {
+    const p = progressFromReports(
+      [rep("2026-10-05", H + "- 504동 지상1층 바닥 거푸집설치(4)\n2. 철근 공사 (1)"), rep("2026-10-06", H + "- 504동 1F 시스템 동바리 및 비계 설치,\n2. 철근 공사 (1)")],
+      "2026-10-30",
+    )
+    assert.equal(p.actual.find((a) => a.stage === "SHORING")?.floor, -1)
+  })
+  it("503동: 「B1F 시스템」 은 아래(B2) 바닥 작업이 없으면 그대로 B1F", () => {
+    const p = progressFromReports(
+      [rep("2026-10-21", H + "- 503동 1F 바닥 거푸집 설치(10)\n2. 철근 공사 (1)"), rep("2026-10-26", H + "- 503동 B1F 시스템 동바리 설치(7)\n2. 철근 공사 (1)")],
+      "2026-10-30",
+    )
+    assert.equal(p.actual.find((a) => a.stage === "SHORING")?.floor, -1)
   })
 })

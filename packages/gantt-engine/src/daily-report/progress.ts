@@ -31,6 +31,35 @@ const isBaseFloor = (a: ActualWork) => a.floorLabel == null && a.floor >= 2
 /** 배근 → 그 뒤 기전 (W철근 → 벽 기전, S철근 → 슬래브 기전) */
 const MEP_AFTER: Partial<Record<Stage, Stage>> = { WALL_REBAR: "WALL_MEP", SLAB_REBAR: "SLAB_MEP" }
 
+/** 동바리가 받치는 바닥을 가늠하는 공종 — 바닥 거푸집·철근만 (기전은 길게 남아 있어 헷갈린다) */
+const SLAB_FORM_STAGES: readonly Stage[] = ["FORM_SLAB", "SLAB_REBAR"]
+/** 한 층 아래 (0층은 없다: 1F → B1F) */
+const storyBelow = (f: number) => (f === 1 ? -1 : f - 1)
+
+/**
+ * 시스템 동바리 층 맞추기 (2026-10-30 사용자 확인: 504동 10/6 「1F 시스템 동바리」 는 1F 바닥(=B1 천장)을 받치므로 B1).
+ * 동바리는 적는 사람마다 층 기준이 달라(503동은 같은 B1 천장 동바리를 「B1F 시스템」 으로 적음) 일괄로 내리지 않는다.
+ * NF 로 적힌 동바리 앞뒤 10일 안에 같은 동의 바닥 작업(S거푸집·S철근)이 원문 층 사이클에는 없고 바로 아래 층 사이클에만 있으면 그 층으로 옮긴다.
+ * 제자리에서 actual 을 고친다.
+ */
+function alignShoringToSlab(actual: ActualWork[]): void {
+  for (const a of actual) {
+    if (a.stage !== "SHORING" || a.floorLabel != null) continue
+    const slabNear = (floor: number) =>
+      actual.some(
+        (x) =>
+          x.buildingId === a.buildingId &&
+          x.floorLabel == null &&
+          x.floor === floor &&
+          SLAB_FORM_STAGES.includes(x.stage) &&
+          x.date >= addDays(a.date, -10) &&
+          x.date <= addDays(a.date, 10),
+      )
+    const below = storyBelow(a.floor)
+    if (!slabNear(a.floor) && slabNear(below)) a.floor = below
+  }
+}
+
 /** 기전 → (앞) 그 기전을 여는 배근, (뒤) 그 기전 창을 닫는 단계 */
 const MEP_WINDOW: Partial<Record<Stage, { opens: Stage; closes: Stage }>> = {
   WALL_MEP: { opens: "WALL_REBAR", closes: "ALFORM" },
@@ -114,6 +143,7 @@ export function progressFromReports(
     }
   }
   actual.sort((a, b) => a.date.localeCompare(b.date) || a.buildingId - b.buildingId)
+  alignShoringToSlab(actual)
   dropMepOutsideWindow(actual)
   deferContinuedMep(actual)
 
