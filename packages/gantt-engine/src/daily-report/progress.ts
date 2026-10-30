@@ -28,6 +28,33 @@ const order = (s: Stage) => STAGES.indexOf(s)
 /** 배근 → 그 뒤 기전 (W철근 → 벽 기전, S철근 → 슬래브 기전) */
 const MEP_AFTER: Partial<Record<Stage, Stage>> = { WALL_REBAR: "WALL_MEP", SLAB_REBAR: "SLAB_MEP" }
 
+/** 기전 → (앞) 그 기전을 여는 배근, (뒤) 그 기전 창을 닫는 단계 */
+const MEP_WINDOW: Partial<Record<Stage, { opens: Stage; closes: Stage }>> = {
+  WALL_MEP: { opens: "WALL_REBAR", closes: "ALFORM" },
+  SLAB_MEP: { opens: "SLAB_REBAR", closes: "POUR" },
+}
+
+/**
+ * 순서 밖 기전은 뺀다 (2026-10-30 사용자 결정). 기전은 배근 뒤 · 다음 골조 단계 앞에서만 기전으로 본다.
+ * - 벽 기전: 가장 최근 W철근 날 ~ 그 뒤 알폼 전날
+ * - 슬래브 기전: 가장 최근 S철근 날 ~ 그 뒤 타설 전날
+ * 알폼 날 데크 위 선행 배관(402동 10/20 「37F 바닥 배관」), 타설 날 마무리 배관(10/22)은 일보에 적혀도 공정 단계가 아니다.
+ * 층 번호가 아니라 그 동의 시간 순서로 본다 — 전기 일보 층이 골조와 하나 틀리게 적힌 날(403동 10/2·3 「34F 벽체」)도 살린다.
+ * 제자리에서 actual 을 고친다. actual 은 날짜순이어야 한다.
+ */
+function dropMepOutsideWindow(actual: ActualWork[]): void {
+  const drop = new Set<ActualWork>()
+  for (const a of actual) {
+    const w = MEP_WINDOW[a.stage]
+    if (!w) continue
+    const mine = actual.filter((x) => x.buildingId === a.buildingId)
+    const opened = mine.filter((x) => x.stage === w.opens && x.date <= a.date).at(-1)?.date
+    const closed = opened !== undefined && mine.some((x) => x.stage === w.closes && x.date > opened && x.date <= a.date)
+    if (opened === undefined || closed) drop.add(a)
+  }
+  for (let i = actual.length - 1; i >= 0; i--) if (drop.has(actual[i])) actual.splice(i, 1)
+}
+
 /**
  * 일보에는 배근과 기전이 같은 날 함께 적히는 일이 많다(배근 시작과 동시에 배관 착수).
  * 기전이 그 동의 다음 일보에도 이어지면 배근 날의 기전은 빼고 다음 날부터 기전으로 본다
@@ -77,6 +104,7 @@ export function progressFromReports(
     }
   }
   actual.sort((a, b) => a.date.localeCompare(b.date) || a.buildingId - b.buildingId)
+  dropMepOutsideWindow(actual)
   deferContinuedMep(actual)
 
   const ids = [...new Set(actual.map((a) => a.buildingId))].sort((a, b) => a - b)
