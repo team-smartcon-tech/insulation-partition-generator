@@ -53,7 +53,7 @@ describe("번호 양식 해석", () => {
       [503, 1, "FORM_SLAB"],
       [504, "RF", "FORM_SLAB"],
       [503, -1, "SHORING"],
-      [502, -2, "FORM_STRIP"],
+      [502, -2, null],
       [501, 1, "SLAB_REBAR"],
       [504, "RF", "POUR"],
       [504, -1, "SLAB_MEP"],
@@ -66,6 +66,16 @@ describe("번호 양식 해석", () => {
     const e = parseWorkText(TEXT).entries
     assert.ok(!e.some((x) => /주변|부대시설|저수조/.test(x.text)))
     assert.ok(!e.some((x) => /면 보수|배선/.test(x.text)))
+  })
+
+  it("동바리는 시스템 동바리만, 해체는 공정 단계 아님", () => {
+    const t = (s: string) => parseWorkText(`1. 형틀 공사 (10)
+${s}
+2. 철근 공사 (1)`).entries.map((e) => e.stage)
+    assert.deepEqual(t("* 시스템(7)\n- 503동 B1F 동바리 설치(7)"), ["SHORING"])
+    assert.deepEqual(t("* 형틀(7)\n- 503동 B1F 시스템 동바리 설치(7)"), ["SHORING"])
+    assert.deepEqual(t("* 형틀(7)\n- 503동 B1F 강관 동바리 설치(7)"), [null])
+    assert.deepEqual(t("* 해체/정리(7)\n- 503동 B1F 시스템 동바리 해체(7)"), [null])
   })
 
   it("「및」 구문은 각자 층과 벽/바닥, 공종 동사는 공유", () => {

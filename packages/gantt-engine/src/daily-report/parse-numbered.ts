@@ -7,8 +7,8 @@
 //   - 503동 B1F 벽체 및 1F 바닥 거푸집 설치(10)
 //   - 503동 주변주차장 B1F 바닥 거푸집 설치(4)        ← "주변 …" 은 그 동이 아니라 옆 부대시설 → 뺀다
 //   * 시스템(7)
-//   - 503동 B1F 시스템 동바리 설치(7)
-//   * 해체/정리(19)
+//   - 503동 B1F 시스템 동바리 설치(7)        ← 동바리는 시스템 동바리만 (화면 「시스템」)
+//   * 해체/정리(19)                           ← 거푸집 해체는 공정 단계가 아니다 (2026-10-30 사용자 결정)
 //   - 503동 주변 램프#2 및 전기실 B2F 벽체 거푸집 해체 및 정리(19)
 //   2. 철근 공사 (24)
 //   - 501동 1F 바닥 철근 조립(10)
@@ -18,7 +18,7 @@
 //   6. 설비 공사 (4)
 //   - 504동, 505동 1F 바닥 슬리브 설치(2)
 //
-// 읽는 것: 형틀(거푸집 설치·해체, 동바리)·철근·콘크리트(타설)·전기/설비(벽·바닥 박스·슬리브·배관 → 기전).
+// 읽는 것: 형틀(벽·바닥 거푸집 설치, 시스템 동바리)·철근·콘크리트(타설)·전기/설비(벽·바닥 박스·슬리브·배관 → 기전).
 // 줄 끝 "(8)" 은 투입 인원이라 버린다. "502동, 503동", "501동~504동" 은 동마다 한 줄씩.
 // "B1F 벽체 및 1F 바닥 거푸집 설치" 처럼 「및」 으로 묶인 것은 벽·바닥을 나눠 각자의 층으로 읽는다.
 import type { Stage, WorkEntry } from "../contracts/index.ts"
@@ -88,12 +88,14 @@ function stageFor(kind: Kind, sub: string, text: string, part: "wall" | "slab" |
   }
   if (/타설/.test(t)) return "POUR"
   if (kind === "concrete") return null // 면 보수·양생 등
-  if (/동바리/.test(t) || /시스템/.test(sub)) return /동바리|시스템/.test(t) ? "SHORING" : null
+  // 해체(거푸집·동바리 모두)는 공정 단계가 아니다
+  if (/해체/.test(t) || /해체/.test(sub)) return null
+  // 동바리는 시스템 동바리만 — 줄에 「시스템」 이 있거나 「* 시스템」 구간 아래. 그 외 동바리는 공정 단계로 보지 않는다
+  if (/동바리|시스템/.test(t) || /시스템/.test(sub)) return /동바리/.test(t) && (/시스템/.test(t) || /시스템/.test(sub)) ? "SHORING" : null
   if (/철근/.test(t) || kind === "rebar") {
     if (!/철근|배근|조립/.test(t)) return null
     return part === "slab" ? "SLAB_REBAR" : part === "wall" ? "WALL_REBAR" : null
   }
-  if (/해체/.test(t) || /해체/.test(sub)) return /거푸집|폼|형틀|해체/.test(t) ? "FORM_STRIP" : null
   if (/거푸집|형틀|폼/.test(t)) return part === "slab" ? "FORM_SLAB" : part === "wall" ? "FORM_WALL" : null
   return null
 }

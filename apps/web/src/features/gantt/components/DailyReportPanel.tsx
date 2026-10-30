@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { useDailyReports } from "../hooks";
 import { addDays, koreanDate, todayKst, weekdayEn } from "../dates";
 
-const STAGE_ORDER: Stage[] = ["FORM_STRIP", "MARK", "GANGFORM", "FORM_WALL", "WALL_REBAR", "ALFORM", "SHORING", "FORM_SLAB", "TOP_INSULATION", "SLAB_REBAR", "POUR", "WALL_MEP", "SLAB_MEP"];
+const STAGE_ORDER: Stage[] = ["MARK", "GANGFORM", "FORM_WALL", "WALL_REBAR", "ALFORM", "SHORING", "FORM_SLAB", "TOP_INSULATION", "SLAB_REBAR", "POUR", "WALL_MEP", "SLAB_MEP"];
 
 const STAGE_KEYWORDS: Record<Stage, RegExp> = {
   MARK: /먹매김|먹메김/g,
@@ -25,7 +25,6 @@ const STAGE_KEYWORDS: Record<Stage, RegExp> = {
   FORM_WALL: /거푸집|형틀/g,
   FORM_SLAB: /거푸집|형틀/g,
   SHORING: /동바리|시스템/g,
-  FORM_STRIP: /해체/g,
 };
 
 const STAGE_TONE: Record<Stage, string> = {
@@ -42,7 +41,6 @@ const STAGE_TONE: Record<Stage, string> = {
   FORM_WALL: "bg-sky-100 text-sky-800",
   FORM_SLAB: "bg-sky-100 text-sky-800",
   SHORING: "bg-slate-200 text-slate-700",
-  FORM_STRIP: "bg-sky-50 text-sky-700",
 };
 
 function Highlight({ text, re }: { text: string; re: RegExp }) {

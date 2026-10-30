@@ -24,8 +24,7 @@ const NAME: Record<Stage, string> = {
   CURE: "양생",
   FORM_WALL: "W거푸집(벽체 거푸집)",
   FORM_SLAB: "S거푸집(바닥 거푸집)",
-  SHORING: "시스템 동바리",
-  FORM_STRIP: "거푸집 해체",
+  SHORING: "시스템(시스템 동바리)",
 };
 
 export type CellTarget = {

@@ -18,7 +18,7 @@ import CellReportDialog, { type CellTarget } from "./CellReportDialog";
 
 export type GanttData = SimulateResponse & Partial<Pick<PlanResponse, "asOf" | "buildings" | "actual">>;
 
-type Group = "cure" | "gangform" | "rebar" | "mep" | "alform" | "insulation" | "pour" | "form" | "shoring" | "strip";
+type Group = "cure" | "gangform" | "rebar" | "mep" | "alform" | "insulation" | "pour" | "form" | "shoring";
 
 const STAGE_GROUP: Record<Stage, Group> = {
   MARK: "cure",
@@ -34,7 +34,6 @@ const STAGE_GROUP: Record<Stage, Group> = {
   FORM_WALL: "form",
   FORM_SLAB: "form",
   SHORING: "shoring",
-  FORM_STRIP: "strip",
 };
 
 const GROUP_LABEL: Record<Group, string> = {
@@ -46,8 +45,7 @@ const GROUP_LABEL: Record<Group, string> = {
   insulation: "단열재(최상층)",
   pour: "타설",
   form: "W·S거푸집(지하)",
-  shoring: "동바리",
-  strip: "거푸집 해체",
+  shoring: "시스템(동바리)",
 };
 
 /** 상자 안 세로 글자 (반일 칸이 좁아 짧게). W철근 = 벽철근, S철근 = 슬래브철근 */
@@ -64,8 +62,7 @@ const STAGE_TEXT: Record<Stage, string> = {
   CURE: "양생",
   FORM_WALL: "W거푸집",
   FORM_SLAB: "S거푸집",
-  SHORING: "동바리",
-  FORM_STRIP: "해체",
+  SHORING: "시스템",
 };
 
 const GROUP_STYLE: Record<Group, string> = {
@@ -78,7 +75,6 @@ const GROUP_STYLE: Record<Group, string> = {
   pour: "bg-rose-100 border-rose-500",
   form: "bg-sky-100 border-sky-500", // 거푸집 = 알폼과 같은 색 (2026-10-30 사용자 요청)
   shoring: "bg-slate-200 border-slate-500",
-  strip: "bg-sky-50 border-sky-400 border-dashed", // 거푸집 해체 = 같은 계열 점선
 };
 
 const STAGE_TITLE: Record<Stage, string> = {
@@ -94,8 +90,7 @@ const STAGE_TITLE: Record<Stage, string> = {
   CURE: "양생",
   FORM_WALL: "W거푸집(벽체 거푸집)",
   FORM_SLAB: "S거푸집(바닥 거푸집)",
-  SHORING: "시스템 동바리",
-  FORM_STRIP: "거푸집 해체",
+  SHORING: "시스템(시스템 동바리)",
 };
 
 const STAGE_INDEX: Record<Stage, number> = {
@@ -109,8 +104,7 @@ const STAGE_INDEX: Record<Stage, number> = {
   SLAB_MEP: 7,
   POUR: 8,
   CURE: 9,
-  // 지하·저층 순서: 해체 → 벽 거푸집 → 벽 철근 → 기전 → 동바리 → 바닥 거푸집 → 바닥 철근 → 기전 → 타설
-  FORM_STRIP: -1,
+  // 지하·저층 순서: 벽 거푸집 → 벽 철근 → 기전 → 시스템 → 바닥 거푸집 → 바닥 철근 → 기전 → 타설
   FORM_WALL: 1.5,
   SHORING: 4.2,
   FORM_SLAB: 4.5,

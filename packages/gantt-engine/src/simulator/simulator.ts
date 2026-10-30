@@ -218,7 +218,6 @@ export function simulate(input: SimulationInput): SimulationResult {
       case "FORM_WALL":
       case "FORM_SLAB":
       case "SHORING":
-      case "FORM_STRIP":
         return false // 옥탑 순서표·지하 실적 전용 (기준층 사이클 밖)
     }
   }

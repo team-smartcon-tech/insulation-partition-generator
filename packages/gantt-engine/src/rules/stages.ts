@@ -15,12 +15,11 @@ export const STAGES = [
   // 지하·저층(재래식 거푸집). 일보 실적 표시용 — 시뮬레이터 사이클에는 들어가지 않는다 (설계 §8-2, 2026-10-30 1안)
   "FORM_WALL", // 벽체 거푸집 설치
   "FORM_SLAB", // 바닥 거푸집 설치
-  "SHORING", // 시스템 동바리
-  "FORM_STRIP", // 거푸집 해체
+  "SHORING", // 시스템 동바리 (화면 표기 「시스템」). 거푸집 해체는 공정 단계가 아니다 (2026-10-30 사용자 결정)
 ] as const
 
 /** 지하·저층 전용 단계 (예정 계산 안 함) */
-export const UNDERGROUND_STAGES: readonly Stage[] = ["FORM_WALL", "FORM_SLAB", "SHORING", "FORM_STRIP"]
+export const UNDERGROUND_STAGES: readonly Stage[] = ["FORM_WALL", "FORM_SLAB", "SHORING"]
 
 export type Stage = (typeof STAGES)[number]
 
@@ -50,7 +49,6 @@ export const STAGE_SLOTS: Record<Stage, number> = {
   FORM_WALL: 2,
   FORM_SLAB: 2,
   SHORING: 2,
-  FORM_STRIP: 2,
 }
 
 export const STAGE_LABEL: Record<Stage, string> = {
@@ -66,8 +64,7 @@ export const STAGE_LABEL: Record<Stage, string> = {
   CURE: "양생",
   FORM_WALL: "벽체 거푸집",
   FORM_SLAB: "바닥 거푸집",
-  SHORING: "시스템 동바리",
-  FORM_STRIP: "거푸집 해체",
+  SHORING: "시스템",
 }
 
 /**

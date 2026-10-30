@@ -54,7 +54,6 @@ export const stageSchema = z.enum([
   "FORM_WALL",
   "FORM_SLAB",
   "SHORING",
-  "FORM_STRIP",
 ])
 
 export const halfSchema = z.enum(["AM", "PM"])
@@ -134,8 +133,7 @@ export const STAGE_LABEL: Record<z.infer<typeof stageSchema>, string> = {
   CURE: "양생",
   FORM_WALL: "벽체 거푸집",
   FORM_SLAB: "바닥 거푸집",
-  SHORING: "시스템 동바리",
-  FORM_STRIP: "거푸집 해체",
+  SHORING: "시스템",
 }
 
 // ── 현장 실적 기반 계획 (작업일보 → 출발 상태 → 예정) ────────────────────────
