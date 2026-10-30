@@ -37,6 +37,9 @@ export type CellTarget = {
   pm?: Assignment;
 };
 
+/** 옥탑은 알폼이 아니라 일반 거푸집 */
+const nameOf = (a: { stage: Stage; roof?: number }) => (a.stage === "ALFORM" && a.roof != null ? "거푸집(옥탑)" : NAME[a.stage]);
+
 const floorText = (a: { floor: number | null; roof?: number }) => (a.roof ? `PH${a.roof}` : a.floor == null ? "층 없음" : `${a.floor}F`);
 
 /** 원문에서 그 동 번호가 나오는 줄만, 바로 위 구간 제목("* 전기(20)")과 함께 */
@@ -127,8 +130,8 @@ export default function CellReportDialog({ siteId, target, onClose }: { siteId: 
             ) : target.am || target.pm ? (
               <p>
                 <span className="mr-1 rounded bg-muted px-1.5 py-0.5 text-xs">엔진 예정</span>
-                오전 {target.am ? `${floorText(target.am)} ${NAME[target.am.stage]}` : "—"} · 오후{" "}
-                {target.pm ? `${floorText(target.pm)} ${NAME[target.pm.stage]}` : "—"}
+                오전 {target.am ? `${floorText(target.am)} ${nameOf(target.am)}` : "—"} · 오후{" "}
+                {target.pm ? `${floorText(target.pm)} ${nameOf(target.pm)}` : "—"}
               </p>
             ) : (
               <p className="text-muted-foreground">엔진 예정 작업이 없습니다.</p>

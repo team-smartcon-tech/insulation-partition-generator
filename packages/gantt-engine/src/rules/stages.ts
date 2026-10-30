@@ -67,7 +67,7 @@ export function nextStage(stage: Stage, isTopFloor = false): Stage {
 }
 
 /**
- * 옥탑 1개 층 순서표 (2026-10-30 사용자 기준). 합계 15일. 일 단위, 작업 가능일(일요일 제외)만 센다.
+ * 옥탑 1개 층 순서표 (2026-10-30 사용자 기준). 합계 15일. 거푸집 단계는 ALFORM 으로 두되 옥탑은 알폼이 아니라 일반 거푸집(화면 표기 「거푸집」). 일 단위, 작업 가능일(일요일 제외)만 센다.
  * 갱폼은 크레인 운행일에만, 타설은 타설 가능일에만 한다. 팀 용량은 쓰지 않는다(옥탑은 별도 작업조로 본다 — 가정).
  */
 export const ROOFTOP_SEQUENCE: readonly { stage: Stage; days: number }[] = [

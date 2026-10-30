@@ -109,24 +109,28 @@ type Box = {
 
 /** 글자: 같은 작업이 여러 칸 이어지면(cont = 앞 칸과 같은 작업) 첫 칸에만 */
 const textOf = (stage: Stage, cont: boolean) => (cont ? undefined : STAGE_TEXT[stage]);
+/** 옥탑은 알폼이 아니라 일반 거푸집 */
+const isRoofForm = (a: { stage: Stage; roof?: number }) => a.stage === "ALFORM" && a.roof != null;
+const planText = (a: Assignment, cont: boolean) => (cont ? undefined : isRoofForm(a) ? "거푸집" : STAGE_TEXT[a.stage]);
+const planTitle = (a: Assignment) => (isRoofForm(a) ? "거푸집(옥탑)" : STAGE_TITLE[a.stage]);
 
 /**
  * 예정 하루 → 상자. 오전·오후가 같은 작업(알폼·단열재·옥탑 등)이면 하루 상자 하나, 아니면 반일 상자 둘.
  * 철근 오전 + 기전 오후도 합치지 않는다 — W철근 → 기전 → 알폼 → S철근 → 기전 순서가 보여야 한다.
  */
 function dayBoxes(date: string, label: string, am: Assignment | undefined, pm: Assignment | undefined, cont: (a: Assignment) => boolean): Box[] {
-  const t = (a: Assignment, half: string) => `${date} ${half} · ${label} ${floorLabel(a)} · ${STAGE_TITLE[a.stage]}`;
+  const t = (a: Assignment, half: string) => `${date} ${half} · ${label} ${floorLabel(a)} · ${planTitle(a)}`;
   if (am && pm) {
     if (am.stage === pm.stage) {
-      return [{ span: "DAY", group: STAGE_GROUP[am.stage], title: `${t(am, "오전·오후")}`, text: textOf(am.stage, cont(am)) }];
+      return [{ span: "DAY", group: STAGE_GROUP[am.stage], title: `${t(am, "오전·오후")}`, text: planText(am, cont(am)) }];
     }
     return [
-      { span: "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: textOf(am.stage, cont(am)) },
-      { span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후"), text: textOf(pm.stage, cont(pm)) },
+      { span: "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: planText(am, cont(am)) },
+      { span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후"), text: planText(pm, cont(pm)) },
     ];
   }
-  if (am) return [{ span: am.stage === "POUR" ? "DAY" : "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: textOf(am.stage, cont(am)) }];
-  if (pm) return [{ span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후"), text: textOf(pm.stage, cont(pm)) }];
+  if (am) return [{ span: am.stage === "POUR" ? "DAY" : "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: planText(am, cont(am)) }];
+  if (pm) return [{ span: "PM", group: STAGE_GROUP[pm.stage], title: t(pm, "오후"), text: planText(pm, cont(pm)) }];
   return [];
 }
 
@@ -369,7 +373,7 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
           </span>
         </div>
         <p>
-          칸 왼쪽 오전 · 오른쪽 오후. W철근·W기전 = 벽철근·벽 기전, S철근·S기전 = 슬래브철근·슬래브 기전. 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
+          칸 왼쪽 오전 · 오른쪽 오후. W철근·W기전 = 벽철근·벽 기전, S철근·S기전 = 슬래브철근·슬래브 기전. 실적은 오전·오후 구분이 없어 그날 공종을 순서대로 나눠 그림. 층 라벨은 사이클 시작(먹매김) 위치, PH1·PH2 는 옥탑(층당 15일, 알폼 대신 거푸집). 유휴 줄은 그달 팀 작업이 없는 날(일요일·공휴일 포함), 상자 숫자는 이달 몇 번째 유휴일.
            칸을 누르면 그날 그 동의 작업일보.{asOf ? ` 세로 선 왼쪽은 작업일보 실적(${asOf}까지, 또렷함), 오른쪽은 엔진 예정(연함).` : ""}
         </p>
       </div>
