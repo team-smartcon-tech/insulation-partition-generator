@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import type { Building } from "../api";
 import { useSaveBuildings, useSaveSettings, useSettings } from "../hooks";
 import BuildingsEditor from "./BuildingsEditor";
+import ZonesEditor from "./ZonesEditor";
 import SettingsForm from "./SettingsForm";
 
 export default function SettingsPanel({ siteId, siteName }: { siteId: string | null; siteName: string }) {
@@ -33,7 +34,11 @@ export default function SettingsPanel({ siteId, siteName }: { siteId: string | n
       toast.error(`${bad.buildingNo}동: 이름이 비었거나 최상층이 기준층 시작보다 낮은 코어가 있습니다.`);
       return;
     }
-    const nos = buildings.map((b) => b.buildingNo);
+    if ((settings.zones ?? []).some((z) => !z.name.trim())) {
+      toast.error("지하층 구역: 이름이 빈 구역이 있습니다.");
+      return;
+    }
+        const nos = buildings.map((b) => b.buildingNo);
     if (new Set(nos).size !== nos.length) {
       toast.error("동 번호가 중복됩니다. 코어별 층이 다르면 한 줄에서 코어를 추가하세요.");
       return;
@@ -71,13 +76,23 @@ export default function SettingsPanel({ siteId, siteName }: { siteId: string | n
             setDirty(true);
           }}
         />
-        <BuildingsEditor
-          value={buildings}
-          onChange={(next) => {
-            setBuildings(next);
-            setDirty(true);
-          }}
-        />
+        <div className="min-w-0 space-y-4">
+          <BuildingsEditor
+            value={buildings}
+            onChange={(next) => {
+              setBuildings(next);
+              setDirty(true);
+            }}
+          />
+          <ZonesEditor
+            value={settings.zones ?? []}
+            buildings={buildings}
+            onChange={(zones) => {
+              setSettings({ ...settings, zones });
+              setDirty(true);
+            }}
+          />
+        </div>
       </div>
     </div>
   );

@@ -58,6 +58,21 @@ export const DEFAULT_UNDERGROUND_SETTINGS: z.infer<typeof undergroundSettingsSch
   },
 }
 
+/**
+ * 지하층 구역 (2026-10-30 사용자 요청: 동 목록과 별도로 지하층 구역별 순서). 배열 순서 = 시공 순서.
+ * 지금은 입력·저장만 — 구역 순서로 지하 예정을 내는 계산은 다음 단계(설계 §8-2 「지하는 구역 단위」).
+ */
+export const undergroundZoneSchema = z.object({
+  id: z.string().min(1),
+  /** "지하주차장 A구역", "501동 지하" */
+  name: z.string().min(1).max(60),
+  /** 지하 몇 층까지 (B3 이면 3) */
+  basementFloors: z.number().int().min(1).max(10),
+  /** 관련 동 번호 (없으면 주차장 등 동 밖 구역) */
+  buildingNos: z.array(z.number().int().min(1)).max(30).default([]),
+  memo: z.string().max(200).default(""),
+})
+
 export const siteSettingsSchema = z.object({
   buildingCount: z.number().int().min(1).max(30),
   rebarTeams: z.number().int().min(1).max(10),
@@ -69,6 +84,8 @@ export const siteSettingsSchema = z.object({
   noPMOnlyStart: z.object({ rebar: z.boolean(), alform: z.boolean() }),
   /** 지하·저층 공정. 없으면 DEFAULT_UNDERGROUND_SETTINGS */
   underground: undergroundSettingsSchema.optional(),
+  /** 지하층 구역별 순서 (배열 순서 = 시공 순서) */
+  zones: z.array(undergroundZoneSchema).max(50).optional(),
 })
 
 export const calendarConfigSchema = z.object({
@@ -234,6 +251,7 @@ export type PlanResponse = z.infer<typeof planResponseSchema>
 export type HalfDayOptions = z.infer<typeof halfDayOptionsSchema>
 export type SiteSettings = z.infer<typeof siteSettingsSchema>
 export type UndergroundSettings = z.infer<typeof undergroundSettingsSchema>
+export type UndergroundZone = z.infer<typeof undergroundZoneSchema>
 export type CalendarConfig = z.infer<typeof calendarConfigSchema>
 export type SimulateRequest = z.infer<typeof simulateRequestSchema>
 export type Stage = z.infer<typeof stageSchema>

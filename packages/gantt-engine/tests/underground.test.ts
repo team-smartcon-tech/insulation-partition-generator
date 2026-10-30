@@ -131,3 +131,19 @@ describe("시스템 동바리 층 맞추기", () => {
     assert.equal(p.actual.find((a) => a.stage === "SHORING")?.floor, -1)
   })
 })
+
+describe("지하층 구역 (설정 저장)", () => {
+  it("구역 순서·이름·지하 층수·관련 동이 설정과 함께 저장된다", async () => {
+    const { siteSettingsSchema, DEFAULT_SITE_SETTINGS } = await import("../src/index.ts")
+    const zones = [
+      { id: "a", name: "지하주차장 A", basementFloors: 3, buildingNos: [], memo: "램프 포함" },
+      { id: "b", name: "501동 지하", basementFloors: 2, buildingNos: [501] },
+    ]
+    const p = siteSettingsSchema.parse({ ...DEFAULT_SITE_SETTINGS, zones })
+    assert.deepEqual(p.zones?.map((z) => [z.name, z.basementFloors, z.buildingNos, z.memo]), [
+      ["지하주차장 A", 3, [], "램프 포함"],
+      ["501동 지하", 2, [501], ""],
+    ])
+    assert.equal(siteSettingsSchema.safeParse({ ...DEFAULT_SITE_SETTINGS, zones: [{ id: "x", name: "", basementFloors: 1 }] }).success, false)
+  })
+})
