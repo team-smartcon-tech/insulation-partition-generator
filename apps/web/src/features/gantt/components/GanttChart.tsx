@@ -131,16 +131,17 @@ function dayBoxes(date: string, label: string, am: Assignment | undefined, pm: A
  * (예전에는 첫·마지막 두 개만 그려 가운데 공종이 빠졌다).
  */
 function actualBoxes(date: string, label: string, works: ActualWork[], cont: (w: ActualWork) => boolean): Box[] {
-  const seen = new Set<string>();
-  const sorted = [...works]
-    .sort((a, b) => a.floor - b.floor || STAGE_INDEX[a.stage] - STAGE_INDEX[b.stage])
-    .filter((w) => {
-      const k = `${w.floor}|${w.stage}`;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  const t = (w: ActualWork) => `${date} 실적 · ${label} ${w.floor}F · ${STAGE_TITLE[w.stage]}`;
+  // 층과 상관없이 사이클 순서(먹매김 → 갱폼 → W철근 → 기전 → 알폼 → 단열재 → S철근 → 기전 → 타설)로만 줄 세운다.
+  // 설비 구간에 다른 층 배관이 같이 적혀도 W철근 앞에 기전이 서지 않게. 같은 공종은 한 칸(높은 층 기준)
+  const byStage = new Map<Stage, ActualWork>();
+  for (const w of works) {
+    const p = byStage.get(w.stage);
+    if (!p || w.floor > p.floor) byStage.set(w.stage, w);
+  }
+  const sorted = [...byStage.values()].sort((a, b) => STAGE_INDEX[a.stage] - STAGE_INDEX[b.stage]);
+  // 툴팁에는 그날 적힌 층을 모두 보여 준다 (합친 칸도 원문 층을 확인할 수 있게)
+  const floorsOf = (stage: Stage) => [...new Set(works.filter((w) => w.stage === stage).map((w) => `${w.floor}F`))].join("·");
+  const t = (w: ActualWork) => `${date} 실적 · ${label} ${floorsOf(w.stage)} · ${STAGE_TITLE[w.stage]}`;
   if (sorted.length === 1) return [{ span: "DAY", group: STAGE_GROUP[sorted[0].stage], title: t(sorted[0]), text: textOf(sorted[0].stage, cont(sorted[0])) }];
   return sorted.map((w, i) => ({ span: "DAY", group: STAGE_GROUP[w.stage], title: t(w), text: textOf(w.stage, cont(w)), seg: { i, n: sorted.length } }));
 }
