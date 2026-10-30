@@ -108,8 +108,8 @@ export default function SchedulePanel({
       {actionsSlot ? createPortal(actions, actionsSlot) : null}
       {/* 인쇄 영역: 현장·월 머리줄, 요약 카드, 간트, 범례 (index.css @media print 의 [data-print-root]) */}
       <div className="min-w-0 space-y-4" data-print-root>
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
-          <p className="text-sm text-muted-foreground">
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
+          <p className="min-w-0 flex-1 text-sm text-muted-foreground">
             <b className="text-foreground">{siteName}</b>
             {nothing && unplanned.length
               ? ` · ${d?.asOf}까지 작업일보 실적이 있지만, 지하·저층 공정이라 이후 예정은 계산하지 않습니다.`
@@ -138,7 +138,7 @@ export default function SchedulePanel({
               </span>
             ) : null}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Button variant="outline" size="icon" aria-label="전달" className="print:hidden" onClick={() => setMonth(shiftMonth(month, -1))}>
               <ChevronLeft />
             </Button>

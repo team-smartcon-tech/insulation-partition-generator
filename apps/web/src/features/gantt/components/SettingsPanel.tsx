@@ -58,13 +58,13 @@ export default function SettingsPanel({ siteId, siteName }: { siteId: string | n
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
-        <p className="text-sm text-muted-foreground">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
+        <p className="min-w-0 flex-1 text-sm text-muted-foreground">
           <b className="text-foreground">{siteName}</b> 현장의 공정 설정과 동별 규모.{" "}
           {q.data?.saved ? `마지막 저장 ${q.data.updatedAt?.slice(0, 16).replace("T", " ") ?? ""} ${q.data.updatedBy ?? ""}` : "아직 저장된 설정이 없어 기본값을 보여줍니다."}
           {dirty ? <span className="ml-2 font-medium text-amber-700">· 저장 안 됨</span> : null}
         </p>
-        <Button onClick={onSave} disabled={saveS.isPending || saveB.isPending || q.isPending}>
+        <Button className="shrink-0" onClick={onSave} disabled={saveS.isPending || saveB.isPending || q.isPending}>
           {saveS.isPending || saveB.isPending ? "저장 중…" : "저장"}
         </Button>
       </div>

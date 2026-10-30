@@ -116,12 +116,12 @@ export default function DailyReportPanel({ siteId, siteName, initialDate }: { si
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
-        <p className="text-sm text-muted-foreground">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
+        <p className="min-w-0 flex-1 text-sm text-muted-foreground">
           기준일 <b className="text-foreground">{koreanDate(date)}</b> — 스마트웍스 작업일보를 불러와{" "}
           <b className="text-foreground">골조 작업을 동·층·단계로 읽습니다.</b> 읽기 전용이며 여기서 고치거나 저장하지 않습니다.
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="icon" aria-label="전날" onClick={() => setDate(addDays(date, -1))}>
             <ChevronLeft />
           </Button>
