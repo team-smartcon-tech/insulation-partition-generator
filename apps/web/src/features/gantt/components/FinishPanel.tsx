@@ -122,7 +122,7 @@ export default function FinishPanel({
   const anyWork = d.buildings.some((x) => x.stats.some((s) => s.done > 0));
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
     <div className="min-w-0 space-y-4" data-print-root>
       {actionsSlot ? createPortal(actions, actionsSlot) : null}
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">

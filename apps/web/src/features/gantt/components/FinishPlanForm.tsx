@@ -32,7 +32,7 @@ export default function FinishPlanForm({
           const changed = JSON.stringify(r) !== JSON.stringify(DEFAULT_FINISH_PLAN[t.key as keyof typeof DEFAULT_FINISH_PLAN]);
           return (
             <div key={t.key} className="rounded-md border border-border/70 px-2 py-1.5">
-              <div className="flex items-center justify-between gap-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-sm">
                 <span className="font-medium">
                   {t.group !== t.label ? <span className="font-normal text-muted-foreground">{t.group} · </span> : null}
                   {t.label}
