@@ -10,11 +10,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { FinishResponse, FinishStat } from "../api";
-import { CALENDAR, useFinish, useSettings } from "../hooks";
+import { CALENDAR, useFinish, useFinishReports, useSettings } from "../hooks";
 import { planFinishBuilding, type FinishPlanSettings } from "@ipg/gantt-engine";
 import { RotateCcw } from "lucide-react";
 import FinishPlanForm from "./FinishPlanForm";
-import { shiftMonth, todayKst } from "../dates";
+import { monthRange, shiftMonth, todayKst } from "../dates";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import FinishGantt from "./FinishGantt";
 import { ExcelIcon, PrintIcon } from "./icons";
@@ -58,6 +58,8 @@ export default function FinishPanel({
   // 기본은 간트(골조 공정표와 같은 한 달 보기), 진척표는 보조
   const [view, setView] = useState<"gantt" | "matrix">("gantt");
   const [month, setMonth] = useState(todayKst().slice(0, 7));
+  const { from: mFrom, to: mTo } = monthRange(month);
+  const reportsQ = useFinishReports(siteId, mFrom, mTo);
   // 예정 규칙: 저장값(설정 탭) 위에 이 화면에서만 바꿔 보기 (골조 공정표와 같은 방식)
   const saved = useSettings(siteId);
   const [override, setOverride] = useState<FinishPlanSettings | null>(null);
@@ -162,7 +164,7 @@ export default function FinishPanel({
 
       {view === "gantt" ? (
         d.gantt.trades.length ? (
-          <FinishGantt gantt={d.gantt} plans={plans} month={month} asOf={d.asOf} />
+          <FinishGantt gantt={d.gantt} plans={plans} reports={reportsQ.data?.rows ?? []} month={month} asOf={d.asOf} />
         ) : (
           <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
             이 현장 스마트웍스 마감 공종 중 간트 공종(내장·PL창호·유리·타일·방통·가구·도배·마루)에 맞는 것이 없습니다.

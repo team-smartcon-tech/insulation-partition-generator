@@ -26,6 +26,7 @@ import {
   UNDERGROUND_STAGES,
   aggregateFinish,
   buildFinishGantt,
+  buildFinishReportBars,
   buildingNoOf,
   groupLinesToCoreGroups,
   addWorkdays,
@@ -400,6 +401,27 @@ gantt.get("/finish/:siteId", async (c) => {
     const gantt = buildFinishGantt({ types, buildings, rooms, works, today });
     const missing = saved.filter((b) => !buildings.some((x) => x.buildingNo === b.buildingNo)).map((b) => b.buildingNo);
     return c.json({ siteId, asOf: today, needsBuildings: false, missingInSmartworks: missing, ...result, gantt });
+  } catch (err) {
+    return fail(c, err);
+  }
+});
+
+/**
+ * GET /finish-reports/:siteId?from&to — 작업일보 마감 줄 → 동·공종별 「일보 작업」 막대 (2026-10-30).
+ * 골조·전기/설비 구간은 읽지 않는다. 「~최상층」 은 동 목록 최상층으로. 동 목록에 없는 동은 뺀다.
+ */
+gantt.get("/finish-reports/:siteId", async (c) => {
+  const siteId = c.req.param("siteId");
+  const parsed = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: "기간(from, to)이 필요합니다.", code: "VALIDATION_FAILED" }, 400);
+  try {
+    const [saved, reports] = await Promise.all([loadBuildings(c.env, siteId), listReports(c.env, { siteId, ...parsed.data })]);
+    const top = new Map(saved.map((b) => [b.buildingNo, b.topFloor]));
+    const rows = buildFinishReportBars(
+      reports.map((r) => ({ date: r.date, rawText: r.rawText })),
+      (no) => top.get(no) ?? null,
+    ).filter((r) => !saved.length || top.has(r.buildingNo));
+    return c.json({ siteId, ...parsed.data, rows });
   } catch (err) {
     return fail(c, err);
   }

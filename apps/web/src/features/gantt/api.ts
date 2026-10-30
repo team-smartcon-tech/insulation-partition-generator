@@ -185,3 +185,20 @@ const finishResponseSchema = z.object({
 export type FinishResponse = z.infer<typeof finishResponseSchema>;
 export type FinishStat = z.infer<typeof finishStatSchema>;
 export const getFinish = (siteId: string) => apiFetch(`/finish/${encodeURIComponent(siteId)}`, finishResponseSchema);
+
+/** 작업일보 마감 줄 → 동·공종별 「일보 작업」 막대 */
+const finishReportsSchema = z.object({
+  siteId: z.string(),
+  from: z.string(),
+  to: z.string(),
+  rows: z.array(
+    z.object({
+      buildingNo: z.number(),
+      trade: z.string(),
+      bars: z.array(finishBarSchema.extend({ days: z.number(), texts: z.array(z.string()) })),
+    }),
+  ),
+});
+export type FinishReportsResponse = z.infer<typeof finishReportsSchema>;
+export const getFinishReports = (siteId: string, from: string, to: string) =>
+  apiFetch(`/finish-reports/${encodeURIComponent(siteId)}?${new URLSearchParams({ from, to })}`, finishReportsSchema);

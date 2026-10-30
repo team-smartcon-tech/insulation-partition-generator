@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KR_HOLIDAYS_2026_Q4, type SiteSettings } from "@ipg/gantt-engine";
 import {
   getFinish,
+  getFinishReports,
   getSettings,
   listDailyReports,
   listSites,
@@ -25,7 +26,19 @@ export const ganttKeys = {
   simulate: (from: string, to: string, settings: SiteSettings) =>
     [...ganttKeys.all, "simulate", from, to, settings] as const,
   finish: (siteId: string) => [...ganttKeys.all, "finish", siteId] as const,
+  finishReports: (siteId: string, from: string, to: string) => [...ganttKeys.all, "finishReports", siteId, from, to] as const,
 };
+
+/** 마감 간트 「일보 작업」 막대 (그 달 작업일보 마감 줄) */
+export function useFinishReports(siteId: string | null, from: string, to: string) {
+  return useQuery({
+    queryKey: ganttKeys.finishReports(siteId ?? "", from, to),
+    queryFn: () => getFinishReports(siteId as string, from, to),
+    enabled: Boolean(siteId),
+    staleTime: 5 * 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
 
 /** 마감 공정표 (스마트웍스 세대별 마감 완료 집계) */
 export function useFinish(siteId: string | null) {
