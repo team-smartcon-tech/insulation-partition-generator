@@ -93,8 +93,6 @@ export const siteSettingsSchema = z.object({
   rebarWallAndSlabSameDay: z.boolean(),
   alformTeams: z.number().int().min(1).max(10),
   gangform: z.object({ per: z.enum(["day", "slot"]), count: z.number().int().min(1).max(10) }),
-  /** 갱폼팀 수 (없으면 1). 하루 갱폼인양 = 팀 수 × 팀당 N동 */
-  gangformTeams: z.number().int().min(1).max(10).optional(),
   pourPerDay: z.number().int().min(1).max(10),
   halfDay: halfDayOptionsSchema,
   noPMOnlyStart: z.object({ rebar: z.boolean(), alform: z.boolean() }),

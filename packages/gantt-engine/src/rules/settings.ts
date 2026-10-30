@@ -1,20 +1,9 @@
 // 현장 설정값 (설계 문서 §5) 과 §8 검증용 프리셋. 하드코딩된 현장값을 두지 않고 전부 여기서 받는다.
 
 export type GangformCapacity = {
-  /** "day" = 팀당 하루 N동, "slot" = 반일 N동(예전 값 — 팀당 하루 2N동으로 본다) */
+  /** "day" = 하루 N동, "slot" = 반일 N동 (§5 "반일 단위로 센다") */
   per: "day" | "slot"
   count: number
-}
-
-/**
- * 갱폼 용량 (2026-10-30 사용자: 갱폼팀 수 + 「갱폼인양 N동/일」).
- * 하루 = 팀 수 × 팀당 N동, 반일 = 팀 수 × ⌈N/2⌉ (한 팀이 하루 2동이면 오전 1·오후 1).
- * 예전 「반일 c동」 = 팀당 하루 2c동 → 반일 c·하루 2c 로 예전 결과와 같다.
- */
-export function gangformCaps(settings: { gangform: GangformCapacity; gangformTeams?: number }): { perDay: number; perSlot: number; perTeamPerDay: number } {
-  const teams = settings.gangformTeams ?? 1
-  const n = settings.gangform.per === "slot" ? settings.gangform.count * 2 : settings.gangform.count
-  return { perDay: teams * n, perSlot: teams * Math.ceil(n / 2), perTeamPerDay: n }
 }
 
 export type HalfDayOptions = {
@@ -38,8 +27,6 @@ export type SiteSettings = {
   /** 알폼팀 수 */
   alformTeams: number
   gangform: GangformCapacity
-  /** 갱폼팀 수 (없으면 1) */
-  gangformTeams?: number
   /** 1일 타설 가능 동수 (펌프카·레미콘) */
   pourPerDay: number
   halfDay: HalfDayOptions

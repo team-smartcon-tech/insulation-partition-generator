@@ -3,7 +3,7 @@
 // 결정적(같은 입력 → 같은 결과) 탐욕 배정. 최적안 탐색은 이 위에 따로 얹는다.
 import { addDays, dateRange, type IsoDate } from "../calendar/date.ts"
 import { getDayInfo, type CalendarConfig, type DayInfo } from "../calendar/calendar.ts"
-import { gangformCaps, type SiteSettings } from "../rules/settings.ts"
+import type { SiteSettings } from "../rules/settings.ts"
 import { ROOFTOP_SEQUENCE, STAGES, STAGE_TEAM, nextStage, type Stage, type Team } from "../rules/stages.ts"
 
 export type Half = "AM" | "PM"
@@ -123,7 +123,7 @@ export function simulate(input: SimulationInput): SimulationResult {
       case "alform":
         return settings.alformTeams
       case "gangform":
-        return gangformCaps(settings).perSlot
+        return settings.gangform.count
       case "pour":
         return settings.pourPerDay
     }
@@ -135,8 +135,8 @@ export function simulate(input: SimulationInput): SimulationResult {
     const perDayLimit =
       team === "pour"
         ? settings.pourPerDay
-        : team === "gangform"
-          ? gangformCaps(settings).perDay
+        : team === "gangform" && settings.gangform.per === "day"
+          ? settings.gangform.count
           : null
     if (perDayLimit !== null && countTeamOnDate(slot.date, team, stage) >= perDayLimit) return false
     return true
