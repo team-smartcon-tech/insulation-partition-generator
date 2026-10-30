@@ -46,7 +46,9 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
           <p className="text-sm text-muted-foreground">
             <b className="text-foreground">{siteName}</b>
-            {nothing
+            {nothing && unplanned.length
+              ? ` · ${d?.asOf}까지 작업일보 실적이 있지만, 지하·저층 공정이라 이후 예정은 계산하지 않습니다.`
+              : nothing
               ? ` · 이 달에는 작업일보 실적이 없습니다${d?.firstReportDate ? ` (첫 일보 ${d.firstReportDate})` : ""}.`
               : d?.asOf
               ? d.asOf < d.from
@@ -60,7 +62,7 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
             {noBuildings && !unplanned.length && !nothing ? (
               <span className="ml-2 text-amber-700">설정 탭에서 동별 최상층을 넣으면 사이클 종료·단열재 단계가 반영됩니다.</span>
             ) : null}
-            {unplanned.length ? (
+            {unplanned.length && !nothing ? (
               <span className="ml-2 text-amber-700">
                 {allUnplanned ? "모든 동이" : `${unplanned.map(labelOf).join("·")}은(는)`} 지하·저층 공정이라 작업일보 실적만 표시합니다(예정 계산은 기준층부터).
               </span>
@@ -81,8 +83,17 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
           <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">{(plan.error as Error).message}</div>
         ) : d && nothing ? (
           <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
-            이 달에는 공정표에 그릴 작업일보 실적이 없습니다.
-            {d.firstReportDate ? ` 이 현장의 첫 작업일보는 ${d.firstReportDate} 입니다.` : ""}
+            {unplanned.length ? (
+              <>
+                이 달에는 작업일보 실적이 없고, 지하·저층 공정({unplanned.map(labelOf).join("·")})은 예정을 계산하지 않습니다.
+                {d.asOf ? ` 마지막 실적은 ${d.asOf} 입니다.` : ""}
+              </>
+            ) : (
+              <>
+                이 달에는 공정표에 그릴 작업일보 실적이 없습니다.
+                {d.firstReportDate ? ` 이 현장의 첫 작업일보는 ${d.firstReportDate} 입니다.` : ""}
+              </>
+            )}
           </div>
         ) : d ? (
           <>
