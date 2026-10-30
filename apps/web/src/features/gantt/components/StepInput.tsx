@@ -9,6 +9,7 @@ const num = (v: string, fallback: number) => (v === "" || Number.isNaN(Number(v)
 /**
  * 화살표가 달린 입력칸 — 동 목록·현장 설정의 숫자 칸이 모두 같은 화살표를 쓰게 한다.
  * 브라우저 기본 숫자 화살표는 숨기고, 마우스를 올리거나 칸에 들어가면 위·아래 화살표가 보인다. 방향키도 같다.
+ * 화살표 자리(오른쪽 여백)는 화살표가 보일 때만 비운다 — 좁은 칸(42px)에서도 평소엔 두 자리 숫자가 다 보이게 (2026-10-30).
  */
 export function StepInput({
   onStep,
@@ -20,7 +21,7 @@ export function StepInput({
     <div className={`group relative ${className}`}>
       <input
         {...rest}
-        className="h-8 w-full rounded-md border border-input bg-card pl-2 pr-5 text-sm tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="h-8 w-full rounded-md border border-input bg-card pl-2 pr-1 text-sm tabular-nums group-hover:pr-5 group-focus-within:pr-5 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         onKeyDown={(e) => {
           if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
           e.preventDefault();
