@@ -40,10 +40,14 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
           <p className="text-sm text-muted-foreground">
             <b className="text-foreground">{siteName}</b>
             {d?.asOf
-              ? ` · 작업일보 실적은 ${d.asOf}까지, 그 다음 날부터는 엔진 예정입니다.`
-              : d
-                ? " · 이 달에 작업일보가 없어 예열 시뮬레이션을 보여줍니다."
-                : ""}
+              ? d.asOf < d.from
+                ? ` · ${d.asOf}까지의 작업일보 실적에서 이어서 계산한 예정입니다.`
+                : ` · 작업일보 실적은 ${d.asOf}까지, 그 다음 날부터는 엔진 예정입니다.`
+              : d && noBuildings
+                ? " · 작업일보와 동 목록이 없어 예시 시뮬레이션을 보여줍니다."
+                : d
+                  ? " · 작업일보가 없어 설정 탭의 동 목록(현재 층)에서 출발한 예정입니다."
+                  : ""}
             {noBuildings ? (
               <span className="ml-2 text-amber-700">설정 탭에서 동별 최상층을 넣으면 사이클 종료·단열재 단계가 반영됩니다.</span>
             ) : null}
@@ -64,7 +68,7 @@ export default function SchedulePanel({ siteId, siteName }: { siteId: string | n
         ) : d ? (
           <>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Stat label={d.asOf ? "예정 타설" : "타설"} value={`${d.stats.pours}회`} sub={d.asOf ? `${d.asOf} 다음 날부터 월말까지` : undefined} />
+              <Stat label={d.asOf ? "예정 타설" : "타설"} value={`${d.stats.pours}회`} sub={d.asOf ? `${d.stats.from}부터 월말까지` : undefined} />
               <Stat label="타설 공백" value={`${d.stats.pourGapDays}일`} />
               <Stat label="알폼 온종일 유휴" value={`${d.stats.idle.alform.fullDays}일`} sub={`반일 ${d.stats.idle.alform.halfDays}일`} />
               <Stat label="철근 / 갱폼 온종일 유휴" value={`${d.stats.idle.rebar.fullDays} / ${d.stats.idle.gangform.fullDays}일`} />

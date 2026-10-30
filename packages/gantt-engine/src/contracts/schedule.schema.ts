@@ -93,7 +93,8 @@ export const simulateResponseSchema = z.object({
 })
 
 /** 2026년 10월 공휴일: 3일(개천절, 토), 5일(대체공휴일, 월), 9일(한글날, 금). 11월은 없음. 실제 운영 달력은 DB 로 간다. */
-export const KR_HOLIDAYS_2026_Q4: string[] = ["2026-10-03", "2026-10-05", "2026-10-09"]
+/** 2026년 4분기 공휴일: 개천절(토), 대체공휴일(월), 한글날(금), 성탄절(금). 11월은 없다. */
+export const KR_HOLIDAYS_2026_Q4: string[] = ["2026-10-03", "2026-10-05", "2026-10-09", "2026-12-25"]
 
 /** 설계 문서 §8 굵은 행(반일 옵션 전부 켬, 갱폼 반일 1동, 오후 단독투입 불가). 화면의 기본값. */
 export const DEFAULT_SITE_SETTINGS: z.infer<typeof siteSettingsSchema> = {

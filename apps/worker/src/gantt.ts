@@ -22,6 +22,7 @@ import {
   simulate,
   simulateRequestSchema,
   siteSettingsSchema,
+  type BuildingState,
   type DailyReport,
   type PlanResponse,
   type SimulateResponse,
@@ -323,7 +324,17 @@ function todayKst(): string {
   return new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
 }
 
-/** POST /plan — 현장 작업일보(실적) + 동별 최상층 → 예정 */
+/** 출발 상태를 찾으려고 거슬러 읽는 일보 기간. 보는 달에 일보가 없어도(다음 달 등) 마지막 실적에서 이어 간다 */
+const REPORT_LOOKBACK_DAYS = 45;
+
+/**
+ * POST /plan — 현장 작업일보(실적) + 동 목록 → 예정
+ *
+ * 보는 달과 상관없이 "오늘까지의 마지막 실적"에서 출발해 그 달 말일까지 이어서 계산한다.
+ * 그래서 11월·12월처럼 아직 일보가 없는 달도 10월 말 실적에서 이어진 예정이 나온다.
+ * 일보에 없는 동(설정 탭에만 있는 동)은 설정의 현재 층(없으면 기준층 시작)에서 먹매김부터 출발한다.
+ * 일보도 동 목록도 없을 때만 예시 시뮬레이션(1~N동)을 보여 준다.
+ */
 gantt.post("/plan", async (c) => {
   const parsed = planRequestSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: "요청이 계약과 다릅니다.", code: "VALIDATION_FAILED", detail: parsed.error.flatten() }, 400);
@@ -332,16 +343,18 @@ gantt.post("/plan", async (c) => {
   try {
     const upTo = req.upTo ?? todayKst();
     const actualTo = upTo < req.to ? upTo : req.to;
+    const lookback = addDays(actualTo, -REPORT_LOOKBACK_DAYS);
+    const readFrom = lookback < req.from ? lookback : req.from;
     const [reports, buildings] = await Promise.all([
-      actualTo >= req.from ? listReports(c.env, { siteId: req.siteId, from: req.from, to: actualTo }) : Promise.resolve([]),
+      listReports(c.env, { siteId: req.siteId, from: readFrom, to: actualTo }),
       loadBuildings(c.env, req.siteId),
     ]);
     const topFloors = new Map(buildings.map((b) => [b.buildingNo, b.topFloor]));
     const progress = progressFromReports(reports, actualTo, topFloors);
     const days = dateRange(req.from, req.to).map((d) => getDayInfo(req.calendar, d));
-    const reportDates = reports.map((r) => r.date);
+    const reportDates = reports.filter((r) => r.date >= req.from).map((r) => r.date);
 
-    if (!progress.asOf) {
+    if (!progress.asOf && buildings.length === 0) {
       const warm = simulate({ settings: req.settings, calendar: req.calendar, from: addDays(req.from, -30), to: req.to });
       const body: PlanResponse = {
         from: req.from,
@@ -360,32 +373,53 @@ gantt.post("/plan", async (c) => {
       return c.json(body);
     }
 
-    const planFrom = addDays(progress.asOf, 1);
+    // 예정 출발일: 마지막 실적 다음 날. 실적이 없으면 오늘부터
+    const planFrom = progress.asOf ? addDays(progress.asOf, 1) : upTo;
+    const reported = new Set(progress.buildings.map((b) => b.id));
+    const initial: BuildingState[] = [
+      ...progress.initial,
+      ...buildings
+        .filter((b) => !reported.has(b.buildingNo))
+        .map((b) => ({
+          id: b.buildingNo,
+          stage: "MARK" as const,
+          readySlot: 0,
+          readyDate: planFrom,
+          prevEndSlot: -1,
+          lastPourDate: null,
+          pours: 0,
+          floor: b.currentFloor ?? b.baseFloor,
+          topFloor: b.topFloor,
+          done: false,
+        })),
+    ].sort((a, b) => a.id - b.id);
+
     const planned =
       planFrom <= req.to
         ? simulate({
-            settings: { ...req.settings, buildingCount: progress.buildings.length },
+            settings: { ...req.settings, buildingCount: initial.length },
             calendar: req.calendar,
             from: planFrom,
             to: req.to,
-            initial: progress.initial,
+            initial,
           })
         : null;
+    const statsFrom = planFrom > req.from ? planFrom : req.from;
     const empty = { fullDays: 0, halfDays: 0 };
+    const labelOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.name ?? progress.buildings.find((x) => x.id === id)?.label ?? `${id}동`;
     const body: PlanResponse = {
       from: req.from,
       to: req.to,
       days,
-      buildingIds: progress.buildings.map((b) => b.id),
-      assignments: (planned?.assignments ?? []).map(({ date, half, buildingId, stage, floor }) => ({ date, half, buildingId, stage, floor })),
+      buildingIds: initial.map((b) => b.id),
+      assignments: (planned?.assignments ?? [])
+        .filter((a) => a.date >= req.from && a.date <= req.to)
+        .map(({ date, half, buildingId, stage, floor }) => ({ date, half, buildingId, stage, floor })),
       stats: planned
-        ? periodStats(planned, req.calendar, planFrom, req.to)
-        : { from: planFrom, to: req.to, pours: 0, pourGapDays: 0, idle: { rebar: empty, alform: empty, gangform: empty } },
+        ? periodStats(planned, req.calendar, statsFrom, req.to)
+        : { from: statsFrom, to: req.to, pours: 0, pourGapDays: 0, idle: { rebar: empty, alform: empty, gangform: empty } },
       asOf: progress.asOf,
-      buildings: progress.buildings.map((b) => {
-        const row = buildings.find((x) => x.buildingNo === b.id);
-        return { id: b.id, label: row?.name ?? b.label };
-      }),
+      buildings: initial.map((b) => ({ id: b.id, label: labelOf(b.id) })),
       actual: progress.actual.filter((a) => a.date >= req.from && a.date <= req.to),
       reportDates,
     };
