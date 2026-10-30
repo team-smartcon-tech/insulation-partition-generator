@@ -20,7 +20,11 @@ describe("라인 → 코어 (2라인 = 1코어, 높이는 둘 중 높은 쪽)", 
     assert.deepEqual(groupLinesToCores([39, 39, 39, 37, 37]), [39, 37]) // 404동
     assert.deepEqual(groupLinesToCores([30, 30, 30, 30, 30]), [30, 30]) // 같으면 3+2
   })
-  it("동 번호", () => {
+  it("3세대 이하 동은 1코어 (남원주 1차 405동 40,40,40)", () => {
+    assert.deepEqual(groupLinesToCores([40, 40, 40]), [40])
+    assert.deepEqual(groupLinesToCores([25, 27, 26]), [27])
+  })
+    it("동 번호", () => {
     assert.equal(buildingNoOf("501동"), 501)
     assert.equal(buildingNoOf("근생동"), null)
   })
