@@ -15,11 +15,13 @@ import {
 const calendar = { holidays: [...KR_HOLIDAYS_2026_Q4] }
 
 describe("지하 순서표", () => {
-  it("기본: W철근∥W기전 → W거푸집 → 시스템 → S거푸집 → S철근∥S기전 → S타설", () => {
+  it("기본: 먹매김 → W철근∥W기전 → W거푸집 → 시스템 → S거푸집 → S철근∥S기전 → S타설 (먹매김은 2026-11-01 타설 다음 날 기본)", () => {
     assert.deepEqual(
       undergroundSequence().map((s) => s.stage),
-      ["WALL_REBAR", "WALL_MEP", "FORM_WALL", "SHORING", "FORM_SLAB", "SLAB_REBAR", "SLAB_MEP", "POUR"],
+      ["MARK", "WALL_REBAR", "WALL_MEP", "FORM_WALL", "SHORING", "FORM_SLAB", "SLAB_REBAR", "SLAB_MEP", "POUR"],
     )
+    // 먹매김 0일이면 예전 순서
+    assert.equal(undergroundSequence({ ...DEFAULT_UNDERGROUND_SETTINGS, markDays: 0 })[0].stage, "WALL_REBAR")
   })
   it("분리 타설이면 W거푸집 뒤 W타설", () => {
     const seq = undergroundSequence({ ...DEFAULT_UNDERGROUND_SETTINGS, separateWallPour: true }).map((s) => s.stage)
@@ -40,8 +42,10 @@ describe("지하 예정", () => {
     assert.equal(days("FORM_WALL"), d.formWall)
     assert.equal(days("SLAB_MEP"), d.slabMep)
     assert.equal(days("POUR"), 1)
-    const first = r.assignments.filter((a) => a.date === r.assignments[0].date)
-    assert.deepEqual(first.map((a) => a.stage), ["WALL_REBAR", "WALL_MEP"])
+    // 첫날 먹매김(하루), 그다음 날 W철근 ∥ W기전
+    assert.deepEqual(r.assignments.filter((a) => a.date === r.assignments[0].date).map((a) => a.stage), ["MARK", "MARK"])
+    const second = r.assignments.find((a) => a.stage !== "MARK")!.date
+    assert.deepEqual(r.assignments.filter((a) => a.date === second).map((a) => a.stage), ["WALL_REBAR", "WALL_MEP"])
   })
 
   it("층 순서 B2 → B1 → 1F, 기준층 시작(2F) 전에서 끝나고 끝난 날을 알려 준다", () => {
@@ -92,7 +96,7 @@ describe("실적 → 지하 위치", () => {
       2,
     )
     // S철근 4일(기본 4) 다 함 → S기전은 병행이라 건너뛰고 S타설
-    assert.deepEqual(st, { id: 501, story: -1, stepIndex: 7, doneDays: 0, baseFloor: 2 })
+    assert.deepEqual(st, { id: 501, story: -1, stepIndex: 8, doneDays: 0, baseFloor: 2 }) // 먹매김이 맨 앞이라 +1
   })
   it("S타설까지 했으면 다음 층 처음 (B1 → 1F)", () => {
     const st = undergroundStateFromActual([A("2026-10-29", "POUR", -1)], 501, 2)
@@ -101,12 +105,12 @@ describe("실적 → 지하 위치", () => {
   it("예전 일부 타설이 있어도 최근 실적 기준 (504동 9/23 1F 바닥 일부 타설 뒤 10월 B1 바닥 거푸집 계속)", () => {
     const st = undergroundStateFromActual([A("2026-09-23", "POUR", -1), A("2026-10-20", "FORM_SLAB", -1), A("2026-10-21", "FORM_SLAB", -1)], 501, 2)
     assert.equal(st?.story, -1)
-    assert.equal(st?.stepIndex, 4) // S거푸집 진행 중
+    assert.equal(st?.stepIndex, 5) // S거푸집 진행 중 (먹매김이 맨 앞이라 +1)
   })
 
   it("진행 중이면 남은 일수", () => {
     const st = undergroundStateFromActual([A("2026-10-28", "FORM_WALL", -1), A("2026-10-29", "FORM_WALL", -1)], 501, 2)
-    assert.deepEqual(st, { id: 501, story: -1, stepIndex: 2, doneDays: 2, baseFloor: 2 })
+    assert.deepEqual(st, { id: 501, story: -1, stepIndex: 3, doneDays: 2, baseFloor: 2 })
   })
 })
 
@@ -150,5 +154,44 @@ describe("지하층 구역 (설정 저장)", () => {
     const q = siteSettingsSchema.parse({ ...DEFAULT_SITE_SETTINGS, zones: [{ ...zones[0], team: "B" }], formTeams: ["A", "B", "C"] })
     assert.equal(q.zones?.[0].team, "B")
     assert.deepEqual(q.formTeams, ["A", "B", "C"])
+  })
+})
+
+describe("지하·저층 팀 용량 (2026-11-01: 지하·저층이 같은 팀, 기준층과 따로)", () => {
+  const b = (id: number) => ({ id, story: -2, stepIndex: 0, doneDays: 0, baseFloor: 3 })
+  const run = (opts: { formTeamOf?: Map<number, string>; rebarTeams?: number | null }) =>
+    planUnderground({ calendar, from: "2026-11-02", to: "2027-06-30", buildings: [b(101), b(102)], ...opts })
+  // (동, 날짜, 반일) 별로 공종을 모아, 같은 날 두 동이 같은 팀 공종을 하는지 본다
+  const overlapDays = (r: ReturnType<typeof run>, stages: string[]) => {
+    const by = new Map<string, Set<number>>()
+    for (const a of r.assignments) {
+      if (!stages.includes(a.stage)) continue
+      const k = `${a.date}|${a.half}`
+      by.set(k, (by.get(k) ?? new Set()).add(a.buildingId))
+    }
+    return [...by.values()].filter((s) => s.size > 1).length
+  }
+  const FORM = ["FORM_WALL", "SHORING", "FORM_SLAB"]
+  const REBAR = ["WALL_REBAR", "SLAB_REBAR"]
+  it("제한이 없으면 두 동이 같은 날 같은 공종 (예전과 같다)", () => {
+    const r = run({})
+    assert.ok(overlapDays(r, FORM) > 0)
+    assert.ok(overlapDays(r, REBAR) > 0)
+  })
+  it("같은 형틀팀(A) 동끼리는 거푸집·시스템을 동시에 하지 않는다", () => {
+    const r = run({ formTeamOf: new Map([[101, "A"], [102, "A"]]) })
+    assert.equal(overlapDays(r, FORM), 0)
+    // 철근은 제한 없음 → 겹칠 수 있다, 두 동 모두 기준층 전까지 끝난다
+    assert.equal(r.finishedOn.size, 2)
+  })
+  it("형틀팀이 다르면(A·B) 동시에 해도 된다", () => {
+    assert.ok(overlapDays(run({ formTeamOf: new Map([[101, "A"], [102, "B"]]) }), FORM) > 0)
+  })
+  it("지하·저층 철근팀 1팀이면 W·S철근을 동시에 하지 않는다", () => {
+    const r = run({ rebarTeams: 1 })
+    assert.equal(overlapDays(r, REBAR), 0)
+    // 팀이 모자라면 늦게 끝난다
+    const free = run({})
+    assert.ok(r.finishedOn.get(102)! >= free.finishedOn.get(102)!)
   })
 })

@@ -65,12 +65,18 @@ describe("parseWorkText", () => {
       text: "바닥 먹매김",
       stage: "MARK",
     })
-    assert.equal(find("403동", "바닥 타설")?.stage, "POUR")
-    assert.equal(find("402동", "1-2호 단열재 설치")?.stage, "TOP_INSULATION")
+    // 「NF 바닥」 타설·단열재는 아래층 사이클 (2026-10-31): 403동 38F 바닥 타설 → 37F 슬래브 타설
+    assert.deepEqual(
+      [find("403동", "슬래브 타설 (원문 38F 바닥)")?.stage, find("403동", "슬래브 타설 (원문 38F 바닥)")?.floor],
+      ["POUR", 37],
+    )
+    assert.deepEqual([find("402동", "1-2호 단열재 설치 (원문 38F)")?.stage, find("402동", "1-2호 단열재 설치 (원문 38F)")?.floor], ["TOP_INSULATION", 37])
+    // 알폼도 「바닥」 이면 아래층: 405동 37F 바닥 알폼설치 → 36F
+    assert.equal(entries.find((e) => e.buildingNo === 405 && e.stage === "ALFORM")?.floor, 36)
   })
   it("전기·설비: 동이 작업마다 붙은 줄도 읽고 기전 단계로", () => {
     assert.equal(find("401동", "벽체 배관작업")?.stage, "WALL_MEP")
-    assert.equal(find("402동", "바닥 이중관 설치")?.stage, "SLAB_MEP")
+    assert.deepEqual([find("402동", "슬래브 이중관 설치 (원문 38F 바닥)")?.stage, find("402동", "슬래브 이중관 설치 (원문 38F 바닥)")?.floor], ["SLAB_MEP", 37])
     assert.ok(!entries.some((e) => e.text.includes("덕트")))
   })
   it("부대시설은 동 번호 없음, 못 읽은 줄 없음", () => {
@@ -92,7 +98,8 @@ describe("다른 장소 조각은 앞 동을 이어받지 않는다", () => {
   })
   it("동 이름 없는 작업 조각은 지금처럼 앞 동을 이어받는다", () => {
     const { entries } = parseWorkText("* 전기(17)\n- 404동 32F 벽체 배관작업 / 33F 바닥 배관작업")
-    assert.deepEqual(entries.map((e) => [e.buildingNo, e.floor, e.stage]), [[404, 32, "WALL_MEP"], [404, 33, "SLAB_MEP"]])
+    // 33F 바닥 배관 = 32층 사이클 (「NF 바닥」 → 아래층)
+    assert.deepEqual(entries.map((e) => [e.buildingNo, e.floor, e.stage]), [[404, 32, "WALL_MEP"], [404, 32, "SLAB_MEP"]])
   })
 })
 

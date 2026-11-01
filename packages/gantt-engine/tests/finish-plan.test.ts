@@ -1,7 +1,7 @@
 // 마감 예정 (선행·층 묶음 규칙, 2026-10-30)
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { finishPlanOf, hasFinishPlan, planFinishBuilding, type FinishGanttBuilding } from "../src/index.ts"
+import { FINISH_TRADES, finishPlanOf, hasFinishPlan, planFinishBuilding, planFinishSite, type FinishGanttBuilding } from "../src/index.ts"
 
 const floors = (done: Record<number, string | null>) =>
   [1, 2, 3, 4].map((f) => ({ floor: f, units: 2, done: done[f] ? 2 : 0, last: done[f] ?? null }))
@@ -49,10 +49,10 @@ describe("마감 예정", () => {
     const p2 = planFinishBuilding(b2, settings, "2026-10-30")
     assert.deepEqual(p2.map((x) => x.bars.length), [0, 0])
   })
-  it("창짝설치·유리는 규칙이 없어 예정을 내지 않는다", () => {
-    const b4: FinishGanttBuilding = { ...b, rows: [...b.rows, row("windowSash", floors({ 1: "2026-10-25" })), row("glass", floors({ 1: "2026-10-27" }))] }
-    const p4 = planFinishBuilding(b4, settings, "2026-10-30")
-    assert.deepEqual(p4.filter((x) => x.trade === "windowSash" || x.trade === "glass").map((x) => x.bars.length), [0, 0])
+  it("예전 키로 저장된 규칙도 읽는다: 「tile」 → 바닥타일, 「baseboard」 → 내장몰딩, 선행 「tile」 → floorTile (2026-10-31 공종 14개)", () => {
+    const old = { tile: { pred: "screed", gapDays: 9, floorsPerBatch: 3, daysPerBatch: 6 }, baseboard: { pred: "tile", gapDays: 1, floorsPerBatch: 2, daysPerBatch: 1 } }
+    assert.deepEqual([finishPlanOf(old, "floorTile").gapDays, finishPlanOf(old, "floorTile").daysPerBatch], [9, 6])
+    assert.deepEqual([finishPlanOf(old, "molding").gapDays, finishPlanOf(old, "molding").pred], [1, "floorTile"])
   })
   it("코어마다 따로: 선행도 같은 코어의 층을 본다", () => {
     const b3: FinishGanttBuilding = {
@@ -87,9 +87,12 @@ describe("마감 예정", () => {
     assert.equal(finishPlanOf({ windowFrame: { pred: null, gapDays: 0, floorsPerBatch: 2, daysPerBatch: 3 } }, "windowFrame").frameLead, 5)
     assert.equal(finishPlanOf({ windowFrame: { pred: null, frameLead: null, gapDays: 0, floorsPerBatch: 2, daysPerBatch: 3 } }, "windowFrame").frameLead, null)
   })
-  it("창짝설치·유리·몰딩·주방가구·일반가구는 예정 규칙이 없다 (간트·규칙 카드에서 빠진다)", () => {
-    assert.deepEqual(["windowSash", "glass", "molding", "kitchen", "furniture"].map(hasFinishPlan), [false, false, false, false, false])
-    assert.deepEqual(["windowFrame", "pvcAll", "baseboard", "flooring"].map(hasFinishPlan), [true, true, true, true])
+  it("공종 14개 모두 예정 규칙이 있고, 기본 선행은 목록에서 바로 앞 공종 (PL창틀은 골조 5개 층)", () => {
+    const keys = FINISH_TRADES.map((t) => t.key)
+    assert.equal(keys.length, 14)
+    assert.ok(keys.every(hasFinishPlan))
+    assert.deepEqual(keys.map((k) => finishPlanOf(undefined, k).pred), [null, ...keys.slice(0, -1)])
+    assert.equal(finishPlanOf(undefined, "windowFrame").frameLead, 5)
   })
   it("팀 2개: 묶음 둘을 동시에, 다음 묶음은 먼저 빈 팀이", () => {
     const b6: FinishGanttBuilding = { ...b, rows: [row("windowFrame", floors({}))] }
@@ -104,5 +107,90 @@ describe("마감 예정", () => {
     // 팀을 안 적으면 1팀 (예전과 같음)
     const p1 = planFinishBuilding(b6, { windowFrame: { ...s6.windowFrame, teams: undefined } }, "2026-10-30", 540, () => "2026-10-01")
     assert.deepEqual(p1[0].bars.map((x) => x.start), ["2026-10-31", "2026-11-03", "2026-11-06", "2026-11-09"])
+  })
+  it("팀은 현장 전체가 나눠 쓴다: 1팀이면 두 동·두 코어가 동시에 하지 않고, 2팀이면 동시에", () => {
+    const bld = (no: number): FinishGanttBuilding => ({
+      buildingNo: no,
+      name: `${no}동`,
+      cores: [],
+      rows: [row("windowFrame", floors({}), 1), row("windowFrame", floors({}), 2)],
+    })
+    const rule = (teams: number) => ({ windowFrame: { pred: null, frameLead: 0, teams, gapDays: 0, floorsPerBatch: 2, daysPerBatch: 3 } })
+    const all = (m: Map<number, { bars: { start: string; end: string }[] }[]>) =>
+      [...m.values()].flatMap((rows) => rows.flatMap((r) => r.bars)).sort((x, y) => x.start.localeCompare(y.start))
+    // 2개 동 × 2코어 × 묶음 2개 = 8묶음, 1팀이면 3일씩 이어서: 10/31 … 마지막 11/21 시작
+    const one = all(planFinishSite([bld(101), bld(102)], rule(1), "2026-10-30", 540, () => "2026-10-01"))
+    assert.equal(one.length, 8)
+    for (let k = 1; k < one.length; k++) assert.ok(one[k].start > one[k - 1].end, "1팀은 겹치지 않는다")
+    assert.equal(one.at(-1)!.start, "2026-11-21")
+    // 2팀이면 두 묶음씩 동시에 → 마지막 시작 11/09
+    const two = all(planFinishSite([bld(101), bld(102)], rule(2), "2026-10-30", 540, () => "2026-10-01"))
+    assert.deepEqual([two[0].start, two[1].start, two.at(-1)!.start], ["2026-10-31", "2026-10-31", "2026-11-09"])
+  })
+  it("예전 PL창틀(pvcAll) 줄은 창틀 규칙을 쓰고, 선행 「창틀」 은 그 코어의 PL창틀 줄을 본다 · 기본 간격 2일·5개 층", () => {
+    assert.deepEqual(finishPlanOf({ windowFrame: { pred: null, frameLead: 3, gapDays: 1, floorsPerBatch: 4, daysPerBatch: 2 } }, "pvcAll").floorsPerBatch, 4)
+    assert.deepEqual([finishPlanOf(undefined, "tile").gapDays, finishPlanOf(undefined, "tile").floorsPerBatch], [2, 5])
+    // PL창틀 2층까지 끝(10/22) → 단열 2층은 PL창틀 완료 + 간격 3일 뒤
+    const b7: FinishGanttBuilding = {
+      ...b,
+      rows: [row("pvcAll", floors({ 1: "2026-10-20", 2: "2026-10-22" })), row("insulation", floors({ 1: "2026-10-27" }))],
+    }
+    const s7 = { insulation: { pred: "windowFrame", gapDays: 3, floorsPerBatch: 1, daysPerBatch: 2 } }
+    const ins = planFinishBuilding(b7, s7, "2026-10-30").find((x) => x.trade === "insulation")!.bars
+    // PL창틀 3~4층 예정 10/31~11/2 (기본 5개 층씩·3일) → 단열 3층은 11/2 + 3 + 1 = 11/6. 선행이 빠졌다면 11/2 에 시작했다
+    assert.deepEqual(ins.map((x) => [x.floorFrom, x.start]), [[2, "2026-10-31"], [3, "2026-11-06"], [4, "2026-11-08"]])
+  })
+  it("스마트웍스 실적이 없는 공종도 선행이 있으면 예정을 낸다 (연결 없는 공종 = 예정만)", () => {
+    const b8: FinishGanttBuilding = {
+      ...b,
+      rows: [row("ceilingWallpaper", floors({ 1: "2026-10-20", 2: "2026-10-22" })), row("wallpaper", floors({}))],
+    }
+    const s8 = { wallpaper: { pred: "ceilingWallpaper", gapDays: 0, floorsPerBatch: 1, daysPerBatch: 1 } }
+    const bars = planFinishBuilding(b8, s8, "2026-10-30").find((x) => x.trade === "wallpaper")!.bars
+    assert.deepEqual(bars.slice(0, 2).map((x) => x.floorFrom), [1, 2])
+  })
+  it("예정은 1년 반(540일)을 넘어도 이어진다 — 선행 사슬 끝 공종이 2028년 이후에도 (한도 5년)", () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => ({ floor: i + 1, units: 2, done: 0, last: null }))
+    const b9: FinishGanttBuilding = { ...b, rows: [{ ...row("wallpaper", floors({})), floors: many(40), done: 1 }] }
+    // 40개 층 · 1층씩 · 20일 → 800일, 시작한 공종(done > 0)이라 선행 없이 내일부터
+    const s9 = { wallpaper: { pred: null, gapDays: 0, floorsPerBatch: 1, daysPerBatch: 20 } }
+    const bars = planFinishBuilding(b9, s9, "2026-10-30").find((x) => x.trade === "wallpaper")!.bars
+    assert.equal(bars.length, 40)
+    assert.ok(bars.at(-1)!.start > "2028-05-01")
+  })
+})
+
+describe("겹쳐 이동 (2026-11-01 사용자: PL창호 1코어 하루 하고 2코어로 — 4코어 5일씩이면 8일)", () => {
+  // 4층짜리 4코어 동 2개, 골조는 다 됨
+  const bld = (no: number): FinishGanttBuilding => ({
+    buildingNo: no,
+    name: `${no}동`,
+    cores: [],
+    rows: [1, 2, 3, 4].map((c) => row("windowFrame", floors({}), c)),
+  })
+  const rule = (extra: object) => ({ windowFrame: { pred: null, frameLead: 0, gapDays: 0, floorsPerBatch: 4, daysPerBatch: 5, ...extra } })
+  const starts = (p: Map<number, { core: number | null; bars: { start: string; end: string }[] }[]>, no: number) =>
+    p.get(no)!.map((r) => [r.core, r.bars[0]?.start, r.bars[0]?.end])
+  it("코어마다 1일 간격: 1코어 10/31 → 4코어 11/3 시작, 4코어가 끝나는 11/7 까지 8일", () => {
+    const p = planFinishSite([bld(101)], rule({ moveDays: 1 }), "2026-10-30", 540, () => "2026-10-01")
+    assert.deepEqual(starts(p, 101), [
+      [1, "2026-10-31", "2026-11-04"],
+      [2, "2026-11-01", "2026-11-05"],
+      [3, "2026-11-02", "2026-11-06"],
+      [4, "2026-11-03", "2026-11-07"],
+    ])
+  })
+  it("코어를 다 돌면 다음 동으로 (같은 코어는 앞 묶음이 끝나야)", () => {
+    const p = planFinishSite([bld(101), bld(102)], rule({ moveDays: 1 }), "2026-10-30", 540, () => "2026-10-01")
+    assert.deepEqual(starts(p, 102).map((x) => x[1]), ["2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07"])
+  })
+  it("동마다 1일 간격: 그 동 코어들은 같은 날, 다음 동은 하루 뒤", () => {
+    const p = planFinishSite([bld(101), bld(102)], rule({ moveDays: 1, moveBy: "building" }), "2026-10-30", 540, () => "2026-10-01")
+    assert.deepEqual(starts(p, 101).map((x) => x[1]), ["2026-10-31", "2026-10-31", "2026-10-31", "2026-10-31"])
+    assert.deepEqual(starts(p, 102).map((x) => x[1]), ["2026-11-01", "2026-11-01", "2026-11-01", "2026-11-01"])
+  })
+  it("간격이 없으면 지금처럼: 1팀이 한 코어를 끝내야 다음", () => {
+    const p = planFinishSite([bld(101)], rule({}), "2026-10-30", 540, () => "2026-10-01")
+    assert.deepEqual(starts(p, 101).map((x) => x[1]), ["2026-10-31", "2026-11-05", "2026-11-10", "2026-11-15"])
   })
 })

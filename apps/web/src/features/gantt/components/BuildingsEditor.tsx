@@ -1,5 +1,7 @@
 /**
- * 동 목록·규모 편집 — 동 번호, 이름, 기준층 시작 층, 코어(최상층·옥탑 층수), (일보 없을 때) 현재 층.
+ * 동 목록·규모 편집 — 동 번호, 이름, 지하, 저층(= 기준층 시작 − 1, 연동), 기준층 시작(= 알폼 셋팅층), 갱폼 셋팅층,
+ * 코어(최상층·옥탑 층수), (일보 없을 때) 현재 층. 갱폼 셋팅층은 현장 설정 settings.gangformFloors 에 저장(2026-11-01) — 저층·기준층 시작과 따로,
+ * 비우면 기준층 시작.
  * 같은 동이라도 코어마다 최상층·옥탑이 다를 수 있어, 동 한 줄 안에 코어를 세로로 쌓는다(동을 두 줄로 넣지 않는다).
  * 동의 최상층 = 코어 중 가장 높은 층. 최상층이 있어야 11월 이후 계획이 맞는다(최상층 타설 뒤 사이클에서 빠짐).
  */
@@ -70,13 +72,28 @@ function BulkField({
   );
 }
 
-export default function BuildingsEditor({ value, onChange, siteId = null }: { value: Building[]; onChange: (next: Building[]) => void; siteId?: string | null }) {
+export default function BuildingsEditor({
+  value,
+  onChange,
+  siteId = null,
+  gangformFloors,
+  onGangform,
+}: {
+  value: Building[];
+  onChange: (next: Building[]) => void;
+  siteId?: string | null;
+  /** 동 번호 → 갱폼 셋팅층 (없으면 기준층 시작) */
+  gangformFloors?: Record<string, number>;
+  /** 갱폼 셋팅층을 바꿀 때 (null = 기준층 시작과 같게) */
+  onGangform?: (buildingNo: number, floor: number | null) => void;
+}) {
   // 스마트웍스에서 불러오기: 동·코어별 최상층을 채운다. 지하·기준층 시작·옥탑·이름은 있는 동은 그대로, 새 동은 마지막 동 값 복사.
   // 스마트웍스에 없는 동은 지우지 않는다. 화면에만 채우고 저장은 「저장」 버튼으로.
   const [importing, setImporting] = useState(false);
   // 일괄 적용 (지하·기준층 시작·옥탑): 모든 동(옥탑은 모든 코어)에 한 번에. 동별·코어별로 다시 고칠 수 있다
   const [bulkBasement, setBulkBasement] = useState<number>(() => value.at(-1)?.basementFloors ?? 0);
   const [bulkBase, setBulkBase] = useState<number>(() => value.at(-1)?.baseFloor ?? 3);
+  const [bulkGang, setBulkGang] = useState<number>(() => value.at(-1)?.baseFloor ?? 3);
   const applyBulkBasement = () => {
     if (!value.length) return;
     onChange(value.map((b) => ({ ...b, basementFloors: bulkBasement })));
@@ -189,7 +206,21 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           <span className="font-medium text-foreground">일괄 적용</span>
           <BulkField label="지하" hint="모든 동의 지하층 수 (0 = 없음)" min={0} max={10} value={bulkBasement} onValue={setBulkBasement} onApply={applyBulkBasement} />
-          <BulkField label="기준층 시작" hint="모든 동의 기준층 시작 층" min={1} max={80} value={bulkBase} onValue={setBulkBase} onApply={applyBulkBase} />
+          <BulkField label="기준층 시작(알폼)" hint="모든 동의 기준층 시작 = 알폼 셋팅층" min={1} max={80} value={bulkBase} onValue={setBulkBase} onApply={applyBulkBase} />
+          {onGangform ? (
+            <BulkField
+              label="갱폼 셋팅"
+              hint="모든 동의 갱폼 셋팅층 (저층에서도 이 층부터 갱폼)"
+              min={1}
+              max={80}
+              value={bulkGang}
+              onValue={setBulkGang}
+              onApply={() => {
+                for (const b of value) onGangform(b.buildingNo, bulkGang);
+                toast.success(`모든 동의 갱폼 셋팅층을 ${bulkGang}층으로 바꿨습니다. 「저장」을 눌러야 반영됩니다.`);
+              }}
+            />
+          ) : null}
           <BulkField label="옥탑" hint="모든 동·코어의 옥탑 층수 (0 = 없음)" min={0} max={10} value={bulkRoof} onValue={setBulkRoof} onApply={applyBulkRoof} />
         </div>
       ) : null}
@@ -202,7 +233,13 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
               <th className="pb-1 pr-3 whitespace-nowrap">동 번호</th>
               <th className="pb-1 pr-3 whitespace-nowrap">이름</th>
               <th className="pb-1 pr-3 whitespace-nowrap" title="지하 맨 아래층 (B3 까지면 3). 일보 없는 동의 지하 출발 층">지하</th>
-              <th className="pb-1 pr-3 whitespace-nowrap">기준층 시작</th>
+              <th className="pb-1 pr-3 whitespace-nowrap" title="1층 ~ 기준층 시작 바로 아래 층 (재래식). 바꾸면 기준층 시작이 함께 바뀐다">저층</th>
+              <th className="pb-1 pr-3 whitespace-nowrap" title="기준층 시작 = 알폼 셋팅층. 이 층부터 알폼 사이클">기준층(알폼)</th>
+              {onGangform ? (
+                <th className="pb-1 pr-3 whitespace-nowrap" title="갱폼 셋팅층 — 저층·기준층과 따로. 이 층부터 갱폼인양(저층이면 재래식 순서 앞에 1일). 기준층이 이보다 낮으면 그 층들은 갱폼 없이. 비우면 기준층 시작">
+                  갱폼 셋팅
+                </th>
+              ) : null}
               <th className="pb-1 pr-3 font-normal">
                 {/* 코어 줄과 같은 칸 너비 — 헤더가 각 입력칸 바로 위에 온다 */}
                 <div className={CORE_GRID}>
@@ -238,8 +275,25 @@ export default function BuildingsEditor({ value, onChange, siteId = null }: { va
                     <NumInput min={0} max={10} value={b.basementFloors ?? 0} onValue={(v) => update(i, { basementFloors: v ?? 0 })} aria-label="지하층 수" />
                   </td>
                   <td className="py-1.5 pr-3 w-[62px]">
-                    <NumInput min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작" />
+                    {/* 저층 = 기준층 시작 − 1 (연동, 2026-11-01) */}
+                    <NumInput min={0} max={79} value={b.baseFloor - 1} onValue={(v) => update(i, { baseFloor: (v ?? b.baseFloor - 1) + 1 })} aria-label="저층 층수" />
                   </td>
+                  <td className="py-1.5 pr-3 w-[62px]">
+                    <NumInput min={1} value={b.baseFloor} onValue={(v) => update(i, { baseFloor: v ?? b.baseFloor })} aria-label="기준층 시작 (알폼 셋팅층)" />
+                  </td>
+                  {onGangform ? (
+                    <td className="py-1.5 pr-3 w-[62px]">
+                      {/* 저층·기준층 시작과 따로 (2026-11-01 사용자: 저층에도 갱폼을 쓸 수 있다). 비우면 기준층 시작 */}
+                      <NumInput
+                        min={1}
+                        max={80}
+                        value={gangformFloors?.[String(b.buildingNo)] ?? null}
+                        placeholder={String(b.baseFloor)}
+                        onValue={(v) => onGangform(b.buildingNo, v)}
+                        aria-label="갱폼 셋팅층"
+                      />
+                    </td>
+                  ) : null}
                   <td className="py-1.5 pr-3">
                     <div className="space-y-1">
                       {cores.map((c, k) => {

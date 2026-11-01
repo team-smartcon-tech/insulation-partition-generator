@@ -2,7 +2,7 @@
  * 지하층 구역별 순서 — 형틀(거푸집) 팀별로 묶는다 (설정 탭, 동 목록·규모 카드와 별도, 2026-10-30).
  * - 팀(A팀·B팀·C팀 …)마다 맡은 구역을 순서대로 돈다. 팀 안에서 위·아래로 순서를 바꾼다.
  * - 구역마다 이름·지하 몇 층까지·관련 동·메모. 팀 선택으로 다른 팀에 옮긴다.
- * - 현장 설정(settings.zones · settings.formTeams)에 같이 저장된다. 이 순서로 지하 예정을 내는 계산은 다음 단계.
+ * - 현장 설정(settings.zones · settings.formTeams)에 같이 저장된다. 지하·저층 예정이 이 팀(형틀팀)과 구역 순서를 쓴다(2026-11-01).
  */
 import { ArrowDown, ArrowUp, Plus, Trash2, X } from "lucide-react";
 import type { UndergroundZone } from "@ipg/gantt-engine";
@@ -81,7 +81,7 @@ export default function ZonesEditor({
         <div>
           <h4 className="text-sm font-semibold">지하층 구역별 순서 (형틀·거푸집 팀별)</h4>
           <p className="text-xs text-muted-foreground">
-            팀마다 맡은 구역을 위에서 아래 순서로 돕니다. 주차장처럼 동 밖 구역은 관련 동을 비워 두세요. 이 순서로 지하 예정을 내는 계산은 다음 단계입니다.
+            팀마다 맡은 구역을 위에서 아래 순서로 돕니다. 주차장처럼 동 밖 구역은 관련 동을 비워 두세요. 지하·저층 예정은 관련 동의 거푸집·시스템을 이 팀이 맡는 것으로 계산합니다(같은 팀 동은 동시에 못 함, 위 구역이 먼저).
           </p>
         </div>
         <Button variant="outline" size="sm" className="shrink-0" onClick={addTeam} disabled={!nextLetter}>

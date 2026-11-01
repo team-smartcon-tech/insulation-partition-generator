@@ -21,8 +21,7 @@ export type FinishCellTarget = {
   core: number | null;
   coreLines: string[];
   trade: { key: string; group: string; label: string };
-  /** 그 날짜에 걸친 막대들 */
-  report: (FinishBarT & { days?: number })[];
+  /** 그 날짜에 걸친 막대들 (지난 작업은 스마트웍스 세대 완료만 — 2026-10-31) */
   actual: FinishBarT[];
   plan: FinishBarT[];
 };
@@ -58,7 +57,6 @@ export default function FinishCellDialog({
   const coreText = target.core != null ? ` ${target.core}코어(${target.coreLines.map((l) => `${l}호`).join("·")})` : "";
   const title = `${target.buildingName}${coreText} · ${target.trade.label}`;
   const bars = [
-    ...target.report.map((b) => ({ kind: "일보 작업", tone: "bg-violet-100 text-violet-800", b, note: b.days ? `일보 ${b.days}일` : "" })),
     ...target.actual.map((b) => ({
       kind: "세대 완료",
       tone: "bg-slate-200 text-slate-800",
