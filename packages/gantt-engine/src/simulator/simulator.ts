@@ -44,6 +44,30 @@ export type BuildingState = {
   done?: boolean
   /** 옥탑 층수. 최상층 타설 다음 날부터 옥탑 순서표(ROOFTOP_SEQUENCE)를 층마다 붙인다. 0/없음 = 옥탑 없음 */
   rooftopFloors?: number
+  /**
+   * 갱폼 셋팅층 (2026-11-01 사용자). 기준층 시작(= 알폼 셋팅층)부터 이 층 바로 아래까지는 갱폼인양 없이 알폼 사이클.
+   * 없으면 기준층 시작부터 갱폼(예전과 같다)
+   */
+  gangformFloor?: number | null
+  /**
+   * 갱폼 설치 기간(작업일, 2026-11-01). 갱폼 셋팅층 사이클에서 먹매김 다음 갱폼을 이만큼 「갱폼」 막대로 그리고(설치 작업조 — 갱폼 인양 용량은 쓰지 않는다)
+   * 벽철근으로 넘어간다. 그 위 층은 보통 인양
+   */
+  gangformSetupDays?: number
+  /** 갱폼 설치를 이미 했다 (엔진 내부) */
+  gangformSet?: boolean
+  /**
+   * 알폼 셋팅층(= 기준층 시작)과 셋팅 기간(작업일, 2026-11-01). 이 층 첫 사이클의 알폼을 셋팅 기간만큼 「알폼」 막대로(셋팅 작업조 —
+   * 알폼팀 용량은 쓰지 않는다). 그 위 층은 보통 알폼
+   */
+  alformFloor?: number | null
+  alformSetupDays?: number
+  alformSet?: boolean
+}
+
+/** 갱폼 셋팅층 아래 층이면 갱폼인양을 건너뛴다 */
+const skipGangform = (b: BuildingState) => {
+  if (b.stage === "GANGFORM" && b.gangformFloor != null && b.floor < b.gangformFloor) b.stage = nextStage("GANGFORM")
 }
 
 export type SimulationInput = {
@@ -97,6 +121,7 @@ export function simulate(input: SimulationInput): SimulationResult {
   const buildings = (input.initial ?? initialBuildings(settings.buildingCount, input.from)).map(
     (b) => ({ ...b }),
   )
+  for (const b of buildings) skipGangform(b)
   const assignments: Assignment[] = []
   // 슬롯별 배정 목록 (예약 포함). 알폼은 2칸을 한 번에 잡는다.
   const bySlot: Assignment[][] = slots.map(() => [])
@@ -263,6 +288,26 @@ export function simulate(input: SimulationInput): SimulationResult {
       b.readyDate = addDays(slot.date, 1)
     }
     b.stage = nextStage(stage, b.topFloor != null && b.floor === b.topFloor)
+    skipGangform(b)
+    // 셋팅층 첫 사이클: 갱폼 설치 · 알폼 셋팅을 셋팅 기간만큼 막대로 (작업일마다 오전·오후) → 다음 단계
+    const setup = (st: "GANGFORM" | "ALFORM", days: number) => {
+      let k = b.readySlot
+      while (k < slots.length && slots[k].half === "PM") k++ // 셋팅은 하루 단위
+      const end = Math.min(slots.length, k + days * 2)
+      for (let j = k; j < end; j++) assignments.push({ slotIndex: j, date: slots[j].date, half: slots[j].half, buildingId: b.id, stage: st, floor: b.floor })
+      b.prevEndSlot = end - 1
+      b.readySlot = end
+      b.readyDate = end < slots.length ? slots[end].date : b.readyDate
+      b.stage = nextStage(st, b.topFloor != null && b.floor === b.topFloor)
+    }
+    if (b.stage === "GANGFORM" && !b.gangformSet && b.gangformFloor != null && b.floor === b.gangformFloor && (b.gangformSetupDays ?? 0) > 0) {
+      b.gangformSet = true
+      setup("GANGFORM", b.gangformSetupDays!)
+    }
+    if (b.stage === "ALFORM" && !b.alformSet && b.alformFloor != null && b.floor === b.alformFloor && (b.alformSetupDays ?? 0) > 0) {
+      b.alformSet = true
+      setup("ALFORM", b.alformSetupDays!)
+    }
   }
 
   for (const slot of slots) {

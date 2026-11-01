@@ -118,6 +118,13 @@ export type SmartworksBuilding = z.infer<typeof smartworksBuildingsSchema>["buil
 export const listSmartworksBuildings = (siteId: string) =>
   apiFetch(`/smartworks-buildings/${encodeURIComponent(siteId)}`, smartworksBuildingsSchema);
 
+/** 스마트웍스 현장 개요 공사기간 (착공 · 준공, 읽기 전용) */
+export const getSitePeriod = (siteId: string) =>
+  apiFetch(
+    `/site-period/${encodeURIComponent(siteId)}`,
+    z.object({ siteId: z.string(), raw: z.string().nullable(), start: z.string().nullable(), completion: z.string().nullable() }),
+  );
+
 export const saveBuildings = (siteId: string, buildings: Building[]) =>
   apiFetch(
     `/buildings/${encodeURIComponent(siteId)}`,
@@ -215,3 +222,38 @@ const finishReportsSchema = z.object({
 export type FinishReportsResponse = z.infer<typeof finishReportsSchema>;
 export const getFinishReports = (siteId: string, from: string, to: string) =>
   apiFetch(`/finish-reports/${encodeURIComponent(siteId)}?${new URLSearchParams({ from, to })}`, finishReportsSchema);
+
+/** 택트 인원 탭 (2026-10-31) — 현장별 마감 택트 입력. 없으면 takt: null */
+const taktSchema = z.object({
+  unitsPerFloor: z.number(),
+  zoneFloors: z.number(),
+  taktDays: z.number(),
+  buildingFloors: z.array(z.number()),
+  frameZoneDays: z.number().nullable(),
+  updatedBy: z.string().nullable(),
+  updatedAt: z.string(),
+  trades: z.array(
+    z.object({
+      stage: z.number(),
+      name: z.string(),
+      unit: z.string(),
+      /** 고정 일수 공종은 비어 있을 수 있다 */
+      qtyPerUnit: z.number().nullable(),
+      productivity: z.number().nullable(),
+      waitDays: z.number(),
+      /** 인원 직접 지정, null = 자동 (고정 일수 공종은 팀 인원) */
+      crew: z.number().nullable().default(null),
+      mode: z.enum(["rate", "fixed"]).default("rate"),
+      fixedDays: z.number().nullable().default(null),
+    }),
+  ),
+});
+export type SavedTakt = z.infer<typeof taktSchema>;
+export type TaktSaveBody = Omit<SavedTakt, "updatedBy" | "updatedAt">;
+export const getTakt = (siteId: string) =>
+  apiFetch(`/takt/${encodeURIComponent(siteId)}`, z.object({ siteId: z.string(), takt: taktSchema.nullable() }));
+export const saveTakt = (siteId: string, body: TaktSaveBody) =>
+  apiFetch(`/takt/${encodeURIComponent(siteId)}`, z.object({ siteId: z.string(), saved: z.boolean() }), {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });

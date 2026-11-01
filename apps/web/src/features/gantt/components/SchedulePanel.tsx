@@ -186,7 +186,8 @@ export default function SchedulePanel({
       </div>
 
       <aside className="min-w-0 space-y-2">
-        <div className="flex items-center justify-between gap-2 px-1">
+        {/* 높이 고정(h-8 = 버튼 높이): 「저장값으로」 가 생겨도 아래 카드가 밀리지 않게 */}
+        <div className="flex h-8 items-center justify-between gap-2 px-1">
           <span className="text-sm font-semibold">설정 (저장 없이 바꿔 보기)</span>
           <div className="flex items-center gap-1">
             {override ? (

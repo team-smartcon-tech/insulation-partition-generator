@@ -10,11 +10,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { FinishResponse, FinishStat } from "../api";
-import { useFinish, useFinishReports, useFrameReady, useSettings } from "../hooks";
-import { ALWAYS_FINISH_TRADES, hasFinishPlan, planFinishBuilding, type FinishPlanSettings } from "@ipg/gantt-engine";
+import { useFinish, useFrameReady, useSettings, useTaktLink } from "../hooks";
+import { finishSettingsWithTakt, planFinishSite, type FinishPlanSettings } from "@ipg/gantt-engine";
 import { RotateCcw } from "lucide-react";
 import FinishPlanForm from "./FinishPlanForm";
-import { monthRange, shiftMonth, todayKst } from "../dates";
+import { shiftMonth, todayKst } from "../dates";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import FinishGantt from "./FinishGantt";
 import { ExcelIcon, PrintIcon } from "./icons";
@@ -58,18 +58,32 @@ export default function FinishPanel({
   // 기본은 간트(골조 공정표와 같은 한 달 보기), 진척표는 보조
   const [view, setView] = useState<"gantt" | "matrix">("gantt");
   const [month, setMonth] = useState(todayKst().slice(0, 7));
-  const { from: mFrom, to: mTo } = monthRange(month);
-  const reportsQ = useFinishReports(siteId, mFrom, mTo);
+  // 지난 작업은 스마트웍스 세대 완료만 그린다 — 작업일보 마감 줄(일보 작업 막대)은 읽지 않는다 (2026-10-31 사용자)
   // 예정 규칙: 저장값(설정 탭) 위에 이 화면에서만 바꿔 보기 (골조 공정표와 같은 방식)
   const saved = useSettings(siteId);
   const [override, setOverride] = useState<FinishPlanSettings | null>(null);
-  useEffect(() => setOverride(null), [siteId]);
-  const finishSettings = override ?? saved.data?.settings.finish;
+  // 택트 인원 연동 (2026-10-31): 여기서 바꾼 인원은 미리보기만 (저장은 설정 탭) — 택트 공종명 → 명
+  const [crewEdits, setCrewEdits] = useState<Record<string, number>>({});
+  useEffect(() => {
+    setOverride(null);
+    setCrewEdits({});
+  }, [siteId]);
+  const taktLink = useTaktLink(siteId, crewEdits);
+  // 규칙 카드에 보이는 값(간격·층씩·선행) + 택트 연동(인원 → 묶음당 작업일, 팀 1)을 입힌 값으로 예정을 계산한다
+  const ruleSettings = override ?? saved.data?.settings.finish;
+  // 인원은 동의 코어들에 나뉘어 동시에 (2026-10-31 사용자) → 동시 묶음 = 현장에서 가장 많은 코어 수
+  const coreCount = Math.max(1, ...(d?.gantt.buildings ?? []).map((b) => b.cores.length || 1));
+  const finishSettings = useMemo(
+    () => finishSettingsWithTakt(ruleSettings, taktLink.links, coreCount),
+    [ruleSettings, taktLink.links, coreCount],
+  );
+  const edited = override != null || Object.keys(crewEdits).length > 0;
   // 골조 선행(창틀 = 골조 5개 층)용 층별 S타설일 — 골조 실적·예정. 받는 동안은 골조 선행 없이 계산
-  const frameReady = useFrameReady(siteId, todayKst());
+  const frame = useFrameReady(siteId, todayKst());
+  const frameReady = frame?.ready;
+  // 팀은 현장 전체가 나눠 쓰므로 모든 동을 한 번에 계산한다 (2026-10-31)
   const plans = useMemo(
-    () =>
-      new Map((d?.gantt.buildings ?? []).map((gb) => [gb.buildingNo, planFinishBuilding(gb as never, finishSettings, d!.asOf, undefined, frameReady)])),
+    () => (d ? planFinishSite(d.gantt.buildings as never, finishSettings, d.asOf, undefined, frameReady) : new Map()),
     [d, finishSettings, frameReady],
   );
   useEffect(() => setBno(null), [siteId]);
@@ -166,20 +180,21 @@ export default function FinishPanel({
       </div>
 
       {view === "gantt" ? (
-        // 늘 두는 공종(타일)만 있으면 스마트웍스에 맞는 공종이 없는 것. 간트에서 뺀 공종(창짝설치·유리·몰딩·가구)만 있어도 같다
-        d.gantt.trades.some((t) => !ALWAYS_FINISH_TRADES.has(t.key as never) && hasFinishPlan(t.key)) ? (
+        // 공종 14개는 늘 줄이 있다(2026-10-31) — 스마트웍스에 연결된 공종이 하나도 없으면 실적 없이 예정만 보인다
+        d.gantt.buildings.length ? (
           <FinishGantt
             gantt={d.gantt}
             plans={plans}
-            reports={reportsQ.data?.rows ?? []}
             month={month}
             asOf={d.asOf}
             siteId={siteId}
             topFloorOf={(no) => saved.data?.buildings.find((x) => x.buildingNo === no)?.topFloor ?? null}
+            framePours={frame?.pours}
+            finishSettings={finishSettings}
           />
         ) : (
           <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
-            이 현장 스마트웍스 마감 공종 중 간트 공종(PL창호 창틀·내장·타일·방수·방통·도배·마루)에 맞는 것이 없습니다.
+            스마트웍스에서 이 현장 세대(동·층·라인)를 찾지 못했습니다. 설정 탭 동 목록과 스마트웍스 동/라인 설정을 확인하세요.
           </p>
         )
       ) : !b ? (
@@ -318,16 +333,34 @@ export default function FinishPanel({
       )}
     </div>
       <aside className="min-w-0 space-y-2 print:hidden">
-        <div className="flex items-center justify-between gap-2 px-1">
+        {/* 높이 고정(h-8 = 버튼 높이): 「저장값으로」 가 생겨도 아래 카드가 밀리지 않게 */}
+        <div className="flex h-8 items-center justify-between gap-2 px-1">
           <span className="text-sm font-semibold">설정 (저장 없이 바꿔 보기)</span>
-          {override ? (
-            <Button variant="ghost" size="sm" onClick={() => setOverride(null)}>
+          {edited ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setOverride(null);
+                setCrewEdits({});
+              }}
+            >
               <RotateCcw /> 저장값으로
             </Button>
           ) : null}
         </div>
-        <FinishPlanForm trades={d.gantt.trades} value={finishSettings} onChange={setOverride} />
-        <p className="px-1 text-xs text-muted-foreground">저장은 설정 탭 「마감 예정 규칙」에서 합니다.</p>
+        <FinishPlanForm
+          trades={d.gantt.trades}
+          value={ruleSettings}
+          onChange={setOverride}
+          predEditable={false}
+          links={taktLink.links}
+          onCrew={(key, crew) => {
+            const name = taktLink.links.get(key as never)?.name;
+            if (name) setCrewEdits((e) => ({ ...e, [name]: crew }));
+          }}
+        />
+        <p className="px-1 text-xs text-muted-foreground">선행 변경과 저장은 설정 탭 「마감 예정 규칙」에서 합니다. 인원은 택트 인원 탭과 같은 값입니다.</p>
       </aside>
     </div>
   );

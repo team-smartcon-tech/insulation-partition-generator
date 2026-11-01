@@ -59,12 +59,71 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export default function SettingsForm({ value, onChange }: { value: SiteSettings; onChange: (next: SiteSettings) => void }) {
+/**
+ * 현장 설정 폼. 설정 탭이 단계별로 나눠 그린다(2026-11-01, 지하층·저층부 / 기준층 / 마감공정):
+ *   part="underground" — 지하·저층 순서표 + 지하·저층 자원(철근팀). 형틀팀은 지하 구역 카드(ZonesEditor)
+ *   part="base" — 기준층 자원 용량·반일 투입·팀 운영 제약
+ * 지하·저층은 같은 팀을 이어 쓰고 기준층 자원과는 따로다.
+ */
+export default function SettingsForm({
+  value,
+  onChange,
+  part = "base",
+}: {
+  value: SiteSettings;
+  onChange: (next: SiteSettings) => void;
+  part?: "base" | "underground";
+}) {
   const s = value;
   const set = (patch: Partial<SiteSettings>) => onChange({ ...s, ...patch });
+  if (part === "underground") {
+    const ug = s.underground ?? DEFAULT_UNDERGROUND_SETTINGS;
+    return (
+      <div className="space-y-3">
+        <UndergroundSection value={ug} onChange={(underground) => set({ underground })} />
+        <Section title="셋팅 기간 (현장 공통, 작업일)">
+          <Days
+            label="알폼 셋팅"
+            hint="기준층 시작(알폼 셋팅층) 첫 사이클의 「알폼」 막대 N일"
+            value={ug.transitionDays}
+            onChange={(v) => set({ underground: { ...ug, transitionDays: v } })}
+          />
+          <Days
+            label="갱폼 설치"
+            hint="갱폼 셋팅층: 타설 → 먹매김 → 「갱폼」 막대 N일 → W철근"
+            min={1}
+            value={s.gangformSetupDays ?? 10}
+            onChange={(v) => set({ gangformSetupDays: v })}
+          />
+          <Days
+            label="먹매김 (지하·저층)"
+            hint="타설 다음 날, 사이클 맨 앞 (0 = 없음)"
+            value={ug.markDays ?? 1}
+            onChange={(v) => set({ underground: { ...ug, markDays: v } })}
+          />
+          <p className="text-xs text-muted-foreground">
+            셋팅층 첫 사이클은 그 공종을 셋팅 기간만큼 막대로 그립니다 — 갱폼 셋팅층(동 목록, 비우면 기준층 시작): 먹매김 다음 갱폼 N일, 기준층 시작: 알폼 N일. 그 위 층부터는 보통
+            인양·알폼입니다. 저층 끝과 기준층 사이에 쉬는 날은 없습니다.
+          </p>
+        </Section>
+        <Section title="지하·저층 자원 (지하층·저층부 공통, 기준층과 따로)">
+          <Num
+            label="철근팀 (W·S철근)"
+            value={ug.rebarTeams ?? ""}
+            options={[{ value: "", label: "제한 없음" }, ...counts(5, "팀")]}
+            onChange={(v) => set({ underground: { ...ug, rebarTeams: v === "" ? null : Number(v) } })}
+          />
+          <p className="text-xs text-muted-foreground">
+            형틀팀(W거푸집·시스템·S거푸집)은 오른쪽 「지하층 구역」 의 팀(A·B …)입니다. 같은 팀 구역의 동은 그 팀이 비어야 거푸집을 시작하고, 구역 순서가 먼저입니다. 구역에 없는 동·「제한 없음」 은 팀을
+            따지지 않습니다(동마다 자기 작업조).
+          </p>
+        </Section>
+      </div>
+    );
+  }
   return (
     <div className="space-y-3">
-      <Section title="자원 용량">
+      <Section title="자원 용량 (기준층)">
         <Num label="철근팀" value={s.rebarTeams} options={counts(3, "팀")} onChange={(v) => set({ rebarTeams: Number(v) })} />
         <Num label="알폼팀" value={s.alformTeams} options={counts(3, "팀")} onChange={(v) => set({ alformTeams: Number(v) })} />
         <Num
@@ -86,7 +145,6 @@ export default function SettingsForm({ value, onChange }: { value: SiteSettings;
         <Toggle label="알폼 오후 투입 (오후 + 다음날 오전)" checked={s.halfDay.alformPMStart} onChange={(v) => set({ halfDay: { ...s.halfDay, alformPMStart: v } })} />
         <Toggle label="슬래브철근 오후 가능" hint="기전·검측이 다음날 오전으로 밀림" checked={s.halfDay.slabRebarPM} onChange={(v) => set({ halfDay: { ...s.halfDay, slabRebarPM: v } })} />
       </Section>
-      <UndergroundSection value={s.underground ?? DEFAULT_UNDERGROUND_SETTINGS} onChange={(underground) => set({ underground })} />
       <Section title="팀 운영 제약">
         <Toggle label="철근팀 오후 단독 투입 불가" checked={s.noPMOnlyStart.rebar} onChange={(v) => set({ noPMOnlyStart: { ...s.noPMOnlyStart, rebar: v } })} />
         <Toggle label="알폼팀 오후 단독 투입 불가" checked={s.noPMOnlyStart.alform} onChange={(v) => set({ noPMOnlyStart: { ...s.noPMOnlyStart, alform: v } })} />
@@ -133,7 +191,7 @@ function UndergroundSection({ value, onChange }: { value: UndergroundSettings; o
     <>
       <Section title="지하층 공정 (재래식, 한 층당 작업일)">
         <p className="-mt-1 text-xs text-muted-foreground">
-          순서: W철근∥W기전 → W거푸집 → 시스템 → S거푸집 → S철근∥S기전 → S타설. ∥ 는 같은 날 시작해 병행. 기본값은 남원주 2차 일보 실적 중앙값.
+          순서: 먹매김 → (갱폼) → W철근∥W기전 → W거푸집 → 시스템 → S거푸집 → S철근∥S기전 → S타설. ∥ 는 같은 날 시작해 병행. 기본값은 남원주 2차 일보 실적 중앙값.
         </p>
         <SequenceFields
           d={value.durations}
@@ -150,7 +208,6 @@ function UndergroundSection({ value, onChange }: { value: UndergroundSettings; o
           onDurations={(patch) => onChange({ ...value, lowRise: { ...low, durations: { ...low.durations, ...patch } } })}
           onSeparate={(v) => onChange({ ...value, lowRise: { ...low, separateWallPour: v } })}
         />
-        <Days label="기준층 전환" hint="저층 끝 → 갱폼 설치 등 (가정값)" value={value.transitionDays} onChange={(v) => onChange({ ...value, transitionDays: v })} />
       </Section>
     </>
   );

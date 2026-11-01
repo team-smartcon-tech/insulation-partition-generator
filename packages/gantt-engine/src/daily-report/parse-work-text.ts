@@ -12,6 +12,13 @@
 // 읽는 구간: 골조(먹매김·갱폼·철근·알폼·타설), 전기·기계 설비(벽체/바닥 배관 → 기전·검측).
 // 줄 모양 둘 다 지원: "- <동>: <작업> / <작업>" (동이 줄 앞에 한 번) 와 "- <동> <작업> / <동> <작업>" (작업마다 동).
 // 요약 글은 AI 가 쓴 것이라 날마다 모양이 조금씩 다를 수 있다 — 못 읽은 줄은 버리지 않고 unmatched 로 돌려준다.
+//
+// 「NF 바닥」 = 그 층 바닥 슬래브 = 아래층 사이클 (2026-10-31 사용자 확인, 남원주 401동):
+//   「37F 먹매김·갱폼 / 37F 벽체 → 38F 바닥 알폼·철근·배관·타설」 이 한 사이클. 그래서 「NF 바닥」 알폼·철근·기전·단열재·타설은
+//   N−1 층 사이클로 읽는다 — 먹매김(그 층 바닥 위 작업)·갱폼·벽체, 「바닥」 이 없는 작업(「38F 알폼 설치」)은 원문 층 그대로.
+//   골조 구간 「단열재」(최상층 바닥단열재)는 「바닥」 이 없어도 알폼 데크 위 슬래브 작업이라 옮긴다(「38F 1-2호 단열재」 → 37F).
+//   번호 목록형 양식(parse-numbered)과 같은 규칙. 차트·창틀 골조 선행은 사이클 층 기준(타설 37F = 원문 38F 바닥).
+//   옮긴 줄은 「37F 슬래브 타설 (원문 38F 바닥)」 처럼 원문을 남긴다.
 import type { Stage, WorkEntry } from "../contracts/index.ts"
 import { isNumberedFormat, parseNumbered } from "./parse-numbered.ts"
 
@@ -149,6 +156,11 @@ function splitLine(line: string): Part[] | null {
   return parts.length ? parts : null
 }
 
+const storyBelow = (f: number) => (f === 1 ? -1 : f - 1)
+const floorName = (f: number) => (f < 0 ? `B${-f}F` : `${f}F`)
+/** 아래층 사이클로 옮기는 「바닥」 작업 단계 (먹매김·갱폼·벽 단계는 빼고) */
+const SLAB_BELOW: ReadonlySet<Stage> = new Set<Stage>(["ALFORM", "SLAB_REBAR", "SLAB_MEP", "TOP_INSULATION", "POUR"])
+
 export function parseWorkText(rawText: string): ParsedWorkText {
   // 번호 붙은 공사 구간 양식("1. 형틀 공사 (133)") 은 따로 읽는다 — 남원주 2차 등 지하·저층 골조 일보
   if (isNumberedFormat(rawText)) return parseNumbered(rawText)
@@ -166,11 +178,19 @@ export function parseWorkText(rawText: string): ParsedWorkText {
     for (const { building, text: rawPart } of parts) {
       const own = parseFloor(rawPart)
       if (own !== null) lastFloor = own
-      const floor: number | null = own ?? lastFloor
-      const text = rawPart.replace(FLOOR, "").trim()
-      const stage = stageOf(text, section)
+      const written: number | null = own ?? lastFloor
+      const rawText = rawPart.replace(FLOOR, "").trim()
+      const stage = stageOf(rawText, section)
       // 전기·설비 구간에서 기전 단계가 아닌 작업(덕트, 전기실 등)은 골조 공정과 무관하므로 싣지 않는다.
       if (section !== "structure" && !stage) continue
+      // 「NF 바닥」 알폼·철근·기전·단열재·타설 → 아래층 사이클 (위 머리말)
+      const below = written != null && stage != null && SLAB_BELOW.has(stage) && (/바닥/.test(rawText) || stage === "TOP_INSULATION")
+      const floor = below ? storyBelow(written!) : written
+      const text = below
+        ? /바닥/.test(rawText)
+          ? `${rawText.replace(/바닥\s*/g, "슬래브 ").trim()} (원문 ${floorName(written!)} 바닥)`
+          : `${rawText} (원문 ${floorName(written!)})`
+        : rawText
       const no = BUILDING_NO.exec(building)
       entries.push({ building, buildingNo: no ? Number(no[1]) : null, floor, text, stage })
     }

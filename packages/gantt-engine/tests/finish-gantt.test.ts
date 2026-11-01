@@ -1,37 +1,56 @@
 // 마감 간트 (2026-10-30)
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { buildFinishGantt, finishTradeOf, floorListText, floorRangeText, splitLinesToCores } from "../src/index.ts"
+import { buildFinishGantt, finishTradeOf, finishTradeOfType, floorListText, floorRangeText, splitLinesToCores } from "../src/index.ts"
 
 describe("공종 이름 맞추기", () => {
-  it("현장마다 다른 이름을 공종으로", () => {
+  it("현장마다 다른 이름을 14개 공종으로 (자동 추천)", () => {
     const m = (n: string) => finishTradeOf(n)
     assert.equal(m("내장-단열재"), "insulation")
+    assert.equal(m("단열재"), "insulation")
     assert.equal(m("외벽 단열재"), null)
     assert.equal(m("내장-경량틀"), "lightWall")
+    assert.equal(m("경량벽체"), "lightWall")
     assert.equal(m("내장-경량석고"), "wallGypsum")
     assert.equal(m("합지석고"), "wallGypsum")
     assert.equal(m("내장-천정"), "ceilingGypsum")
+    assert.equal(m("천정공사"), "ceilingGypsum")
     assert.equal(m("욕실천정"), null)
     assert.equal(m("PL창호(창틀)공사"), "windowFrame")
+    assert.equal(m("PL창호공사"), "windowFrame")
     assert.equal(m("PL창호(코킹+사춤)공사"), null)
-    assert.equal(m("PL창호(창짝)공사"), "windowSash")
-    assert.equal(m("내장-창짝폼사춤"), null)
-    assert.equal(m("PL창호공사"), "pvcAll")
-    assert.equal(m("유리공사"), "glass")
-    assert.equal(m("타일-욕실벽타일"), "tile")
+    assert.equal(m("PL창호(창짝)공사"), null)
+    assert.equal(m("유리공사"), null)
+    assert.equal(m("몰딩"), "molding")
+    assert.equal(m("걸레받이"), "molding")
+    assert.equal(m("기본 욕실벽"), "wallTile")
+    assert.equal(m("주방벽체"), "wallTile")
+    assert.equal(m("아트월"), "wallTile")
+    assert.equal(m("화장실바닥타일"), "floorTile")
+    assert.equal(m("세대 바닥"), "floorTile")
+    assert.equal(m("타일공사"), "floorTile")
+    assert.equal(m("타일방통"), null)
     assert.equal(m("방통2차"), "screed")
     assert.equal(m("1차 방통청소"), null)
+    assert.equal(m("기포콘크리트공사"), "screed")
     assert.equal(m("욕실방수"), "waterproof")
     assert.equal(m("옥상방수"), null)
-    assert.equal(m("주방가구공사"), "kitchen")
+    assert.equal(m("측벽, 자재인양구 방수"), null)
+    assert.equal(m("주방가구공사"), "furniture")
     assert.equal(m("일반가구(침실1)"), "furniture")
     assert.equal(m("가구공사"), "furniture")
-    assert.equal(m("내장-합지"), "wallpaper")
     assert.equal(m("도배공사"), "wallpaper")
+    assert.equal(m("천장 도배"), "ceilingWallpaper")
     assert.equal(m("마루공사"), "flooring")
-    assert.equal(m("내장공사"), "interiorAll")
+    assert.equal(m("내장공사"), null)
     assert.equal(m("견출-내부"), null)
+  })
+  it("현장 공종 연결이 이름 규칙보다 먼저, null = 제외", () => {
+    const map = { A: "wallTile", B: null, C: "없는공종" }
+    assert.equal(finishTradeOfType(map, { id: "A", name: "타일공사" }), "wallTile")
+    assert.equal(finishTradeOfType(map, { id: "B", name: "단열재" }), null)
+    assert.equal(finishTradeOfType(map, { id: "C", name: "단열재" }), null)
+    assert.equal(finishTradeOfType(map, { id: "D", name: "단열재" }), "insulation")
   })
 })
 
@@ -53,7 +72,7 @@ describe("실적·예정 막대", () => {
     today: "2026-10-30",
     gapDays: 3,
   })
-  const row = g.buildings[0].rows[0]
+  const row = g.buildings[0].rows.find((r) => r.trade === "insulation")!
   it("기본은 완료일마다 따로, 층별 세대", () => {
     const daily = buildFinishGantt({
       types: [{ id: "T", name: "내장-단열재", index: 0 }],
@@ -61,7 +80,7 @@ describe("실적·예정 막대", () => {
       rooms,
       works: [...works, { roomId: "8-1", typeId: "T", date: "2026-10-01" }],
       today: "2026-10-30",
-    }).buildings[0].rows[0]
+    }).buildings[0].rows.find((r) => r.trade === "insulation")!
     assert.equal(daily.actual.length, 6)
     assert.deepEqual(daily.actual[0].floorUnits, [
       { floor: 8, units: 1 },
@@ -83,9 +102,10 @@ describe("실적·예정 막대", () => {
     assert.equal(row.perWeek, 1) // 최근 4주(10/2 이후) 4세대 ÷ 4
     assert.deepEqual(row.forecast, { start: "2026-10-31", end: "2026-11-13", floorFrom: 8, floorTo: 8, units: 2 })
   })
-  it("간트 공종은 맞춘 것 + 늘 두는 공종(타일, 스마트웍스에 없어도 예정용 줄)", () => {
-    assert.deepEqual(g.trades.map((t) => t.label), ["단열", "타일"])
-    const tile = g.buildings[0].rows.find((r) => r.trade === "tile")!
+  it("간트 공종은 늘 14개 — 스마트웍스에 없는 공종도 예정용 줄 (2026-10-31)", () => {
+    assert.equal(g.trades.length, 14)
+    assert.deepEqual(g.trades.slice(0, 3).map((t) => t.label), ["PL창틀", "내장단열", "내장경량벽체"])
+    const tile = g.buildings[0].rows.find((r) => r.trade === "floorTile")!
     assert.deepEqual([tile.done, tile.total, tile.sources], [0, 8, []])
   })
 })
@@ -95,9 +115,9 @@ describe("세부 공종이 여러 개인 공종 (울산다운2차 타일 거실�
     const rooms = [{ id: "a", buildingId: "b", floor: 1, line: "1" }, { id: "c", buildingId: "b", floor: 1, line: "2" }]
     const g = buildFinishGantt({
       types: [
-        { id: "T1", name: "타일-거실바닥", index: 0 },
-        { id: "T2", name: "타일-욕실벽타일", index: 1 },
-        { id: "T3", name: "타일-아트월", index: 2 }, // 기록 없음 → 무시
+        { id: "T1", name: "타일-거실바닥타일", index: 0 },
+        { id: "T2", name: "타일-화장실바닥타일", index: 1 },
+        { id: "T3", name: "타일-현관바닥타일", index: 2 }, // 기록 없음 → 무시
       ],
       buildings: [{ id: "b", buildingNo: 1, name: "1동" }],
       rooms,
@@ -108,7 +128,7 @@ describe("세부 공종이 여러 개인 공종 (울산다운2차 타일 거실�
       ],
       today: "2026-10-30",
     })
-    const row = g.buildings[0].rows[0]
+    const row = g.buildings[0].rows.find((r) => r.trade === "floorTile")!
     assert.equal(row.done, 1)
     assert.equal(row.actual[0].start, "2026-10-12") // 둘 다 끝난 날
   })
@@ -146,12 +166,13 @@ describe("코어 단위", () => {
       today: "2026-10-30",
     })
     const b = g.buildings[0]
-    assert.deepEqual(b.rows.map((r) => [r.trade, r.core, r.done, r.total]), [
+    // 줄 = 14개 공종 × 코어 (FINISH_TRADES 순). 천장 줄만 실적이 있다
+    assert.equal(b.rows.length, 28)
+    assert.deepEqual(b.rows.filter((r) => r.trade === "ceilingGypsum").map((r) => [r.trade, r.core, r.done, r.total]), [
       ["ceilingGypsum", 1, 2, 4],
       ["ceilingGypsum", 2, 1, 4],
-      ["tile", 1, 0, 4],
-      ["tile", 2, 0, 4],
     ])
-    assert.deepEqual(b.rows[0].floors.map((f) => [f.floor, f.done, f.units]), [[1, 2, 2], [2, 0, 2]])
+    const ceil1 = b.rows.find((r) => r.trade === "ceilingGypsum" && r.core === 1)!
+    assert.deepEqual(ceil1.floors.map((f) => [f.floor, f.done, f.units]), [[1, 2, 2], [2, 0, 2]])
   })
 })

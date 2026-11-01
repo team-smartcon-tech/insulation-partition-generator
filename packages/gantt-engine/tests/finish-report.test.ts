@@ -31,7 +31,7 @@ describe("일보 마감 줄 해석", () => {
       [101, "lightWall", 16, 20],
       [102, "lightWall", 16, 20],
       [102, "insulation", 16, 20],
-      [104, "wallpaper", 21, 23],
+      [104, "wallGypsum", 21, 23] /* 「합지」 = 내장합지 (2026-10-31) */,
       [101, "windowFrame", 21, 24],
     ])
   })

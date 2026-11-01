@@ -53,24 +53,27 @@ describe("progressFromReports", () => {
     assert.equal(state(401).lastPourDate, "2026-10-27")
   })
   it("타설로 끝 → 먹매김, 층 +1", () => {
+    // 「38F 바닥 타설」 = 37층 사이클 끝 → 다음은 38층 먹매김 (2026-10-31 「NF 바닥」 → 아래층)
     assert.equal(state(403).stage, "MARK")
-    assert.equal(state(403).floor, 39)
+    assert.equal(state(403).floor, 38)
   })
   it("벽철근 + 벽체 배관 → 기전까지 끝 → 알폼", () => {
     assert.equal(state(404).stage, "ALFORM")
   })
   it("402동: 단열재(최상층) 끝 → 슬래브철근", () => {
+    // 「38F 바닥 알폼」·「38F 단열재」 = 37층 사이클
     assert.equal(state(402).stage, "SLAB_REBAR")
-    assert.equal(state(402).floor, 38)
+    assert.equal(state(402).floor, 37)
   })
 })
 
 describe("최상층 규칙", () => {
-  it("최상층 38F 로 주면 403동은 38F 타설로 끝(done), 다른 동은 38F 사이클에 단열재가 낀다", () => {
+  it("403동 최상층 37F 면 「38F 바닥 타설」(37층 사이클)로 끝(done), 다른 동은 최상층 38F 사이클에 단열재가 낀다", () => {
+    // 「NF 바닥」 = 아래층 사이클 (2026-10-31): 403동의 마지막 실적 「38F 바닥 타설」 은 37층 사이클 타설
     const top = new Map([
       [401, 38],
       [402, 38],
-      [403, 38],
+      [403, 37],
       [404, 38],
       [405, 38],
     ])

@@ -45,6 +45,10 @@ export const undergroundSettingsSchema = z.object({
    * 없으면 지하 값을 쓴다. 필로티·상가처럼 층고·기둥이 달라 소요가 다르다.
    */
   lowRise: z.object({ durations: ugDurationsSchema, separateWallPour: z.boolean() }).optional(),
+  /** 지하·저층 철근팀 수 (2026-11-01, 지하·저층이 같이 쓰고 기준층과는 따로). 없으면 제한 없음. 형틀팀은 지하 구역(zones)의 팀 */
+  rebarTeams: z.number().int().min(1).max(10).nullable().optional(),
+  /** 지하·저층 사이클 맨 앞 먹매김 일수 (2026-11-01 사용자: 타설하면 다음 날 먹매김은 기본). 없으면 1, 0 = 없음 */
+  markDays: z.number().int().min(0).max(5).optional(),
 })
 
 export const DEFAULT_UNDERGROUND_SETTINGS: z.infer<typeof undergroundSettingsSchema> = {
@@ -88,6 +92,13 @@ export const finishTradePlanSchema = z.object({
   gapDays: z.number().int().min(0).max(120),
   floorsPerBatch: z.number().int().min(1).max(20),
   daysPerBatch: z.number().int().min(1).max(60),
+  /**
+   * 겹쳐 이동 (2026-11-01 사용자: PL창호는 1코어를 하루 하고 2코어로 — 4코어 5일씩이면 8일). 있으면 팀이 한 곳(코어 또는 동)을 시작하고
+   * moveDays 뒤 다음 곳을 시작한다. 각 곳 막대 = 묶음당 작업일. 없으면 지금처럼(팀이 묶음을 끝내야 다음으로)
+   */
+  moveDays: z.number().int().min(1).max(30).nullable().optional(),
+  /** 겹쳐 이동 단위: core = 코어마다(기본), building = 동마다(그 동 코어들은 같은 날 시작) */
+  moveBy: z.enum(["core", "building"]).optional(),
 })
 export const finishPlanSettingsSchema = z.record(z.string(), finishTradePlanSchema)
 
@@ -104,6 +115,12 @@ export const siteSettingsSchema = z.object({
   underground: undergroundSettingsSchema.optional(),
   /** 마감 공정표 예정 규칙 (공종 키 → 선행·간격·층 묶음·묶음당 일). 없으면 DEFAULT_FINISH_PLAN */
   finish: finishPlanSettingsSchema.optional(),
+  /** 마감 공종 연결 (2026-10-31): 스마트웍스 마감 공종 id → 공종 키(14개), null = 제외. 없는 공종은 이름 규칙(finishTradeOf)으로 자동 */
+  finishMap: z.record(z.string(), z.string().nullable()).optional(),
+  /** 동별 갱폼 셋팅층 (2026-11-01): 동 번호 → 층. 기준층 시작(= 알폼 셋팅층)부터 이 층 아래까지는 갱폼인양 없이. 없으면 기준층 시작 */
+  gangformFloors: z.record(z.string(), z.number().int().min(1).max(80)).optional(),
+  /** 갱폼 셋팅 기간(작업일, 현장 공통, 2026-11-01). 갱폼 셋팅층 사이클 앞에 쉰다. 없으면 10. 알폼 셋팅 기간은 underground.transitionDays */
+  gangformSetupDays: z.number().int().min(0).max(60).optional(),
   /** 지하층 구역별 순서 (배열 순서 = 시공 순서, 같은 팀 안에서) */
   zones: z.array(undergroundZoneSchema).max(50).optional(),
   /** 지하 형틀(거푸집) 팀 이름 목록 ("A", "B"). 구역이 없는 팀도 남겨 두려고 따로 둔다 */

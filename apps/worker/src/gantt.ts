@@ -38,10 +38,12 @@ import {
   type PlanResponse,
   type SimulateResponse,
   type Site,
+  validateTaktInput,
+  type TaktInput,
 } from "@ipg/gantt-engine";
 import { z } from "zod";
 import type { Env, SessionUser } from "./auth";
-import { supabaseRest, errMsg } from "./supabaseClient";
+import { supabaseRest, supabaseRpc, errMsg } from "./supabaseClient";
 
 const gantt = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>();
 
@@ -339,6 +341,31 @@ gantt.get("/smartworks-buildings/:siteId", async (c) => {
   }
 });
 
+/** "25.08.06" · "2025.08.06" · "2025-08-06" → "2025-08-06" (아니면 null) */
+function periodDate(s: string | undefined): string | null {
+  const m = /^\s*(\d{2}|\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/.exec(s ?? "");
+  if (!m) return null;
+  const y = m[1].length === 2 ? `20${m[1]}` : m[1];
+  return `${y}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+}
+
+/**
+ * GET /site-period/:siteId — 스마트웍스 현장 개요 공사기간 (읽기 전용, 2026-11-01 택트 준공일 역산).
+ * ssx_site_overview_profiles.construction_overview.info.period = "25.08.06 ~ 29.04.30 (44.8개월)". 없거나 못 읽으면 null.
+ */
+gantt.get("/site-period/:siteId", async (c) => {
+  const siteId = c.req.param("siteId");
+  try {
+    const res = await dcrRest(c.env, `/ssx_site_overview_profiles?site_id=eq.${encodeURIComponent(siteId)}&select=construction_overview`);
+    const row = ((await res.json()) as { construction_overview: { info?: { period?: string } } | null }[])[0];
+    const raw = row?.construction_overview?.info?.period ?? null;
+    const [a, b] = (raw ?? "").split("~");
+    return c.json({ siteId, raw, start: periodDate(a), completion: periodDate(b) });
+  } catch (err) {
+    return fail(c, err);
+  }
+});
+
 /** 스마트웍스 표를 1000행씩 끝까지 (PostgREST limit/offset) */
 async function dcrAll<T>(env: Env, path: string, max = 100_000): Promise<T[]> {
   const out: T[] = [];
@@ -360,7 +387,8 @@ gantt.get("/finish/:siteId", async (c) => {
   const siteId = c.req.param("siteId");
   const sid = encodeURIComponent(siteId);
   try {
-    const saved = await loadBuildings(c.env, siteId);
+    // 현장 공종 연결(settings.finishMap, 2026-10-31): 스마트웍스 공종 → 마감 공종 14개. 없는 공종은 이름 규칙
+    const [saved, siteSettings] = await Promise.all([loadBuildings(c.env, siteId), loadSettings(c.env, siteId)]);
     const today = todayKst();
     if (!saved.length)
       return c.json({ siteId, asOf: today, needsBuildings: true, types: [], sequences: [], buildings: [], gantt: { trades: [], buildings: [] } });
@@ -402,7 +430,7 @@ gantt.get("/finish/:siteId", async (c) => {
       today,
     });
     // 간트(골조 공정표처럼 날짜 × 동·공종 막대): 사용자 지정 공종만 (engine finish/gantt)
-    const gantt = buildFinishGantt({ types, buildings, rooms, works, today });
+    const gantt = buildFinishGantt({ types, buildings, rooms, works, today, finishMap: siteSettings.settings.finishMap });
     const missing = saved.filter((b) => !buildings.some((x) => x.buildingNo === b.buildingNo)).map((b) => b.buildingNo);
     return c.json({ siteId, asOf: today, needsBuildings: false, missingInSmartworks: missing, ...result, gantt });
   } catch (err) {
@@ -589,6 +617,12 @@ gantt.post("/plan", async (c) => {
     // 지하가 끝나면(기준층 시작 바로 아래 층 S타설) 전환 작업일 뒤 기준층 엔진으로 넘긴다.
     const ug = req.settings.underground ?? DEFAULT_UNDERGROUND_SETTINGS;
     const baseFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.baseFloor ?? 2;
+    // 갱폼 셋팅층 (2026-11-01): 저층·기준층 시작과 따로. 저층도 이 층 이상이면 갱폼인양, 기준층은 이 층 아래면 갱폼인양 없이
+    const gangformOf = (id: number) => req.settings.gangformFloors?.[String(id)] ?? null;
+    // 셋팅 기간 (2026-11-01, 사용자: 알폼 셋팅 5일이면 공정표에 5일): 셋팅층 첫 사이클의 그 공종을 셋팅 기간만큼 막대로 —
+    //   갱폼 설치 = 갱폼 셋팅층 먹매김 다음 「갱폼」(현장 공통, 기본 10일), 알폼 셋팅 = 기준층 시작 층의 「알폼」(underground.transitionDays).
+    //   저층 끝 → 기준층 시작 사이에 빈칸으로 쉬지 않는다(다음 작업일 먹매김)
+    const gangformSetupDays = req.settings.gangformSetupDays ?? 10;
     const unplanned = new Set<number>(); // 지하 공정인데 위치를 못 읽은 동 (실적만)
     const rooftopPhase = new Set<number>(); // 옥탑 공사 중인 동 (실적만)
     const ugBuildings: UgBuilding[] = [];
@@ -605,17 +639,37 @@ gantt.post("/plan", async (c) => {
       const numeric = lastDay.filter((a) => a.floorLabel == null);
       const topNum = numeric.length ? Math.max(...numeric.map((a) => a.floor)) : top;
       if (!(lastDay.some((a) => UNDERGROUND_STAGES.includes(a.stage) || (a.floorLabel != null && a.floorLabel !== "층?")) || topNum < baseFloorOf(b.id))) continue;
-      const st = undergroundStateFromActual(progress.actual, b.id, baseFloorOf(b.id), ug);
+      const st = undergroundStateFromActual(progress.actual, b.id, baseFloorOf(b.id), ug, gangformOf(b.id));
       if (st) ugBuildings.push(st);
       else unplanned.add(b.id);
     }
     // 일보에 없는 동 중 지하층 수가 있으면 지하 맨 아래층부터
     for (const b of buildings) {
       if (reported.has(b.buildingNo) || !b.basementFloors) continue;
-      ugBuildings.push({ id: b.buildingNo, story: -b.basementFloors, stepIndex: 0, doneDays: 0, baseFloor: b.baseFloor });
+      ugBuildings.push({ id: b.buildingNo, story: -b.basementFloors, stepIndex: 0, doneDays: 0, baseFloor: b.baseFloor, gangformFloor: gangformOf(b.buildingNo) });
     }
     const ugIds = new Set(ugBuildings.map((b) => b.id));
-    const ugPlan = planUnderground({ calendar: req.calendar, settings: ug, from: planFrom, to: req.to, buildings: ugBuildings });
+    // 지하·저층 팀 용량 (2026-11-01): 형틀팀 = 동이 속한 지하 구역의 팀(구역 순서 = 우선순위), 철근팀 = underground.rebarTeams.
+    // 지하·저층이 같은 팀을 이어 쓰고 기준층 자원(rebarTeams·alformTeams …)과는 따로
+    const formTeamOf = new Map<number, string>();
+    const ugPriority = new Map<number, number>();
+    (req.settings.zones ?? []).forEach((z, i) => {
+      for (const no of z.buildingNos) {
+        if (!formTeamOf.has(no)) formTeamOf.set(no, z.team);
+        if (!ugPriority.has(no)) ugPriority.set(no, i);
+      }
+    });
+    const ugPlan = planUnderground({
+      calendar: req.calendar,
+      settings: ug,
+      from: planFrom,
+      to: req.to,
+      buildings: ugBuildings,
+      formTeamOf,
+      rebarTeams: ug.rebarTeams ?? null,
+      priority: ugPriority,
+      gangformSetupDays,
+    });
     const topFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.topFloor ?? null;
 
     const initial: BuildingState[] = [
@@ -640,7 +694,7 @@ gantt.post("/plan", async (c) => {
         id,
         stage: "MARK" as const,
         readySlot: 0,
-        readyDate: addWorkdays(req.calendar, finished, ug.transitionDays),
+        readyDate: addWorkdays(req.calendar, finished, 0),
         prevEndSlot: -1,
         lastPourDate: finished,
         pours: 0,
@@ -649,7 +703,17 @@ gantt.post("/plan", async (c) => {
         done: false,
         rooftopFloors: rooftops.get(id) ?? 0,
       })),
-    ].sort((a, b) => a.id - b.id);
+    ]
+      // 갱폼 셋팅층 (2026-11-01): 기준층 시작(= 알폼 셋팅층)부터 이 층 아래까지 갱폼인양 없이. 없으면 기준층 시작부터 갱폼
+      // 갱폼 셋팅층을 비웠으면 기준층 시작이 셋팅층 (설치 기간 막대가 기준층 첫 사이클에)
+      .map((b) => ({
+        ...b,
+        gangformFloor: gangformOf(b.id) ?? baseFloorOf(b.id),
+        gangformSetupDays,
+        alformFloor: baseFloorOf(b.id),
+        alformSetupDays: ug.transitionDays,
+      }))
+      .sort((a, b) => a.id - b.id);
 
     // 최상층을 모르는 동은 기준층 예정을 그리지 않는다(끝없이 올라가 67층 같은 예정이 나왔다). 실적·지하 예정은 그대로, 화면에 「최상층 미입력」 안내
     const noTopFloor = initial.filter((b) => b.topFloor == null).map((b) => b.id);
@@ -783,6 +847,131 @@ gantt.put("/buildings/:siteId", async (c) => {
     const del = await supabaseRest(c.env, "DELETE", `/gantt_buildings?site_id=eq.${encodeURIComponent(siteId)}${notIn}`, undefined, "return=minimal");
     if (!del.ok) throw new GanttError(500, `동 정리 실패: ${await del.text()}`, "DATABASE_ERROR");
     return c.json({ siteId, buildings: await loadBuildings(c.env, siteId) });
+  } catch (err) {
+    return fail(c, err);
+  }
+});
+
+// ─── 택트 인원 (2026-10-31) — 현장별 마감 택트 입력 (gantt_takt_*) ─────────────────────
+// 계산은 화면(엔진 computeTakt). 여기서는 저장·불러오기와 같은 함수(validateTaktInput)로 입력 검사만.
+
+type TaktSiteRow = {
+  units_per_floor: number;
+  zone_floors: number;
+  takt_days: number;
+  building_floors: number[];
+  frame_zone_days: number | null;
+  updated_by: string | null;
+  updated_at: string;
+  gantt_takt_trades: {
+    sort_order: number;
+    stage: number;
+    name: string;
+    unit: string;
+    qty_per_unit: number | null;
+    productivity: number | null;
+    wait_days: number;
+    /** 인원 직접 지정 (마이그레이션 20261031100000 전에는 없음 → 자동) */
+    crew?: number | null;
+    /** 산정 방식·고정 일수 (마이그레이션 20261031110000 전에는 없음 → rate) */
+    mode?: string | null;
+    fixed_days?: number | null;
+  }[];
+};
+
+/** GET /takt/:siteId — 저장된 택트 입력 (없으면 takt: null → 화면이 예시값·설정 동 목록으로 채운다) */
+gantt.get("/takt/:siteId", async (c) => {
+  const siteId = c.req.param("siteId");
+  try {
+    const res = await supabaseRest(c.env, "GET", `/gantt_takt_sites?select=*,gantt_takt_trades(*)&site_id=eq.${encodeURIComponent(siteId)}`);
+    if (!res.ok) throw new GanttError(500, `택트 조회 실패: ${await res.text()}`, "DATABASE_ERROR");
+    const row = ((await res.json()) as TaktSiteRow[])[0];
+    if (!row) return c.json({ siteId, takt: null });
+    return c.json({
+      siteId,
+      takt: {
+        unitsPerFloor: Number(row.units_per_floor),
+        zoneFloors: Number(row.zone_floors),
+        taktDays: Number(row.takt_days),
+        buildingFloors: row.building_floors.map(Number),
+        frameZoneDays: row.frame_zone_days == null ? null : Number(row.frame_zone_days),
+        updatedBy: row.updated_by,
+        updatedAt: row.updated_at,
+        trades: [...(row.gantt_takt_trades ?? [])]
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((t) => ({
+            stage: Number(t.stage),
+            name: t.name,
+            unit: t.unit,
+            qtyPerUnit: t.qty_per_unit == null ? null : Number(t.qty_per_unit),
+            productivity: t.productivity == null ? null : Number(t.productivity),
+            waitDays: Number(t.wait_days),
+            crew: t.crew == null ? null : Number(t.crew),
+            mode: t.mode === "fixed" ? ("fixed" as const) : ("rate" as const),
+            fixedDays: t.fixed_days == null ? null : Number(t.fixed_days),
+          })),
+      },
+    });
+  } catch (err) {
+    return fail(c, err);
+  }
+});
+
+/** PUT /takt/:siteId — 택트 입력 저장 (현장 줄 + 공종 표 통째로, RPC 한 트랜잭션) */
+gantt.put("/takt/:siteId", async (c) => {
+  const siteId = c.req.param("siteId");
+  const b = (await c.req.json().catch(() => null)) as (Partial<TaktInput> & { frameZoneDays?: unknown }) | null;
+  if (!b || !Array.isArray(b.buildingFloors) || !Array.isArray(b.trades)) {
+    return c.json({ error: "동별 층수·공종 표가 필요합니다.", code: "VALIDATION_FAILED" }, 400);
+  }
+  if (b.buildingFloors.length > 100 || b.trades.length > 100) return c.json({ error: "동·공종은 각각 100개까지입니다.", code: "VALIDATION_FAILED" }, 400);
+  const input: TaktInput = {
+    unitsPerFloor: Number(b.unitsPerFloor),
+    zoneFloors: Number(b.zoneFloors),
+    taktDays: Number(b.taktDays),
+    buildingFloors: b.buildingFloors.map(Number),
+    trades: b.trades.map((t) => ({
+      stage: Number(t?.stage),
+      name: typeof t?.name === "string" ? t.name.trim().slice(0, 50) : "",
+      unit: typeof t?.unit === "string" ? t.unit.trim().slice(0, 10) : "",
+      qtyPerUnit: Number(t?.qtyPerUnit),
+      productivity: Number(t?.productivity),
+      waitDays: Number(t?.waitDays),
+      crew: t?.crew == null ? null : Number(t.crew),
+      mode: t?.mode === "fixed" ? ("fixed" as const) : ("rate" as const),
+      fixedDays: t?.fixedDays == null ? null : Number(t.fixedDays),
+    })),
+  };
+  const errors = validateTaktInput(input);
+  if (Object.keys(errors).length) return c.json({ error: `입력 오류: ${Object.values(errors)[0]}`, code: "VALIDATION_FAILED", detail: errors }, 400);
+  const frame = b.frameZoneDays == null ? null : Number(b.frameZoneDays);
+  if (frame != null && !(Number.isFinite(frame) && frame > 0)) return c.json({ error: "골조 소요일은 0보다 큰 값이어야 합니다.", code: "VALIDATION_FAILED" }, 400);
+  try {
+    const res = await supabaseRpc(c.env, "gantt_takt_save", {
+      p_site_id: siteId,
+      p_site: {
+        units_per_floor: input.unitsPerFloor,
+        zone_floors: input.zoneFloors,
+        takt_days: input.taktDays,
+        building_floors: input.buildingFloors,
+        frame_zone_days: frame,
+      },
+      p_trades: input.trades.map((t) => ({
+        stage: t.stage,
+        name: t.name,
+        unit: t.unit,
+        // 고정 일수 공종은 물량·생산성을 비워도 된다 → 숫자가 아니면 null
+        qty_per_unit: Number.isFinite(t.qtyPerUnit) ? t.qtyPerUnit : null,
+        productivity: Number.isFinite(t.productivity) ? t.productivity : null,
+        wait_days: t.waitDays,
+        crew: t.crew ?? null,
+        mode: t.mode ?? "rate",
+        fixed_days: t.mode === "fixed" ? (t.fixedDays ?? null) : null,
+      })),
+      p_user: c.get("user")?.name ?? null,
+    });
+    if (!res.ok) throw new GanttError(500, `택트 저장 실패: ${await res.text()}`, "DATABASE_ERROR");
+    return c.json({ siteId, saved: true });
   } catch (err) {
     return fail(c, err);
   }

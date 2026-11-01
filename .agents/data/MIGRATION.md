@@ -227,6 +227,9 @@ Approval:
 |---|---|---|---|---|
 | YYYY-MM-DD | `<migration-file>` | `<summary>` | `<tables/apis>` | `<rollback>` |
 | 2026-10-07 | `20261007061356_market_apps_section_distribution.sql` | `market_apps` 에 `section`(construction/cad) · `distribution`(web/download) · `download_count` 추가, `market_app_bump_download` RPC 신설 | `market_apps` / `/api/market/apps*`, 신규 `/api/market/apps/:appId/download` | 이전 Worker 로 되돌린 뒤 RPC·컬럼 3개 drop (CAD 분류·다운로드 수 소실) |
+| 2026-10-31 | `20261031110000_gantt_takt_fixed_mode.sql` (**미적용**, `20261031100000` 다음) | `gantt_takt_trades.mode text default 'rate'`(rate/fixed)·`fixed_days numeric` 추가, `qty_per_unit`·`productivity` not null 해제, `gantt_takt_save` 가 mode·fixed_days 를 넣도록 갱신 | `PUT /api/gantt/takt/:siteId` (적용 전엔 고정 일수가 저장 안 됨) | 두 칸 drop + not null 복구(null 줄 먼저 정리) + 이전 `gantt_takt_save` 재생성 |
+| 2026-10-31 | `20261031100000_gantt_takt_crew.sql` (**미적용**) | `gantt_takt_trades.crew int null`(인원 직접 지정, null = 자동) 추가, `gantt_takt_save` 가 crew 를 넣도록 갱신 | `PUT /api/gantt/takt/:siteId` (적용 전엔 crew 만 저장 안 됨) | `alter table gantt_takt_trades drop column crew;` + 이전 `gantt_takt_save` 재생성 (직접 정한 인원 소실) |
+| 2026-10-31 | `20261031090000_gantt_takt.sql` (적용됨 2026-10-31, 사용자) | 스마트 공정표 택트 인원 탭 신규 표 `gantt_takt_sites`(site_id text PK)·`gantt_takt_trades`(RLS 켜고 정책 없음, service_role 전용), 저장 RPC `gantt_takt_save`(현장 줄 upsert + 공종 표 교체, 한 트랜잭션) | 신규 `GET/PUT /api/gantt/takt/:siteId` (기존 표 영향 없음) | Worker 를 되돌린 뒤 `drop function gantt_takt_save; drop table gantt_takt_trades, gantt_takt_sites;` (저장한 택트 입력 소실) |
 
 ---
 

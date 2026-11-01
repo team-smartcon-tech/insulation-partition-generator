@@ -1,8 +1,9 @@
 // 마감 공정표 간트 (2026-10-30, 사용자 요청: 하남교산OT 「건축 예정공정표(실적관리)」 처럼 동 × 공종 줄에 「5~6F 단열재」 막대).
 //
-// 공종은 우선 아래만 (사용자 지정):
-//   PL창호 — 창틀설치, 창짝설치 / 내장 — 단열, 경량벽체, 벽석고, 천장석고, 걸레받이, 몰딩 / 유리 / 타일 / 방수 / 방통 / 주방가구 / 일반가구 / 도배 / 마루
-// 스마트웍스 공종 이름은 현장마다 달라 이름 규칙으로 맞춘다. 「내장공사」「PL창호공사」 처럼 한 덩어리 이름은 세부를 알 수 없어 「(구분 없음)」 줄.
+// 공종 = 택트 인원과 같은 14개로 고정 (2026-10-31 사용자): PL창틀, 내장단열, 내장경량벽체, 내장합지, 방수공사, 기포방통, 내장천장,
+//   벽타일, 바닥타일, 가구공사, 내장몰딩, 천장도배, 벽도배, 마루공사. 스마트웍스 공종이 없는 것도 줄을 두고 예정만 낸다.
+// 스마트웍스 공종 → 14개 연결은 현장 설정 「공종 연결」(settings.finishMap, 스마트웍스 공종 id → 공종 키, null = 제외)이 우선,
+//   없으면 이름 규칙(finishTradeOf, 자동 추천). 스마트웍스는 현장마다 공종을 자유롭게 만들기 때문(1차 「기본 욕실벽」 / 2차 「타일공사」).
 //
 // 세대 완료 = 그 동에서 쓰인 세부 공종(타일 거실·욕실…)이 모두 끝난 날.
 // 실적 막대: 그 공종을 끝낸 세대의 완료일을 날짜순으로 이어 붙이고, 3일 넘게 끊기면 새 막대. 막대 이름 = 그 세대들의 층 범위("5~6F").
@@ -42,6 +43,9 @@ export function splitLinesToCores(lines: string[], lineTops: number[], cores?: n
 }
 
 export type FinishTradeKey =
+  | "wallTile"
+  | "floorTile"
+  | "ceilingWallpaper"
   | "insulation"
   | "lightWall"
   | "wallGypsum"
@@ -63,53 +67,64 @@ export type FinishTradeKey =
 
 export type FinishTrade = { key: FinishTradeKey; group: string; label: string }
 
-/** 화면 순서 (사용자 지정 순) */
+/**
+ * 화면 순서 = 공종 목록 (2026-10-31 사용자 지정 14개, 택트 인원과 같은 이름). group 은 색 묶음.
+ * 예전 키(pvcAll·tile·baseboard·kitchen·interiorAll·windowSash·glass)는 저장된 설정을 읽으려고 타입에만 남긴다.
+ */
 export const FINISH_TRADES: readonly FinishTrade[] = [
-  { key: "windowFrame", group: "PL창호", label: "창틀설치" },
-  { key: "windowSash", group: "PL창호", label: "창짝설치" },
-  { key: "pvcAll", group: "PL창호", label: "PL창틀" }, // 「PL창호공사」 처럼 창틀·창짝 구분 없는 이름 (2026-10-30 사용자: PL창틀로 표시)
-  { key: "insulation", group: "내장", label: "단열" },
-  { key: "lightWall", group: "내장", label: "경량벽체" },
-  { key: "wallGypsum", group: "내장", label: "벽석고" },
-  { key: "ceilingGypsum", group: "내장", label: "천장석고" },
-  { key: "baseboard", group: "내장", label: "걸레받이" },
-  { key: "molding", group: "내장", label: "몰딩" },
-  { key: "interiorAll", group: "내장", label: "내장(구분 없음)" },
-  { key: "glass", group: "유리", label: "유리" },
-  { key: "tile", group: "타일", label: "타일" },
-  { key: "waterproof", group: "방수", label: "방수" },
-  { key: "screed", group: "방통", label: "방통" },
-  { key: "kitchen", group: "가구", label: "주방가구" },
-  { key: "furniture", group: "가구", label: "일반가구" },
-  { key: "wallpaper", group: "도배", label: "도배" },
-  { key: "flooring", group: "마루", label: "마루" },
+  { key: "windowFrame", group: "PL창호", label: "PL창틀" },
+  { key: "insulation", group: "내장", label: "내장단열" },
+  { key: "lightWall", group: "내장", label: "내장경량벽체" },
+  { key: "wallGypsum", group: "내장", label: "내장합지" },
+  { key: "waterproof", group: "방수", label: "방수공사" },
+  { key: "screed", group: "기포+방통", label: "기포방통" },
+  { key: "ceilingGypsum", group: "내장", label: "내장천장" },
+  { key: "wallTile", group: "타일", label: "벽타일" },
+  { key: "floorTile", group: "타일", label: "바닥타일" },
+  { key: "furniture", group: "가구", label: "가구공사" },
+  { key: "molding", group: "내장", label: "내장몰딩" },
+  { key: "ceilingWallpaper", group: "도배", label: "천장도배" },
+  { key: "wallpaper", group: "도배", label: "벽도배" },
+  { key: "flooring", group: "마루", label: "마루공사" },
 ]
 
-/** 스마트웍스에 맞는 공종이 없어도 줄을 두는 공종 — 세대(층·라인)로 줄을 만들어 예정만 낸다 (2026-10-30 사용자: 타일 추가) */
-export const ALWAYS_FINISH_TRADES: ReadonlySet<FinishTradeKey> = new Set(["tile"])
+/** 스마트웍스에 맞는 공종이 없어도 줄을 두는 공종 — 세대(층·라인)로 줄을 만들어 예정만 낸다. 14개 모두 (2026-10-31) */
+export const ALWAYS_FINISH_TRADES: ReadonlySet<FinishTradeKey> = new Set(FINISH_TRADES.map((t) => t.key))
 
-/** 공종 이름 → 마감 간트 공종 (맞는 것이 없으면 null). 먼저 맞는 규칙이 이긴다 */
+/**
+ * 공종 이름 → 14개 공종 (맞는 것이 없으면 null) — 현장 「공종 연결」 의 자동 추천. 먼저 맞는 규칙이 이긴다.
+ * 남원주 1차(2026-10-31) 스마트웍스 이름 기준: 합지석고·경량석고 → 내장합지, 방통1차·2차 → 기포방통, 기본/옵션 욕실벽·주방벽체·아트월 → 벽타일,
+ * 화장실바닥타일·세대 바닥 → 바닥타일, 일반·주방·욕실·시스템가구 → 가구공사, 도배공사 → 벽도배, 천정공사 → 내장천장.
+ */
 export function finishTradeOf(name: string): FinishTradeKey | null {
   const n = name.replace(/\s+/g, "")
-  if (/걸레받이/.test(n)) return "baseboard"
-  if (/몰딩/.test(n)) return "molding"
-  if (/창짝/.test(n)) return /사춤|코킹/.test(n) ? null : "windowSash"
-  if (/창틀/.test(n)) return /사춤|코킹|목창호/.test(n) ? null : "windowFrame"
-  if (/^PL창호(공사)?$/.test(n)) return "pvcAll"
-  if (/유리/.test(n)) return "glass"
-  if (/주방가구/.test(n)) return "kitchen"
-  if (/일반가구|시스템가구|^가구공사$/.test(n)) return "furniture"
+  if (/몰딩|걸레받이/.test(n)) return "molding"
+  if (/창짝|유리/.test(n)) return null
+  if (/창틀|^PL창호(공사)?$/.test(n)) return /사춤|코킹|목창호/.test(n) ? null : "windowFrame"
+  if (/가구/.test(n)) return "furniture"
   if (/마루/.test(n)) return "flooring"
-  if (/방통|방바닥/.test(n)) return /청소|타일/.test(n) ? null : "screed"
-  if (/방수/.test(n)) return /외벽|옥상|지붕|지하/.test(n) ? null : "waterproof"
-  if (/타일/.test(n)) return "tile"
+  // 도배: 천장·천정이 붙으면 천장도배, 아니면 벽도배 (「도배공사」 처럼 하나뿐이면 벽도배 — 현장 연결에서 바꾼다)
+  if (/도배|벽지|초배/.test(n)) return /천장|천정/.test(n) ? "ceilingWallpaper" : "wallpaper"
+  // 기포+방통 한 줄 — 세대 완료 = 둘 다 끝난 날
+  if (/방통|방바닥|기포/.test(n)) return /청소|타일/.test(n) ? null : "screed"
+  if (/방수/.test(n)) return /외벽|옥상|지붕|지하|측벽|자재인양구/.test(n) ? null : "waterproof"
+  if (/바닥타일|세대바닥|화장실바닥/.test(n)) return "floorTile"
+  if (/벽타일|욕실벽|주방벽|아트월/.test(n)) return "wallTile"
+  if (/타일/.test(n)) return "floorTile"
   if (/천정|천장/.test(n)) return /욕실|EV/.test(n) ? null : "ceilingGypsum"
-  if (/석고/.test(n)) return "wallGypsum"
+  if (/석고|합지/.test(n)) return "wallGypsum"
   if (/단열/.test(n)) return /외벽|실외기|발코니/.test(n) ? null : "insulation"
   if (/경량|스터드|런너|내장틀/.test(n)) return /사춤/.test(n) ? null : "lightWall"
-  if (/도배|합지|초배/.test(n)) return "wallpaper"
-  if (/^내장(공사)?$/.test(n)) return "interiorAll"
   return null
+}
+
+/** 현장 공종 연결(스마트웍스 공종 id → 공종 키, null = 제외)을 먼저 보고, 없으면 이름 규칙 */
+export function finishTradeOfType(map: Record<string, string | null> | undefined, type: { id: string; name: string }): FinishTradeKey | null {
+  if (map && type.id in map) {
+    const k = map[type.id]
+    return k && FINISH_TRADES.some((t) => t.key === k) ? (k as FinishTradeKey) : null
+  }
+  return finishTradeOf(type.name)
 }
 
 export type FinishBar = {
@@ -163,13 +178,15 @@ export function buildFinishGantt(input: {
   today: IsoDate
   /** 실적 막대를 끊는 간격(일). 기본 0 = 완료일마다 따로 (스마트웍스 마감입력 날짜와 그대로 맞게, 2026-10-30) */
   gapDays?: number
+  /** 현장 공종 연결 (settings.finishMap). 없으면 이름 규칙만 */
+  finishMap?: Record<string, string | null>
 }): FinishGantt {
   const gap = input.gapDays ?? 0
   const tradeOfType = new Map<string, FinishTradeKey>()
   const namesOf = new Map<FinishTradeKey, Set<string>>()
   for (const t of input.types) {
     if (t.deleted) continue
-    const k = finishTradeOf(t.name)
+    const k = finishTradeOfType(input.finishMap, t)
     if (!k) continue
     tradeOfType.set(t.id, k)
     namesOf.set(k, (namesOf.get(k) ?? new Set()).add(t.name))

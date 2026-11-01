@@ -51,6 +51,7 @@ export {
   ALWAYS_FINISH_TRADES,
   buildFinishGantt,
   finishTradeOf,
+  finishTradeOfType,
   floorListText,
   splitLinesToCores,
   type FinishCore,
@@ -63,5 +64,21 @@ export {
   type FinishTrade,
   type FinishTradeKey,
 } from "./finish/gantt.ts"
-export { DEFAULT_FINISH_PLAN, finishPlanOf, hasFinishPlan, planFinishBuilding, type FinishPlanRow, type FrameReady } from "./finish/plan.ts"
+export { DEFAULT_FINISH_PLAN, FINISH_RULE_ALIAS, finishPlanOf, hasFinishPlan, planFinishBuilding, planFinishSite, type FinishPlanRow, type FrameReady } from "./finish/plan.ts"
 export { buildFinishReportBars, parseFinishReport, type FinishReportBar, type FinishReportItem, type FinishReportRow } from "./finish/report.ts"
+export {
+  DEFAULT_TAKT_INPUT,
+  TAKT_LOW_UTILIZATION,
+  computeTakt,
+  parseBuildingFloors,
+  taktForDeadline,
+  validateTaktInput,
+  type TaktErrors,
+  type TaktForDeadline,
+  type TaktMode,
+  type TaktInput,
+  type TaktResult,
+  type TaktTrade,
+  type TaktTradeResult,
+} from "./takt/crew.ts"
+export { finishSettingsWithTakt, linkedBatchDays, taktLinks, taktWithFlows, type TaktFlow, type TaktLink } from "./takt/link.ts"
