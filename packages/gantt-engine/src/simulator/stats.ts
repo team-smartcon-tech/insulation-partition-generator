@@ -34,6 +34,8 @@ export function periodStats(
   calendar: CalendarConfig,
   from: IsoDate,
   to: IsoDate,
+  /** 지하·저층 예정 타설 날짜(타설 1회 = 1개). 타설 횟수·공백에 같이 센다 (2026-11-02) */
+  extraPourDates: IsoDate[] = [],
 ): PeriodStats {
   // 타설 횟수·타설 공백은 기준층 사이클만 센다(옥탑 타설은 뺀다).
   // 팀 유휴는 옥탑 작업도 그 팀 작업일로 센다 — 옥탑 갱폼·철근·거푸집도 갱폼·철근·알폼팀 몫 (2026-10-30 사용자 결정)
@@ -42,8 +44,8 @@ export function periodStats(
   const inRange = (a: Assignment) => a.date >= from && a.date <= to
   const days = dateRange(from, to)
 
-  const pours = base.filter((a) => inRange(a) && a.stage === "POUR").length
-  const pourDates = new Set(base.filter((a) => a.stage === "POUR").map((a) => a.date))
+  const pours = base.filter((a) => inRange(a) && a.stage === "POUR").length + extraPourDates.filter((d) => d >= from && d <= to).length
+  const pourDates = new Set([...base.filter((a) => a.stage === "POUR").map((a) => a.date), ...extraPourDates])
   const pourGapDays = days.filter(
     (d) => getDayInfo(calendar, d).pourAllowed && !pourDates.has(d),
   ).length

@@ -669,7 +669,12 @@ gantt.post("/plan", async (c) => {
       rebarTeams: ug.rebarTeams ?? null,
       priority: ugPriority,
       gangformSetupDays,
+      pourPerDay: req.settings.pourPerDay,
     });
+    // 지하·저층이 잡은 타설(S타설·W타설) — 기준층 예정의 「1일 타설」 한도와 요약 카드 타설 수에 같이 센다 (2026-11-02)
+    const ugPourDates = ugPlan.assignments.filter((a) => a.stage === "POUR" || a.stage === "POUR_WALL").map((a) => a.date);
+    const reservedPours = new Map<string, number>();
+    for (const d of ugPourDates) reservedPours.set(d, (reservedPours.get(d) ?? 0) + 1);
     const topFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.topFloor ?? null;
 
     const initial: BuildingState[] = [
@@ -726,6 +731,7 @@ gantt.post("/plan", async (c) => {
             from: planFrom,
             to: req.to,
             initial: initialWithTop,
+            reservedPours,
           })
         : null;
     const statsFrom = planFrom > req.from ? planFrom : req.from;
@@ -743,8 +749,8 @@ gantt.post("/plan", async (c) => {
         ...(planned?.assignments ?? []).map(({ date, half, buildingId, stage, floor, roof }) => ({ date, half, buildingId, stage, floor, roof })),
       ].filter((a) => a.date >= req.from && a.date <= req.to),
       stats: planned
-        ? periodStats(planned, req.calendar, statsFrom, req.to)
-        : { from: statsFrom, to: req.to, pours: 0, pourGapDays: 0, idle: { rebar: empty, alform: empty, gangform: empty } },
+        ? periodStats(planned, req.calendar, statsFrom, req.to, ugPourDates)
+        : { ...periodStats({ slots: [], assignments: [], buildings: [] }, req.calendar, statsFrom, req.to, ugPourDates), idle: { rebar: empty, alform: empty, gangform: empty } },
       asOf: progress.asOf,
       buildings: allIds.map((id) => ({ id, label: labelOf(id) })),
       actual: progress.actual.filter((a) => a.date >= req.from && a.date <= req.to),

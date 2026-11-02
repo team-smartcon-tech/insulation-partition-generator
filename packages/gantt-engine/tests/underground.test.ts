@@ -195,3 +195,21 @@ describe("지하·저층 팀 용량 (2026-11-01: 지하·저층이 같은 팀, �
     assert.ok(r.finishedOn.get(102)! >= free.finishedOn.get(102)!)
   })
 })
+
+describe("지하·저층 타설 한도 (2026-11-02 사용자: 타설은 하루 1개 동)", () => {
+  // 같은 날 같은 공종에서 출발하는 두 동 — 한도가 없으면 S타설이 같은 날 겹친다
+  const b = (id: number) => ({ id, story: -1, stepIndex: 0, doneDays: 0, baseFloor: 3 })
+  const pours = (pourPerDay?: number) =>
+    planUnderground({ calendar, from: "2026-11-02", to: "2027-03-31", buildings: [b(501), b(504)], pourPerDay })
+      .assignments.filter((a) => a.stage === "POUR" || a.stage === "POUR_WALL")
+  const maxPerDay = (xs: { date: string }[]) => Math.max(...[...xs.reduce((m, x) => m.set(x.date, (m.get(x.date) ?? 0) + 1), new Map<string, number>()).values()])
+  it("한도 없으면 같은 날 두 동 타설 (예전 동작)", () => {
+    assert.equal(maxPerDay(pours()), 2)
+  })
+  it("1일 타설 1동이면 하루 한 동만, 타설 가능일에만", () => {
+    const xs = pours(1)
+    assert.equal(maxPerDay(xs), 1)
+    assert.ok(xs.every((x) => getDayInfo(calendar, x.date).pourAllowed))
+    assert.equal(xs.length, pours().length) // 기간 안 타설 수는 같고 날짜만 하루씩 밀린다
+  })
+})

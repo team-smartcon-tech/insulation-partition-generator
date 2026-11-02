@@ -77,6 +77,8 @@ export type SimulationInput = {
   to: IsoDate
   /** 출발 상태. 없으면 모든 동이 from 날 아침 "먹매김 대기" */
   initial?: BuildingState[]
+  /** 날짜 → 이미 잡힌 타설 수 (지하·저층 예정). 「1일 타설」 한도에 같이 센다 (2026-11-02) */
+  reservedPours?: ReadonlyMap<IsoDate, number>
 }
 
 export type SimulationResult = {
@@ -156,14 +158,15 @@ export function simulate(input: SimulationInput): SimulationResult {
 
   // 팀 용량: 반일 칸 기준 + 하루 기준(갱폼 "하루 N동", 타설 "1일 N동")
   const hasCapacity = (slot: Slot, team: Team, stage: Stage): boolean => {
-    if (countTeam(slot.index, team, stage) >= teamCapacityPerSlot(team)) return false
+    const reserved = team === "pour" ? (input.reservedPours?.get(slot.date) ?? 0) : 0
+    if (countTeam(slot.index, team, stage) + reserved >= teamCapacityPerSlot(team)) return false
     const perDayLimit =
       team === "pour"
         ? settings.pourPerDay
         : team === "gangform" && settings.gangform.per === "day"
           ? settings.gangform.count
           : null
-    if (perDayLimit !== null && countTeamOnDate(slot.date, team, stage) >= perDayLimit) return false
+    if (perDayLimit !== null && countTeamOnDate(slot.date, team, stage) + reserved >= perDayLimit) return false
     return true
   }
 
