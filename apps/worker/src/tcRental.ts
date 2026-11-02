@@ -1,10 +1,10 @@
 /**
  * TC 임대계획 API — /api/tc-rental-projects*
  *
- * 계층: 현장(elev_sites, 단열 Layout 과 공유) → 세부 프로젝트(tc_rental_projects)
+ * 계층: 현장(elev_sites, 단열 MAKER 와 공유) → 세부 프로젝트(tc_rental_projects)
  *       → REV(tc_rental_revisions)
  *
- * 단열 Layout 과 다른 점은 **첨부 파일이 없다**는 것뿐이라, REV 저장이 multipart 가 아니라
+ * 단열 MAKER 와 다른 점은 **첨부 파일이 없다**는 것뿐이라, REV 저장이 multipart 가 아니라
  * 평범한 JSON 이다. 계획 문서 전체(plan)를 통째로 스냅샷으로 넣는다 — 부분 저장을 하면
  * "화면에 그린 것만 저장되어 나머지가 지워지는" 유실 경로가 생긴다.
  *

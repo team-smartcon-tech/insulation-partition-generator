@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" role="img" aria-label="타일 MAKER — Tile Layout &amp; Takeoff">
+  <title>타일 MAKER</title>
+  <!--
+    홈 카드 썸네일 원본 (16:9, 카드 패널 배경 #f7f9fc). 타일 MAKER 는 App Market 게시 도구라
+    렌더한 thumbs/tile-maker.png 를 게시 화면에서 썸네일로 올려 쓴다.
+    짝: logo-insul-maker.svg — 마크 크기·글자 위치를 같게 맞춘다.
+  -->
+  <defs>
+    <linearGradient id="tm-navy" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B5BB0"/><stop offset="1" stop-color="#003A78"/>
+    </linearGradient>
+    <linearGradient id="tm-warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFA24A"/><stop offset="1" stop-color="#EC6A16"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#F7F9FC"/>
+  <!-- 마크+워드마크 실측 폭(x236~1377)을 화면 가운데로 두고 카드에서 읽히게 1.15배 -->
+  <g transform="translate(800 450) scale(1.15) translate(-806 -450)">
+
+  <!-- ── 마크: 온장 타일 격자 + 가장자리에서 잘린 절단 타일(주황) ── -->
+  <g transform="translate(236 300)">
+    <rect x="0" y="12" width="300" height="300" rx="72" fill="#003A78" opacity="0.12"/>
+    <rect width="300" height="300" rx="72" fill="url(#tm-navy)"/>
+    <g fill="#FFFFFF" opacity="0.94">
+      <rect x="54" y="54" width="46" height="46" rx="6"/><rect x="106" y="54" width="46" height="46" rx="6"/><rect x="158" y="54" width="46" height="46" rx="6"/>
+      <rect x="54" y="106" width="46" height="46" rx="6"/><rect x="106" y="106" width="46" height="46" rx="6"/><rect x="158" y="106" width="46" height="46" rx="6"/>
+      <rect x="54" y="158" width="46" height="46" rx="6"/><rect x="106" y="158" width="46" height="46" rx="6"/><rect x="158" y="158" width="46" height="46" rx="6"/>
+    </g>
+    <!-- 절단 타일: 오른쪽 열·아래 행 -->
+    <g fill="url(#tm-warm)">
+      <rect x="210" y="54" width="36" height="46" rx="6"/><rect x="210" y="106" width="36" height="46" rx="6"/><rect x="210" y="158" width="36" height="46" rx="6"/>
+      <rect x="54" y="210" width="46" height="36" rx="6" fill="#FFC48F"/><rect x="106" y="210" width="46" height="36" rx="6" fill="#FFC48F"/><rect x="158" y="210" width="46" height="36" rx="6" fill="#FFC48F"/>
+      <rect x="210" y="210" width="36" height="36" rx="6"/>
+    </g>
+    <!-- 절단선 -->
+    <path d="M207 40V260M40 207H260" stroke="#FFFFFF" stroke-width="3" stroke-dasharray="8 7" stroke-linecap="round" opacity="0.7" fill="none"/>
+  </g>
+
+  <!-- ── 워드마크 ── -->
+  <g font-family="'SUIT Variable','SUIT','Pretendard Variable','Pretendard','Malgun Gothic',sans-serif">
+    <text x="610" y="468" font-size="138" font-weight="800" fill="#0F2A4A" letter-spacing="-3">타일<tspan dx="26" font-weight="300" fill="#004791" letter-spacing="6">MAKER</tspan></text>
+    <rect x="614" y="512" width="96" height="8" rx="4" fill="url(#tm-warm)"/>
+    <text x="614" y="580" font-size="30" font-weight="600" fill="#6B7C90" letter-spacing="7">TILE LAYOUT · TAKEOFF</text>
+  </g>
+  </g>
+</svg>

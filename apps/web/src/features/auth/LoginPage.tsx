@@ -19,7 +19,7 @@ import { AuthError } from "./authApi";
 const SAVED_EMAIL_KEY = "ipg_saved_email";
 
 const FEATURES = [
-  { icon: LayoutGrid, l1: "단열·타일 Layout", l2: "나누기도·물량 산출" },
+  { icon: LayoutGrid, l1: "단열·타일 MAKER", l2: "나누기도·물량 산출" },
   { icon: Construction, l1: "TC Planner·TC/HOIST", l2: "배치 계획·발주의뢰서" },
   { icon: FileText, l1: "스마트폼", l2: "현장 서류·품질관리계획" },
   { icon: Wrench, l1: "Smart CAD Manager", l2: "CAD 플러그인·리습" },

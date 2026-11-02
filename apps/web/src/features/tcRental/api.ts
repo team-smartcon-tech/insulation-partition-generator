@@ -1,7 +1,7 @@
 /**
  * TC 임대계획 API 클라이언트
  *
- * 경로: /api/sites/* (현장, 단열 Layout 과 공유) · /api/tc-rental-projects/* (세부 프로젝트·REV)
+ * 경로: /api/sites/* (현장, 단열 MAKER 와 공유) · /api/tc-rental-projects/* (세부 프로젝트·REV)
  * 인증: 세션 쿠키(credentials: include). 401 이면 인증 컨텍스트에 만료를 알린다
  *       (features/market/api.ts 와 동일한 규약 — "ipg-auth-expired" 이벤트).
  *
