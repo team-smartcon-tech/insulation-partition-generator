@@ -25,7 +25,7 @@ function Toggle({
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 size-4 rounded border-input accent-primary"
+        className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
       />
       <span>
         <span className="block">{label}</span>
