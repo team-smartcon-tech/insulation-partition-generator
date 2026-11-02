@@ -7,13 +7,14 @@ import { useEffect, useState } from "react";
 import { ExcelIcon, PrintIcon } from "./icons";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, RotateCcw, Save } from "lucide-react";
-import { DEFAULT_SITE_SETTINGS, type SiteSettings } from "@ipg/gantt-engine";
+import { DEFAULT_SITE_SETTINGS, addDays, type SiteSettings, type Stage } from "@ipg/gantt-engine";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { monthRange, shiftMonth, todayKst } from "../dates";
 import { usePlan, useSaveSettings, useSettings } from "../hooks";
 import GanttChart from "./GanttChart";
 import SettingsForm from "./SettingsForm";
+import StartOverrideForm from "./StartOverrideForm";
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -64,6 +65,13 @@ export default function SchedulePanel({
   const noTop = d?.noTopFloor ?? [];
   const ignored = d?.ignoredBuildings ?? [];
   const roofPhase = d?.rooftopPhase ?? [];
+  // 동별 예정 첫 공종 (보정 카드의 「일보 기준」 값) — 그 달에 예정 시작일이 보일 때
+  const firstPlanned = new Map<number, { stage: Stage; floor: number }>();
+  if (d?.asOf) {
+    const start = addDays(d.asOf, 1);
+    for (const a of [...d.assignments].sort((x, y) => x.date.localeCompare(y.date) || (x.half === "AM" ? -1 : 1)))
+      if (a.date >= start && !firstPlanned.has(a.buildingId) && a.roof == null) firstPlanned.set(a.buildingId, { stage: a.stage, floor: a.floor });
+  }
   const allUnplanned = d != null && unplanned.length > 0 && unplanned.length === d.buildingIds.length;
   // 이 달에 그릴 것이 없다 (일보가 있는 현장인데 첫 일보 이전 달 등)
   // (동 목록이 있어도 실적·예정이 하나도 없으면 빈 줄만 남으므로 같이 안내)
@@ -229,6 +237,21 @@ export default function SchedulePanel({
           </div>
         </div>
         <SettingsForm value={settings} onChange={setOverride} />
+        {/* 출발 상태 보정 (2026-11-02): 일보가 있어 예정 시작일이 정해진 현장만 */}
+        {d?.asOf && saved.data ? (
+          <StartOverrideForm
+            value={settings}
+            onChange={setOverride}
+            planFrom={addDays(d.asOf, 1)}
+            buildings={d.buildingIds.map((id) => ({
+              id,
+              label: d.buildings?.find((x) => x.id === id)?.label ?? `${id}동`,
+              baseFloor: saved.data.buildings.find((x) => x.buildingNo === id)?.baseFloor ?? 2,
+            }))}
+            computed={firstPlanned}
+            stale={d.startOverride?.stale ?? []}
+          />
+        ) : null}
       </aside>
     </div>
   );
