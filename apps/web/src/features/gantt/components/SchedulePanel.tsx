@@ -199,7 +199,8 @@ export default function SchedulePanel({
 
       <aside className="min-w-0 space-y-2">
         {/* 높이 고정(h-8 = 버튼 높이): 「저장값으로」 가 생겨도 아래 카드가 밀리지 않게. 폭 280px 에 맞게 되돌리기는 아이콘만 */}
-        <div className="flex h-8 items-center justify-between gap-2 px-1">
+        {/* 오른쪽 여백 없음: 저장 버튼 오른쪽 끝을 탭 줄 인쇄 버튼과 맞춘다 */}
+        <div className="flex h-8 items-center justify-between gap-2 pl-1">
           <span className="text-sm font-semibold">설정 (저장 없이 바꿔 보기)</span>
           <div className="flex items-center gap-1">
             {override ? (
@@ -217,6 +218,8 @@ export default function SchedulePanel({
             ) : null}
             <Button
               size="sm"
+              // 인쇄 버튼(outline)과 같은 폭 — 테두리 1px 를 투명으로 둔다
+              className="border border-transparent"
               onClick={onSave}
               disabled={!override || !siteId || saveS.isPending}
               title={override ? "바꾼 값을 현장 설정에 저장 (설정 탭에도 반영)" : "바꾼 값이 없습니다"}
