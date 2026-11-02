@@ -1,16 +1,17 @@
 /**
  * 공정표 탭 — 월 이동, 요약 숫자, 간트(실적 + 예정), 오른쪽 "저장 없이 바꿔 보기" 설정.
- * 저장된 현장 설정을 기본으로 쓰고, 패널에서 바꾼 값은 이 화면에서만 적용된다(저장은 설정 탭).
+ * 저장된 현장 설정을 기본으로 쓰고, 패널에서 바꾼 값은 이 화면에서만 적용된다.
+ * 「저장」(2026-11-02) 을 누르면 바꾼 값을 현장 설정에 저장한다 — 설정 탭과 같은 값.
  */
 import { useEffect, useState } from "react";
 import { ExcelIcon, PrintIcon } from "./icons";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, Save } from "lucide-react";
 import { DEFAULT_SITE_SETTINGS, type SiteSettings } from "@ipg/gantt-engine";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { monthRange, shiftMonth, todayKst } from "../dates";
-import { usePlan, useSettings } from "../hooks";
+import { usePlan, useSaveSettings, useSettings } from "../hooks";
 import GanttChart from "./GanttChart";
 import SettingsForm from "./SettingsForm";
 
@@ -38,6 +39,17 @@ export default function SchedulePanel({
   const saved = useSettings(siteId);
   const [override, setOverride] = useState<SiteSettings | null>(null);
   const settings = override ?? saved.data?.settings ?? DEFAULT_SITE_SETTINGS;
+  const saveS = useSaveSettings(siteId);
+  const onSave = async () => {
+    if (!override) return;
+    try {
+      await saveS.mutateAsync(override);
+      setOverride(null); // 저장값 = 지금 값
+      toast.success("설정을 저장했습니다. 설정 탭에도 반영됩니다.");
+    } catch (e) {
+      toast.error(`설정 저장 실패: ${(e as Error).message}`);
+    }
+  };
   useEffect(() => setOverride(null), [siteId]);
 
   const { from, to } = monthRange(month);
@@ -186,15 +198,31 @@ export default function SchedulePanel({
       </div>
 
       <aside className="min-w-0 space-y-2">
-        {/* 높이 고정(h-8 = 버튼 높이): 「저장값으로」 가 생겨도 아래 카드가 밀리지 않게 */}
+        {/* 높이 고정(h-8 = 버튼 높이): 「저장값으로」 가 생겨도 아래 카드가 밀리지 않게. 폭 280px 에 맞게 되돌리기는 아이콘만 */}
         <div className="flex h-8 items-center justify-between gap-2 px-1">
           <span className="text-sm font-semibold">설정 (저장 없이 바꿔 보기)</span>
           <div className="flex items-center gap-1">
             {override ? (
-              <Button variant="ghost" size="sm" onClick={() => setOverride(null)}>
-                <RotateCcw /> 저장값으로
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                onClick={() => setOverride(null)}
+                disabled={saveS.isPending}
+                title="저장값으로 되돌리기"
+                aria-label="저장값으로 되돌리기"
+              >
+                <RotateCcw />
               </Button>
             ) : null}
+            <Button
+              size="sm"
+              onClick={onSave}
+              disabled={!override || !siteId || saveS.isPending}
+              title={override ? "바꾼 값을 현장 설정에 저장 (설정 탭에도 반영)" : "바꾼 값이 없습니다"}
+            >
+              <Save /> {saveS.isPending ? "저장 중…" : "저장"}
+            </Button>
           </div>
         </div>
         <SettingsForm value={settings} onChange={setOverride} />
