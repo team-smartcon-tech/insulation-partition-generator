@@ -150,7 +150,7 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
     bandsTop.push([row, row + 1]);
     // 층 라벨 줄
     const fr = ws.getRow(row);
-    fr.height = 11;
+    fr.height = 15; // 층 표시 줄 (2026-11-02: 키우고 검정 글자)
     fr.getCell(1).value = "";
     days.forEach((d, i) => {
       const c = col(i, 0);
@@ -158,7 +158,8 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
       if (t) {
         ws.mergeCells(row, c, row, c + 1);
         ws.getCell(row, c).value = t;
-        ws.getCell(row, c).font = { size: 7, color: { argb: "FF64748B" } };
+        ws.getCell(row, c).font = { size: 8, color: { argb: "FF000000" } };
+        ws.getCell(row, c).alignment = { vertical: "bottom" };
       }
       if (dayBg(i)) [c, c + 1].forEach((cc) => (ws.getCell(row, cc).fill = fill(dayBg(i)!)));
     });
@@ -249,8 +250,9 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
 
   // 표 실선: 바깥은 진하게, 안쪽(날짜 사이·줄 묶음 사이)은 연하게. 오전·오후 사이는 선 없음.
   // 예정 시작 왼쪽 굵은 파란 선은 그대로 둔다
-  const OUT = thin("FF475569");
-  const IN = thin("FFCBD5E1");
+  const OUT = thin("FF000000");
+  const IN = thin("FFCBD5E1"); // 안쪽 세로선(날짜 사이)
+  const ROW = thin("FF000000"); // 안쪽 가로선 — 검정 실선 (2026-11-02)
   const grid = (bands: [number, number][]) => {
     if (!bands.length) return;
     const first = bands[0][0];
@@ -265,8 +267,8 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
           x.border = {
             ...(keepLeft ? { left: keepLeft } : dayStart ? { left: cc === 1 ? OUT : IN } : {}),
             ...(dayEnd ? { right: cc === lastCol ? OUT : IN } : {}),
-            ...(r === r1 ? { top: r === first ? OUT : IN } : {}),
-            ...(r === r2 ? { bottom: r === last ? OUT : IN } : {}),
+            ...(r === r1 ? { top: r === first ? OUT : ROW } : {}),
+            ...(r === r2 ? { bottom: r === last ? OUT : ROW } : {}),
           };
         }
   };
