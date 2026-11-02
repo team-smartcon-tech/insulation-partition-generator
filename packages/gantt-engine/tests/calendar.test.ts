@@ -4,7 +4,9 @@ import { describe, it } from "node:test"
 import {
   KR_HOLIDAYS_2026_Q4,
   addDays,
+  coldRangeOf,
   dateRange,
+  inMonthDayRange,
   dayOfWeek,
   getDayInfo,
   previousCraneDay,
@@ -61,5 +63,25 @@ describe("달력 규칙 §4", () => {
   })
   it("공휴일 월요일(10/5) 철근 선인양은 10/2 금", () => {
     assert.equal(previousCraneDay(config, "2026-10-05"), "2026-10-02")
+  })
+})
+
+describe("한중 기간 (날짜 단위 동절기 양생)", () => {
+  const ranged: CalendarConfig = { ...config, winterCuringRange: { start: "11-24", end: "03-05" } }
+  it("해를 넘기는 기간: 11/23 아님, 11/24·1/15·3/5 동절기, 3/6 아님", () => {
+    assert.equal(getDayInfo(ranged, "2026-11-23").curingDays, 0)
+    assert.equal(getDayInfo(ranged, "2026-11-24").curingDays, 1)
+    assert.equal(getDayInfo(ranged, "2027-01-15").curingDays, 1)
+    assert.equal(getDayInfo(ranged, "2027-03-05").curingDays, 1)
+    assert.equal(getDayInfo(ranged, "2027-03-06").curingDays, 0)
+  })
+  it("해를 넘지 않는 기간", () => {
+    assert.equal(inMonthDayRange({ start: "01-05", end: "02-10" }, "2027-01-04"), false)
+    assert.equal(inMonthDayRange({ start: "01-05", end: "02-10" }, "2027-02-10"), true)
+  })
+  it("설정: 꺼져 있으면 null, 직접 고친 기간이 관측소보다 먼저", () => {
+    assert.equal(coldRangeOf(undefined), null)
+    assert.equal(coldRangeOf({ enabled: false, range: { start: "12-01", end: "02-01" } }), null)
+    assert.deepEqual(coldRangeOf({ enabled: true, stationId: 108, range: { start: "12-01", end: "02-01" } }), { start: "12-01", end: "02-01" })
   })
 })

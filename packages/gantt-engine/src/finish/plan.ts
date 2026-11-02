@@ -3,7 +3,8 @@
 // 공종마다 (설정 「마감 예정」):
 //   pred           선행 공종 — 선행이 그 층을 끝낸 날 + gapDays 이후에 그 층 시작
 //   floorsPerBatch 한 번에 하는 층 수 ("5~6F 단열재" 처럼 2개 층씩)
-//   daysPerBatch   한 묶음 작업일 (일요일·공휴일도 센다 — 2026-10-30 사용자: 마감은 일요일을 빼지 않는다)
+//   daysPerBatch   한 묶음 작업일 (일요일만 뺀다, 공휴일은 작업 — 2026-11-02 사용자: 「마감공정은 일요일만 빼고 공휴일은 작업」.
+//                  2026-10-30 에는 일요일도 셌다). 간격(gapDays)·겹쳐 이동(moveDays)도 같은 작업일로 센다. 시작·끝은 일요일이 아니다.
 // 팀(teams, 2026-10-31 사용자: 1팀인데 여러 코어에서 동시에 → 현장 전체 N팀): 공종마다 현장 전체(모든 동·코어)가 N팀을 나눠 쓴다.
 //   가장 먼저 비는 팀이, 지금 가장 먼저 시작할 수 있는 묶음(선행·골조가 풀린 곳)을 맡는다 — 같으면 아래층, 앞 동·코어.
 //   한 동·코어 안에서는 아래층 묶음부터. 이미 다 끝난 층은 건너뛴다(덜 끝난 층은 다시 한 묶음).
@@ -19,7 +20,7 @@
 //   팀이 한 곳을 시작하고 moveDays 뒤에 다음 곳을 시작할 수 있다(막대는 묶음당 작업일 그대로). 한 곳 안에서는 앞 묶음이 끝나야 다음 묶음.
 //   moveBy "core" = 곳이 동·코어(코어를 다 돌면 다음 동), "building" = 곳이 동(그 동 코어들의 다음 묶음을 같은 날 함께 시작).
 // 공종은 14개 고정(2026-10-31, FINISH_TRADES). 예전 키로 저장된 규칙·선행은 FINISH_RULE_ALIAS 로 지금 공종에 잇는다.
-import { addDays, type IsoDate } from "../calendar/date.ts"
+import { addDays, dayOfWeek, type IsoDate } from "../calendar/date.ts"
 import type { FinishPlanSettings, FinishTradePlan } from "../contracts/index.ts"
 import type { FinishBar, FinishGanttBuilding, FinishTradeKey } from "./gantt.ts"
 
@@ -81,6 +82,22 @@ export const finishPlanOf = (settings: FinishPlanSettings | undefined, key: stri
  * 예전 540일(오늘 + 약 1년 반)이라 남원주 1차 벽도배처럼 선행 사슬 끝 공종의 2028-05 이후 예정이 잘렸다 (2026-10-31) → 5년.
  */
 export const FINISH_HORIZON_DAYS = 1825
+
+/** 마감 작업일: 일요일이면 다음 날 (공휴일은 작업일) */
+export const finishWorkday = (d: IsoDate): IsoDate => (dayOfWeek(d) === 0 ? addDays(d, 1) : d)
+/** d 에서 작업일 n 일 뒤 (일요일은 건너뛴다) */
+export const addFinishWorkdays = (d: IsoDate, n: number): IsoDate => {
+  let x = d
+  for (let i = 0; i < n; i++) x = finishWorkday(addDays(x, 1))
+  return x
+}
+/** a 다음 날부터 b 까지의 작업일 수 (일요일 빼고). b 가 a 보다 앞이면 음수 */
+export const finishWorkdaysBetween = (a: IsoDate, b: IsoDate): number => {
+  if (b < a) return -finishWorkdaysBetween(b, a)
+  let n = 0
+  for (let x = addDays(a, 1); x <= b; x = addDays(x, 1)) if (dayOfWeek(x) !== 0) n++
+  return n
+}
 
 /** 동 → (층 → 그 층 S타설일). 최상층보다 높은 층은 최상층 날짜, 모르면 null. 화면이 골조 실적·예정으로 만든다 */
 export type FrameReady = (buildingNo: number, floor: number) => IsoDate | null
@@ -186,19 +203,19 @@ export function planFinishSite(
     })
     /** 그 묶음을 시작할 수 있는 가장 이른 날 (선행·골조). 모르면 null → 그 동·코어는 여기서 멈춘다 */
     const readyOf = (q: (typeof queues)[number], batch: number[]): IsoDate | null => {
-      let ready = addDays(today, 1)
+      let ready = finishWorkday(addDays(today, 1))
       if (q.predEnds) {
         for (const fl of batch) {
           const pe = q.predEnds.get(fl)
           if (!pe) return null // 선행이 이 층을 언제 끝낼지 모른다
-          const r = addDays(pe, rule.gapDays + 1)
+          const r = addFinishWorkdays(pe, rule.gapDays + 1)
           if (r > ready) ready = r
         }
       }
       if (q.frameLead != null) {
         const poured = q.u.frame!(Math.max(...batch) + q.frameLead)
         if (!poured) return null // 골조가 그 층을 언제 타설할지 모른다
-        const r = addDays(poured, rule.gapDays + 1)
+        const r = addFinishWorkdays(poured, rule.gapDays + 1)
         if (r > ready) ready = r
       }
       // 겹쳐 이동: 같은 곳의 앞 묶음이 끝난 다음 날부터
@@ -206,7 +223,7 @@ export function planFinishSite(
       return ready
     }
     const move = rule.moveDays ?? null
-    const teamFree = Array.from({ length: Math.max(1, rule.teams ?? 1) }, () => addDays(today, 1))
+    const teamFree = Array.from({ length: Math.max(1, rule.teams ?? 1) }, () => finishWorkday(addDays(today, 1)))
     for (;;) {
       const free = [...teamFree].sort()[0]
       const team = teamFree.indexOf(free)
@@ -219,7 +236,7 @@ export function planFinishSite(
           q.blocked = true
           continue
         }
-        const start = ready > free ? ready : free
+        const start = finishWorkday(ready > free ? ready : free)
         const better =
           !best ||
           start < best.start ||
@@ -239,7 +256,8 @@ export function planFinishSite(
         }
         if (start > limit) break
       }
-      const end = addDays(start, rule.daysPerBatch - 1)
+      start = finishWorkday(start)
+      const end = addFinishWorkdays(start, rule.daysPerBatch - 1)
       for (const q of group) {
         const batch = q.batches[q.next++]
         const ends = q.u.ends.get(key)!
@@ -248,9 +266,9 @@ export function planFinishSite(
         const bars = q.u.bars.get(key) ?? []
         bars.push({ start, end, floorFrom: Math.min(...batch), floorTo: Math.max(...batch), units })
         q.u.bars.set(key, bars)
-        if (move != null) q.after = addDays(end, 1)
+        if (move != null) q.after = addFinishWorkdays(end, 1)
       }
-      teamFree[team] = move != null ? addDays(start, move) : addDays(end, 1)
+      teamFree[team] = move != null ? addFinishWorkdays(start, move) : addFinishWorkdays(end, 1)
     }
   }
 

@@ -2,7 +2,8 @@
  * 현장 설정 폼 (설계 §5): 자원 용량 · 반일 투입(같은 날 오전→오후 연계) · 팀 운영 제약.
  * 값은 부모가 들고(controlled) 저장은 부모가 한다 — 공정표 탭에서는 "저장 없이 바꿔 보기", 설정 탭에서는 저장.
  */
-import { DEFAULT_UNDERGROUND_SETTINGS, type SiteSettings, type UndergroundSettings } from "@ipg/gantt-engine";
+import { DEFAULT_UNDERGROUND_SETTINGS, coldRangeOf, monthDayLabel, type SiteSettings, type UndergroundSettings } from "@ipg/gantt-engine";
+import ColdWeatherFields from "./ColdWeatherFields";
 import { NumInput } from "./StepInput";
 
 function Toggle({
@@ -87,12 +88,16 @@ export default function SettingsForm({
   value,
   onChange,
   part = "base",
+  siteId,
 }: {
   value: SiteSettings;
   onChange: (next: SiteSettings) => void;
   part?: "base" | "underground";
+  /** 한중 기간 관측소 추천(현장 좌표)용 */
+  siteId?: string | null;
 }) {
   const s = value;
+  const cold = coldRangeOf(s.coldWeather);
   const set = (patch: Partial<SiteSettings>) => onChange({ ...s, ...patch });
   if (part === "underground") {
     const ug = s.underground ?? DEFAULT_UNDERGROUND_SETTINGS;
@@ -163,8 +168,9 @@ export default function SettingsForm({
         <Toggle label="알폼 오후 투입 (오후 + 다음날 오전)" checked={s.halfDay.alformPMStart} onChange={(v) => set({ halfDay: { ...s.halfDay, alformPMStart: v } })} />
         <Toggle label="슬래브철근 오후 가능" hint="기전·검측이 다음날 오전으로 밀림" checked={s.halfDay.slabRebarPM} onChange={(v) => set({ halfDay: { ...s.halfDay, slabRebarPM: v } })} />
       </Section>
-      {/* 동절기(11~3월) 양생 — 타설 다음 날은 양생일(먹매김만). 2026-11-02 */}
-      <Section title="동절기 양생 (11~3월)">
+      {/* 동절기 양생 — 타설 다음 날은 양생일(먹매김만). 기간은 11~3월 또는 한중 기간. 2026-11-02 */}
+      <Section title={`동절기 양생 (${cold ? `${monthDayLabel(cold.start)}~${monthDayLabel(cold.end)}` : "11~3월"})`}>
+        <ColdWeatherFields siteId={siteId} value={s.coldWeather} onChange={(coldWeather) => set({ coldWeather })} />
         <Toggle
           label="보온양생 2일 (갱폼인양 타설일+3일)"
           hint="소요강도 도달 후 2일간 0℃ 이상 유지"
