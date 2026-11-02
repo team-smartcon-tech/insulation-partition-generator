@@ -11,6 +11,8 @@ export type HalfDayOptions = {
   alformPMStart: boolean
   /** 먹매김 오전 완료 시 같은 날 오후 갱폼인양 */
   gangformPMAfterMarking: boolean
+  /** 동절기 양생일(타설 다음 날)에도 먹매김 오전 → 오후 갱폼인양. 없으면 false = 양생일 갱폼 불가 */
+  curingDayGangformPM?: boolean
   /** 갱폼 오전 완료 시 오후 벽철근 — 벽철근을 오후 칸에 둘 수 있다 */
   wallRebarPM: boolean
   /** 슬래브철근 오후 가능 (기전·검측이 다음날 오전으로 밀림) */
@@ -29,6 +31,8 @@ export type SiteSettings = {
   gangform: GangformCapacity
   /** 1일 타설 가능 동수 (펌프카·레미콘) */
   pourPerDay: number
+  /** 동절기 타설 후 2일 0℃ 이상 유지(보온양생) — 갱폼인양은 타설일 +3일부터 */
+  winterCuring2Days?: boolean
   halfDay: HalfDayOptions
   /** 오후 단독 투입 불가 — 그날 오전에 그 팀 작업이 없으면 오후부터 투입 안 함 */
   noPMOnlyStart: { rebar: boolean; alform: boolean }

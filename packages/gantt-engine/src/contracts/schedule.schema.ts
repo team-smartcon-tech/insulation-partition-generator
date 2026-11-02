@@ -8,6 +8,8 @@ export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD
 export const halfDayOptionsSchema = z.object({
   alformPMStart: z.boolean(),
   gangformPMAfterMarking: z.boolean(),
+  /** 동절기 양생일(타설 다음 날)에도 먹매김 오전 → 오후 갱폼인양. 없으면 false = 양생일 갱폼 불가 (2026-11-02) */
+  curingDayGangformPM: z.boolean().optional(),
   wallRebarPM: z.boolean(),
   slabRebarPM: z.boolean(),
 })
@@ -102,6 +104,21 @@ export const finishTradePlanSchema = z.object({
 })
 export const finishPlanSettingsSchema = z.record(z.string(), finishTradePlanSchema)
 
+/**
+ * 출발 상태 보정 (2026-11-02). 예정 첫날 그 동이 할 층·공종을 직접 정한다. from = 정할 때의 예정 시작일 —
+ * 새 일보가 들어와 예정 시작일이 바뀌면 서버가 쓰지 않는다(stage 는 Stage 이름, 서버가 확인).
+ */
+export const startOverrideSchema = z.object({
+  from: isoDateSchema,
+  floor: z.number().int().min(-10).max(80),
+  /** 오전(또는 첫) 공종 */
+  stage: z.string().min(1).max(20),
+  /** 오후 공종 (기준층만). 없으면 엔진이 정한다 — 있으면 첫날 오전·오후를 그대로 고정 */
+  pm: z.string().min(1).max(20).optional(),
+  /** 첫날 오전 비움 — stage 는 오후 공종 (기준층만) */
+  amEmpty: z.boolean().optional(),
+})
+
 export const siteSettingsSchema = z.object({
   buildingCount: z.number().int().min(1).max(30),
   rebarTeams: z.number().int().min(1).max(10),
@@ -109,6 +126,10 @@ export const siteSettingsSchema = z.object({
   alformTeams: z.number().int().min(1).max(10),
   gangform: z.object({ per: z.enum(["day", "slot"]), count: z.number().int().min(1).max(10) }),
   pourPerDay: z.number().int().min(1).max(10),
+  /** 동절기 타설 후 2일 0℃ 이상 유지(보온양생) — 갱폼인양은 타설일 +3일부터. 없으면 false (2026-11-02) */
+  winterCuring2Days: z.boolean().optional(),
+  /** 동 번호 → 출발 상태 보정 */
+  startOverrides: z.record(z.string(), startOverrideSchema).optional(),
   halfDay: halfDayOptionsSchema,
   noPMOnlyStart: z.object({ rebar: z.boolean(), alform: z.boolean() }),
   /** 지하·저층 공정. 없으면 DEFAULT_UNDERGROUND_SETTINGS */
@@ -286,6 +307,8 @@ export const planResponseSchema = simulateResponseSchema.extend({
   ignoredBuildings: z.array(z.number().int()).default([]),
   /** 이 현장의 첫 작업일보 날짜. 보는 달에 쓸 실적이 없을 때 안내용 (일보가 아예 없으면 null) */
   firstReportDate: isoDateSchema.nullable().default(null),
+  /** 출발 상태 보정: 쓴 동 / 예정 시작일이 달라 무시한 동 */
+  startOverride: z.object({ applied: z.array(z.number().int()), stale: z.array(z.number().int()) }).default({ applied: [], stale: [] }),
 })
 
 export type PlanRequest = z.infer<typeof planRequestSchema>

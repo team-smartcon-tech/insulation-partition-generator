@@ -1,18 +1,20 @@
 /**
  * 공정표 탭 — 월 이동, 요약 숫자, 간트(실적 + 예정), 오른쪽 "저장 없이 바꿔 보기" 설정.
- * 저장된 현장 설정을 기본으로 쓰고, 패널에서 바꾼 값은 이 화면에서만 적용된다(저장은 설정 탭).
+ * 저장된 현장 설정을 기본으로 쓰고, 패널에서 바꾼 값은 이 화면에서만 적용된다.
+ * 「저장」(2026-11-02) 을 누르면 바꾼 값을 현장 설정에 저장한다 — 설정 탭과 같은 값.
  */
 import { useEffect, useState } from "react";
 import { ExcelIcon, PrintIcon } from "./icons";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
-import { DEFAULT_SITE_SETTINGS, type SiteSettings } from "@ipg/gantt-engine";
+import { ChevronLeft, ChevronRight, RotateCcw, Save } from "lucide-react";
+import { DEFAULT_SITE_SETTINGS, addDays, getDayInfo, type SiteSettings, type Stage } from "@ipg/gantt-engine";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { monthRange, shiftMonth, todayKst } from "../dates";
-import { usePlan, useSettings } from "../hooks";
+import { CALENDAR, usePlan, useSaveSettings, useSettings } from "../hooks";
 import GanttChart from "./GanttChart";
 import SettingsForm from "./SettingsForm";
+import type { Override, StartOverrideCtx } from "./StartOverridePopup";
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -38,6 +40,17 @@ export default function SchedulePanel({
   const saved = useSettings(siteId);
   const [override, setOverride] = useState<SiteSettings | null>(null);
   const settings = override ?? saved.data?.settings ?? DEFAULT_SITE_SETTINGS;
+  const saveS = useSaveSettings(siteId);
+  const onSave = async () => {
+    if (!override) return;
+    try {
+      await saveS.mutateAsync(override);
+      setOverride(null); // 저장값 = 지금 값
+      toast.success("설정을 저장했습니다. 설정 탭에도 반영됩니다.");
+    } catch (e) {
+      toast.error(`설정 저장 실패: ${(e as Error).message}`);
+    }
+  };
   useEffect(() => setOverride(null), [siteId]);
 
   const { from, to } = monthRange(month);
@@ -52,6 +65,61 @@ export default function SchedulePanel({
   const noTop = d?.noTopFloor ?? [];
   const ignored = d?.ignoredBuildings ?? [];
   const roofPhase = d?.rooftopPhase ?? [];
+  // 동별 예정 첫 공종 (보정 카드의 「일보 기준」 값) — 그 달에 예정 시작일이 보일 때
+  // am·pm = 그 첫날 오전·오후 공종 (비어 있으면 없음 — 오후부터 시작하는 동이 있다)
+  const firstPlanned = new Map<number, { stage: Stage; floor: number; am?: Stage; pm?: Stage }>();
+  if (d?.asOf) {
+    const start = addDays(d.asOf, 1);
+    const sorted = [...d.assignments].sort((x, y) => x.date.localeCompare(y.date) || (x.half === "AM" ? -1 : 1));
+    const firstDate = new Map<number, string>();
+    for (const a of sorted)
+      if (a.date >= start && !firstPlanned.has(a.buildingId) && a.roof == null) {
+        firstPlanned.set(a.buildingId, { stage: a.stage, floor: a.floor });
+        firstDate.set(a.buildingId, a.date);
+      }
+    // 그날 오전·오후 공종 (팝업의 「일보 기준」)
+    for (const a of sorted) {
+      const f = firstPlanned.get(a.buildingId);
+      if (!f || a.date !== firstDate.get(a.buildingId) || a.roof != null) continue;
+      if (a.half === "AM" && f.am == null) f.am = a.stage;
+      if (a.half === "PM" && f.pm == null) f.pm = a.stage;
+    }
+  }
+  // 출발 상태 보정 (2026-11-02): 간트 동 이름을 누르면 팝업. 일보가 있어 예정 시작일이 정해진 현장만
+  const startOverrideCtx: StartOverrideCtx | null =
+    d?.asOf && saved.data
+      ? {
+          value: settings,
+          onChange: setOverride,
+          planFrom: addDays(d.asOf, 1),
+          firstWorkday: (() => {
+            let x = addDays(d.asOf, 1);
+            for (let i = 0; i < 14 && !getDayInfo(CALENDAR, x).workable; i++) x = addDays(x, 1);
+            return x;
+          })(),
+          savedOf: (id) => ((saved.data!.settings.startOverrides ?? {})[String(id)] as Override | undefined) ?? null,
+          saving: saveS.isPending,
+          saveOne: async (id, o) => {
+            // 저장값(서버) 위에 이 동 보정만 바꿔 저장 — 오른쪽 설정에서 바꾼 다른 값은 화면에만 남는다
+            const base = saved.data!.settings;
+            const next = { ...(base.startOverrides ?? {}) };
+            if (o) next[String(id)] = o;
+            else delete next[String(id)];
+            try {
+              const savedNow = { ...base, startOverrides: next };
+              await saveS.mutateAsync(savedNow);
+              // 오른쪽 설정에 다른 변경이 없었으면 「바꿔 보기」 상태도 끝 (저장값 = 지금 값)
+              if (override && JSON.stringify(override) === JSON.stringify(savedNow)) setOverride(null);
+              toast.success(`${id}동 출발 상태 보정을 저장했습니다.`);
+            } catch (e) {
+              toast.error(`보정 저장 실패: ${(e as Error).message}`);
+            }
+          },
+          baseFloorOf: (id) => saved.data!.buildings.find((x) => x.buildingNo === id)?.baseFloor ?? 2,
+          computed: firstPlanned,
+          stale: d.startOverride?.stale ?? [],
+        }
+      : null;
   const allUnplanned = d != null && unplanned.length > 0 && unplanned.length === d.buildingIds.length;
   // 이 달에 그릴 것이 없다 (일보가 있는 현장인데 첫 일보 이전 달 등)
   // (동 목록이 있어도 실적·예정이 하나도 없으면 빈 줄만 남으므로 같이 안내)
@@ -177,7 +245,7 @@ export default function SchedulePanel({
               <Stat label="철근 / 갱폼 온종일 유휴" value={`${d.stats.idle.rebar.fullDays} / ${d.stats.idle.gangform.fullDays}일`} />
             </div>
             <div className={plan.isFetching ? "opacity-70" : ""}>
-              <GanttChart data={d} siteId={siteId} />
+              <GanttChart data={d} siteId={siteId} startOverride={startOverrideCtx} />
             </div>
           </>
         ) : (
@@ -186,15 +254,34 @@ export default function SchedulePanel({
       </div>
 
       <aside className="min-w-0 space-y-2">
-        {/* 높이 고정(h-8 = 버튼 높이): 「저장값으로」 가 생겨도 아래 카드가 밀리지 않게 */}
-        <div className="flex h-8 items-center justify-between gap-2 px-1">
+        {/* 높이 고정(h-8 = 버튼 높이): 「저장값으로」 가 생겨도 아래 카드가 밀리지 않게. 폭 280px 에 맞게 되돌리기는 아이콘만 */}
+        {/* 오른쪽 여백 없음: 저장 버튼 오른쪽 끝을 탭 줄 인쇄 버튼과 맞춘다 */}
+        <div className="flex h-8 items-center justify-between gap-2 pl-1">
           <span className="text-sm font-semibold">설정 (저장 없이 바꿔 보기)</span>
           <div className="flex items-center gap-1">
             {override ? (
-              <Button variant="ghost" size="sm" onClick={() => setOverride(null)}>
-                <RotateCcw /> 저장값으로
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                onClick={() => setOverride(null)}
+                disabled={saveS.isPending}
+                title="저장값으로 되돌리기"
+                aria-label="저장값으로 되돌리기"
+              >
+                <RotateCcw />
               </Button>
             ) : null}
+            <Button
+              size="sm"
+              // 인쇄 버튼(outline)과 같은 폭 — 테두리 1px 를 투명으로 둔다
+              className="border border-transparent"
+              onClick={onSave}
+              disabled={!override || !siteId || saveS.isPending}
+              title={override ? "바꾼 값을 현장 설정에 저장 (설정 탭에도 반영)" : "바꾼 값이 없습니다"}
+            >
+              <Save /> {saveS.isPending ? "저장 중…" : "저장"}
+            </Button>
           </div>
         </div>
         <SettingsForm value={settings} onChange={setOverride} />

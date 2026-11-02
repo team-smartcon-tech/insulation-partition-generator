@@ -24,6 +24,10 @@ import {
   siteSettingsSchema,
   DEFAULT_UNDERGROUND_SETTINGS,
   UNDERGROUND_STAGES,
+  STAGES,
+  undergroundSequence,
+  pinFirstDay,
+  type Stage,
   aggregateFinish,
   buildFinishGantt,
   buildFinishReportBars,
@@ -575,6 +579,7 @@ gantt.post("/plan", async (c) => {
         rooftopPhase: [],
         ignoredBuildings: [],
         firstReportDate,
+        startOverride: { applied: [], stale: [] },
       };
       return c.json(body);
     }
@@ -601,6 +606,7 @@ gantt.post("/plan", async (c) => {
         rooftopPhase: [],
         ignoredBuildings: [],
         firstReportDate,
+        startOverride: { applied: [], stale: [] },
       };
       return c.json(body);
     }
@@ -648,6 +654,43 @@ gantt.post("/plan", async (c) => {
       if (reported.has(b.buildingNo) || !b.basementFloors) continue;
       ugBuildings.push({ id: b.buildingNo, story: -b.basementFloors, stepIndex: 0, doneDays: 0, baseFloor: b.baseFloor, gangformFloor: gangformOf(b.buildingNo) });
     }
+    // 출발 상태 보정 (2026-11-02): settings.startOverrides[동] = {from, floor, stage}. from 이 이번 예정 시작일과 같을 때만 쓴다
+    // (새 일보가 들어와 시작일이 바뀌면 무효 — 화면에 안내). 층이 기준층 시작보다 낮으면 지하·저층 순서표, 아니면 기준층 사이클
+    const overrides = new Map<number, { floor: number; stage: Stage; pm?: Stage; amEmpty?: boolean }>();
+    const staleOverrides: number[] = [];
+    for (const [k, o] of Object.entries(req.settings.startOverrides ?? {})) {
+      const no = Number(k);
+      if (!buildings.some((x) => x.buildingNo === no) && !progress.buildings.some((x) => x.id === no)) continue;
+      const stage = o.stage as Stage;
+      const ok = (STAGES as readonly string[]).includes(o.stage) && (o.floor < baseFloorOf(no) || !UNDERGROUND_STAGES.includes(stage));
+      if (o.from !== planFrom || !ok) {
+        staleOverrides.push(no);
+        continue;
+      }
+      // 오후 공종은 기준층만, 기준층 사이클 공종일 때만 (아니면 엔진이 정한다)
+      const pm = o.pm && o.floor >= baseFloorOf(no) && (STAGES as readonly string[]).includes(o.pm) && !UNDERGROUND_STAGES.includes(o.pm as Stage) ? (o.pm as Stage) : undefined;
+      const amEmpty = o.amEmpty === true && o.floor >= baseFloorOf(no) && stage !== "POUR";
+      overrides.set(no, { floor: o.floor, stage, ...(pm ? { pm } : {}), ...(amEmpty ? { amEmpty } : {}) });
+    }
+    for (const [no, o] of overrides) {
+      unplanned.delete(no);
+      rooftopPhase.delete(no);
+      const i = ugBuildings.findIndex((b) => b.id === no);
+      if (i >= 0) ugBuildings.splice(i, 1);
+      if (o.floor < baseFloorOf(no)) {
+        const seq = undergroundSequence(ug, o.floor, gangformOf(no), gangformSetupDays);
+        ugBuildings.push({
+          id: no,
+          story: o.floor,
+          stepIndex: Math.max(0, seq.findIndex((s) => s.stage === o.stage)),
+          doneDays: 0,
+          baseFloor: baseFloorOf(no),
+          gangformFloor: gangformOf(no),
+        });
+      }
+    }
+    const baseOverrides = [...overrides].filter(([no, o]) => o.floor >= baseFloorOf(no));
+    const pinned: { date: string; half: "AM" | "PM"; buildingId: number; stage: Stage; floor: number }[] = [];
     const ugIds = new Set(ugBuildings.map((b) => b.id));
     // 지하·저층 팀 용량 (2026-11-01): 형틀팀 = 동이 속한 지하 구역의 팀(구역 순서 = 우선순위), 철근팀 = underground.rebarTeams.
     // 지하·저층이 같은 팀을 이어 쓰고 기준층 자원(rebarTeams·alformTeams …)과는 따로
@@ -669,13 +712,29 @@ gantt.post("/plan", async (c) => {
       rebarTeams: ug.rebarTeams ?? null,
       priority: ugPriority,
       gangformSetupDays,
+      pourPerDay: req.settings.pourPerDay,
     });
+    // 지하·저층이 잡은 타설(S타설·W타설) — 기준층 예정의 「1일 타설」 한도와 요약 카드 타설 수에 같이 센다 (2026-11-02)
+    const ugPourDates = ugPlan.assignments.filter((a) => a.stage === "POUR" || a.stage === "POUR_WALL").map((a) => a.date);
+    const reservedPours = new Map<string, number>();
+    for (const d of ugPourDates) reservedPours.set(d, (reservedPours.get(d) ?? 0) + 1);
     const topFloorOf = (id: number) => buildings.find((x) => x.buildingNo === id)?.topFloor ?? null;
 
     const initial: BuildingState[] = [
-      ...progress.initial.filter((b) => !unplanned.has(b.id) && !ugIds.has(b.id) && !rooftopPhase.has(b.id)).map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
+      ...progress.initial
+        .filter((b) => !unplanned.has(b.id) && !ugIds.has(b.id) && !rooftopPhase.has(b.id) && !overrides.has(b.id))
+        .map((b) => ({ ...b, rooftopFloors: rooftops.get(b.id) ?? 0 })),
+      // 출발 상태 보정한 동 (기준층): 예정 첫날 그 층·공종부터. 마지막 타설일은 일보 값(양생일 판정)
+      ...baseOverrides.map(([no, o]) => {
+        const prev = progress.initial.find((b) => b.id === no);
+        const topFloor = topFloorOf(no) ?? prev?.topFloor ?? null;
+        // 첫날 오전(·오후)은 정한 대로 고정하고 그 다음 칸부터 엔진 (pinFirstDay). 오후를 안 정했으면 오전만 고정
+        const p = pinFirstDay({ calendar: req.calendar, from: planFrom, buildingId: no, floor: o.floor, topFloor, am: o.stage, pm: o.pm, amEmpty: o.amEmpty, lastPourDate: prev?.lastPourDate ?? null });
+        pinned.push(...p.fixed);
+        return { id: no, pours: 0, topFloor, rooftopFloors: rooftops.get(no) ?? 0, ...p.state };
+      }),
       ...buildings
-        .filter((b) => !reported.has(b.buildingNo) && !ugIds.has(b.buildingNo))
+        .filter((b) => !reported.has(b.buildingNo) && !ugIds.has(b.buildingNo) && !overrides.has(b.buildingNo))
         .map((b) => ({
           id: b.buildingNo,
           stage: "MARK" as const,
@@ -726,6 +785,7 @@ gantt.post("/plan", async (c) => {
             from: planFrom,
             to: req.to,
             initial: initialWithTop,
+            reservedPours,
           })
         : null;
     const statsFrom = planFrom > req.from ? planFrom : req.from;
@@ -739,12 +799,13 @@ gantt.post("/plan", async (c) => {
       days,
       buildingIds: allIds,
       assignments: [
+        ...pinned.map(({ date, half, buildingId, stage, floor }) => ({ date, half, buildingId, stage, floor })),
         ...ugPlan.assignments,
         ...(planned?.assignments ?? []).map(({ date, half, buildingId, stage, floor, roof }) => ({ date, half, buildingId, stage, floor, roof })),
       ].filter((a) => a.date >= req.from && a.date <= req.to),
       stats: planned
-        ? periodStats(planned, req.calendar, statsFrom, req.to)
-        : { from: statsFrom, to: req.to, pours: 0, pourGapDays: 0, idle: { rebar: empty, alform: empty, gangform: empty } },
+        ? periodStats(planned, req.calendar, statsFrom, req.to, ugPourDates)
+        : { ...periodStats({ slots: [], assignments: [], buildings: [] }, req.calendar, statsFrom, req.to, ugPourDates), idle: { rebar: empty, alform: empty, gangform: empty } },
       asOf: progress.asOf,
       buildings: allIds.map((id) => ({ id, label: labelOf(id) })),
       actual: progress.actual.filter((a) => a.date >= req.from && a.date <= req.to),
@@ -755,6 +816,7 @@ gantt.post("/plan", async (c) => {
       rooftopPhase: [...rooftopPhase].sort((a, b) => a - b),
       ignoredBuildings: [...ignoredSet].sort((a, b) => a - b),
       firstReportDate,
+      startOverride: { applied: [...overrides.keys()].sort((a, b) => a - b), stale: staleOverrides.sort((a, b) => a - b) },
     };
     return c.json(body);
   } catch (err) {

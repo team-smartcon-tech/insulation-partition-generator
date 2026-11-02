@@ -11,7 +11,8 @@
 // 팀 용량 (2026-11-01 사용자: 지하층·저층부는 같은 팀을 이어서 쓰고, 기준층 자원과는 따로):
 //   형틀팀 — W거푸집·시스템·S거푸집. 동이 속한 지하 구역(settings.zones)의 팀(A·B …)이 맡고, 같은 팀 동들은 그 팀이 비어야 시작.
 //   철근팀 — W철근·S철근. 지하·저층 철근팀 수(underground.rebarTeams)만큼 동시에.
-//   구역에 없는 동·철근팀 수가 비었으면 제한 없음(예전처럼 동마다 자기 작업조). 기전(병행)·타설은 팀을 따지지 않는다.
+//   구역에 없는 동·철근팀 수가 비었으면 제한 없음(예전처럼 동마다 자기 작업조). 기전(병행)은 팀을 따지지 않는다.
+//   타설 — 「1일 타설 N동」(pourPerDay) 한도. S타설·W타설 모두 센다 (2026-11-02 사용자: 타설은 하루 1개 동).
 //   배정: 가장 먼저 시작할 수 있는 동의 다음 공종부터 (같으면 구역 순서, 동 번호). 팀은 그 공종 자기 일수만큼 묶인다.
 // 작업일 = 일요일 제외. 타설은 타설 가능일(평일, 공휴일 제외)만.
 import { addDays, dateRange, type IsoDate } from "../calendar/date.ts"
@@ -99,6 +100,8 @@ export function planUnderground(input: {
   priority?: ReadonlyMap<number, number>
   /** 갱폼 설치 기간(작업일). 저층 갱폼 셋팅층 첫 사이클의 갱폼 막대 길이 (2026-11-01) */
   gangformSetupDays?: number
+  /** 1일 타설 가능 동수. 없으면 제한 없음 */
+  pourPerDay?: number | null
 }): UgResult {
   const seqOf = (story: number, gangformFloor?: number | null) =>
     undergroundSequence(input.settings, story, gangformFloor ?? null, input.gangformSetupDays ?? 1)
@@ -111,6 +114,9 @@ export function planUnderground(input: {
   const states = input.buildings.map((b) => ({ b, w: 0, story: b.story, stepIndex: b.stepIndex, doneDays: b.doneDays }))
   const formFree = new Map<string, number>() // 형틀팀 → 비는 날
   const rebarFree = input.rebarTeams && input.rebarTeams > 0 ? Array.from({ length: input.rebarTeams }, () => 0) : null
+  const pourLimit = input.pourPerDay && input.pourPerDay > 0 ? input.pourPerDay : null
+  const poursOn = new Map<number, number>() // 작업일 인덱스 → 잡힌 타설 수
+  const pourFull = (w: number) => pourLimit != null && (poursOn.get(w) ?? 0) >= pourLimit
 
   for (let guard = 0; guard < 200_000; guard++) {
     let best: {
@@ -144,7 +150,7 @@ export function planUnderground(input: {
         start = Math.max(start, rebarFree[rebar])
       }
       // 타설은 타설 가능일까지 미룬다
-      if (group[0].step.pour) while (start < workdays.length && !pourOk(workdays[start])) start++
+      if (group[0].step.pour) while (start < workdays.length && (!pourOk(workdays[start]) || pourFull(start))) start++
       if (start >= workdays.length) {
         st.w = workdays.length // 기간 안에 못 한다 — 이 동은 여기서 멈춤
         continue
@@ -177,6 +183,7 @@ export function planUnderground(input: {
     // 팀은 그 공종 자기 일수만큼 (병행 기전이 더 길어도 팀은 먼저 빠진다)
     if (team) formFree.set(team, start + group[0].days)
     if (rebar >= 0) rebarFree![rebar] = start + group[0].days
+    if (group[0].step.pour) poursOn.set(start, (poursOn.get(start) ?? 0) + 1)
     st.w = endW + 1
     st.doneDays = 0
     st.stepIndex = last + 1

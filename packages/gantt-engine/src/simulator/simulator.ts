@@ -77,6 +77,8 @@ export type SimulationInput = {
   to: IsoDate
   /** 출발 상태. 없으면 모든 동이 from 날 아침 "먹매김 대기" */
   initial?: BuildingState[]
+  /** 날짜 → 이미 잡힌 타설 수 (지하·저층 예정). 「1일 타설」 한도에 같이 센다 (2026-11-02) */
+  reservedPours?: ReadonlyMap<IsoDate, number>
 }
 
 export type SimulationResult = {
@@ -156,14 +158,15 @@ export function simulate(input: SimulationInput): SimulationResult {
 
   // 팀 용량: 반일 칸 기준 + 하루 기준(갱폼 "하루 N동", 타설 "1일 N동")
   const hasCapacity = (slot: Slot, team: Team, stage: Stage): boolean => {
-    if (countTeam(slot.index, team, stage) >= teamCapacityPerSlot(team)) return false
+    const reserved = team === "pour" ? (input.reservedPours?.get(slot.date) ?? 0) : 0
+    if (countTeam(slot.index, team, stage) + reserved >= teamCapacityPerSlot(team)) return false
     const perDayLimit =
       team === "pour"
         ? settings.pourPerDay
         : team === "gangform" && settings.gangform.per === "day"
           ? settings.gangform.count
           : null
-    if (perDayLimit !== null && countTeamOnDate(slot.date, team, stage) >= perDayLimit) return false
+    if (perDayLimit !== null && countTeamOnDate(slot.date, team, stage) + reserved >= perDayLimit) return false
     return true
   }
 
@@ -217,7 +220,16 @@ export function simulate(input: SimulationInput): SimulationResult {
         return true // 양생일과 같은 날 가능
       case "GANGFORM":
         if (!slot.day.craneAllowed) return false
-        if (curingDay(b) === slot.date) return false // 동절기 양생일에는 갱폼인양 불가 (§8-1)
+        // 동절기 보온양생 2일(소요강도 도달 후 2일간 0℃ 이상 유지): 갱폼인양은 타설일 +3일부터 (2026-11-02 사용자)
+        if (
+          settings.winterCuring2Days &&
+          b.lastPourDate &&
+          getDayInfo(calendar, b.lastPourDate).curingDays === 1 &&
+          slot.date < addDays(b.lastPourDate, 3)
+        )
+          return false
+        // 동절기 양생일에는 갱폼인양 불가 (§8-1). 설정을 켜면 양생일 오후는 가능(오전 먹매김 뒤) — 2026-11-02 사용자
+        if (curingDay(b) === slot.date && !(h.curingDayGangformPM && slot.half === "PM")) return false
         if (sameDay && !h.gangformPMAfterMarking) return false
         return true
       case "WALL_REBAR":

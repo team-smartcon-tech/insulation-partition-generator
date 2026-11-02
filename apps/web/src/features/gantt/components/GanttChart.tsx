@@ -15,6 +15,7 @@ import type {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import CellReportDialog, { type CellTarget } from "./CellReportDialog";
+import StartOverridePopup, { activeOverride, type StartOverrideCtx } from "./StartOverridePopup";
 import { todayKst } from "../dates";
 import {
   GROUP_LABEL,
@@ -148,7 +149,17 @@ const IDLE_TEAMS: { key: string; label: string; group: Group; stages: Stage[] }[
   { key: "alform", label: "알폼 유휴", group: "alform", stages: ["ALFORM"] },
 ];
 
-export default function GanttChart({ data, siteId = null }: { data: GanttData; siteId?: string | null }) {
+export default function GanttChart({
+  data,
+  siteId = null,
+  startOverride,
+}: {
+  data: GanttData;
+  siteId?: string | null;
+  /** 동 이름을 누르면 출발 상태 보정 팝업 (2026-11-02). 없으면 동 이름은 그냥 글자 */
+  startOverride?: StartOverrideCtx | null;
+}) {
+  const [ovOpen, setOvOpen] = useState<{ id: number; rect: DOMRect } | null>(null);
   // 칸을 누르면 그날 그 동의 작업일보 팝업
   const [target, setTarget] = useState<CellTarget | null>(null);
   const byCell = new Map<string, Assignment>();
@@ -237,6 +248,9 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
   return (
     <div className="space-y-3">
       {target ? <CellReportDialog siteId={siteId} target={target} onClose={() => setTarget(null)} /> : null}
+      {ovOpen && startOverride ? (
+        <StartOverridePopup ctx={startOverride} id={ovOpen.id} label={label(ovOpen.id)} anchor={ovOpen.rect} onClose={() => setOvOpen(null)} />
+      ) : null}
       <div className="overflow-x-auto rounded-lg border border-border bg-card p-3">
         <div className="min-w-[960px] text-xs">
           <div className="grid" style={gridCols}>
@@ -265,7 +279,29 @@ export default function GanttChart({ data, siteId = null }: { data: GanttData; s
 
           {data.buildingIds.map((id) => (
             <div key={id} className="grid border-b border-border/60" style={gridCols}>
-              <div className="flex items-end pb-2 text-sm font-semibold">{label(id)}</div>
+              <div className="flex items-end pb-2 text-sm font-semibold">
+                {startOverride ? (
+                  <button
+                    type="button"
+                    data-ov-anchor
+                    className="rounded px-0.5 text-left hover:bg-primary/10 hover:text-primary print:p-0"
+                    title={`${label(id)} 출발 상태 보정 (예정 첫날 층·공종)`}
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setOvOpen((o) => (o?.id === id ? null : { id, rect }));
+                    }}
+                  >
+                    {label(id)}
+                    {activeOverride(startOverride.value, id, startOverride.planFrom) ? (
+                      <span className="ml-1 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary print:hidden">보정</span>
+                    ) : startOverride.stale.includes(id) ? (
+                      <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-800 print:hidden">보정 무효</span>
+                    ) : null}
+                  </button>
+                ) : (
+                  label(id)
+                )}
+              </div>
               {data.days.map((d) => {
                 const actual = actualByCell.get(`${d.date}|${id}`);
                 const am = get(d.date, "AM", id);

@@ -27,6 +27,7 @@ export {
   type UgResult,
   type UgStep,
 } from "./simulator/underground.ts"
+export { pinFirstDay, type PinnedStart } from "./simulator/pin.ts"
 export { renderText } from "./simulator/render.ts"
 export * from "./daily-report/parse-work-text.ts"
 export { isNumberedFormat, parseNumbered } from "./daily-report/parse-numbered.ts"
