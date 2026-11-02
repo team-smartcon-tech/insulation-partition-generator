@@ -5,10 +5,28 @@
 import { DEFAULT_UNDERGROUND_SETTINGS, type SiteSettings, type UndergroundSettings } from "@ipg/gantt-engine";
 import { NumInput } from "./StepInput";
 
-function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
-    <label className="flex cursor-pointer items-start gap-2 text-sm">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 size-4 rounded border-input accent-primary" />
+    <label className={disabled ? "flex cursor-not-allowed items-start gap-2 text-sm opacity-50" : "flex cursor-pointer items-start gap-2 text-sm"}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 size-4 rounded border-input accent-primary"
+      />
       <span>
         <span className="block">{label}</span>
         {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
@@ -141,15 +159,25 @@ export default function SettingsForm({
       </Section>
       <Section title="반일 투입 (같은 날 오전→오후 연계)">
         <Toggle label="먹매김 오전 완료 시 오후 갱폼인양" checked={s.halfDay.gangformPMAfterMarking} onChange={(v) => set({ halfDay: { ...s.halfDay, gangformPMAfterMarking: v } })} />
-        <Toggle
-          label="동절기 양생일에도 오후 갱폼인양"
-          hint="11~3월 타설 다음 날. 끄면 갱폼은 타설 이틀 뒤"
-          checked={s.halfDay.curingDayGangformPM ?? false}
-          onChange={(v) => set({ halfDay: { ...s.halfDay, curingDayGangformPM: v } })}
-        />
         <Toggle label="갱폼 오전 완료 시 오후 벽철근" checked={s.halfDay.wallRebarPM} onChange={(v) => set({ halfDay: { ...s.halfDay, wallRebarPM: v } })} />
         <Toggle label="알폼 오후 투입 (오후 + 다음날 오전)" checked={s.halfDay.alformPMStart} onChange={(v) => set({ halfDay: { ...s.halfDay, alformPMStart: v } })} />
         <Toggle label="슬래브철근 오후 가능" hint="기전·검측이 다음날 오전으로 밀림" checked={s.halfDay.slabRebarPM} onChange={(v) => set({ halfDay: { ...s.halfDay, slabRebarPM: v } })} />
+      </Section>
+      {/* 동절기(11~3월) 양생 — 타설 다음 날은 양생일(먹매김만). 2026-11-02 */}
+      <Section title="동절기 양생 (11~3월)">
+        <Toggle
+          label="보온양생 2일 (갱폼인양 타설일+3일)"
+          hint="소요강도 도달 후 2일간 0℃ 이상 유지"
+          checked={s.winterCuring2Days ?? false}
+          onChange={(v) => set({ winterCuring2Days: v })}
+        />
+        <Toggle
+          label="양생일에도 오후 갱폼인양"
+          hint={s.winterCuring2Days ? "보온양생 2일이 켜져 있어 적용되지 않음" : "타설 다음 날 오전 먹매김 → 오후 갱폼. 끄면 타설 이틀 뒤"}
+          checked={s.halfDay.curingDayGangformPM ?? false}
+          disabled={s.winterCuring2Days ?? false}
+          onChange={(v) => set({ halfDay: { ...s.halfDay, curingDayGangformPM: v } })}
+        />
       </Section>
       <Section title="팀 운영 제약">
         <Toggle label="철근팀 오후 단독 투입 불가" checked={s.noPMOnlyStart.rebar} onChange={(v) => set({ noPMOnlyStart: { ...s.noPMOnlyStart, rebar: v } })} />

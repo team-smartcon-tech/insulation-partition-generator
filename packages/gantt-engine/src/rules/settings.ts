@@ -31,6 +31,8 @@ export type SiteSettings = {
   gangform: GangformCapacity
   /** 1일 타설 가능 동수 (펌프카·레미콘) */
   pourPerDay: number
+  /** 동절기 타설 후 2일 0℃ 이상 유지(보온양생) — 갱폼인양은 타설일 +3일부터 */
+  winterCuring2Days?: boolean
   halfDay: HalfDayOptions
   /** 오후 단독 투입 불가 — 그날 오전에 그 팀 작업이 없으면 오후부터 투입 안 함 */
   noPMOnlyStart: { rebar: boolean; alform: boolean }

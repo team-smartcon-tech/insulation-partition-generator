@@ -31,3 +31,25 @@ describe("동절기 양생일 갱폼", () => {
     assert.ok(xs.every((a) => a.half === "PM"))
   })
 })
+
+describe("동절기 보온양생 2일 (갱폼인양 타설일+3일)", () => {
+  const runW = (on: boolean) =>
+    simulate({ settings: { ...DEFAULT_SITE_SETTINGS, winterCuring2Days: on }, calendar, from: "2026-11-02", to: "2026-11-30" }).assignments
+  /** 동별 타설일 → 그 뒤 첫 갱폼까지 달력일 */
+  const gaps = (as: ReturnType<typeof runW>) => {
+    const out: number[] = []
+    for (const p of as.filter((a) => a.stage === "POUR" && a.roof == null)) {
+      const g = as.find((a) => a.buildingId === p.buildingId && a.stage === "GANGFORM" && a.date > p.date)
+      if (g) out.push(Math.round((Date.parse(g.date) - Date.parse(p.date)) / 86_400_000))
+    }
+    return out
+  }
+  it("끄면 타설 이틀 뒤 갱폼이 있다", () => {
+    assert.ok(gaps(runW(false)).some((d) => d === 2))
+  })
+  it("켜면 갱폼은 모두 타설일 +3일 이후", () => {
+    const g = gaps(runW(true))
+    assert.ok(g.length > 0)
+    assert.ok(g.every((d) => d >= 3))
+  })
+})

@@ -220,6 +220,14 @@ export function simulate(input: SimulationInput): SimulationResult {
         return true // 양생일과 같은 날 가능
       case "GANGFORM":
         if (!slot.day.craneAllowed) return false
+        // 동절기 보온양생 2일(소요강도 도달 후 2일간 0℃ 이상 유지): 갱폼인양은 타설일 +3일부터 (2026-11-02 사용자)
+        if (
+          settings.winterCuring2Days &&
+          b.lastPourDate &&
+          getDayInfo(calendar, b.lastPourDate).curingDays === 1 &&
+          slot.date < addDays(b.lastPourDate, 3)
+        )
+          return false
         // 동절기 양생일에는 갱폼인양 불가 (§8-1). 설정을 켜면 양생일 오후는 가능(오전 먹매김 뒤) — 2026-11-02 사용자
         if (curingDay(b) === slot.date && !(h.curingDayGangformPM && slot.half === "PM")) return false
         if (sameDay && !h.gangformPMAfterMarking) return false

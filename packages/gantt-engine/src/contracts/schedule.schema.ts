@@ -111,6 +111,8 @@ export const siteSettingsSchema = z.object({
   alformTeams: z.number().int().min(1).max(10),
   gangform: z.object({ per: z.enum(["day", "slot"]), count: z.number().int().min(1).max(10) }),
   pourPerDay: z.number().int().min(1).max(10),
+  /** 동절기 타설 후 2일 0℃ 이상 유지(보온양생) — 갱폼인양은 타설일 +3일부터. 없으면 false (2026-11-02) */
+  winterCuring2Days: z.boolean().optional(),
   halfDay: halfDayOptionsSchema,
   noPMOnlyStart: z.object({ rebar: z.boolean(), alform: z.boolean() }),
   /** 지하·저층 공정. 없으면 DEFAULT_UNDERGROUND_SETTINGS */
