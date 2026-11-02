@@ -1,5 +1,5 @@
 /**
- * 발주수량 검토 줄 만들기 — 실행예산 품목 + 단열 Layout 현장 산출을 맞붙인다.
+ * 발주수량 검토 줄 만들기 — 실행예산 품목 + 단열 MAKER 현장 산출을 맞붙인다.
  *
  * 회사 양식의 핵심 규칙은 **"겹침이음 시공 규격 세분화"** 다. 실행예산은 `T:150 비드법보온판`
  * 한 줄인데 현장은 1P·2P 두 겹(55T + 95T)으로 나눠 발주한다. 두께 합이 예산 두께와 같은
@@ -22,7 +22,7 @@ export interface OrderPreset {
   ply2: number;
 }
 
-/** 단열 Layout 현장 합계 한 줄 — (노출, 겹) 별 주문 판수·현장식 면적 */
+/** 단열 MAKER 현장 합계 한 줄 — (노출, 겹) 별 주문 판수·현장식 면적 */
 export interface LayoutPlyTotal {
   exposure: OrderExposure;
   ply: 1 | 2;
@@ -65,7 +65,7 @@ export interface OrderLine {
 }
 
 export const LAYOUT_REASON = "겹침이음 시공 규격 세분화";
-export const LAYOUT_WHERE = "세대 (단열 Layout 산출)";
+export const LAYOUT_WHERE = "세대 (단열 MAKER 산출)";
 
 /** 실제로 양식에 나갈 발주 줄 */
 export function effectiveRows(line: OrderLine): OrderRow[] {

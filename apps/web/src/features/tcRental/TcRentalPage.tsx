@@ -93,7 +93,7 @@ export default function TcRentalPage() {
   /** 서버에 연결된 세부 프로젝트. null = 아직 저장 대상이 없는 로컬 작업 */
   const [project, setProject] = useState<{ id: string; name: string; revNo: number } | null>(null);
   /**
-   * 도구에 들어오면 **프로젝트 화면부터** 연다 — 단열 Layout 과 같은 시작점이다.
+   * 도구에 들어오면 **프로젝트 화면부터** 연다 — 단열 MAKER 와 같은 시작점이다.
    * 초안은 그대로 복원해 두고 그 위에 띄운다. 닫으면(X) 하던 작업으로 돌아간다.
    */
   const [browserOpen, setBrowserOpen] = useState(true);

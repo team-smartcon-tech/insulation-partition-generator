@@ -40,13 +40,13 @@ export interface ToolDef {
 export const TOOLS: ToolDef[] = [
   {
     id: "insulation",
-    name: "단열 Layout",
+    name: "단열 MAKER",
     description: "외벽선을 트레이싱해 전개 입면을 만들고, 세대별 단열재·오프닝을 배치합니다.",
     path: "/tools/insulation",
     icon: Square,
     status: "available",
     tags: ["단열", "도면·산출", "웹앱"],
-    thumbnail: "/thumbs/insulation-logo.png",
+    thumbnail: "/thumbs/insulation-maker.png",
     logo: "/brand/mark-insul-layout.svg",
   },
   {
