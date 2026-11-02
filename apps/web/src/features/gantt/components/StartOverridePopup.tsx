@@ -5,7 +5,8 @@
  * 층이 기준층 시작보다 낮으면 지하·저층 순서표, 아니면 기준층 사이클의 공종.
  */
 import { useEffect, useRef } from "react";
-import { X } from "lucide-react";
+import { Save, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { SiteSettings, Stage } from "@ipg/gantt-engine";
 import { STAGE_TITLE, floorLabel } from "../ganttLabels";
 import { NumInput } from "./StepInput";
@@ -25,6 +26,13 @@ export const activeOverride = (settings: SiteSettings, id: number, planFrom: str
 
 export type StartOverrideCtx = {
   value: SiteSettings;
+  /** 저장돼 있는 이 동 보정 (저장 상태 표시용) */
+  savedOf: (id: number) => Override | null;
+  /** 이 동 보정만 현장 설정에 저장 — 오른쪽 설정에서 바꾼 다른 값은 저장하지 않는다 (2026-11-02) */
+  saveOne: (id: number, o: Override | null) => Promise<void>;
+  saving: boolean;
+  /** 예정 시작일 다음 첫 작업일 (일요일·공휴일이면 그다음) — 화면 표기용 */
+  firstWorkday: string;
   onChange: (next: SiteSettings) => void;
   /** 이번 예정 시작일 (마지막 일보 다음 날) */
   planFrom: string;
@@ -114,7 +122,7 @@ export default function StartOverridePopup({
         </button>
       </div>
       <p className="mb-2 text-xs text-muted-foreground">
-        예정 첫날({md(planFrom)}) 할 층·공종. 오후까지 정하면 첫날은 그대로 고정, 다음 칸부터 엔진이 이어 갑니다. 새 일보가 들어오면 자동으로 풀립니다.
+        예정 첫날({md(ctx.firstWorkday)}) 할 층·공종. 오후까지 정하면 첫날은 그대로 고정, 다음 칸부터 엔진이 이어 갑니다. 새 일보가 들어오면 자동으로 풀립니다.
       </p>
       <div className="space-y-1.5 text-sm">
         <div className="flex items-center gap-1.5">
@@ -175,7 +183,20 @@ export default function StartOverridePopup({
       {ctx.stale.includes(id) ? (
         <p className="mt-2 text-xs text-amber-700">저장된 보정은 예전 예정 시작일 기준이라 쓰지 않았습니다(새 일보 반영). 다시 정하거나 그대로 두세요.</p>
       ) : null}
-      <p className="mt-2 text-[11px] text-muted-foreground">계속 쓰려면 오른쪽 설정의 「저장」.</p>
+      {(() => {
+        // 이 동 보정만 저장 (오른쪽 설정의 다른 변경과 상관없이)
+        const savedO = ctx.savedOf(id);
+        const savedActive = savedO && savedO.from === planFrom ? savedO : null;
+        const same = JSON.stringify(savedActive ?? null) === JSON.stringify(active ?? null);
+        return (
+          <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-2">
+            <span className="text-[11px] text-muted-foreground">{same ? (active ? "저장된 보정입니다." : "저장된 보정 없음") : "저장하지 않은 변경이 있습니다."}</span>
+            <Button size="sm" disabled={same || ctx.saving} onClick={() => void ctx.saveOne(id, active)}>
+              <Save /> {ctx.saving ? "저장 중…" : "저장"}
+            </Button>
+          </div>
+        );
+      })()}
     </div>
   );
 }

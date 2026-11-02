@@ -7,14 +7,14 @@ import { useEffect, useState } from "react";
 import { ExcelIcon, PrintIcon } from "./icons";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, RotateCcw, Save } from "lucide-react";
-import { DEFAULT_SITE_SETTINGS, addDays, type SiteSettings, type Stage } from "@ipg/gantt-engine";
+import { DEFAULT_SITE_SETTINGS, addDays, getDayInfo, type SiteSettings, type Stage } from "@ipg/gantt-engine";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { monthRange, shiftMonth, todayKst } from "../dates";
-import { usePlan, useSaveSettings, useSettings } from "../hooks";
+import { CALENDAR, usePlan, useSaveSettings, useSettings } from "../hooks";
 import GanttChart from "./GanttChart";
 import SettingsForm from "./SettingsForm";
-import type { StartOverrideCtx } from "./StartOverridePopup";
+import type { Override, StartOverrideCtx } from "./StartOverridePopup";
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -89,6 +89,29 @@ export default function SchedulePanel({
           value: settings,
           onChange: setOverride,
           planFrom: addDays(d.asOf, 1),
+          firstWorkday: (() => {
+            let x = addDays(d.asOf, 1);
+            for (let i = 0; i < 14 && !getDayInfo(CALENDAR, x).workable; i++) x = addDays(x, 1);
+            return x;
+          })(),
+          savedOf: (id) => ((saved.data!.settings.startOverrides ?? {})[String(id)] as Override | undefined) ?? null,
+          saving: saveS.isPending,
+          saveOne: async (id, o) => {
+            // 저장값(서버) 위에 이 동 보정만 바꿔 저장 — 오른쪽 설정에서 바꾼 다른 값은 화면에만 남는다
+            const base = saved.data!.settings;
+            const next = { ...(base.startOverrides ?? {}) };
+            if (o) next[String(id)] = o;
+            else delete next[String(id)];
+            try {
+              const savedNow = { ...base, startOverrides: next };
+              await saveS.mutateAsync(savedNow);
+              // 오른쪽 설정에 다른 변경이 없었으면 「바꿔 보기」 상태도 끝 (저장값 = 지금 값)
+              if (override && JSON.stringify(override) === JSON.stringify(savedNow)) setOverride(null);
+              toast.success(`${id}동 출발 상태 보정을 저장했습니다.`);
+            } catch (e) {
+              toast.error(`보정 저장 실패: ${(e as Error).message}`);
+            }
+          },
           baseFloorOf: (id) => saved.data!.buildings.find((x) => x.buildingNo === id)?.baseFloor ?? 2,
           computed: firstPlanned,
           stale: d.startOverride?.stale ?? [],
