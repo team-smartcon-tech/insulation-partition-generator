@@ -2,6 +2,7 @@
  * 공정표 엑셀 저장 (공정표 탭 「엑셀」 버튼, 2026-10-30). 화면 간트와 같은 규칙으로 그린다.
  * - 「공정표」 시트: 날짜마다 오전·오후 2칸. 같은 작업이면 2칸 병합. 공종 글자·색, 층 라벨 줄, 유휴 줄(이달 몇 번째), 타설 없음 줄.
  *   실적(작업일보, asOf 까지)은 보통 글씨, 예정(엔진)은 기울임. 일요일 회색, 공휴일 빨간 날짜. A3 가로 인쇄 설정.
+ *   선(2026-11-02 사용자): 제목 가운데, 표 바깥 테두리 + 날짜 사이·동 사이·줄 사이 실선. 오전·오후 사이는 선 없음, 공종 칸 테두리 없음.
  * - 「목록」 시트: 날짜·동·실적/예정·반일·층·공종 한 줄씩 (거르기·피벗용).
  * exceljs 는 무거워서 누를 때 불러온다.
  */
@@ -71,6 +72,8 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
   ws.mergeCells(1, 1, 1, lastCol);
   ws.getCell(1, 1).value = `${siteName}  ${y}년 ${Number(m)}월 공정표`;
   ws.getCell(1, 1).font = { bold: true, size: 14 };
+  ws.getCell(1, 1).alignment = { horizontal: "center", vertical: "middle" };
+  ws.getRow(1).height = 24;
   ws.mergeCells(2, 1, 2, lastCol);
   ws.getCell(2, 1).value = asOf
     ? `작업일보 실적 ${asOf} 까지(보통 글씨), 이후 엔진 예정(기울임). 칸 왼쪽 오전 · 오른쪽 오후.`
@@ -93,7 +96,6 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
     n.value = Number(d.date.slice(8));
     n.font = { bold: d.isSunday || d.isHoliday, color: { argb: d.isSunday || d.isHoliday ? "FFDC2626" : "FF0F172A" } };
     n.alignment = { horizontal: "center" };
-    n.border = { bottom: thin("FF94A3B8") };
     if (dayBg(i)) [w, n].forEach((x) => (x.fill = fill(dayBg(i)!)));
   });
 
@@ -131,21 +133,21 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
     if (c2 > c1) ws.mergeCells(row, c1, row, c2);
     const x = ws.getCell(row, c1);
     const f = GROUP_FILL[cell.group];
-    x.value = cell.text;
+    // 유휴 줄 숫자는 숫자로 (글자로 넣으면 엑셀이 「텍스트 형식 숫자」 초록 삼각형을 띄운다)
+    x.value = /^\d+$/.test(cell.text) ? Number(cell.text) : cell.text;
     x.font = { size: 8, italic: cell.planned, color: { argb: cell.planned ? "FF475569" : "FF0F172A" } };
     x.alignment = { horizontal: "center", vertical: "middle", wrapText: true, shrinkToFit: false };
-    // 합친 칸은 첫 칸에만 테두리를 주면 오른쪽 외곽선이 빠진다 — 범위의 모든 칸에 바깥 테두리
-    const b = thin(`FF${f.border}`);
-    for (let cc = c1; cc <= c2; cc++) {
-      const y = ws.getCell(row, cc);
-      y.fill = fill(`FF${f.bg}`);
-      y.border = { top: b, bottom: b, ...(cc === c1 ? { left: b } : {}), ...(cc === c2 ? { right: b } : {}) };
-    }
+    // 공종 칸은 색만 (테두리 없음 — 표 실선은 grid 에서 한 번에)
+    for (let cc = c1; cc <= c2; cc++) ws.getCell(row, cc).fill = fill(`FF${f.bg}`);
   };
 
   let row = 5;
   const list: (string | number)[][] = [];
+  // 실선을 그을 줄 묶음 [첫 줄, 끝 줄] — 표1: 머리줄(요일·날짜) + 동마다(층 라벨·작업 2줄), 표2: 유휴·타설 없음 줄마다
+  const bandsTop: [number, number][] = [[3, 4]];
+  const bandsBottom: [number, number][] = [];
   for (const id of data.buildingIds) {
+    bandsTop.push([row, row + 1]);
     // 층 라벨 줄
     const fr = ws.getRow(row);
     fr.height = 11;
@@ -219,6 +221,7 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
       else if (dayBg(i)) [col(i, 0), col(i, 1)].forEach((cc) => (ws.getCell(row, cc).fill = fill(dayBg(i)!)));
     });
     ws.getRow(row).height = 16;
+    bandsBottom.push([row, row]);
     row++;
   }
   // 타설 없음 줄
@@ -242,6 +245,33 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
     }
   });
   ws.getRow(row).height = 16;
+  bandsBottom.push([row, row]);
+
+  // 표 실선: 바깥은 진하게, 안쪽(날짜 사이·줄 묶음 사이)은 연하게. 오전·오후 사이는 선 없음.
+  // 예정 시작 왼쪽 굵은 파란 선은 그대로 둔다
+  const OUT = thin("FF475569");
+  const IN = thin("FFCBD5E1");
+  const grid = (bands: [number, number][]) => {
+    if (!bands.length) return;
+    const first = bands[0][0];
+    const last = bands[bands.length - 1][1];
+    for (const [r1, r2] of bands)
+      for (let r = r1; r <= r2; r++)
+        for (let cc = 1; cc <= lastCol; cc++) {
+          const x = ws.getCell(r, cc);
+          const dayStart = cc === 1 || cc === 2 || (cc > 2 && (cc - 2) % 2 === 0);
+          const dayEnd = cc === 1 || cc === lastCol || (cc - 2) % 2 === 1;
+          const keepLeft = x.border?.left?.style === "medium" ? x.border.left : undefined;
+          x.border = {
+            ...(keepLeft ? { left: keepLeft } : dayStart ? { left: cc === 1 ? OUT : IN } : {}),
+            ...(dayEnd ? { right: cc === lastCol ? OUT : IN } : {}),
+            ...(r === r1 ? { top: r === first ? OUT : IN } : {}),
+            ...(r === r2 ? { bottom: r === last ? OUT : IN } : {}),
+          };
+        }
+  };
+  grid(bandsTop);
+  grid(bandsBottom);
   row += 2;
 
   // 범례
