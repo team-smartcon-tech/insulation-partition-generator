@@ -8,6 +8,8 @@ export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD
 export const halfDayOptionsSchema = z.object({
   alformPMStart: z.boolean(),
   gangformPMAfterMarking: z.boolean(),
+  /** 동절기 양생일(타설 다음 날)에도 먹매김 오전 → 오후 갱폼인양. 없으면 false = 양생일 갱폼 불가 (2026-11-02) */
+  curingDayGangformPM: z.boolean().optional(),
   wallRebarPM: z.boolean(),
   slabRebarPM: z.boolean(),
 })
