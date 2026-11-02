@@ -1,5 +1,5 @@
 /**
- * 단열재 자재 발주의뢰서 — 실행예산 내역서를 올리고, 단열 Layout 산출과 맞춰 본 뒤 양식으로 내보낸다.
+ * 단열재 자재 발주의뢰서 — 실행예산 내역서를 올리고, 단열 MAKER 산출과 맞춰 본 뒤 양식으로 내보낸다.
  *
  * 흐름: ① 실행예산 통합 문서(2-2 건축(기) · 11-3 건축(확+옵) 시트가 든 xlsx) 업로드
  *       ② 지급자재 단열재 품목이 자동으로 잡히고, 세대 외벽 품목(09.내장목공사)은 Layout 두께별 물량으로
@@ -38,7 +38,7 @@ export default function InsulOrderDialog({
   onClose: () => void;
   /** 프로젝트 이름 — 표지·제목의 [현장명] 기본값 */
   defaultSiteName: string;
-  /** 단열 Layout 현장 합계 (노출·겹별) */
+  /** 단열 MAKER 현장 합계 (노출·겹별) */
   totals: LayoutTotals;
   presets: OrderPreset[];
   /** 현장산출서 — 있으면 맨 뒤에 「현장산출검토」 시트로 붙는다 */
@@ -205,7 +205,7 @@ export default function InsulOrderDialog({
 
           {/* Layout 합계 */}
           <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-[12.5px] text-slate-600">
-            <span className="font-bold text-slate-700">단열 Layout 현장 합계</span>
+            <span className="font-bold text-slate-700">단열 MAKER 현장 합계</span>
             {totals.plies.length === 0 ? (
               <span className="ml-2 text-amber-700">
                 산출된 물량이 없습니다 — 동·타입 설정에서 세대수를 넣고 입면에 타입을 지정하면 겹별 물량이 잡힙니다.

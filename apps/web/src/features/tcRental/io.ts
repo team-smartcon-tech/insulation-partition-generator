@@ -172,7 +172,7 @@ export function downloadText(filename: string, text: string, mime = "text/plain"
 
 // ── 초안 저장 ────────────────────────────────────────────────────────────────
 // 저장 원천이 아니라 "새로고침으로 날아가는 것"만 막는 안전망이다.
-// 계획 문서는 수십 KB 수준이라 localStorage 로 충분하다(단열 Layout 은 DXF 원문 때문에
+// 계획 문서는 수십 KB 수준이라 localStorage 로 충분하다(단열 MAKER 는 DXF 원문 때문에
 // IndexedDB 를 쓰지만 여기는 그럴 이유가 없다).
 
 const DRAFT_KEY = "sd-tc-rental-draft";

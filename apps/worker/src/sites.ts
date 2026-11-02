@@ -233,7 +233,7 @@ sites.delete("/:siteId", async (c) => {
     // 현장은 여러 도구가 공유하므로, 어느 도구의 세부 프로젝트가 남아 있어도 삭제를 막는다.
     // (TC 임대계획 쪽은 FK 가 on delete set null 이라 막지 않으면 조용히 "미분류"로 떨어진다)
     const owners: Array<{ table: string; label: string }> = [
-      { table: "elev_projects", label: "단열 Layout" },
+      { table: "elev_projects", label: "단열 MAKER" },
       { table: "tc_rental_projects", label: "TC 임대계획" },
     ];
     const blocking: string[] = [];

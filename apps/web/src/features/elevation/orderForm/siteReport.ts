@@ -260,7 +260,7 @@ export function addSiteReportSheet(wb: ExcelJS.Workbook, r: SiteReport, opts: Si
   note(
     ws,
     row,
-    `단열 Layout 산출 · 정척 ${opts.boardLength}×${opts.boardHeight}mm · 세대수 ${r.total.units.toLocaleString("ko-KR")} · 작성 ${dateLabel}`,
+    `단열 MAKER 산출 · 정척 ${opts.boardLength}×${opts.boardHeight}mm · 세대수 ${r.total.units.toLocaleString("ko-KR")} · 작성 ${dateLabel}`,
     lastCol,
   );
   row += 1;
