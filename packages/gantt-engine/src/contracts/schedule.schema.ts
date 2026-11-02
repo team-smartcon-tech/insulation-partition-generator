@@ -115,6 +115,8 @@ export const startOverrideSchema = z.object({
   stage: z.string().min(1).max(20),
   /** 오후 공종 (기준층만). 없으면 엔진이 정한다 — 있으면 첫날 오전·오후를 그대로 고정 */
   pm: z.string().min(1).max(20).optional(),
+  /** 첫날 오전 비움 — stage 는 오후 공종 (기준층만) */
+  amEmpty: z.boolean().optional(),
 })
 
 export const siteSettingsSchema = z.object({

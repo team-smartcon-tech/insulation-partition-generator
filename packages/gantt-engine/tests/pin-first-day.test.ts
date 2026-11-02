@@ -61,3 +61,16 @@ describe("오전만 고정", () => {
     assert.equal(p.state.stage, "SLAB_REBAR")
   })
 })
+
+describe("오전 비움", () => {
+  it("오전 비우고 오후 W철근 → 오후 칸만, 다음은 W기전", () => {
+    const p = pinFirstDay({ calendar, from: "2026-11-02", buildingId: 405, floor: 37, topFloor: 42, am: "WALL_REBAR", amEmpty: true, lastPourDate: null })
+    assert.deepEqual(p.fixed.map((a) => `${a.half} ${a.stage}`), ["PM WALL_REBAR"])
+    assert.equal(p.state.stage, "WALL_MEP")
+    assert.equal(p.state.readySlot, 2)
+  })
+  it("오전 비우고 오후 알폼 → 오후 + 다음 날 오전", () => {
+    const p = pinFirstDay({ calendar, from: "2026-11-02", buildingId: 405, floor: 37, topFloor: 42, am: "ALFORM", amEmpty: true, lastPourDate: null })
+    assert.deepEqual(p.fixed.map((a) => `${a.date.slice(5)}${a.half} ${a.stage}`), ["11-02PM ALFORM", "11-03AM ALFORM"])
+  })
+})

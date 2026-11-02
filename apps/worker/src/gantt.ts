@@ -656,7 +656,7 @@ gantt.post("/plan", async (c) => {
     }
     // 출발 상태 보정 (2026-11-02): settings.startOverrides[동] = {from, floor, stage}. from 이 이번 예정 시작일과 같을 때만 쓴다
     // (새 일보가 들어와 시작일이 바뀌면 무효 — 화면에 안내). 층이 기준층 시작보다 낮으면 지하·저층 순서표, 아니면 기준층 사이클
-    const overrides = new Map<number, { floor: number; stage: Stage; pm?: Stage }>();
+    const overrides = new Map<number, { floor: number; stage: Stage; pm?: Stage; amEmpty?: boolean }>();
     const staleOverrides: number[] = [];
     for (const [k, o] of Object.entries(req.settings.startOverrides ?? {})) {
       const no = Number(k);
@@ -669,7 +669,8 @@ gantt.post("/plan", async (c) => {
       }
       // 오후 공종은 기준층만, 기준층 사이클 공종일 때만 (아니면 엔진이 정한다)
       const pm = o.pm && o.floor >= baseFloorOf(no) && (STAGES as readonly string[]).includes(o.pm) && !UNDERGROUND_STAGES.includes(o.pm as Stage) ? (o.pm as Stage) : undefined;
-      overrides.set(no, { floor: o.floor, stage, ...(pm ? { pm } : {}) });
+      const amEmpty = o.amEmpty === true && o.floor >= baseFloorOf(no) && stage !== "POUR";
+      overrides.set(no, { floor: o.floor, stage, ...(pm ? { pm } : {}), ...(amEmpty ? { amEmpty } : {}) });
     }
     for (const [no, o] of overrides) {
       unplanned.delete(no);
@@ -728,7 +729,7 @@ gantt.post("/plan", async (c) => {
         const prev = progress.initial.find((b) => b.id === no);
         const topFloor = topFloorOf(no) ?? prev?.topFloor ?? null;
         // 첫날 오전(·오후)은 정한 대로 고정하고 그 다음 칸부터 엔진 (pinFirstDay). 오후를 안 정했으면 오전만 고정
-        const p = pinFirstDay({ calendar: req.calendar, from: planFrom, buildingId: no, floor: o.floor, topFloor, am: o.stage, pm: o.pm, lastPourDate: prev?.lastPourDate ?? null });
+        const p = pinFirstDay({ calendar: req.calendar, from: planFrom, buildingId: no, floor: o.floor, topFloor, am: o.stage, pm: o.pm, amEmpty: o.amEmpty, lastPourDate: prev?.lastPourDate ?? null });
         pinned.push(...p.fixed);
         return { id: no, pours: 0, topFloor, rooftopFloors: rooftops.get(no) ?? 0, ...p.state };
       }),

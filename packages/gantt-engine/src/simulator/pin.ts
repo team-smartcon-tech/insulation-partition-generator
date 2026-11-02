@@ -29,6 +29,8 @@ export function pinFirstDay(input: {
   am: Stage
   /** 없으면 오전만 고정 */
   pm?: Stage | null
+  /** 오전 비움 — am 을 오후 칸부터 (pm 무시) */
+  amEmpty?: boolean
   /** 일보의 마지막 타설일 (am 이 타설이 아니면 그대로) */
   lastPourDate: IsoDate | null
 }): PinnedStart {
@@ -41,7 +43,7 @@ export function pinFirstDay(input: {
   }
 
   // 오전 타설: 그날로 끝, 다음 날 한 층 위 먹매김
-  if (input.am === "POUR") {
+  if (input.am === "POUR" && !input.amEmpty) {
     const date = slots[0].date
     const readyDate = addDays(date, 1)
     return {
@@ -59,12 +61,14 @@ export function pinFirstDay(input: {
   }
 
   // 오후를 안 정했으면 오전 공종을 자기 칸 수만큼(알폼 = 오전·오후) 고정하고 끝
-  const last: Stage = input.pm ?? input.am
-  const fixed: Assignment[] = input.pm ? [at(0, input.am), at(1, input.pm)] : [at(0, input.am)]
+  // 오전 비움: am 을 오후 칸부터
+  const pm = input.amEmpty ? null : input.pm
+  const last: Stage = pm ?? input.am
+  const fixed: Assignment[] = input.amEmpty ? [at(1, input.am)] : pm ? [at(0, input.am), at(1, pm)] : [at(0, input.am)]
   // last 가 더 써야 하는 칸 (같은 공종으로 하루를 채웠으면 2칸, 아니면 1칸을 쓴 것)
-  const used = !input.pm ? 1 : input.pm === input.am ? 2 : 1
+  const used = !pm ? 1 : pm === input.am ? 2 : 1
   const more = Math.max(0, (STAGE_SLOTS[last] ?? 1) - used)
-  let end = input.pm ? 1 : 0
+  let end = input.amEmpty || pm ? 1 : 0
   for (let k = 0; k < more; k++) fixed.push(at(++end, last))
   let readySlot = end + 1
   let readyDate = slots[readySlot]?.date ?? addDays(slots[end].date, 1)
