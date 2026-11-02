@@ -6,6 +6,8 @@
 //   - pm ≠ am 이면 am 은 오전에 끝난 것으로 보고, pm 은 자기 칸 수만큼(알폼 오후 투입 = 오후 + 다음 날 오전) 고정.
 //   - 슬래브 기전으로 끝나면 타설은 다음 날부터(엔진 규칙과 같다).
 //   - pm 이 없으면 오전만 고정(오전 공종이 여러 칸이면 그만큼 이어서), 그다음 칸부터 엔진.
+//   - 오후 비움(pmEmpty)이면 오전만 고정하고 오후는 빈 칸, 오전 공종의 남은 칸·다음 공종은 다음 날부터.
+//   - 고정 안 함(free)이면 고정 칸 없이 그 층·공종부터 엔진(비운 칸 다음부터).
 // 고정한 칸의 팀 용량은 엔진이 모른다 — 사용자가 정한 값이므로 그대로 둔다.
 import { addDays, type IsoDate } from "../calendar/date.ts"
 import type { CalendarConfig } from "../calendar/calendar.ts"
@@ -31,6 +33,10 @@ export function pinFirstDay(input: {
   pm?: Stage | null
   /** 오전 비움 — am 을 오후 칸부터 (pm 무시) */
   amEmpty?: boolean
+  /** 오후 비움 — 첫날 오후는 아무것도 안 함. 오전 공종이 칸이 더 남았으면 다음 날부터 이어서 (2026-11-02) */
+  pmEmpty?: boolean
+  /** 고정 안 함 — am 은 엔진의 출발 공종일 뿐, 그 층·공종부터 엔진이 정한다 (amEmpty 면 오후, pmEmpty 도면 다음 날부터) */
+  free?: boolean
   /** 일보의 마지막 타설일 (am 이 타설이 아니면 그대로) */
   lastPourDate: IsoDate | null
 }): PinnedStart {
@@ -40,6 +46,15 @@ export function pinFirstDay(input: {
   const slotAt = (date: IsoDate) => {
     const i = slots.findIndex((s) => s.date >= date)
     return i < 0 ? slots.length : i
+  }
+
+  // 고정 안 함: 고정 칸 없이 비운 칸 다음부터 엔진
+  if (input.free) {
+    const readySlot = !input.amEmpty ? 0 : input.pmEmpty ? 2 : 1
+    return {
+      fixed: [],
+      state: { stage: input.am, floor: input.floor, done: false, lastPourDate: input.lastPourDate, readyDate: slots[readySlot].date, readySlot, prevEndSlot: -1 },
+    }
   }
 
   // 오전 타설: 그날로 끝, 다음 날 한 층 위 먹매김
@@ -61,14 +76,14 @@ export function pinFirstDay(input: {
   }
 
   // 오후를 안 정했으면 오전 공종을 자기 칸 수만큼(알폼 = 오전·오후) 고정하고 끝
-  // 오전 비움: am 을 오후 칸부터
-  const pm = input.amEmpty ? null : input.pm
+  // 오전 비움: am 을 오후 칸부터. 오후 비움: 오후 칸을 건너뛰고 남은 칸은 다음 날부터
+  const pm = input.amEmpty || input.pmEmpty ? null : input.pm
   const last: Stage = pm ?? input.am
   const fixed: Assignment[] = input.amEmpty ? [at(1, input.am)] : pm ? [at(0, input.am), at(1, pm)] : [at(0, input.am)]
   // last 가 더 써야 하는 칸 (같은 공종으로 하루를 채웠으면 2칸, 아니면 1칸을 쓴 것)
   const used = !pm ? 1 : pm === input.am ? 2 : 1
   const more = Math.max(0, (STAGE_SLOTS[last] ?? 1) - used)
-  let end = input.amEmpty || pm ? 1 : 0
+  let end = input.amEmpty || input.pmEmpty || pm ? 1 : 0
   for (let k = 0; k < more; k++) fixed.push(at(++end, last))
   let readySlot = end + 1
   let readyDate = slots[readySlot]?.date ?? addDays(slots[end].date, 1)

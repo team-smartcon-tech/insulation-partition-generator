@@ -131,6 +131,7 @@ export default function SettingsPanel({ siteId, siteName }: { siteId: string | n
         <div className="max-w-xl">
           <SettingsForm
             part="base"
+            siteId={siteId}
             value={settings}
             onChange={(next) => {
               setSettings(next);

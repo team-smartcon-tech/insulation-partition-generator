@@ -2,10 +2,10 @@
  * 준공일 역산 (2026-11-01 사용자: 준공일도 스마트웍스에 있어 → 준공일에 맞는 택트·인원을 거꾸로).
  * 준공일 = 스마트웍스 현장 개요 공사기간 끝(바꿀 수 있음). 마감에 쓸 기간 = 준공 − 준공 전 여유 − 마감 착수일.
  * 그 안에 끝나는 가장 긴 택트(= 가장 적은 인원)를 구간 층수별로 보여 주고, 고르면 택트·구간 층수에 넣는다(직접 정한 인원은 자동으로).
- * 택트 일수는 마감 공정표처럼 달력일(일요일 포함)로 본다. 착수일·여유·준공일 수정은 이 브라우저에만 기억(저장 안 함).
+ * 택트 일수는 마감 공정표처럼 작업일(일요일만 빼고 공휴일은 작업, 2026-11-02)로 본다. 준공 전 여유는 달력일. 착수일·여유·준공일 수정은 이 브라우저에만 기억(저장 안 함).
  */
 import { useEffect, useMemo, useState } from "react";
-import { taktForDeadline, type TaktInput, type TaktResult } from "@ipg/gantt-engine";
+import { addFinishWorkdays, finishWorkdaysBetween, taktForDeadline, type TaktInput, type TaktResult } from "@ipg/gantt-engine";
 import { cn } from "@/lib/utils";
 import { addDays, todayKst } from "../dates";
 import { useSitePeriod } from "../hooks";
@@ -62,7 +62,8 @@ export default function DeadlineCard({
   const buffer = Number(bufferText);
   const valid = isDate(completion) && isDate(start) && Number.isInteger(buffer) && buffer >= 0;
   const target = valid ? addDays(completion, -buffer) : null;
-  const available = target ? daysBetween(start, target) : 0;
+  // 마감에 쓸 작업일 (일요일 빼고)
+  const available = target ? finishWorkdaysBetween(start, target) : 0;
 
   const maxFloors = Math.max(...input.buildingFloors);
   const rows = useMemo(() => {
@@ -71,7 +72,7 @@ export default function DeadlineCard({
     return zones.map((z) => taktForDeadline(input, available, z, 60, prepare));
   }, [input, available, target, maxFloors, prepare]);
 
-  const nowEnd = addDays(start, Math.ceil(result.totalDays - 1e-9));
+  const nowEnd = addFinishWorkdays(start, Math.ceil(result.totalDays - 1e-9));
   const nowLate = target ? daysBetween(target, nowEnd) : 0;
 
   return (
@@ -80,7 +81,7 @@ export default function DeadlineCard({
       <p className="mb-3 text-xs text-muted-foreground">
         ① 준공일·여유·마감 착수일을 맞추면 ② 마감이 끝나야 하는 날까지 끝나는 <b>가장 긴 택트</b>(= 가장 적은 인원)를 구간 층수별로 보여 줍니다. ③ 인원·공기를 보고
         한 줄을 「적용」 하면 위 택트·구간 층수와 아래 공종 표 인원이 그 값으로 바뀝니다 → 「저장」. 인원은 자동 인원 기준, 기포방통 같은 고정 일수 공종은 구간 층수에
-        비례. 일수는 달력일(마감 공정표처럼 일요일 포함).
+        비례. 일수는 작업일(마감 공정표처럼 일요일만 빼고 공휴일은 작업), 준공 전 여유는 달력일.
       </p>
 
       <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
@@ -153,7 +154,7 @@ export default function DeadlineCard({
               <tbody>
                 {rows.map((r) => {
                   const current = r.zoneFloors === input.zoneFloors;
-                  const end = addDays(start, Math.ceil(r.result.totalDays - 1e-9));
+                  const end = addFinishWorkdays(start, Math.ceil(r.result.totalDays - 1e-9));
                   const applied = current && r.taktDays === input.taktDays && input.trades.every((t) => t.mode === "fixed" || t.crew == null);
                   return (
                     <tr key={r.zoneFloors} className={cn("border-t border-border/60", current && "bg-muted/40")}>

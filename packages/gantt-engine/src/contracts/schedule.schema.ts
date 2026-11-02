@@ -117,6 +117,24 @@ export const startOverrideSchema = z.object({
   pm: z.string().min(1).max(20).optional(),
   /** 첫날 오전 비움 — stage 는 오후 공종 (기준층만) */
   amEmpty: z.boolean().optional(),
+  /** 첫날 오후 비움 (기준층만) */
+  pmEmpty: z.boolean().optional(),
+  /** 고정 안 함 — stage 는 엔진의 출발 공종 (층만 바꾸거나 비운 칸 다음부터 엔진) */
+  free: z.boolean().optional(),
+})
+
+/** "MM-DD" */
+const monthDaySchema = z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/)
+export const monthDayRangeSchema = z.object({ start: monthDaySchema, end: monthDaySchema })
+
+/**
+ * 한중 기간 (2026-11-02). 켜면 동절기 양생을 11~3월 대신 이 기간으로 판정한다.
+ * stationId = 기상청 관측소(10년 평균 4℃ 이하 기간), range = 직접 고친 기간(있으면 관측소 값보다 먼저).
+ */
+export const coldWeatherSettingsSchema = z.object({
+  enabled: z.boolean(),
+  stationId: z.number().int().positive().nullable().optional(),
+  range: monthDayRangeSchema.nullable().optional(),
 })
 
 export const siteSettingsSchema = z.object({
@@ -128,6 +146,8 @@ export const siteSettingsSchema = z.object({
   pourPerDay: z.number().int().min(1).max(10),
   /** 동절기 타설 후 2일 0℃ 이상 유지(보온양생) — 갱폼인양은 타설일 +3일부터. 없으면 false (2026-11-02) */
   winterCuring2Days: z.boolean().optional(),
+  /** 한중 기간 — 없거나 꺼져 있으면 11~3월 */
+  coldWeather: coldWeatherSettingsSchema.optional(),
   /** 동 번호 → 출발 상태 보정 */
   startOverrides: z.record(z.string(), startOverrideSchema).optional(),
   halfDay: halfDayOptionsSchema,
@@ -153,6 +173,7 @@ export const calendarConfigSchema = z.object({
   sundayOff: z.boolean().optional(),
   saturdayPourAllowed: z.boolean().optional(),
   winterCuringMonths: z.array(z.number().int().min(1).max(12)).optional(),
+  winterCuringRange: monthDayRangeSchema.optional(),
 })
 
 export const simulateRequestSchema = z.object({
@@ -318,6 +339,7 @@ export type PlanResponse = z.infer<typeof planResponseSchema>
 
 export type HalfDayOptions = z.infer<typeof halfDayOptionsSchema>
 export type SiteSettings = z.infer<typeof siteSettingsSchema>
+export type ColdWeatherSettings = z.infer<typeof coldWeatherSettingsSchema>
 export type UndergroundSettings = z.infer<typeof undergroundSettingsSchema>
 export type UndergroundZone = z.infer<typeof undergroundZoneSchema>
 export type FinishTradePlan = z.infer<typeof finishTradePlanSchema>

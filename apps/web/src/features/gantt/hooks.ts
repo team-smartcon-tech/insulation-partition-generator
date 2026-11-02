@@ -3,7 +3,7 @@
  */
 import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { DEFAULT_SITE_SETTINGS, DEFAULT_TAKT_INPUT, KR_HOLIDAYS_2026_Q4, taktLinks, type ActualWork, type FrameReady, type PlanResponse, type SiteSettings } from "@ipg/gantt-engine";
+import { DEFAULT_SITE_SETTINGS, DEFAULT_TAKT_INPUT, KR_HOLIDAYS_2026_Q4, coldRangeOf, taktLinks, type ActualWork, type FrameReady, type PlanResponse, type SiteSettings } from "@ipg/gantt-engine";
 import { addDays, monthRange } from "./dates";
 import { buildFramePours, buildFrameReady, type FramePours } from "./framePours";
 import { draftOf, inputOf } from "./takt/draft";
@@ -73,6 +73,12 @@ export function useFinish(siteId: string | null) {
 /** 달력. 공휴일은 아직 2026-10 만 상수 — 현장 달력(DB)으로 옮길 예정 */
 export const CALENDAR = { holidays: [...KR_HOLIDAYS_2026_Q4] };
 
+/** 현장 설정이 들어간 달력 — 한중 기간을 켜면 동절기 양생을 그 기간으로 (2026-11-02) */
+export function calendarOf(settings: SiteSettings) {
+  const range = coldRangeOf(settings.coldWeather);
+  return range ? { ...CALENDAR, winterCuringRange: range } : CALENDAR;
+}
+
 export function useSites() {
   return useQuery({ queryKey: ganttKeys.sites(), queryFn: listSites, staleTime: 5 * 60_000 });
 }
@@ -96,7 +102,7 @@ export function useSettings(siteId: string | null) {
 export function usePlan(siteId: string | null, from: string, to: string, settings: SiteSettings, upTo: string) {
   return useQuery({
     queryKey: ganttKeys.plan(siteId ?? "", from, to, settings),
-    queryFn: () => planSchedule({ siteId: siteId as string, settings, calendar: CALENDAR, from, to, upTo }),
+    queryFn: () => planSchedule({ siteId: siteId as string, settings, calendar: calendarOf(settings), from, to, upTo }),
     enabled: Boolean(siteId),
     placeholderData: (prev) => prev,
   });
@@ -142,7 +148,7 @@ export function useActualHistory(siteId: string | null, from: string | null, upT
   return useQueries({
     queries: chunks.map((c) => ({
       queryKey: ganttKeys.plan(siteId ?? "", c.from, c.to, settings),
-      queryFn: () => planSchedule({ siteId: siteId as string, settings, calendar: CALENDAR, from: c.from, to: c.to, upTo }),
+      queryFn: () => planSchedule({ siteId: siteId as string, settings, calendar: calendarOf(settings), from: c.from, to: c.to, upTo }),
       enabled: Boolean(siteId),
       staleTime: 5 * 60_000,
     })),
@@ -163,7 +169,7 @@ function combineHistory(results: UseQueryResult<PlanResponse>[]) {
 export function useSimulate(from: string, to: string, settings: SiteSettings, enabled: boolean) {
   return useQuery({
     queryKey: ganttKeys.simulate(from, to, settings),
-    queryFn: () => simulateSchedule({ settings, calendar: CALENDAR, from, to, warmupFrom: "2026-09-01" }),
+    queryFn: () => simulateSchedule({ settings, calendar: calendarOf(settings), from, to, warmupFrom: "2026-09-01" }),
     enabled,
     placeholderData: (prev) => prev,
   });

@@ -5,14 +5,23 @@
  * 층이 기준층 시작보다 낮으면 지하·저층 순서표, 아니면 기준층 사이클의 공종.
  */
 import { useEffect, useRef } from "react";
-import { Save, X } from "lucide-react";
+import { RotateCcw, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { SiteSettings, Stage } from "@ipg/gantt-engine";
 import { STAGE_TITLE, floorLabel } from "../ganttLabels";
 import { NumInput } from "./StepInput";
 
-/** stage = 오전 공종(amEmpty 면 오후 공종), pm = 오후 공종, amEmpty = 첫날 오전 비움(오후만 고정) */
-export type Override = { from: string; floor: number; stage: string; pm?: string; amEmpty?: boolean };
+/**
+ * stage = 오전 공종(amEmpty 면 오후 공종), pm = 오후 공종, amEmpty = 첫날 오전 비움(오후만 고정), pmEmpty = 첫날 오후 비움,
+ * free = 고정 안 함 — stage 는 엔진이 출발할 공종일 뿐 (층만 바꾸거나, 비운 칸 다음부터 엔진)
+ */
+export type Override = { from: string; floor: number; stage: string; pm?: string; amEmpty?: boolean; pmEmpty?: boolean; free?: boolean };
+
+/** 팝업 선택값: 엔진이 정함 / 비어 있음 / 공종 */
+const AUTO = "";
+const EMPTY = "EMPTY";
+type Pick = Stage | typeof AUTO | typeof EMPTY;
+const isStage = (v: Pick): v is Stage => v !== AUTO && v !== EMPTY;
 
 /** 기준층 사이클에서 고를 수 있는 공종 (순서대로) */
 const BASE_STAGES: Stage[] = ["MARK", "GANGFORM", "WALL_REBAR", "WALL_MEP", "ALFORM", "TOP_INSULATION", "SLAB_REBAR", "SLAB_MEP", "POUR"];
@@ -90,31 +99,45 @@ export default function StartOverridePopup({
   const floor = active?.floor ?? cur?.floor ?? baseFloor;
   const ug = floor < baseFloor;
   const options = ug ? UG_STAGES : BASE_STAGES;
-  // 지금 보이는 오전·오후 ("" = 비어 있음 / 엔진이 정함). 보정이 없으면 엔진 첫날 값
-  const amVal = (active ? (active.amEmpty ? "" : active.stage) : ((ug ? cur?.stage : cur?.am) ?? "")) as Stage | "";
-  const pmVal = (ug ? "" : active ? (active.amEmpty ? active.stage : (active.pm ?? "")) : "") as Stage | "";
-  /** 오전·오후 → 저장 값. 둘 다 비면 보정 없음. 오전을 비우고 오후만 = amEmpty(오후만 고정). 오후가 오전보다 앞서면 오후는 엔진 */
-  const make = (am: Stage | "", pm: Stage | "", fl = floor): Override | null => {
+  // 지금 보이는 오전·오후. 보정이 없으면 둘 다 엔진이 정함 (엔진 값은 아래 「일보 기준」)
+  const amVal: Pick = !active || (active.free && !active.amEmpty) ? AUTO : active.amEmpty ? EMPTY : (active.stage as Stage);
+  const pmVal: Pick =
+    ug || !active || (active.free && !active.pmEmpty) ? AUTO : active.pmEmpty ? EMPTY : active.amEmpty ? (active.stage as Stage) : ((active.pm as Stage | undefined) ?? AUTO);
+  // 고정하지 않고 엔진이 출발할 공종 (지금 보정 → 엔진 첫 공종 → 먹매김)
+  const startOf = (opts: Stage[]) => [active?.stage as Stage | undefined, cur?.stage].find((s): s is Stage => !!s && opts.includes(s)) ?? "MARK";
+  /**
+   * 오전·오후 → 저장 값. 오전이 엔진이면 오후도 엔진 — 층을 바꿨을 때만 보정(free). 오전 비움 + 오후 공종 = amEmpty(오후만 고정),
+   * 오전 비움 + 오후 엔진·비움 = 고정 없이 비운 칸 다음부터 엔진. 오후 비움 = pmEmpty. 오후가 오전보다 앞서면 오후는 엔진
+   */
+  const make = (am: Pick, pm: Pick, fl = floor): Override | null => {
     const opts = fl < baseFloor ? UG_STAGES : BASE_STAGES;
-    if (fl < baseFloor) return am ? { from: planFrom, floor: fl, stage: am } : null;
-    if (!am && !pm) return null;
-    if (!am) return pm === "POUR" ? null : { from: planFrom, floor: fl, stage: pm, amEmpty: true };
+    const free: Override = { from: planFrom, floor: fl, stage: startOf(opts), free: true };
+    // 층을 바꿔 지하·저층 ↔ 기준층이 바뀌면 그 순서표에 없는 공종은 엔진에 맡긴다
+    if (isStage(am) && !opts.includes(am)) am = AUTO;
+    if (fl < baseFloor) return isStage(am) ? { from: planFrom, floor: fl, stage: am } : fl !== floor || active ? free : null;
+    if (am === AUTO) return fl !== floor || active ? free : null;
+    if (am === EMPTY) {
+      if (!isStage(pm)) return { ...free, amEmpty: true, ...(pm === EMPTY ? { pmEmpty: true } : {}) };
+      return pm === "POUR" ? null : { from: planFrom, floor: fl, stage: pm, amEmpty: true };
+    }
     const o: Override = { from: planFrom, floor: fl, stage: am };
-    if (pm && am !== "POUR" && pm !== "POUR" && opts.indexOf(pm) >= opts.indexOf(am)) o.pm = pm;
+    if (am === "POUR") return o;
+    if (pm === EMPTY) o.pmEmpty = true;
+    else if (isStage(pm) && pm !== "POUR" && opts.indexOf(pm) >= opts.indexOf(am)) o.pm = pm;
     return o;
   };
-  const pmOptions = (amVal ? options.slice(Math.max(0, options.indexOf(amVal))) : options).filter((s) => s !== "POUR");
+  const pmOptions = (isStage(amVal) ? options.slice(Math.max(0, options.indexOf(amVal))) : options).filter((s) => s !== "POUR");
   const sel = "h-8 min-w-0 flex-1 rounded-md border border-input bg-card px-1 text-xs";
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   // 화면 아래쪽이면 위로 올려 붙인다
-  const top = Math.min(anchor.top, window.innerHeight - 220);
+  const top = Math.min(anchor.top, window.innerHeight - 260);
 
   return (
     <div
       ref={ref}
       role="dialog"
       aria-label={`${label} 출발 상태 보정`}
-      className="fixed z-50 w-72 rounded-lg border border-border bg-card p-3 shadow-xl print:hidden"
+      className="fixed z-50 w-80 rounded-lg border border-border bg-card p-3 shadow-xl print:hidden"
       style={{ left: anchor.right + 6, top: Math.max(8, top) }}
     >
       <div className="mb-1 flex items-center justify-between">
@@ -126,7 +149,7 @@ export default function StartOverridePopup({
         </button>
       </div>
       <p className="mb-2 text-xs text-muted-foreground">
-        예정 첫날({md(ctx.firstWorkday)}) 할 층·공종. 정한 칸은 그대로 고정, 다음 칸부터 엔진이 이어 갑니다. 오전을 비우고 오후만 정할 수도 있습니다. 새 일보가 들어오면 자동으로 풀립니다.
+        예정 첫날({md(ctx.firstWorkday)}) 할 층·공종. 정한 칸은 그대로 고정, 다음 칸부터 엔진이 이어 갑니다. 「비어 있음」은 그 반나절 작업 없음, 「엔진이 정함」은 엔진에 맡김. 새 일보가 들어오면 자동으로 풀립니다.
       </p>
       <div className="space-y-1.5 text-sm">
         <div className="flex items-center gap-1.5">
@@ -137,14 +160,15 @@ export default function StartOverridePopup({
             max={80}
             value={floor}
             aria-label={`${label} 층`}
-            onValue={(v) => v != null && v !== 0 && setOne(make(amVal || (pmVal ? "" : (cur?.stage ?? "MARK")), pmVal, v))}
+            onValue={(v) => v != null && v !== 0 && setOne(make(amVal, pmVal, v))}
           />
           <span className="shrink-0 text-xs text-muted-foreground">{floor < 0 ? `= B${-floor}F` : "F"}</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="w-8 shrink-0 text-xs text-muted-foreground">{ug ? "공종" : "오전"}</span>
-          <select value={amVal} onChange={(e) => setOne(make(e.target.value as Stage | "", pmVal))} className={sel} aria-label={`${label} ${ug ? "공종" : "오전 공종"}`}>
-            <option value="">{ug ? "엔진이 정함" : "비어 있음 (엔진이 정함)"}</option>
+          <select value={amVal} onChange={(e) => setOne(make(e.target.value as Pick, pmVal))} className={sel} aria-label={`${label} ${ug ? "공종" : "오전 공종"}`}>
+            <option value={AUTO}>엔진이 정함</option>
+            {ug ? null : <option value={EMPTY}>비어 있음</option>}
             {options.map((s) => (
               <option key={s} value={s}>
                 {STAGE_TITLE[s]}
@@ -158,8 +182,16 @@ export default function StartOverridePopup({
             {amVal === "POUR" ? (
               <span className="text-xs text-muted-foreground">타설은 그날 하루 (오후 없음)</span>
             ) : (
-              <select value={pmVal} onChange={(e) => setOne(make(amVal, e.target.value as Stage | ""))} className={sel} aria-label={`${label} 오후 공종`}>
-                <option value="">엔진이 정함</option>
+              <select
+                value={pmVal}
+                disabled={amVal === AUTO}
+                title={amVal === AUTO ? "오전을 정하거나 비워야 오후를 정할 수 있습니다" : undefined}
+                onChange={(e) => setOne(make(amVal, e.target.value as Pick))}
+                className={`${sel} disabled:opacity-60`}
+                aria-label={`${label} 오후 공종`}
+              >
+                <option value={AUTO}>엔진이 정함</option>
+                <option value={EMPTY}>비어 있음</option>
                 {pmOptions.map((s) => (
                   <option key={s} value={s}>
                     {STAGE_TITLE[s]}
@@ -170,7 +202,7 @@ export default function StartOverridePopup({
           </div>
         )}
       </div>
-      <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+      <div className="mt-2 text-xs">
         <span className="text-muted-foreground">
           일보 기준:{" "}
           {cur
@@ -179,11 +211,6 @@ export default function StartOverridePopup({
               : `${floorLabel(cur)} 오전 ${cur.am ? STAGE_TITLE[cur.am] : "비어 있음"} · 오후 ${cur.pm ? STAGE_TITLE[cur.pm] : "비어 있음"}`
             : "이 달에 예정 없음"}
         </span>
-        {active ? (
-          <button type="button" onClick={() => setOne(null)} className="shrink-0 rounded px-1.5 py-0.5 text-primary hover:bg-muted">
-            일보 기준으로
-          </button>
-        ) : null}
       </div>
       {ctx.stale.includes(id) ? (
         <p className="mt-2 text-xs text-amber-700">저장된 보정은 예전 예정 시작일 기준이라 쓰지 않았습니다(새 일보 반영). 다시 정하거나 그대로 두세요.</p>
@@ -196,9 +223,23 @@ export default function StartOverridePopup({
         return (
           <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-2">
             <span className="text-[11px] text-muted-foreground">{same ? (active ? "저장된 보정입니다." : "저장된 보정 없음") : "저장하지 않은 변경이 있습니다."}</span>
-            <Button size="sm" disabled={same || ctx.saving} onClick={() => void ctx.saveOne(id, active)}>
-              <Save /> {ctx.saving ? "저장 중…" : "저장"}
-            </Button>
+            <div className="flex shrink-0 gap-1.5">
+              {/* 일보대로: 이 동 보정을 지우고 바로 저장 */}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={(!active && !savedActive) || ctx.saving}
+                onClick={() => {
+                  setOne(null);
+                  void ctx.saveOne(id, null);
+                }}
+              >
+                <RotateCcw /> 일보대로
+              </Button>
+              <Button size="sm" disabled={same || ctx.saving} onClick={() => void ctx.saveOne(id, active)}>
+                <Save /> {ctx.saving ? "저장 중…" : "저장"}
+              </Button>
+            </div>
           </div>
         );
       })()}

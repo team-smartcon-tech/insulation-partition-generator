@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { monthRange, shiftMonth, todayKst } from "../dates";
 import { CALENDAR, usePlan, useSaveSettings, useSettings } from "../hooks";
 import GanttChart from "./GanttChart";
+import StageGantt from "./StageGantt";
 import SettingsForm from "./SettingsForm";
 import type { Override, StartOverrideCtx } from "./StartOverridePopup";
 
@@ -109,8 +110,8 @@ export default function SchedulePanel({
               const savedNow = { ...base, startOverrides: next };
               await saveS.mutateAsync(savedNow);
               // 오른쪽 설정에 다른 변경이 없었으면 「바꿔 보기」 상태도 끝 (저장값 = 지금 값)
-              if (override && JSON.stringify(override) === JSON.stringify(savedNow)) setOverride(null);
-              toast.success(`${id}동 출발 상태 보정을 저장했습니다.`);
+              setOverride((cur) => (cur && JSON.stringify(cur) === JSON.stringify(savedNow) ? null : cur));
+              toast.success(o ? `${id}동 출발 상태 보정을 저장했습니다.` : `${id}동을 일보대로 되돌렸습니다.`);
             } catch (e) {
               toast.error(`보정 저장 실패: ${(e as Error).message}`);
             }
@@ -246,6 +247,10 @@ export default function SchedulePanel({
             </div>
             <div className={plan.isFetching ? "opacity-70" : ""}>
               <GanttChart data={d} siteId={siteId} startOverride={startOverrideCtx} />
+              {/* 공정별 공정표 (2026-11-02): 줄 = 공종, 칸 = 동 번호 */}
+              <div className="mt-3">
+                <StageGantt data={d} />
+              </div>
             </div>
           </>
         ) : (
@@ -284,7 +289,7 @@ export default function SchedulePanel({
             </Button>
           </div>
         </div>
-        <SettingsForm value={settings} onChange={setOverride} />
+        <SettingsForm siteId={siteId} value={settings} onChange={setOverride} />
       </aside>
     </div>
   );

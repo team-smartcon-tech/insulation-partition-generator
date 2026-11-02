@@ -7,6 +7,9 @@ export const siteSchema = z.object({
   id: z.string(),
   name: z.string(),
   location: z.string().nullable(),
+  /** 스마트웍스 현장 좌표 (한중 기간 관측소 추천용). 없으면 null */
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
   /** 이 현장의 가장 최근 작업일보 날짜. 일보가 없으면 null. 목록은 이 값 내림차순 */
   lastReportDate: isoDateSchema.nullable(),
 })

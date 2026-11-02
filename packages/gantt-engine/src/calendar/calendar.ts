@@ -1,5 +1,6 @@
 // 달력·휴일 규칙 (설계 문서 §4). 현장 설정값은 CalendarConfig 로 받고, 여기서는 날짜를 판정만 한다.
 import { addDays, dayOfWeek, monthOf, type IsoDate } from "./date.ts"
+import { inMonthDayRange, type MonthDayRange } from "../climate/cold-period.ts"
 
 // 공용 계약(packages/shared calendarConfigSchema)과 같은 모양. rules/contract-check.ts 가 대조한다.
 export type CalendarConfig = {
@@ -11,6 +12,8 @@ export type CalendarConfig = {
   saturdayPourAllowed?: boolean
   /** 동절기 양생 적용 월 (기본 11·12·1·2·3 — §3 "11월 초~3월 말") */
   winterCuringMonths?: number[]
+  /** 동절기 양생 기간 "MM-DD"~"MM-DD" (한중 기간, 2026-11-02). 있으면 winterCuringMonths 대신 */
+  winterCuringRange?: MonthDayRange
 }
 
 export type DayInfo = {
@@ -32,6 +35,7 @@ export type DayInfo = {
 const DEFAULT_WINTER_MONTHS: number[] = [11, 12, 1, 2, 3]
 
 export function isWinterCuring(config: CalendarConfig, date: IsoDate): boolean {
+  if (config.winterCuringRange) return inMonthDayRange(config.winterCuringRange, date)
   const months = config.winterCuringMonths ?? DEFAULT_WINTER_MONTHS
   return months.includes(monthOf(date))
 }

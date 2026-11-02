@@ -74,3 +74,28 @@ describe("오전 비움", () => {
     assert.deepEqual(p.fixed.map((a) => `${a.date.slice(5)}${a.half} ${a.stage}`), ["11-02PM ALFORM", "11-03AM ALFORM"])
   })
 })
+
+describe("오후 비움 · 고정 안 함", () => {
+  it("오전 S철근 · 오후 비움 → 오전만, 다음 날부터 S기전", () => {
+    const p = pinFirstDay({ calendar, from: "2026-11-02", buildingId: 401, floor: 38, topFloor: 42, am: "SLAB_REBAR", pmEmpty: true, lastPourDate: null })
+    assert.deepEqual(cells(p), ["11-02AM SLAB_REBAR"])
+    assert.equal(p.state.stage, "SLAB_MEP")
+    assert.equal(p.state.readyDate, "2026-11-03")
+  })
+  it("오전 알폼 · 오후 비움 → 알폼 남은 칸은 다음 날 오전", () => {
+    const p = pinFirstDay({ calendar, from: "2026-11-02", buildingId: 401, floor: 38, topFloor: 42, am: "ALFORM", pmEmpty: true, lastPourDate: null })
+    assert.deepEqual(cells(p), ["11-02AM ALFORM", "11-03AM ALFORM"])
+    assert.equal(p.state.stage, "SLAB_REBAR")
+  })
+  it("오전 비움 · 오후 엔진 → 고정 없이 오후 칸부터 엔진", () => {
+    const p = pinFirstDay({ calendar, from: "2026-11-02", buildingId: 401, floor: 38, topFloor: 42, am: "SLAB_REBAR", amEmpty: true, free: true, lastPourDate: null })
+    assert.deepEqual(p.fixed, [])
+    assert.equal(p.state.stage, "SLAB_REBAR")
+    assert.equal(p.state.readySlot, 1)
+  })
+  it("오전·오후 비움 → 다음 날부터 엔진", () => {
+    const p = pinFirstDay({ calendar, from: "2026-11-02", buildingId: 401, floor: 38, topFloor: 42, am: "SLAB_REBAR", amEmpty: true, pmEmpty: true, free: true, lastPourDate: null })
+    assert.deepEqual(p.fixed, [])
+    assert.equal(p.state.readyDate, "2026-11-03")
+  })
+})

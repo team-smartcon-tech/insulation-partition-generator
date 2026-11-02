@@ -4,6 +4,16 @@
 export * from "./contracts/index.ts"
 export * from "./calendar/date.ts"
 export { getDayInfo, isWinterCuring, previousCraneDay } from "./calendar/calendar.ts"
+export {
+  coldRangeOf,
+  coldStation,
+  inMonthDayRange,
+  monthDayLabel,
+  nearestColdStations,
+  type ColdStation,
+  type MonthDayRange,
+} from "./climate/cold-period.ts"
+export { COLD_STATIONS } from "./climate/kma-cold-normals.ts"
 export { ALL_HALF_DAY_ON, ALL_HALF_DAY_OFF, SCENARIO_2026_10 } from "./rules/settings.ts"
 export { ROOFTOP_SEQUENCE, UNDERGROUND_STAGES, STAGES, STAGE_TEAM, STAGE_SLOTS, nextStage, type Team } from "./rules/stages.ts"
 export {
@@ -65,7 +75,7 @@ export {
   type FinishTrade,
   type FinishTradeKey,
 } from "./finish/gantt.ts"
-export { DEFAULT_FINISH_PLAN, FINISH_RULE_ALIAS, finishPlanOf, hasFinishPlan, planFinishBuilding, planFinishSite, type FinishPlanRow, type FrameReady } from "./finish/plan.ts"
+export { DEFAULT_FINISH_PLAN, FINISH_RULE_ALIAS, addFinishWorkdays, finishPlanOf, finishWorkday, finishWorkdaysBetween, hasFinishPlan, planFinishBuilding, planFinishSite, type FinishPlanRow, type FrameReady } from "./finish/plan.ts"
 export { buildFinishReportBars, parseFinishReport, type FinishReportBar, type FinishReportItem, type FinishReportRow } from "./finish/report.ts"
 export {
   DEFAULT_TAKT_INPUT,
