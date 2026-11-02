@@ -1,0 +1,140 @@
+/**
+ * 출발 상태 보정 팝업 (2026-11-02 사용자: 「달력 첫날 작업을 수정할 수 있나」 → 1안, 「동 숫자를 누르면 동 옆에 팝업처럼」).
+ * 예정은 마지막 작업일보에서 동마다 「몇 층·어느 공종까지 했는지」를 읽어 출발한다. 그게 현장과 다르면 간트의 동 이름을 눌러
+ * 예정 첫날의 층·공종을 직접 정한다. 값에는 예정 시작일(from)을 같이 저장해, 새 일보가 들어와 시작일이 바뀌면 서버가 무시한다.
+ * 층이 기준층 시작보다 낮으면 지하·저층 순서표, 아니면 기준층 사이클의 공종.
+ */
+import { useEffect, useRef } from "react";
+import { X } from "lucide-react";
+import type { SiteSettings, Stage } from "@ipg/gantt-engine";
+import { STAGE_TITLE, floorLabel } from "../ganttLabels";
+import { NumInput } from "./StepInput";
+
+export type Override = { from: string; floor: number; stage: string };
+
+/** 기준층 사이클에서 고를 수 있는 공종 (순서대로) */
+const BASE_STAGES: Stage[] = ["MARK", "GANGFORM", "WALL_REBAR", "WALL_MEP", "ALFORM", "TOP_INSULATION", "SLAB_REBAR", "SLAB_MEP", "POUR"];
+/** 지하·저층(재래식) 순서표 공종 */
+const UG_STAGES: Stage[] = ["MARK", "GANGFORM", "WALL_REBAR", "WALL_MEP", "FORM_WALL", "POUR_WALL", "SHORING", "FORM_SLAB", "SLAB_REBAR", "SLAB_MEP", "POUR"];
+
+/** 이 동에 지금 쓰이는 보정 (예정 시작일이 같을 때만) */
+export const activeOverride = (settings: SiteSettings, id: number, planFrom: string): Override | null => {
+  const o = (settings.startOverrides ?? {})[String(id)] as Override | undefined;
+  return o && o.from === planFrom ? o : null;
+};
+
+export type StartOverrideCtx = {
+  value: SiteSettings;
+  onChange: (next: SiteSettings) => void;
+  /** 이번 예정 시작일 (마지막 일보 다음 날) */
+  planFrom: string;
+  baseFloorOf: (id: number) => number;
+  /** 엔진이 일보로 정한 예정 첫 공종 (그 달에 보이면) */
+  computed: Map<number, { stage: Stage; floor: number }>;
+  /** 저장돼 있지만 예정 시작일이 달라 무시된 동 */
+  stale: number[];
+};
+
+export default function StartOverridePopup({
+  ctx,
+  id,
+  label,
+  anchor,
+  onClose,
+}: {
+  ctx: StartOverrideCtx;
+  id: number;
+  label: string;
+  /** 동 이름 칸의 화면 위치 — 그 오른쪽에 띄운다 */
+  anchor: DOMRect;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onDown = (e: MouseEvent) => {
+      // 동 이름 버튼은 그 버튼이 열고 닫는다(여기서 닫으면 바로 다시 열린다)
+      if ((e.target as HTMLElement).closest?.("[data-ov-anchor]")) return;
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  const { value, onChange, planFrom } = ctx;
+  const all = (value.startOverrides ?? {}) as Record<string, Override>;
+  const setOne = (next: Override | null) => {
+    const copy = { ...all };
+    if (next) copy[String(id)] = next;
+    else delete copy[String(id)];
+    onChange({ ...value, startOverrides: copy });
+  };
+  const active = activeOverride(value, id, planFrom);
+  const cur = ctx.computed.get(id);
+  const baseFloor = ctx.baseFloorOf(id);
+  const floor = active?.floor ?? cur?.floor ?? baseFloor;
+  const stage = (active?.stage ?? cur?.stage ?? "MARK") as Stage;
+  const options = floor < baseFloor ? UG_STAGES : BASE_STAGES;
+  const put = (patch: Partial<Override>) => setOne({ from: planFrom, floor, stage, ...patch });
+  const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+  // 화면 아래쪽이면 위로 올려 붙인다
+  const top = Math.min(anchor.top, window.innerHeight - 220);
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label={`${label} 출발 상태 보정`}
+      className="fixed z-50 w-72 rounded-lg border border-border bg-card p-3 shadow-xl print:hidden"
+      style={{ left: anchor.right + 6, top: Math.max(8, top) }}
+    >
+      <div className="mb-1 flex items-center justify-between">
+        <h4 className="text-sm font-semibold">
+          {label} <span className="font-normal text-muted-foreground">출발 상태 보정</span>
+        </h4>
+        <button type="button" onClick={onClose} className="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted" aria-label="닫기">
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <p className="mb-2 text-xs text-muted-foreground">
+        예정 첫날({md(planFrom)}) 할 층·공종. 일보에서 읽은 위치가 현장과 다를 때만 바꾸세요. 새 일보가 들어오면 자동으로 풀립니다.
+      </p>
+      <div className="flex items-center gap-1.5 text-sm">
+        <NumInput className="w-[56px]" min={-10} max={80} value={floor} aria-label={`${label} 층`} onValue={(v) => v != null && v !== 0 && put({ floor: v })} />
+        <span className="shrink-0 text-xs text-muted-foreground">{floor < 0 ? `= B${-floor}F` : "F"}</span>
+        <select
+          value={options.includes(stage) ? stage : options[0]}
+          onChange={(e) => put({ stage: e.target.value })}
+          className="h-8 min-w-0 flex-1 rounded-md border border-input bg-card px-1 text-xs"
+          aria-label={`${label} 공종`}
+        >
+          {options.map((s) => (
+            <option key={s} value={s}>
+              {STAGE_TITLE[s]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+        <span className="text-muted-foreground">
+          일보 기준: {cur ? `${floorLabel(cur)} ${STAGE_TITLE[cur.stage]}` : "이 달에 예정 없음"}
+        </span>
+        {active ? (
+          <button type="button" onClick={() => setOne(null)} className="shrink-0 rounded px-1.5 py-0.5 text-primary hover:bg-muted">
+            일보 기준으로
+          </button>
+        ) : null}
+      </div>
+      {ctx.stale.includes(id) ? (
+        <p className="mt-2 text-xs text-amber-700">저장된 보정은 예전 예정 시작일 기준이라 쓰지 않았습니다(새 일보 반영). 다시 정하거나 그대로 두세요.</p>
+      ) : null}
+      <p className="mt-2 text-[11px] text-muted-foreground">계속 쓰려면 오른쪽 설정의 「저장」.</p>
+    </div>
+  );
+}
