@@ -111,7 +111,10 @@ export const finishPlanSettingsSchema = z.record(z.string(), finishTradePlanSche
 export const startOverrideSchema = z.object({
   from: isoDateSchema,
   floor: z.number().int().min(-10).max(80),
+  /** 오전(또는 첫) 공종 */
   stage: z.string().min(1).max(20),
+  /** 오후 공종 (기준층만). 없으면 엔진이 정한다 — 있으면 첫날 오전·오후를 그대로 고정 */
+  pm: z.string().min(1).max(20).optional(),
 })
 
 export const siteSettingsSchema = z.object({

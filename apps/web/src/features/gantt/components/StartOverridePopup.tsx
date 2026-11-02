@@ -10,7 +10,7 @@ import type { SiteSettings, Stage } from "@ipg/gantt-engine";
 import { STAGE_TITLE, floorLabel } from "../ganttLabels";
 import { NumInput } from "./StepInput";
 
-export type Override = { from: string; floor: number; stage: string };
+export type Override = { from: string; floor: number; stage: string; pm?: string };
 
 /** 기준층 사이클에서 고를 수 있는 공종 (순서대로) */
 const BASE_STAGES: Stage[] = ["MARK", "GANGFORM", "WALL_REBAR", "WALL_MEP", "ALFORM", "TOP_INSULATION", "SLAB_REBAR", "SLAB_MEP", "POUR"];
@@ -30,7 +30,7 @@ export type StartOverrideCtx = {
   planFrom: string;
   baseFloorOf: (id: number) => number;
   /** 엔진이 일보로 정한 예정 첫 공종 (그 달에 보이면) */
-  computed: Map<number, { stage: Stage; floor: number }>;
+  computed: Map<number, { stage: Stage; floor: number; pm?: Stage }>;
   /** 저장돼 있지만 예정 시작일이 달라 무시된 동 */
   stale: number[];
 };
@@ -80,8 +80,19 @@ export default function StartOverridePopup({
   const baseFloor = ctx.baseFloorOf(id);
   const floor = active?.floor ?? cur?.floor ?? baseFloor;
   const stage = (active?.stage ?? cur?.stage ?? "MARK") as Stage;
-  const options = floor < baseFloor ? UG_STAGES : BASE_STAGES;
-  const put = (patch: Partial<Override>) => setOne({ from: planFrom, floor, stage, ...patch });
+  const ug = floor < baseFloor;
+  const options = ug ? UG_STAGES : BASE_STAGES;
+  // 오후 (기준층만): 없으면 엔진이 정한다. 오전 공종 이후 공종만 고를 수 있다
+  const pm = ug ? undefined : (active?.pm as Stage | undefined);
+  const pmOptions = options.slice(Math.max(0, options.indexOf(stage)));
+  const put = (patch: Partial<Override>) => {
+    const next: Override = { from: planFrom, floor, stage, ...(pm ? { pm } : {}), ...patch };
+    // 오전을 바꿔 오후가 앞서게 되면 오후는 엔진에 맡긴다. 지하·저층과 오전 타설은 오후 없음
+    const nextOpts = next.floor < baseFloor ? UG_STAGES : BASE_STAGES;
+    if (next.pm && (next.floor < baseFloor || next.stage === "POUR" || nextOpts.indexOf(next.pm as Stage) < nextOpts.indexOf(next.stage as Stage))) delete next.pm;
+    setOne(next);
+  };
+  const sel = "h-8 min-w-0 flex-1 rounded-md border border-input bg-card px-1 text-xs";
   const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
   // 화면 아래쪽이면 위로 올려 붙인다
   const top = Math.min(anchor.top, window.innerHeight - 220);
@@ -103,27 +114,57 @@ export default function StartOverridePopup({
         </button>
       </div>
       <p className="mb-2 text-xs text-muted-foreground">
-        예정 첫날({md(planFrom)}) 할 층·공종. 일보에서 읽은 위치가 현장과 다를 때만 바꾸세요. 새 일보가 들어오면 자동으로 풀립니다.
+        예정 첫날({md(planFrom)}) 할 층·공종. 오후까지 정하면 첫날은 그대로 고정, 다음 칸부터 엔진이 이어 갑니다. 새 일보가 들어오면 자동으로 풀립니다.
       </p>
-      <div className="flex items-center gap-1.5 text-sm">
-        <NumInput className="w-[56px]" min={-10} max={80} value={floor} aria-label={`${label} 층`} onValue={(v) => v != null && v !== 0 && put({ floor: v })} />
-        <span className="shrink-0 text-xs text-muted-foreground">{floor < 0 ? `= B${-floor}F` : "F"}</span>
-        <select
-          value={options.includes(stage) ? stage : options[0]}
-          onChange={(e) => put({ stage: e.target.value })}
-          className="h-8 min-w-0 flex-1 rounded-md border border-input bg-card px-1 text-xs"
-          aria-label={`${label} 공종`}
-        >
-          {options.map((s) => (
-            <option key={s} value={s}>
-              {STAGE_TITLE[s]}
-            </option>
-          ))}
-        </select>
+      <div className="space-y-1.5 text-sm">
+        <div className="flex items-center gap-1.5">
+          <span className="w-8 shrink-0 text-xs text-muted-foreground">층</span>
+          <NumInput className="w-[56px]" min={-10} max={80} value={floor} aria-label={`${label} 층`} onValue={(v) => v != null && v !== 0 && put({ floor: v })} />
+          <span className="shrink-0 text-xs text-muted-foreground">{floor < 0 ? `= B${-floor}F` : "F"}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-8 shrink-0 text-xs text-muted-foreground">{ug ? "공종" : "오전"}</span>
+          <select value={options.includes(stage) ? stage : options[0]} onChange={(e) => put({ stage: e.target.value })} className={sel} aria-label={`${label} ${ug ? "공종" : "오전 공종"}`}>
+            {options.map((s) => (
+              <option key={s} value={s}>
+                {STAGE_TITLE[s]}
+              </option>
+            ))}
+          </select>
+        </div>
+        {ug ? null : (
+          <div className="flex items-center gap-1.5">
+            <span className="w-8 shrink-0 text-xs text-muted-foreground">오후</span>
+            {stage === "POUR" ? (
+              <span className="text-xs text-muted-foreground">타설은 그날 하루 (오후 없음)</span>
+            ) : (
+              <select
+                value={pm ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const next: Override = { from: planFrom, floor, stage };
+                  if (v) next.pm = v;
+                  setOne(next);
+                }}
+                className={sel}
+                aria-label={`${label} 오후 공종`}
+              >
+                <option value="">엔진이 정함</option>
+                {pmOptions
+                  .filter((s) => s !== "POUR")
+                  .map((s) => (
+                    <option key={s} value={s}>
+                      {STAGE_TITLE[s]}
+                    </option>
+                  ))}
+              </select>
+            )}
+          </div>
+        )}
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 text-xs">
         <span className="text-muted-foreground">
-          일보 기준: {cur ? `${floorLabel(cur)} ${STAGE_TITLE[cur.stage]}` : "이 달에 예정 없음"}
+          일보 기준: {cur ? `${floorLabel(cur)} ${STAGE_TITLE[cur.stage]}${cur.pm && cur.pm !== cur.stage ? ` → 오후 ${STAGE_TITLE[cur.pm]}` : ""}` : "이 달에 예정 없음"}
         </span>
         {active ? (
           <button type="button" onClick={() => setOne(null)} className="shrink-0 rounded px-1.5 py-0.5 text-primary hover:bg-muted">

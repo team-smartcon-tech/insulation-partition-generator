@@ -66,11 +66,21 @@ export default function SchedulePanel({
   const ignored = d?.ignoredBuildings ?? [];
   const roofPhase = d?.rooftopPhase ?? [];
   // 동별 예정 첫 공종 (보정 카드의 「일보 기준」 값) — 그 달에 예정 시작일이 보일 때
-  const firstPlanned = new Map<number, { stage: Stage; floor: number }>();
+  const firstPlanned = new Map<number, { stage: Stage; floor: number; pm?: Stage }>();
   if (d?.asOf) {
     const start = addDays(d.asOf, 1);
-    for (const a of [...d.assignments].sort((x, y) => x.date.localeCompare(y.date) || (x.half === "AM" ? -1 : 1)))
-      if (a.date >= start && !firstPlanned.has(a.buildingId) && a.roof == null) firstPlanned.set(a.buildingId, { stage: a.stage, floor: a.floor });
+    const sorted = [...d.assignments].sort((x, y) => x.date.localeCompare(y.date) || (x.half === "AM" ? -1 : 1));
+    const firstDate = new Map<number, string>();
+    for (const a of sorted)
+      if (a.date >= start && !firstPlanned.has(a.buildingId) && a.roof == null) {
+        firstPlanned.set(a.buildingId, { stage: a.stage, floor: a.floor });
+        firstDate.set(a.buildingId, a.date);
+      }
+    // 그날 오후 공종 (팝업의 「일보 기준」 오전·오후)
+    for (const a of sorted) {
+      const f = firstPlanned.get(a.buildingId);
+      if (f && a.half === "PM" && a.date === firstDate.get(a.buildingId) && f.pm == null) f.pm = a.stage;
+    }
   }
   // 출발 상태 보정 (2026-11-02): 간트 동 이름을 누르면 팝업. 일보가 있어 예정 시작일이 정해진 현장만
   const startOverrideCtx: StartOverrideCtx | null =
