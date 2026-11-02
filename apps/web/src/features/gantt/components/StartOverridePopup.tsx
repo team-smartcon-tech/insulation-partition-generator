@@ -38,7 +38,7 @@ export type StartOverrideCtx = {
   planFrom: string;
   baseFloorOf: (id: number) => number;
   /** 엔진이 일보로 정한 예정 첫 공종 (그 달에 보이면) */
-  computed: Map<number, { stage: Stage; floor: number; pm?: Stage }>;
+  computed: Map<number, { stage: Stage; floor: number; am?: Stage; pm?: Stage }>;
   /** 저장돼 있지만 예정 시작일이 달라 무시된 동 */
   stale: number[];
 };
@@ -87,14 +87,16 @@ export default function StartOverridePopup({
   const cur = ctx.computed.get(id);
   const baseFloor = ctx.baseFloorOf(id);
   const floor = active?.floor ?? cur?.floor ?? baseFloor;
-  const stage = (active?.stage ?? cur?.stage ?? "MARK") as Stage;
+  // 오전: 보정값, 없으면 엔진 첫날 오전 공종. 엔진이 오전을 비웠으면(오후부터 시작) "" = 비어 있음
+  const stage = (active?.stage ?? cur?.am ?? (cur ? "" : "MARK")) as Stage | "";
   const ug = floor < baseFloor;
   const options = ug ? UG_STAGES : BASE_STAGES;
   // 오후 (기준층만): 없으면 엔진이 정한다. 오전 공종 이후 공종만 고를 수 있다
   const pm = ug ? undefined : (active?.pm as Stage | undefined);
-  const pmOptions = options.slice(Math.max(0, options.indexOf(stage)));
+  const pmOptions = stage ? options.slice(Math.max(0, options.indexOf(stage))) : [];
   const put = (patch: Partial<Override>) => {
-    const next: Override = { from: planFrom, floor, stage, ...(pm ? { pm } : {}), ...patch };
+    // 오전이 비어 있는 채로 층만 바꾸면 엔진 첫 공종을 오전으로
+    const next: Override = { from: planFrom, floor, stage: stage || cur?.stage || "MARK", ...(pm ? { pm } : {}), ...patch };
     // 오전을 바꿔 오후가 앞서게 되면 오후는 엔진에 맡긴다. 지하·저층과 오전 타설은 오후 없음
     const nextOpts = next.floor < baseFloor ? UG_STAGES : BASE_STAGES;
     if (next.pm && (next.floor < baseFloor || next.stage === "POUR" || nextOpts.indexOf(next.pm as Stage) < nextOpts.indexOf(next.stage as Stage))) delete next.pm;
@@ -132,7 +134,13 @@ export default function StartOverridePopup({
         </div>
         <div className="flex items-center gap-1.5">
           <span className="w-8 shrink-0 text-xs text-muted-foreground">{ug ? "공종" : "오전"}</span>
-          <select value={options.includes(stage) ? stage : options[0]} onChange={(e) => put({ stage: e.target.value })} className={sel} aria-label={`${label} ${ug ? "공종" : "오전 공종"}`}>
+          <select
+            value={stage === "" ? "" : options.includes(stage) ? stage : options[0]}
+            onChange={(e) => (e.target.value ? put({ stage: e.target.value }) : setOne(null))}
+            className={sel}
+            aria-label={`${label} ${ug ? "공종" : "오전 공종"}`}
+          >
+            {stage === "" || !active ? <option value="">{cur?.am ? "엔진이 정함" : "비어 있음 (엔진이 정함)"}</option> : null}
             {options.map((s) => (
               <option key={s} value={s}>
                 {STAGE_TITLE[s]}
@@ -143,7 +151,9 @@ export default function StartOverridePopup({
         {ug ? null : (
           <div className="flex items-center gap-1.5">
             <span className="w-8 shrink-0 text-xs text-muted-foreground">오후</span>
-            {stage === "POUR" ? (
+            {stage === "" ? (
+              <span className="text-xs text-muted-foreground">엔진이 정함{cur?.pm ? ` (${STAGE_TITLE[cur.pm]})` : ""} — 오전을 먼저 고르세요</span>
+            ) : stage === "POUR" ? (
               <span className="text-xs text-muted-foreground">타설은 그날 하루 (오후 없음)</span>
             ) : (
               <select
@@ -172,7 +182,12 @@ export default function StartOverridePopup({
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 text-xs">
         <span className="text-muted-foreground">
-          일보 기준: {cur ? `${floorLabel(cur)} ${STAGE_TITLE[cur.stage]}${cur.pm && cur.pm !== cur.stage ? ` → 오후 ${STAGE_TITLE[cur.pm]}` : ""}` : "이 달에 예정 없음"}
+          일보 기준:{" "}
+          {cur
+            ? ug
+              ? `${floorLabel(cur)} ${STAGE_TITLE[cur.stage]}`
+              : `${floorLabel(cur)} 오전 ${cur.am ? STAGE_TITLE[cur.am] : "비어 있음"} · 오후 ${cur.pm ? STAGE_TITLE[cur.pm] : "비어 있음"}`
+            : "이 달에 예정 없음"}
         </span>
         {active ? (
           <button type="button" onClick={() => setOne(null)} className="shrink-0 rounded px-1.5 py-0.5 text-primary hover:bg-muted">

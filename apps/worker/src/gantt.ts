@@ -727,25 +727,10 @@ gantt.post("/plan", async (c) => {
       ...baseOverrides.map(([no, o]) => {
         const prev = progress.initial.find((b) => b.id === no);
         const topFloor = topFloorOf(no) ?? prev?.topFloor ?? null;
-        // 오전·오후를 정했으면 첫날은 그대로 고정하고 그 다음 칸부터 엔진 (pinFirstDay)
-        if (o.pm) {
-          const p = pinFirstDay({ calendar: req.calendar, from: planFrom, buildingId: no, floor: o.floor, topFloor, am: o.stage, pm: o.pm, lastPourDate: prev?.lastPourDate ?? null });
-          pinned.push(...p.fixed);
-          return { id: no, pours: 0, topFloor, rooftopFloors: rooftops.get(no) ?? 0, ...p.state };
-        }
-        return {
-          id: no,
-          stage: o.stage,
-          readySlot: 0,
-          readyDate: planFrom,
-          prevEndSlot: -1,
-          lastPourDate: prev?.lastPourDate ?? null,
-          pours: 0,
-          floor: o.floor,
-          topFloor: topFloorOf(no) ?? prev?.topFloor ?? null,
-          done: false,
-          rooftopFloors: rooftops.get(no) ?? 0,
-        };
+        // 첫날 오전(·오후)은 정한 대로 고정하고 그 다음 칸부터 엔진 (pinFirstDay). 오후를 안 정했으면 오전만 고정
+        const p = pinFirstDay({ calendar: req.calendar, from: planFrom, buildingId: no, floor: o.floor, topFloor, am: o.stage, pm: o.pm, lastPourDate: prev?.lastPourDate ?? null });
+        pinned.push(...p.fixed);
+        return { id: no, pours: 0, topFloor, rooftopFloors: rooftops.get(no) ?? 0, ...p.state };
       }),
       ...buildings
         .filter((b) => !reported.has(b.buildingNo) && !ugIds.has(b.buildingNo) && !overrides.has(b.buildingNo))

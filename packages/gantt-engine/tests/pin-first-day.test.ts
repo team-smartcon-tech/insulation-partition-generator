@@ -47,3 +47,17 @@ describe("첫날 오전·오후 고정", () => {
     assert.ok(first.date >= "2026-11-03")
   })
 })
+
+describe("오전만 고정", () => {
+  it("오후를 안 정하면 오전만, 오후부터 다음 공종", () => {
+    const p = pinFirstDay({ calendar, from: "2026-11-02", buildingId: 401, floor: 38, topFloor: 42, am: "SLAB_REBAR", lastPourDate: null })
+    assert.deepEqual(p.fixed.map((a) => `${a.half} ${a.stage}`), ["AM SLAB_REBAR"])
+    assert.equal(p.state.stage, "SLAB_MEP")
+    assert.equal(p.state.readySlot, 1)
+  })
+  it("오전 알폼은 하루(오전·오후) 고정", () => {
+    const p = pinFirstDay({ calendar, from: "2026-11-02", buildingId: 401, floor: 38, topFloor: 42, am: "ALFORM", lastPourDate: null })
+    assert.deepEqual(p.fixed.map((a) => `${a.half} ${a.stage}`), ["AM ALFORM", "PM ALFORM"])
+    assert.equal(p.state.stage, "SLAB_REBAR")
+  })
+})

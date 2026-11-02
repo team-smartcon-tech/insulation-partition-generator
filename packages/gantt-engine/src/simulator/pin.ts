@@ -5,6 +5,7 @@
 //   - pm = am 이면 그 공종이 하루(2칸)를 쓴 것. 알폼처럼 2칸이면 끝, 바닥단열재(4칸)면 다음 날 2칸을 더 고정.
 //   - pm ≠ am 이면 am 은 오전에 끝난 것으로 보고, pm 은 자기 칸 수만큼(알폼 오후 투입 = 오후 + 다음 날 오전) 고정.
 //   - 슬래브 기전으로 끝나면 타설은 다음 날부터(엔진 규칙과 같다).
+//   - pm 이 없으면 오전만 고정(오전 공종이 여러 칸이면 그만큼 이어서), 그다음 칸부터 엔진.
 // 고정한 칸의 팀 용량은 엔진이 모른다 — 사용자가 정한 값이므로 그대로 둔다.
 import { addDays, type IsoDate } from "../calendar/date.ts"
 import type { CalendarConfig } from "../calendar/calendar.ts"
@@ -26,7 +27,8 @@ export function pinFirstDay(input: {
   floor: number
   topFloor?: number | null
   am: Stage
-  pm: Stage
+  /** 없으면 오전만 고정 */
+  pm?: Stage | null
   /** 일보의 마지막 타설일 (am 이 타설이 아니면 그대로) */
   lastPourDate: IsoDate | null
 }): PinnedStart {
@@ -56,23 +58,25 @@ export function pinFirstDay(input: {
     }
   }
 
-  const fixed: Assignment[] = [at(0, input.am), at(1, input.pm)]
-  // pm 이 더 써야 하는 칸 (같은 공종으로 하루를 채웠으면 2칸, 아니면 오후 1칸을 쓴 것)
-  const used = input.pm === input.am ? 2 : 1
-  const more = Math.max(0, (STAGE_SLOTS[input.pm] ?? 1) - used)
-  let end = 1
-  for (let k = 0; k < more; k++) fixed.push(at(++end, input.pm))
+  // 오후를 안 정했으면 오전 공종을 자기 칸 수만큼(알폼 = 오전·오후) 고정하고 끝
+  const last: Stage = input.pm ?? input.am
+  const fixed: Assignment[] = input.pm ? [at(0, input.am), at(1, input.pm)] : [at(0, input.am)]
+  // last 가 더 써야 하는 칸 (같은 공종으로 하루를 채웠으면 2칸, 아니면 1칸을 쓴 것)
+  const used = !input.pm ? 1 : input.pm === input.am ? 2 : 1
+  const more = Math.max(0, (STAGE_SLOTS[last] ?? 1) - used)
+  let end = input.pm ? 1 : 0
+  for (let k = 0; k < more; k++) fixed.push(at(++end, last))
   let readySlot = end + 1
   let readyDate = slots[readySlot]?.date ?? addDays(slots[end].date, 1)
   // 슬래브 기전(검측) 다음 타설은 다음 날 (엔진 규칙)
-  if (input.pm === "SLAB_MEP") {
+  if (last === "SLAB_MEP") {
     readyDate = addDays(slots[end].date, 1)
     readySlot = slotAt(readyDate)
   }
   return {
     fixed,
     state: {
-      stage: nextStage(input.pm, isTop),
+      stage: nextStage(last, isTop),
       floor: input.floor,
       done: false,
       lastPourDate: input.lastPourDate,
