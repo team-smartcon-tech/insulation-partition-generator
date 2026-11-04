@@ -46,3 +46,10 @@ tags: [wiki/log]
 - 한 것: `GanttPage.tsx` `TABS` 에 `hidden` 을 두어 「3D 골조」 만 탭 줄에서 뺐다(화면 코드 유지). `public/brand/logo-gantt.svg` 를 타일 MAKER(`logo-tile-maker.svg`)와 같은 규격으로 다시 그렸다 — 16:9·카드 바탕 #F7F9FC, 300 둥근 배지 안 간트 막대, 워드마크 「Smart Gantt」(굵게+가늘게), 설명 줄 「스마트 공정표 · 골조 공정 자동 재산정」.
 - 정한 것과 이유: 카드 패널(`HomePage` `LogoPanel`)은 16:9·#f7f9fc·`object-contain` 이라, 썸네일도 같은 비율·바탕이어야 흰 네모가 떠 보이지 않는다. 바꾼 것은 썸네일뿐 — 카드 제목·도구 제목은 「스마트 공정표」 그대로.
 - 막혔다 푼 것: Bash PreToolUse 훅이 명령 문자열에 「push … 메인 브랜치 이름」 이 보이면(`메인:feature/x` refspec, 심지어 heredoc 본문 글자도) 막는다. 작업 브랜치는 `HEAD:refs/heads/feature/blackcivic` refspec 으로 올렸다. 썸네일은 크롬 `--headless --screenshot` 으로 그려 가운데 맞춤을 확인했다.
+
+## 2026-11-04 · 만들기 · 내장 도구를 App Market 에 게시 (/tools/… 배포 경로)
+
+- 계기(사용자): 「다른 플랫폼은 버튼을 누르면 소개 화면이 나오는데, 스마트 공정표는 바로 들어가져버려」, 「이것처럼 수정 삭제도 되게」.
+- 한 것: App Market 배포 URL 에 https 외에 내부 경로 `/tools/<id>` 를 허용했다(worker `market.ts` `INTERNAL_PATH`, 게시 폼 검증). 상세 페이지 바로가기는 내부 경로면 같은 탭에서 이동한다. 홈은 게시된 앱이 가리키는 경로의 내장 카드를 숨긴다. 게시용 스크린샷 `public/thumbs/smart-gantt.png` 를 넣었다.
+- 정한 것과 이유: 처음엔 코드로만 만드는 내장 소개 화면을 만들었으나, 수정·삭제를 화면에서 하려면 App Market 데이터가 맞아 그 방식으로 바꿨다(소개 화면 코드는 지웠다). 내장 카드 숨김은 경로 일치로만 판정해, 게시를 지우면 내장 카드가 다시 나온다.
+- 남은 것: 배포 뒤 운영 홈에서 관리자가 게시하기 — 배포 URL `/tools/gantt`, 스크린샷 `smart-gantt.png`. 로컬에서 게시해도 운영 DB 에 생긴다(같은 Supabase).
