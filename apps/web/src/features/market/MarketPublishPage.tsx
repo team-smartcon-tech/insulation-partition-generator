@@ -180,8 +180,9 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
       }
     } else {
       if (!form.deployUrl.trim()) return "배포 URL을 입력하세요.";
-      if (!/^https?:\/\/.+/i.test(form.deployUrl.trim())) {
-        return "배포 URL은 http:// 또는 https:// 로 시작해야 합니다.";
+      // 툴박스 안 도구 경로(/tools/gantt)도 된다 — 바로가기가 같은 탭에서 그 도구로 (worker INTERNAL_PATH 와 같은 규칙)
+      if (!/^https?:\/\/.+/i.test(form.deployUrl.trim()) && !/^\/tools\/[a-z0-9-]+$/.test(form.deployUrl.trim())) {
+        return "배포 URL은 http:// · https:// 주소 또는 /tools/… 경로여야 합니다.";
       }
     }
     if (form.repoUrl.trim() && !/^https?:\/\/.+/i.test(form.repoUrl.trim())) {
@@ -344,12 +345,12 @@ export default function MarketPublishPage({ appId }: { appId?: string }) {
               />
             </Field>
           ) : (
-            <Field label="배포 URL" required hint="카드·상세의 '바로가기'가 이 주소로 연결됩니다.">
+            <Field label="배포 URL" required hint="카드·상세의 '바로가기'가 이 주소로 연결됩니다. 툴박스 안 도구는 /tools/gantt 처럼 경로만 (같은 탭에서 열림).">
               <input
                 className={inputCls}
                 value={form.deployUrl}
                 onChange={(e) => set("deployUrl", e.target.value)}
-                placeholder="https://"
+                placeholder="https:// 또는 /tools/…"
               />
             </Field>
           )}
