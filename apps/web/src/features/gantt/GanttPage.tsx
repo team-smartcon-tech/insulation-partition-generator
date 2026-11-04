@@ -21,10 +21,11 @@ import Frame3DPanel from "./components/Frame3DPanel";
 import SettingsPanel from "./components/SettingsPanel";
 
 type Tab = "reports" | "schedule" | "frame3d" | "finish" | "takt" | "settings";
-const TABS: { id: Tab; label: string; icon: typeof ClipboardList }[] = [
+// hidden = 탭 줄에서 숨김 (코드는 그대로 둔다)
+const TABS: { id: Tab; label: string; icon: typeof ClipboardList; hidden?: boolean }[] = [
   { id: "reports", label: "작업일보", icon: ClipboardList },
   { id: "schedule", label: "골조 공정표", icon: CalendarRange },
-  { id: "frame3d", label: "3D 골조", icon: Box },
+  { id: "frame3d", label: "3D 골조", icon: Box, hidden: true }, // 2026-11-04 사용자: 「3D골조 탭은 일단 숨겨줘」
   { id: "finish", label: "마감 공정표", icon: PaintRoller },
   { id: "takt", label: "택트 인원", icon: Users },
   { id: "settings", label: "설정", icon: Settings2 },
@@ -78,7 +79,7 @@ export default function GanttPage() {
     >
       <div className="px-6 py-4 lg:px-8">
         <div className="mb-4 flex gap-1 border-b border-slate-200">
-          {TABS.map((t) => (
+          {TABS.filter((t) => !t.hidden).map((t) => (
             <button
               key={t.id}
               type="button"
