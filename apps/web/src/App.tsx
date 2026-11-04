@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import ElevationGeneratorPage from "@/features/elevation/ElevationGeneratorPage";
 import TcRentalPage from "@/features/tcRental/TcRentalPage";
 import GanttPage from "@/features/gantt/GanttPage";
+import InspectionLaunchPage from "@/features/inspection/InspectionLaunchPage";
 import LoginPage from "@/features/auth/LoginPage";
 import AuthGate from "@/features/auth/AuthGate";
 import HomePage from "@/features/home/HomePage";
@@ -36,6 +37,12 @@ export default function App() {
         <Route path="/tools/gantt">
           <AuthGate>
             <GanttPage />
+          </AuthGate>
+        </Route>
+        {/* 도구: 검측요청 (별도 서비스로 로그인 넘겨 이동) */}
+        <Route path="/tools/inspection">
+          <AuthGate>
+            <InspectionLaunchPage />
           </AuthGate>
         </Route>
         {/* App Market — 게시/수정/상세 (구체적인 경로가 /market/:appId 보다 먼저 와야 한다) */}
