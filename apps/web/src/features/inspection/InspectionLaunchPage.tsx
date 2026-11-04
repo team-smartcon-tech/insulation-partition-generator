@@ -18,10 +18,10 @@ export default function InspectionLaunchPage() {
   }, []);
 
   return (
-    <ToolShell title="검측요청" subtitle={<span className="text-[12px] text-slate-400">검측요청 · 전자서명 · 결과통보</span>}>
+    <ToolShell title="검측요청서" subtitle={<span className="text-[12px] text-slate-400">검측요청 · 전자서명 · 결과통보</span>}>
       <div className="px-6 py-16 text-center text-sm lg:px-8">
         <p className="text-slate-500">
-          검측요청으로 이동하는 중입니다… 열리지 않으면 <a className="text-blue-700 underline" href={INSPECTION_URL}>여기</a>를 눌러 주세요.
+          검측요청서로 이동하는 중입니다… 열리지 않으면 <a className="text-blue-700 underline" href={INSPECTION_URL}>여기</a>를 눌러 주세요.
         </p>
       </div>
     </ToolShell>

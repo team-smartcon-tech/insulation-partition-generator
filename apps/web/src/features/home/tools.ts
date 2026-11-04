@@ -78,7 +78,7 @@ export const TOOLS: ToolDef[] = [
   {
     // 별도 서비스(wm-pi/Inspection-Request). /tools/inspection 은 검측요청 주소로 이동만 한다.
     id: "inspection",
-    name: "검측요청",
+    name: "검측요청서",
     description:
       "시공사가 감리단에 검측을 요청하고 전자서명하며, 감리단이 현장검측 사진과 결과통보를 발행합니다. 스마트웍스 계정으로 로그인합니다.",
     path: "/tools/inspection",
