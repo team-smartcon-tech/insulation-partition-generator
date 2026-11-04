@@ -207,6 +207,12 @@ export default function MarketAppDetailPage() {
             다운로드
             {app.version && <span className="font-semibold text-white/75">{app.version}</span>}
           </a>
+        ) : app.deploy_url?.startsWith("/") ? (
+          // 툴박스 안 도구(/tools/gantt): 같은 탭에서 이동
+          <button type="button" onClick={() => navigate(app.deploy_url!)} className={primaryActionCls}>
+            <ExternalLink className="h-4 w-4" />
+            바로가기
+          </button>
         ) : (
           app.deploy_url && (
             <a
