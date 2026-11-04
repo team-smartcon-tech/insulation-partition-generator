@@ -10,6 +10,10 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 
 ## [Unreleased]
 
+### 변경 — 카드 이름 「검측요청서」 (2026-11-04)
+
+- 홈 카드 이름과 `/tools/inspection` 화면 제목을 「검측요청」 → 「검측요청서」 로 (`tools.ts`, `InspectionLaunchPage.tsx`). 썸네일은 그대로.
+
 ### 변경 — 「검측요청」 카드 썸네일 워드마크 (2026-11-04)
 
 - 워드마크를 「검측(굵게) **Request**(가늘게)」 로 — Smart Gantt 와 같은 굵기·간격. 설명 줄은 「검측요청 · 전자서명 · 결과통보」. 폭이 늘어 전체를 조금 왼쪽으로 옮겼다(`public/brand/logo-inspection.svg`).
