@@ -10,6 +10,13 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 
 ## [Unreleased]
 
+### 추가 — 홈 「검측요청」 카드 (2026-11-04)
+
+- 검측요청(별도 서비스 `wm-pi/Inspection-Request`, 감리단·협력사도 쓰는 독립 앱)으로 가는 카드. 카드 → `/tools/inspection` → 검측요청 운영 주소로 이동만 한다.
+- 우미 직원은 검측요청 로그인 화면에서 **스마트웍스 이메일·비밀번호**로 들어간다(검측요청이 dcr-app 에 직접 확인). 이 앱의 Worker·비밀값은 바뀌지 않는다.
+- 주소는 `VITE_INSPECTION_URL`(없으면 `https://inspection-request.jogh.workers.dev`).
+- 파일: `apps/web/src/features/inspection/InspectionLaunchPage.tsx`, `tools.ts` 카드, `public/brand/{logo,mark}-inspection.svg`.
+
 ### 추가 — 내장 도구를 App Market 에 게시 (2026-11-04)
 
 - 게시 도구의 **배포 URL** 에 툴박스 안 도구 경로(`/tools/gantt` 처럼 `/tools/…`)도 받는다(웹앱만, Worker `INTERNAL_PATH`·게시 폼 같은 규칙). 상세의 **바로가기**는 이 경로면 같은 탭에서 이동한다.

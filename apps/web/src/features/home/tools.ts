@@ -7,7 +7,7 @@
  *   3) App.tsx 에 <Route path="/tools/xxx"> 연결
  * → 홈(HomePage)은 이 배열을 읽어 카드를 자동으로 그린다.
  */
-import { CalendarRange, Square, TowerControl, type LucideIcon } from "lucide-react";
+import { CalendarRange, ClipboardCheck, Square, TowerControl, type LucideIcon } from "lucide-react";
 import type { SectionId } from "@/features/market/types";
 
 export type ToolStatus = "available" | "comingSoon";
@@ -73,6 +73,20 @@ export const TOOLS: ToolDef[] = [
     tags: ["골조 공정", "작업일보", "간트"],
     thumbnail: "/brand/logo-gantt.svg",
     logo: "/brand/mark-gantt.svg",
+    sortLast: true,
+  },
+  {
+    // 별도 서비스(wm-pi/Inspection-Request). /tools/inspection 은 검측요청 주소로 이동만 한다.
+    id: "inspection",
+    name: "검측요청",
+    description:
+      "시공사가 감리단에 검측을 요청하고 전자서명하며, 감리단이 현장검측 사진과 결과통보를 발행합니다. 스마트웍스 계정으로 로그인합니다.",
+    path: "/tools/inspection",
+    icon: ClipboardCheck,
+    status: "available",
+    tags: ["검측", "전자서명", "감리"],
+    thumbnail: "/brand/logo-inspection.svg",
+    logo: "/brand/mark-inspection.svg",
     sortLast: true,
   },
   // 빈 자리표시자 카드는 두지 않는다 — 홈은 "준비 중" 섹션에 컴팩트 타일로만 노출한다.
