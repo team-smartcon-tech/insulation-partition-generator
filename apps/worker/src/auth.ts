@@ -43,6 +43,10 @@ export interface Env {
   /** 스마트 공정표 — 스마트웍스(dcr-app) Supabase 읽기 전용. URL 은 wrangler vars, 키는 secret */
   DCR_SUPABASE_URL?: string;
   DCR_SUPABASE_SERVICE_ROLE_KEY?: string;
+  /** 검측요청 연결 토큰 서명키(HS256) — 검측요청 Worker 의 TOOLBOX_SSO_SECRET 과 같은 값. secret */
+  INSPECTION_SSO_SECRET?: string;
+  /** 검측요청 운영 주소(끝 / 없이). wrangler vars */
+  INSPECTION_URL?: string;
 }
 
 export interface SessionUser {

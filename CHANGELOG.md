@@ -10,6 +10,14 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 
 ## [Unreleased]
 
+### 추가 — 홈 「검측요청」 카드: 툴박스 계정으로 바로 들어가기 (2026-11-04)
+
+- 검측요청(별도 서비스 `wm-pi/Inspection-Request`)은 감리단·협력사도 쓰는 독립 앱이라 스마트 공정표처럼 옮기지 않고 **로그인을 넘겨 준다**.
+- 카드 → `/tools/inspection` → Worker `POST /api/inspection/handoff` → `{INSPECTION_URL}/sso#t=<토큰>` 으로 이동. 토큰은 60초, HS256 `INSPECTION_SSO_SECRET`(이 앱 세션 키·DCR 키와 별개), `iss=smart-toolbox`·`aud=inspection-request`, claim 은 이메일·이름·스마트웍스 역할·들어갈 현장 `{id,name}[]`·먼저 열 현장(스마트 공정표에서 고르던 현장).
+- 현장 권한은 스마트웍스에서 읽기만 한다 — super_admin·system_admin 전 현장, 그 외 `admins.managed_sites` → `people.managed_sites`.
+- 설정: secret `INSPECTION_SSO_SECRET`(검측요청 `TOOLBOX_SSO_SECRET` 과 같은 값), vars `INSPECTION_URL`. 둘 중 하나라도 없으면 카드가 503 안내만 한다.
+- 파일: `apps/worker/src/inspection.ts`, `apps/web/src/features/inspection/InspectionLaunchPage.tsx`, `tools.ts` 카드, `public/brand/{logo,mark}-inspection.svg`.
+
 ### 변경 — 스마트 공정표 카드 썸네일 (2026-11-04)
 
 - 홈 카드 썸네일(`public/brand/logo-gantt.svg`)을 타일 MAKER 처럼: 둥근 남색 배지 안에 간트 막대(실적·예정·다음 공정, 오늘 점선), 아래 주황 밑줄과 설명 줄. 워드마크는 영문 **Smart Gantt**(굵게 + 가늘게, 타일 MAKER 처럼), 설명 줄 「스마트 공정표 · 골조 공정 자동 재산정」. 16:9·카드 바탕색(#F7F9FC)으로 바꿔 카드 패널과 이어진다(예전 16:10 흰 바탕).

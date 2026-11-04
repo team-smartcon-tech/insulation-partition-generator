@@ -26,6 +26,7 @@ import market from "./market";
 import sites from "./sites";
 import tcRental from "./tcRental";
 import gantt from "./gantt";
+import inspection from "./inspection";
 
 export type { Env };
 
@@ -198,6 +199,8 @@ app.route("/api/tc-rental-projects", tcRental);
 
 // 스마트 공정표 — /api/gantt* . 스마트웍스(dcr) 작업일보 읽기 전용 + 공정 엔진 + 현장 설정(gantt_*).
 app.route("/api/gantt", gantt);
+// 검측요청 플랫폼 연결 — 로그인을 넘겨 주는 토큰 발급 (inspection.ts)
+app.route("/api/inspection", inspection);
 
 /** GET /api/elevation-projects — 프로젝트 목록 */
 app.get("/api/elevation-projects", async (c) => {
