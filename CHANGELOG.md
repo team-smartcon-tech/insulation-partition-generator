@@ -10,6 +10,10 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 
 ## [Unreleased]
 
+### 변경 — 「검측요청」 카드 썸네일 워드마크 (2026-11-04)
+
+- 워드마크를 「검측(굵게) **Request**(가늘게)」 로 — Smart Gantt 와 같은 굵기·간격. 설명 줄은 「검측요청 · 전자서명 · 결과통보」. 폭이 늘어 전체를 조금 왼쪽으로 옮겼다(`public/brand/logo-inspection.svg`).
+
 ### 추가 — 홈 「검측요청」 카드 (2026-11-04)
 
 - 검측요청(별도 서비스 `wm-pi/Inspection-Request`, 감리단·협력사도 쓰는 독립 앱)으로 가는 카드. 카드 → `/tools/inspection` → 검측요청 운영 주소로 이동만 한다.
