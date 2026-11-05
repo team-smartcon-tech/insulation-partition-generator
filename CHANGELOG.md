@@ -10,6 +10,10 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 
 ## [Unreleased]
 
+### 추가 — 한중 기간 현장: 화성남양1차·평택고덕P1 1·2차 (2026-11-05)
+
+- `build-cold-normals.ts` 로 최근 10겨울 기상청 격자 평균을 계산해 `kma-cold-normals.ts` 에 추가. 화성남양1차(B16) 11/28~2/26, 평택고덕P1 1차·2차(같은 격자, 한 항목) 11/28~2/26, 둘 다 7일 평균 최저 -2.1℃. DB 변경 없음.
+
 ### 변경 — 카드 이름 「검측요청서」 (2026-11-04)
 
 - 홈 카드 이름과 `/tools/inspection` 화면 제목을 「검측요청」 → 「검측요청서」 로 (`tools.ts`, `InspectionLaunchPage.tsx`). 썸네일은 그대로.
