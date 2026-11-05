@@ -68,12 +68,13 @@ describe("달력 규칙 §4", () => {
 
 describe("한중 기간 (날짜 단위 동절기 양생)", () => {
   const ranged: CalendarConfig = { ...config, winterCuringRange: { start: "11-24", end: "03-05" } }
-  it("해를 넘기는 기간: 11/23 아님, 11/24·1/15·3/5 동절기, 3/6 아님", () => {
-    assert.equal(getDayInfo(ranged, "2026-11-23").curingDays, 0)
-    assert.equal(getDayInfo(ranged, "2026-11-24").curingDays, 1)
-    assert.equal(getDayInfo(ranged, "2027-01-15").curingDays, 1)
-    assert.equal(getDayInfo(ranged, "2027-03-05").curingDays, 1)
-    assert.equal(getDayInfo(ranged, "2027-03-06").curingDays, 0)
+  it("해를 넘기는 기간: 11/24·1/15·3/5 보온양생 2일, 그 밖 11~3월은 양생 1 그대로 (2026-11-05)", () => {
+    assert.equal(getDayInfo(ranged, "2026-11-23").curingDays, 1)
+    assert.equal(getDayInfo(ranged, "2026-11-24").curingDays, 2)
+    assert.equal(getDayInfo(ranged, "2027-01-15").curingDays, 2)
+    assert.equal(getDayInfo(ranged, "2027-03-05").curingDays, 2)
+    assert.equal(getDayInfo(ranged, "2027-03-06").curingDays, 1)
+    assert.equal(getDayInfo(ranged, "2026-10-30").curingDays, 0)
   })
   it("해를 넘지 않는 기간", () => {
     assert.equal(inMonthDayRange({ start: "01-05", end: "02-10" }, "2027-01-04"), false)

@@ -73,7 +73,7 @@ export function useFinish(siteId: string | null) {
 /** 달력. 공휴일은 아직 2026-10 만 상수 — 현장 달력(DB)으로 옮길 예정 */
 export const CALENDAR = { holidays: [...KR_HOLIDAYS_2026_Q4] };
 
-/** 현장 설정이 들어간 달력 — 한중 기간을 켜면 동절기 양생을 그 기간으로 (2026-11-02) */
+/** 현장 설정이 들어간 달력 — 한중 기간을 켜면 그 기간 타설은 보온양생 2일 (2026-11-02, 11~3월 양생일 +1 은 그대로 2026-11-05) */
 export function calendarOf(settings: SiteSettings) {
   const range = coldRangeOf(settings.coldWeather);
   return range ? { ...CALENDAR, winterCuringRange: range } : CALENDAR;

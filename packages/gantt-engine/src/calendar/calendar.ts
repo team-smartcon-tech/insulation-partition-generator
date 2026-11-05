@@ -12,7 +12,7 @@ export type CalendarConfig = {
   saturdayPourAllowed?: boolean
   /** 동절기 양생 적용 월 (기본 11·12·1·2·3 — §3 "11월 초~3월 말") */
   winterCuringMonths?: number[]
-  /** 동절기 양생 기간 "MM-DD"~"MM-DD" (한중 기간, 2026-11-02). 있으면 winterCuringMonths 대신 */
+  /** 한중 기간 "MM-DD"~"MM-DD" (2026-11-02). 이 기간 타설은 보온양생 2일(양생 2) — 그 밖은 winterCuringMonths 그대로 (2026-11-05 사용자) */
   winterCuringRange?: MonthDayRange
 }
 
@@ -28,14 +28,14 @@ export type DayInfo = {
   pourAllowed: boolean
   /** 타워크레인 운행 (일·공휴일 불가) → 갱폼인양·철근인양 */
   craneAllowed: boolean
-  /** 이 날 타설하면 양생이 며칠인가 (동절기 1, 그 외 0) */
-  curingDays: 0 | 1
+  /** 이 날 타설하면 양생이 며칠인가 (한중 기간 2 = 보온양생 2일, 동절기 1, 그 외 0) */
+  curingDays: 0 | 1 | 2
 }
 
 const DEFAULT_WINTER_MONTHS: number[] = [11, 12, 1, 2, 3]
 
 export function isWinterCuring(config: CalendarConfig, date: IsoDate): boolean {
-  if (config.winterCuringRange) return inMonthDayRange(config.winterCuringRange, date)
+  if (config.winterCuringRange && inMonthDayRange(config.winterCuringRange, date)) return true
   const months = config.winterCuringMonths ?? DEFAULT_WINTER_MONTHS
   return months.includes(monthOf(date))
 }
@@ -60,7 +60,7 @@ export function getDayInfo(config: CalendarConfig, date: IsoDate): DayInfo {
     workable,
     pourAllowed,
     craneAllowed,
-    curingDays: isWinterCuring(config, date) ? 1 : 0,
+    curingDays: config.winterCuringRange && inMonthDayRange(config.winterCuringRange, date) ? 2 : isWinterCuring(config, date) ? 1 : 0,
   }
 }
 

@@ -13,10 +13,12 @@ export type HalfDayOptions = {
   gangformPMAfterMarking: boolean
   /** 동절기 양생일(타설 다음 날)에도 먹매김 오전 → 오후 갱폼인양. 없으면 false = 양생일 갱폼 불가 */
   curingDayGangformPM?: boolean
-  /** 갱폼 오전 완료 시 오후 벽철근 — 벽철근을 오후 칸에 둘 수 있다 */
-  wallRebarPM: boolean
-  /** 슬래브철근 오후 가능 (기전·검측이 다음날 오전으로 밀림) */
-  slabRebarPM: boolean
+  /** 오후 W철근이면 W기전을 같은 오후 칸에 함께 시공 (없으면 false = W기전은 다음 칸부터, 2026-11-05) */
+  wallMepWithPMRebar?: boolean
+  /** 없앤 설정 (2026-11-05) — 예전에 저장된 값만 남아 있고 엔진은 읽지 않는다. W철근은 오후 칸도 항상 가능 */
+  wallRebarPM?: boolean
+  /** 없앤 설정 (2026-11-05) — 예전에 저장된 값만 남아 있고 엔진은 읽지 않는다. 슬래브철근은 알폼 오전 완료 뒤 같은 날 오후 항상 가능 */
+  slabRebarPM?: boolean
 }
 
 export type SiteSettings = {
@@ -26,12 +28,14 @@ export type SiteSettings = {
   rebarTeams: number
   /** 철근팀이 벽(오전)+슬래브(오후)를 같은 날 병행할 수 있는가. false 면 하루 1작업 */
   rebarWallAndSlabSameDay: boolean
+  /** 슬래브철근 우선: 같은 칸에 W철근·S철근이 겹치면 S철근 먼저 (오전에도). 없으면 false = 오전은 W철근 먼저 (2026-11-05) */
+  slabRebarFirst?: boolean
   /** 알폼팀 수 */
   alformTeams: number
   gangform: GangformCapacity
   /** 1일 타설 가능 동수 (펌프카·레미콘) */
   pourPerDay: number
-  /** 동절기 타설 후 2일 0℃ 이상 유지(보온양생) — 갱폼인양은 타설일 +3일부터 */
+  /** (없앰 2026-11-05 — 한중 기간 판정으로 합침. 엔진은 읽지 않는다) 동절기 보온양생 2일 */
   winterCuring2Days?: boolean
   halfDay: HalfDayOptions
   /** 오후 단독 투입 불가 — 그날 오전에 그 팀 작업이 없으면 오후부터 투입 안 함 */
@@ -41,15 +45,11 @@ export type SiteSettings = {
 export const ALL_HALF_DAY_ON: HalfDayOptions = {
   alformPMStart: true,
   gangformPMAfterMarking: true,
-  wallRebarPM: true,
-  slabRebarPM: true,
 }
 
 export const ALL_HALF_DAY_OFF: HalfDayOptions = {
   alformPMStart: false,
   gangformPMAfterMarking: false,
-  wallRebarPM: false,
-  slabRebarPM: false,
 }
 
 const BASE: SiteSettings = {

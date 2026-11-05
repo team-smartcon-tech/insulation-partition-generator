@@ -2,13 +2,13 @@
 //
 // 일보에는 오전/오후 구분이 없다. 그래서 "그날 그 동이 끝낸 단계" 로 보고, 다음 날 아침부터 그 다음 단계를 시작한다.
 // 같은 날 여러 단계(먹매김 + 갱폼인양)가 적히면 사이클 순서상 가장 뒤의 것이 끝난 단계다.
-import type { DailyReport, Stage } from "../contracts/index.ts"
+import type { DailyReport, Stage, WorkEntry } from "../contracts/index.ts"
 import { addDays, type IsoDate } from "../calendar/date.ts"
 import { STAGES, nextStage } from "../rules/stages.ts"
 import type { BuildingState } from "../simulator/simulator.ts"
 
 /** 실적 한 칸: 그날 그 동이 한 단계 (반일 구분 없음) */
-export type ActualWork = { date: IsoDate; buildingId: number; stage: Stage; floor: number; floorLabel?: string }
+export type ActualWork = { date: IsoDate; buildingId: number; stage: Stage; floor: number; floorLabel?: string; floorFromPrev?: true }
 
 export type BuildingLabel = { id: number; label: string }
 
@@ -75,10 +75,14 @@ const MEP_WINDOW: Partial<Record<Stage, { opens: Stage; closes: Stage }>> = {
  * 제자리에서 actual 을 고친다. actual 은 날짜순이어야 한다.
  */
 function dropMepOutsideWindow(actual: ActualWork[]): void {
+  // 옥탑·「층?」(층 없는 줄) 기전도 같은 시간 순서로 거른다 — 지하·저층 숫자 층만 일보 그대로 둔다
+  // (2026-11-05 사용자: 남원주 401동 11/4 「3-5호 옥탑 벽체 배관작업」 이 W철근 전 W기전으로 그려졌다.
+  // 「W철근 이전에 W기전을 할 수 없는데 걸러서 보여줘야지」)
+  const lowNumbered = (x: ActualWork) => x.floorLabel == null && !isBaseFloor(x)
   const drop = new Set<ActualWork>()
   for (const a of actual) {
     const w = MEP_WINDOW[a.stage]
-    if (!w || !isBaseFloor(a)) continue
+    if (!w || lowNumbered(a)) continue
     const mine = actual.filter((x) => x.buildingId === a.buildingId)
     const opened = mine.filter((x) => x.stage === w.opens && x.date <= a.date).at(-1)?.date
     const closed = opened !== undefined && mine.some((x) => x.stage === w.closes && x.date > opened && x.date <= a.date)
@@ -117,6 +121,69 @@ function deferContinuedMep(actual: ActualWork[]): void {
   for (let i = actual.length - 1; i >= 0; i--) if (drop.has(actual[i])) actual.splice(i, 1)
 }
 
+/** 기준층 사이클 단계 (층 없는 줄의 층을 이어 붙일 수 있는 것) */
+const CYCLE_STAGES: ReadonlySet<Stage> = new Set<Stage>(["MARK", "GANGFORM", "WALL_REBAR", "WALL_MEP", "ALFORM", "SLAB_REBAR", "SLAB_MEP", "POUR"])
+
+/**
+ * 층 없이 적힌 기준층 공종(「층?」)의 층을 그 동의 앞 실적에서 잇는다 (부산장안 2026-04: 「4동 갱폼인양+3동 알폼조립」).
+ * 앞 실적 층 사이클에서 타설이 끝났으면 다음 층, 아니면 같은 층. 앞에 숫자 층 실적이 없거나 기준층(2층 이상)이 아니면 「층?」 그대로.
+ * 숫자 층 골조 실적이 나오면 그 층으로 다시 맞춘다. 기전(전기·설비 일보) 층은 골조 실적이 아직 없을 때만 쓴다
+ * — 전기 일보의 층 오타 하나(부산장안 4/8 「101동 16층」)가 뒤 추정을 모두 끌어올리지 않게. actual 은 날짜순이어야 한다. 제자리에서 고친다.
+ */
+function inferMissingFloors(actual: ActualWork[]): void {
+  type S = { floor: number; poured: boolean; fromMep: boolean; last: Stage | null; lastDate: IsoDate }
+  const state = new Map<number, S>()
+  for (const a of actual) {
+    const s = state.get(a.buildingId)
+    if (a.floorLabel === "층?") {
+      if (!s || s.floor < 2 || !CYCLE_STAGES.has(a.stage)) continue
+      // 다음 층 사이클: 타설이 끝났거나(타설 일보가 빠진 날도 있어) 다른 날 앞 순서 공종(S철근 뒤 갱폼)이 다시 나오면
+      const restarted = s.last != null && a.date > s.lastDate && order(a.stage) < order(s.last)
+      const up = (s.poured && a.stage !== "POUR") || (!s.poured && restarted)
+      const floor = up ? s.floor + 1 : s.floor
+      a.floor = floor
+      delete a.floorLabel
+      state.set(a.buildingId, { floor, poured: a.stage === "POUR" || (!up && s.poured), fromMep: s.fromMep, last: up ? a.stage : maxStage(s.last, a.stage), lastDate: a.date })
+      continue
+    }
+    if (a.floorLabel != null) continue
+    const mep = a.stage === "WALL_MEP" || a.stage === "SLAB_MEP"
+    if (mep) {
+      if (!s || (s.fromMep && a.floor > s.floor)) state.set(a.buildingId, { floor: a.floor, poured: false, fromMep: true, last: null, lastDate: a.date })
+      continue
+    }
+    // 골조 실적: 가장 최근 기준층 공종을 따른다 (같은 층 타설이면 타설 끝). 「1동 1층 거푸집 조립」 같은 저층 작업은 보지 않는다
+    if (!CYCLE_STAGES.has(a.stage) || a.floor < 2) continue
+    if (!s || s.fromMep || a.floor !== s.floor) state.set(a.buildingId, { floor: a.floor, poured: a.stage === "POUR", fromMep: false, last: a.stage, lastDate: a.date })
+    else {
+      if (a.stage === "POUR") s.poured = true
+      s.last = maxStage(s.last, a.stage)
+      s.lastDate = a.date
+    }
+  }
+}
+
+const maxStage = (a: Stage | null, b: Stage): Stage => (a == null || order(b) > order(a) ? b : a)
+
+/** 기전으로 치려면 같은 날·같은 동·같은 기전(벽/바닥)을 적은 공종이 이만큼 있어야 한다 */
+const MIN_MEP_TRADES = 2
+
+/**
+ * 한 공종만 적은 기전은 기전 작업으로 보지 않는다 (2026-11-05 사용자: 남원주 401동 11/4 W기전은 전기만 있고
+ * 기계 설비·소방은 없었다 — 「최소 2개 공종이 있어야」). 동·기전 단계별로 적은 공종(전기·기계 설비·소방) 수를 센다. 층은 보지 않는다
+ * (공종마다 층을 하나씩 틀리게 적는 일이 있다).
+ * 그날 일보에서 기전을 적은 공종이 둘 이상일 때만 적용한다 — 전기만 올리는 현장·양식, 골조 구간 「검측」 은 예전처럼 둔다.
+ * 빼야 할 항목 집합을 돌려준다.
+ */
+function thinMepEntries(entries: readonly WorkEntry[]): Set<WorkEntry> {
+  const mep = entries.filter((e) => e.trade && (e.stage === "WALL_MEP" || e.stage === "SLAB_MEP"))
+  if (new Set(mep.map((e) => e.trade)).size < MIN_MEP_TRADES) return new Set()
+  const trades = new Map<string, Set<string>>()
+  const key = (e: WorkEntry) => `${e.buildingNo}|${e.stage}`
+  for (const e of mep) trades.set(key(e), (trades.get(key(e)) ?? new Set()).add(e.trade!))
+  return new Set(mep.filter((e) => trades.get(key(e))!.size < MIN_MEP_TRADES))
+}
+
 /**
  * @param reports 날짜 오름차순이 아니어도 된다. 동 번호가 없는 줄(부대시설)은 뺀다.
  * @param upTo 이 날짜까지만 실적으로 본다 (보통 오늘). 그 뒤 일보는 무시.
@@ -130,8 +197,9 @@ export function progressFromReports(
   const actual: ActualWork[] = []
   for (const r of reports) {
     if (r.date > upTo) continue
+    const thin = thinMepEntries(r.entries)
     for (const e of r.entries) {
-      if (e.buildingNo === null || !e.stage) continue
+      if (e.buildingNo === null || !e.stage || thin.has(e)) continue
       actual.push({
         date: r.date,
         buildingId: e.buildingNo,
@@ -139,10 +207,17 @@ export function progressFromReports(
         floor: e.floor ?? 0,
         // 일보에 층이 없으면 0층이 아니라 「층?」 (근거 없는 층을 만들지 않는다)
         ...(e.floorLabel ? { floorLabel: e.floorLabel } : e.floor == null ? { floorLabel: "층?" } : {}),
+        ...(e.floorFromPrev ? { floorFromPrev: true as const } : {}),
       })
     }
   }
   actual.sort((a, b) => a.date.localeCompare(b.date) || a.buildingId - b.buildingId)
+  inferMissingFloors(actual)
+  // 층을 잇지 못한 「공종만 적힌 줄」 은 뺀다 (지하·기초 단계 현장의 「104동 갱폼 인상」 등)
+  for (let i = actual.length - 1; i >= 0; i--) {
+    if (actual[i].floorFromPrev && actual[i].floorLabel === "층?") actual.splice(i, 1)
+    else delete actual[i].floorFromPrev
+  }
   alignShoringToSlab(actual)
   dropMepOutsideWindow(actual)
   deferContinuedMep(actual)

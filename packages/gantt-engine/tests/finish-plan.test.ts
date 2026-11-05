@@ -1,7 +1,7 @@
 // 마감 예정 (선행·층 묶음 규칙, 2026-10-30)
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { FINISH_TRADES, finishPlanOf, hasFinishPlan, planFinishBuilding, planFinishSite, type FinishGanttBuilding } from "../src/index.ts"
+import { FINISH_TRADES, finishPlanOf, finishSettingsWithTakt, hasFinishPlan, planFinishBuilding, planFinishSite, type FinishGanttBuilding } from "../src/index.ts"
 
 const floors = (done: Record<number, string | null>) =>
   [1, 2, 3, 4].map((f) => ({ floor: f, units: 2, done: done[f] ? 2 : 0, last: done[f] ?? null }))
@@ -192,5 +192,67 @@ describe("겹쳐 이동 (2026-11-01 사용자: PL창호 1코어 하루 하고 2�
   it("간격이 없으면 지금처럼: 1팀이 한 코어를 끝내야 다음", () => {
     const p = planFinishSite([bld(101)], rule({}), "2026-10-30", 540, () => "2026-10-01")
     assert.deepEqual(starts(p, 101).map((x) => x[1]), ["2026-10-31", "2026-11-06", "2026-11-12", "2026-11-18"])
+  })
+})
+
+describe("끝내고 이동 (2026-11-05 사용자: 코어 끝내고 이동 · 동 끝내고 이동)", () => {
+  // 4층짜리 2코어 동 2개, 1층씩 하루, 1팀, 골조는 다 됨
+  const bld = (no: number): FinishGanttBuilding => ({
+    buildingNo: no,
+    name: `${no}동`,
+    cores: [],
+    rows: [1, 2].map((c) => row("windowFrame", floors({}), c)),
+  })
+  const rule = (extra: object) => ({ windowFrame: { pred: null, frameLead: 0, gapDays: 0, floorsPerBatch: 1, daysPerBatch: 1, ...extra } })
+  /** 시작일 순서대로 「동-코어-층」 */
+  const order = (extra: object) => {
+    const p = planFinishSite([bld(101), bld(102)], rule(extra), "2026-10-30", 540, () => "2026-10-01")
+    return [...p]
+      .flatMap(([no, rows]) => rows.flatMap((r) => r.bars.map((x) => ({ s: x.start, k: `${no}-${r.core}-${x.floorFrom}` }))))
+      .sort((a, b) => a.s.localeCompare(b.s))
+      .map((x) => x.k)
+  }
+  it("묶음 끝내고 이동(기본): 아래층부터 코어·동을 오가며", () => {
+    assert.deepEqual(order({}).slice(0, 4), ["101-1-1", "101-2-1", "102-1-1", "102-2-1"])
+  })
+  it("코어 끝내고 이동: 한 코어 4개 층을 다 하고 다음 코어", () => {
+    assert.deepEqual(order({ stayIn: "core" }), [
+      "101-1-1", "101-1-2", "101-1-3", "101-1-4",
+      "101-2-1", "101-2-2", "101-2-3", "101-2-4",
+      "102-1-1", "102-1-2", "102-1-3", "102-1-4",
+      "102-2-1", "102-2-2", "102-2-3", "102-2-4",
+    ])
+  })
+  it("동 끝내고 이동: 그 동 코어들을 다 하고 다음 동", () => {
+    const o = order({ stayIn: "building" })
+    assert.ok(o.slice(0, 8).every((k) => k.startsWith("101-")), o.join(","))
+    assert.ok(o.slice(8).every((k) => k.startsWith("102-")), o.join(","))
+  })
+  it("동 끝내고 이동 2팀: 한 동 코어들을 함께(동시에) 하고 다 같이 다음 동", () => {
+    const p = planFinishSite([bld(101), bld(102)], rule({ stayIn: "building", teams: 2 }), "2026-10-30", 540, () => "2026-10-01")
+    const [c1, c2] = p.get(101)!
+    assert.deepEqual(c1.bars.map((x) => x.start), c2.bars.map((x) => x.start))
+    const last101 = [...c1.bars, ...c2.bars].map((x) => x.end).sort().at(-1)!
+    assert.ok(p.get(102)!.every((r) => r.bars.every((x) => x.start > last101)))
+  })
+  it("코어 끝내고 이동 2팀: 팀마다 다른 코어", () => {
+    const p = planFinishSite([bld(101), bld(102)], rule({ stayIn: "core", teams: 2 }), "2026-10-30", 540, () => "2026-10-01")
+    assert.equal(p.get(101)![0].bars[0].start, p.get(101)![1].bars[0].start)
+  })
+  it("맡은 동 다음 묶음이 골조를 기다리면 쉬지 않고 다른 동으로 옮긴다", () => {
+    // 101동 3·4층은 골조(층 + 0) 타설일을 12/1 로, 나머지는 다 됨
+    const frame = (no: number, floor: number) => (no === 101 && floor >= 3 ? "2026-12-01" : "2026-10-01")
+    for (const stayIn of ["building", "core"]) {
+      const p = planFinishSite([bld(101), bld(102)], rule({ stayIn }), "2026-10-30", 540, frame)
+      const first102 = p.get(102)!.flatMap((r) => r.bars.map((x) => x.start)).sort()[0]
+      assert.ok(first102 < "2026-12-01", `${stayIn}: 102동 첫 시작 ${first102}`)
+    }
+  })
+  it("택트 연동: 코어 끝내고 이동은 1팀, 동 끝내고 이동은 코어 수만큼", () => {
+    const link = { crew: 2 } as never
+    const links = new Map([["windowFrame", link]]) as never
+    const base = { pred: null, gapDays: 0, floorsPerBatch: 1, daysPerBatch: 1 }
+    assert.equal(finishSettingsWithTakt({ windowFrame: { ...base, stayIn: "core" } }, links, 2).windowFrame.teams, 1)
+    assert.equal(finishSettingsWithTakt({ windowFrame: { ...base, stayIn: "building" } }, links, 2).windowFrame.teams, 2)
   })
 })

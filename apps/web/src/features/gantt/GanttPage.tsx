@@ -46,8 +46,13 @@ export default function GanttPage() {
 
   // 저장된 현장이 목록에 없으면(권한·삭제) 최근 일보가 있는 첫 현장으로
   useEffect(() => {
-    const list = sites.data?.sites ?? [];
-    if (!list.length) return;
+    if (!sites.data) return;
+    const list = sites.data.sites;
+    // 소속 현장이 하나도 없으면 다른 계정이 남긴 현장 id 로 조회하지 않게 비운다 (2026-11-05 소속 현장만)
+    if (!list.length) {
+      if (siteId) setSiteId(null);
+      return;
+    }
     if (!siteId || !list.some((s) => s.id === siteId)) setSiteId(list[0].id);
   }, [sites.data, siteId]);
   useEffect(() => {
@@ -98,6 +103,10 @@ export default function GanttPage() {
 
         {sites.isError ? (
           <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">{(sites.error as Error).message}</div>
+        ) : sites.data && !sites.data.sites.length ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+            볼 수 있는 현장이 없습니다. 스마트웍스에서 소속 현장이 지정돼 있는지 확인해 주세요.
+          </div>
         ) : tab === "reports" ? (
           <DailyReportPanel key={siteId ?? ""} siteId={siteId} siteName={site?.name ?? ""} initialDate={site?.lastReportDate ?? null} />
         ) : tab === "schedule" ? (

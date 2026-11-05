@@ -22,9 +22,11 @@ type Trade = { key: string; group: string; label: string };
 const FRAME = "__frame";
 /** 「변경」 표시 비교용 — frameLead 없음(undefined)과 null 을 같게 본다. 작업일·팀은 택트 연동이라 비교하지 않는다 */
 const sig = (r: FinishTradePlan | undefined) =>
-  r ? JSON.stringify([r.pred, r.frameLead ?? null, r.gapDays, r.floorsPerBatch, r.moveDays ?? null, r.moveDays != null ? (r.moveBy ?? "core") : null]) : "";
-/** 이동 방식 선택값: 묶음을 끝내고 다음으로(기본) / 코어마다 겹쳐 / 동마다 겹쳐 */
+  r ? JSON.stringify([r.pred, r.frameLead ?? null, r.gapDays, r.floorsPerBatch, r.moveDays ?? null, r.moveDays != null ? (r.moveBy ?? "core") : (r.stayIn ?? null)]) : "";
+/** 이동 방식 선택값: 묶음을 끝내고 다음으로(기본) / 코어·동을 끝내고 다음으로(stayIn) / 코어마다 겹쳐 / 동마다 겹쳐 */
 const MOVE_DONE = "done";
+const STAY_CORE = "stay-core";
+const STAY_BUILDING = "stay-building";
 
 export default function FinishPlanForm({
   trades,
@@ -72,6 +74,7 @@ export default function FinishPlanForm({
         선행 공종이 그 층을 끝내고 <b>간격</b>이 지나면 시작, <b>N개 층씩</b> 묶어 <b>묶음당 작업일</b> 동안. 선행이 <b>골조</b>면 묶음 최고층 + N 층 S타설
         다음 날부터(창틀 5: 1~5층은 골조 10층 타설 후). <b>N명</b>은 택트 인원 탭의 투입 인원과 같은 값이고, <b>묶음당 작업일</b>은 그 인원으로 자동 계산합니다(묶음 층수 × 층당 인·일 ÷ 인원).
         그 인원이 동의 코어들에 나뉘어 동시에 진행하고(코어마다 묶음당 작업일은 같음), 동과 동 사이는 차례로 옮겨 갑니다. 아래층부터. 일수는 일요일만 빼고 셉니다(공휴일은 작업). 기본값은 가정값입니다.
+        이동 방식 — <b>묶음 끝내고 이동</b>: 묶음을 끝내면 어디든 가장 먼저 시작할 수 있는 곳으로, <b>코어 끝내고 이동</b>: 인원 전체가 한 팀으로 한 코어의 남은 층을 다 끝내고 다음 코어로(코어를 차례로), <b>동 끝내고 이동</b>: 인원이 그 동 코어들에 나뉘어 동시에 하고 그 동을 다 끝내면 다 같이 다음 동으로.
         <b>겹쳐 이동</b>(PL창호처럼 1코어를 하루 하고 2코어로)을 고르면 한 팀이 코어(또는 동)를 N일 간격으로 차례로 시작하고, 각 막대는 묶음당 작업일 — 4코어 5일 간격 1일이면 8일.
         이때 작업일은 직접 넣고 인원은 표시만 합니다.
       </p>
@@ -140,18 +143,36 @@ export default function FinishPlanForm({
                 <span className="flex items-center gap-1">
                   <NumInput className="w-[42px]" min={1} max={20} value={r.floorsPerBatch} aria-label={`${t.label} 층 묶음`} onValue={(v) => set(t.key, { floorsPerBatch: v ?? 1 })} />층씩
                 </span>
-                <span className="flex items-center gap-1" title="겹쳐 이동: 팀이 한 곳을 시작하고 N일 뒤 다음 곳을 시작 (막대는 묶음당 작업일). 기본은 묶음을 끝내고 다음으로">
+                <span
+                  className="flex items-center gap-1"
+                  title={[
+                    "묶음 끝내고 이동: 묶음을 끝내면 어디든 가장 먼저 시작할 수 있는 곳으로",
+                    "코어 끝내고 이동: 인원 전체가 한 팀으로 코어를 차례로 (한 코어 남은 층을 다 끝내고 다음 코어)",
+                    "동 끝내고 이동: 인원이 그 동 코어들에 나뉘어 동시에, 그 동을 다 끝내면 다 같이 다음 동",
+                    "겹쳐 이동: 한 곳을 시작하고 N일 뒤 다음 곳을 시작 (막대는 묶음당 작업일)",
+                  ].join("\n")}
+                >
                   <select
-                    value={r.moveDays != null ? (r.moveBy ?? "core") : MOVE_DONE}
+                    value={r.moveDays != null ? (r.moveBy ?? "core") : r.stayIn === "core" ? STAY_CORE : r.stayIn === "building" ? STAY_BUILDING : MOVE_DONE}
                     onChange={(e) => {
                       const v = e.target.value;
-                      if (v === MOVE_DONE) set(t.key, { moveDays: null, moveBy: undefined });
-                      else set(t.key, { moveDays: r.moveDays ?? 1, moveBy: v as "core" | "building", daysPerBatch: link ? linkedBatchDays(link, r.floorsPerBatch) : r.daysPerBatch });
+                      if (v === MOVE_DONE) set(t.key, { moveDays: null, moveBy: undefined, stayIn: undefined });
+                      else if (v === STAY_CORE || v === STAY_BUILDING)
+                        set(t.key, { moveDays: null, moveBy: undefined, stayIn: v === STAY_CORE ? "core" : "building" });
+                      else
+                        set(t.key, {
+                          moveDays: r.moveDays ?? 1,
+                          moveBy: v as "core" | "building",
+                          stayIn: undefined,
+                          daysPerBatch: link ? linkedBatchDays(link, r.floorsPerBatch) : r.daysPerBatch,
+                        });
                     }}
                     className="h-7 rounded-md border border-input bg-card px-1 text-xs text-foreground"
                     aria-label={`${t.label} 이동 방식`}
                   >
-                    <option value={MOVE_DONE}>끝내고 이동</option>
+                    <option value={MOVE_DONE}>묶음 끝내고 이동</option>
+                    <option value={STAY_CORE}>코어 끝내고 이동</option>
+                    <option value={STAY_BUILDING}>동 끝내고 이동</option>
                     <option value="core">코어 겹쳐 이동</option>
                     <option value="building">동 겹쳐 이동</option>
                   </select>

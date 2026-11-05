@@ -10,8 +10,12 @@ export const halfDayOptionsSchema = z.object({
   gangformPMAfterMarking: z.boolean(),
   /** 동절기 양생일(타설 다음 날)에도 먹매김 오전 → 오후 갱폼인양. 없으면 false = 양생일 갱폼 불가 (2026-11-02) */
   curingDayGangformPM: z.boolean().optional(),
-  wallRebarPM: z.boolean(),
-  slabRebarPM: z.boolean(),
+  /** 오후 W철근이면 W기전을 같은 오후 칸에 함께 시공 (2026-11-05). 없으면 false */
+  wallMepWithPMRebar: z.boolean().optional(),
+  /** 없앤 설정 (2026-11-05). 예전 저장값 호환용으로만 받는다 — 엔진은 읽지 않는다 (W철근 오후 항상 가능) */
+  wallRebarPM: z.boolean().optional(),
+  /** 없앤 설정 (2026-11-05). 예전 저장값 호환용으로만 받는다 — 엔진은 읽지 않는다 */
+  slabRebarPM: z.boolean().optional(),
 })
 
 /**
@@ -101,6 +105,11 @@ export const finishTradePlanSchema = z.object({
   moveDays: z.number().int().min(1).max(30).nullable().optional(),
   /** 겹쳐 이동 단위: core = 코어마다(기본), building = 동마다(그 동 코어들은 같은 날 시작) */
   moveBy: z.enum(["core", "building"]).optional(),
+  /**
+   * 끝내고 이동 단위 (2026-11-05 사용자, 겹쳐 이동이 아닐 때만): core = 팀이 그 코어 남은 층을 다 끝내고 다음 코어로,
+   * building = 그 동을 다 끝내고 다음 동으로. 없으면 묶음마다 — 묶음을 끝내면 어디든 가장 먼저 시작할 수 있는 곳으로
+   */
+  stayIn: z.enum(["core", "building"]).optional(),
 })
 export const finishPlanSettingsSchema = z.record(z.string(), finishTradePlanSchema)
 
@@ -128,7 +137,7 @@ const monthDaySchema = z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$
 export const monthDayRangeSchema = z.object({ start: monthDaySchema, end: monthDaySchema })
 
 /**
- * 한중 기간 (2026-11-02). 켜면 동절기 양생을 11~3월 대신 이 기간으로 판정한다.
+ * 한중 기간 (2026-11-02). 켜면 이 기간 타설은 보온양생 2일(갱폼 타설일+3일), 그 밖 11~3월 동절기 양생은 그대로 (2026-11-05).
  * stationId = 기상청 관측소(10년 평균 4℃ 이하 기간), range = 직접 고친 기간(있으면 관측소 값보다 먼저).
  */
 export const coldWeatherSettingsSchema = z.object({
@@ -141,12 +150,14 @@ export const siteSettingsSchema = z.object({
   buildingCount: z.number().int().min(1).max(30),
   rebarTeams: z.number().int().min(1).max(10),
   rebarWallAndSlabSameDay: z.boolean(),
+  /** 슬래브철근 우선 — W철근·S철근이 겹치면 S철근 먼저 (2026-11-05). 없으면 false */
+  slabRebarFirst: z.boolean().optional(),
   alformTeams: z.number().int().min(1).max(10),
   gangform: z.object({ per: z.enum(["day", "slot"]), count: z.number().int().min(1).max(10) }),
   pourPerDay: z.number().int().min(1).max(10),
-  /** 동절기 타설 후 2일 0℃ 이상 유지(보온양생) — 갱폼인양은 타설일 +3일부터. 없으면 false (2026-11-02) */
+  /** (없앰 2026-11-05 — 한중 기간 판정으로 합침. 예전 저장값 호환용으로만 남기고 엔진은 읽지 않는다) */
   winterCuring2Days: z.boolean().optional(),
-  /** 한중 기간 — 없거나 꺼져 있으면 11~3월 */
+  /** 한중 기간 — 켜면 이 기간 타설에 보온양생 2일. 없거나 꺼져 있으면 없음 */
   coldWeather: coldWeatherSettingsSchema.optional(),
   /** 동 번호 → 출발 상태 보정 */
   startOverrides: z.record(z.string(), startOverrideSchema).optional(),
@@ -225,7 +236,7 @@ export const dayInfoSchema = z.object({
   workable: z.boolean(),
   pourAllowed: z.boolean(),
   craneAllowed: z.boolean(),
-  curingDays: z.union([z.literal(0), z.literal(1)]),
+  curingDays: z.union([z.literal(0), z.literal(1), z.literal(2)]),
 })
 
 const teamIdleSchema = z.object({ fullDays: z.number().int(), halfDays: z.number().int() })
@@ -262,8 +273,6 @@ export const DEFAULT_SITE_SETTINGS: z.infer<typeof siteSettingsSchema> = {
   halfDay: {
     alformPMStart: true,
     gangformPMAfterMarking: true,
-    wallRebarPM: true,
-    slabRebarPM: true,
   },
   noPMOnlyStart: { rebar: true, alform: true },
 }

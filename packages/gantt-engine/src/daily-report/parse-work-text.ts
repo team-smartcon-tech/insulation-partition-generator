@@ -24,7 +24,7 @@ import { isNumberedFormat, parseNumbered } from "./parse-numbered.ts"
 
 export type ParsedWorkText = { entries: WorkEntry[]; unmatched: string[] }
 
-export type Section = "structure" | "electric" | "mechanical"
+export type Section = "structure" | "electric" | "mechanical" | "fire"
 
 const SECTION_HEADER = /^\s*\*\s*(.+?)\s*(?:\(\d+\))?\s*$/
 const COLON_LINE = /^\s*-\s*([^:：/]+?)\s*[:：]\s*(.+)$/
@@ -37,7 +37,9 @@ const LEADING_BUILDING =
   /^\s*(\d{2,4}\s*동|근생\s*#?\s*\d+|부대시설|지하주차장|주민공동시설|상가)\s*/
 
 export function sectionOf(header: string): Section | null {
-  if (/골조|구조/.test(header)) return "structure"
+  // 골조 = 형틀·거푸집·철근·콘크리트(철근콘크리트) 공사도 같다 — 현장마다 제목이 다르다 (2026-11-05 사용자). 가설(가설전기 등)은 아님
+  if (/골조|구조/.test(header) || (/형틀|거푸집|철근|콘크리트|철콘/.test(header) && !/가설/.test(header))) return "structure"
+  if (/소방/.test(header)) return "fire" // 「소방설비」 가 설비로 읽히지 않게 먼저
   if (/전기/.test(header)) return "electric"
   if (/설비|기계/.test(header)) return "mechanical"
   return null
@@ -62,7 +64,8 @@ export function pourStage(text: string, part: "wall" | "slab" | null): Stage {
 export function stageOf(text: string, section: Section = "structure"): Stage | null {
   const t = text.replace(/\s+/g, "")
   const isSlab = /바닥|슬라브|슬래브|슬랩/.test(t)
-  const isWall = /벽/.test(t)
+  // 「수직 철근」 = 벽·기둥 세로근 → 벽 쪽 (2026-11-05 오산서2 101동 B2F)
+  const isWall = /벽|수직/.test(t)
 
   if (section === "structure") {
     if (/먹매김|먹메김/.test(t)) return "MARK"
@@ -76,8 +79,8 @@ export function stageOf(text: string, section: Section = "structure"): Stage | n
     return null
   }
 
-  // 전기·기계 설비: 벽체/바닥 배관(이중관 포함)·검측만 기전 단계로. 덕트·전기실 같은 것은 골조 단계가 아니다.
-  if (/배관|이중관|검측/.test(t)) return isSlab ? "SLAB_MEP" : isWall ? "WALL_MEP" : null
+  // 전기·기계 설비·소방: 벽체/바닥 배관(이중관·CD관 매립배관 포함)·수전구·검측만 기전 단계로. 덕트·전기실 같은 것은 골조 단계가 아니다.
+  if (/배관|이중관|수전구|검측/.test(t)) return isSlab ? "SLAB_MEP" : isWall ? "WALL_MEP" : null
   return null
 }
 
@@ -161,7 +164,29 @@ const floorName = (f: number) => (f < 0 ? `B${-f}F` : `${f}F`)
 /** 아래층 사이클로 옮기는 「바닥」 작업 단계 (먹매김·갱폼·벽 단계는 빼고) */
 const SLAB_BELOW: ReadonlySet<Stage> = new Set<Stage>(["ALFORM", "SLAB_REBAR", "SLAB_MEP", "TOP_INSULATION", "POUR"])
 
-export function parseWorkText(rawText: string): ParsedWorkText {
+/**
+ * 줄여 쓴 동 번호를 현장 동 목록으로 풀어 쓴다 (부산장안: 「1동」 = 101동, 「1~4동」, 「101,2동」, 「04동」).
+ * 한두 자리 번호가 동 목록의 끝 두 자리와 하나만 맞을 때만 바꾼다. 목록에 그 번호 동이 실제로 있으면(1동·2동 현장) 그대로.
+ */
+export function expandShortBuildingNos(text: string, buildingNos: readonly number[]): string {
+  if (!buildingNos.length) return text
+  const full = (n: number): number | null => {
+    if (buildingNos.includes(n)) return null
+    const hit = buildingNos.filter((b) => b >= 100 && b % 100 === n)
+    return hit.length === 1 ? hit[0] : null
+  }
+  return text.replace(/(?<![\dA-Za-z.#])(\d{1,4}(?:\s*[,~∼-]\s*\d{1,4})*)(\s*동)/g, (_m, list: string, tail: string) =>
+    list.replace(/\d{1,4}/g, (d) => (d.length <= 2 ? String(full(Number(d)) ?? d) : d)) + tail,
+  )
+}
+
+export type ParseOptions = {
+  /** 현장 동 목록 (줄여 쓴 동 번호 풀기) */
+  buildingNos?: readonly number[]
+}
+
+export function parseWorkText(rawText: string, opts: ParseOptions = {}): ParsedWorkText {
+  if (opts.buildingNos?.length) rawText = expandShortBuildingNos(rawText, opts.buildingNos)
   // 번호 붙은 공사 구간 양식("1. 형틀 공사 (133)") 은 따로 읽는다 — 남원주 2차 등 지하·저층 골조 일보
   if (isNumberedFormat(rawText)) return parseNumbered(rawText)
   const entries: WorkEntry[] = []
@@ -192,7 +217,7 @@ export function parseWorkText(rawText: string): ParsedWorkText {
           : `${rawText} (원문 ${floorName(written!)})`
         : rawText
       const no = BUILDING_NO.exec(building)
-      entries.push({ building, buildingNo: no ? Number(no[1]) : null, floor, text, stage })
+      entries.push({ building, buildingNo: no ? Number(no[1]) : null, floor, text, stage, ...(section !== "structure" ? { trade: section } : {}) })
     }
   }
   return { entries, unmatched }
