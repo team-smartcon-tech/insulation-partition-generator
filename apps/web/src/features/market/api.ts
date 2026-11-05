@@ -11,6 +11,7 @@ import type {
   MarketAppSummary,
   MarketAppVersion,
 } from "./types";
+import type { CardBadgeMap } from "@/features/home/cardBadge";
 
 const BASE = "/api/market";
 
@@ -151,14 +152,21 @@ export function deleteMarketApp(appId: string) {
 }
 
 /** 홈 카드 순서 — 카드 키("tool:id" / "market:uuid") 배열 */
-export function getHomeOrder() {
-  return marketFetch<{ keys: string[] }>("/home-order");
+/** 홈 카드 순서·상태 배지 응답 (badges 는 구버전 서버면 없을 수 있다) */
+export interface HomeOrderResponse {
+  keys: string[];
+  badges?: CardBadgeMap;
+  warning?: string;
 }
 
-/** 홈 카드 순서 저장 (관리자) — 배열 통째로 교체 */
-export function saveHomeOrder(keys: string[]) {
-  return marketFetch<{ keys: string[] }>("/home-order", {
+export function getHomeOrder() {
+  return marketFetch<HomeOrderResponse>("/home-order");
+}
+
+/** 홈 카드 순서·배지 저장 (관리자) — 통째로 교체. badges 를 빼면 서버의 기존 배지를 유지 */
+export function saveHomeOrder(keys: string[], badges?: CardBadgeMap) {
+  return marketFetch<HomeOrderResponse>("/home-order", {
     method: "PUT",
-    body: JSON.stringify({ keys }),
+    body: JSON.stringify(badges ? { keys, badges } : { keys }),
   });
 }

@@ -741,23 +741,52 @@ const MAX_CARD_KEYS = 300;
  */
 market.get("/home-order", async (c) => {
   try {
-    const res = await supabaseRest(c.env, "GET", "/market_home_order?id=eq.home&select=card_keys");
+    // select=* — card_badges 컬럼이 아직 없어도(마이그레이션 전) 조회가 깨지지 않게 이름으로 박지 않는다
+    const res = await supabaseRest(c.env, "GET", "/market_home_order?id=eq.home&select=*");
     if (!res.ok) {
       console.error("[market/home-order GET]", await res.text());
-      return c.json({ keys: [] });
+      return c.json({ keys: [], badges: {} });
     }
-    const rows = (await res.json()) as { card_keys: string[] | null }[];
-    return c.json({ keys: rows[0]?.card_keys ?? [] });
+    const rows = (await res.json()) as { card_keys: string[] | null; card_badges?: unknown }[];
+    return c.json({ keys: rows[0]?.card_keys ?? [], badges: sanitizeCardBadges(rows[0]?.card_badges) ?? {} });
   } catch (err) {
     console.error("[market/home-order GET]", errMsg(err));
-    return c.json({ keys: [] });
+    return c.json({ keys: [], badges: {} });
   }
 });
 
-/** PUT /api/market/home-order — 순서 통째로 교체 (관리자 전용) body: { keys: string[] } */
+/** 카드 상태 배지 — 출처(본사/현장) · 상태(사내기준/운영중/검증중). web features/home/cardBadge.ts 와 같은 값 */
+const BADGE_ORIGINS = new Set(["hq", "site"]);
+const BADGE_STATUSES = new Set(["standard", "operating", "testing"]);
+type CardBadge = { origin?: string; status?: string };
+
+/** 배지 맵 검증 — 형식이 틀리면 null. 둘 다 비어 있는 항목은 버린다. */
+function sanitizeCardBadges(raw: unknown): Record<string, CardBadge> | null {
+  if (raw == null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out: Record<string, CardBadge> = {};
+  const entries = Object.entries(raw as Record<string, unknown>);
+  if (entries.length > MAX_CARD_KEYS) return null;
+  for (const [key, v] of entries) {
+    if (!CARD_KEY_RE.test(key) || !v || typeof v !== "object") return null;
+    const { origin, status } = v as { origin?: unknown; status?: unknown };
+    if (origin != null && !(typeof origin === "string" && BADGE_ORIGINS.has(origin))) return null;
+    if (status != null && !(typeof status === "string" && BADGE_STATUSES.has(status))) return null;
+    const badge: CardBadge = {};
+    if (origin) badge.origin = origin as string;
+    if (status) badge.status = status as string;
+    if (badge.origin || badge.status) out[key] = badge;
+  }
+  return out;
+}
+
+/**
+ * PUT /api/market/home-order — 순서(·배지) 통째로 교체 (관리자 전용)
+ * body: { keys: string[], badges?: Record<카드키, { origin?, status? }> } — badges 를 빼면 기존 배지는 그대로 둔다.
+ */
 market.put("/home-order", async (c) => {
   if (!adminOnly(c)) return c.json({ error: "순서 변경 권한이 없습니다." }, 403);
-  const body = (await c.req.json().catch(() => null)) as { keys?: unknown } | null;
+  const body = (await c.req.json().catch(() => null)) as { keys?: unknown; badges?: unknown } | null;
   if (!body || !Array.isArray(body.keys)) {
     return c.json({ error: "keys 배열이 필요합니다." }, 400);
   }
@@ -770,26 +799,45 @@ market.put("/home-order", async (c) => {
   if (keys.length > MAX_CARD_KEYS) {
     return c.json({ error: `카드는 최대 ${MAX_CARD_KEYS}개까지입니다.` }, 400);
   }
+  const badges = body.badges === undefined ? undefined : sanitizeCardBadges(body.badges);
+  if (badges === null) {
+    return c.json({ error: "잘못된 배지 값이 있습니다." }, 400);
+  }
   try {
     const user = c.get("user");
-    const res = await supabaseRest(
-      c.env,
-      "POST",
-      "/market_home_order?on_conflict=id",
-      {
-        id: "home",
-        card_keys: keys,
-        updated_at: new Date().toISOString(),
-        updated_by: user?.name ?? user?.id ?? null,
-      },
-      "resolution=merge-duplicates,return=representation",
-    );
+    const row: Record<string, unknown> = {
+      id: "home",
+      card_keys: keys,
+      updated_at: new Date().toISOString(),
+      updated_by: user?.name ?? user?.id ?? null,
+    };
+    const upsert = (r: Record<string, unknown>) =>
+      supabaseRest(c.env, "POST", "/market_home_order?on_conflict=id", r, "resolution=merge-duplicates,return=representation");
+
+    let res = await upsert(badges ? { ...row, card_badges: badges } : row);
+    let badgesSaved = !!badges;
+    if (!res.ok && badges) {
+      // card_badges 컬럼이 아직 없으면(마이그레이션 전) 순서만이라도 저장한다
+      const errText = await res.text();
+      if (!errText.includes("card_badges")) {
+        console.error("[market/home-order PUT]", errText);
+        return c.json({ error: `순서 저장 실패: ${errText}` }, res.status as 500);
+      }
+      console.warn("[market/home-order PUT] card_badges 컬럼 없음 — 순서만 저장");
+      res = await upsert(row);
+      badgesSaved = false;
+    }
     if (!res.ok) {
       const errText = await res.text();
       console.error("[market/home-order PUT]", errText);
       return c.json({ error: `순서 저장 실패: ${errText}` }, res.status as 500);
     }
-    return c.json({ keys });
+    const saved = (await res.json().catch(() => [])) as { card_badges?: unknown }[];
+    return c.json({
+      keys,
+      badges: sanitizeCardBadges(saved[0]?.card_badges) ?? {},
+      ...(badges && !badgesSaved ? { warning: "배지 저장 준비가 안 됐습니다(DB 마이그레이션 전). 순서만 저장했습니다." } : {}),
+    });
   } catch (err) {
     console.error("[market/home-order PUT]", errMsg(err));
     return c.json({ error: `순서 저장 실패: ${errMsg(err)}` }, 500);

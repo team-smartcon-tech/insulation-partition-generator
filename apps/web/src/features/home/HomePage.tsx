@@ -4,6 +4,7 @@
  * 디자인: 네이비 단색 상단 띠 + 연한 바탕 + 흰 카드(로고 패널 · 이름 · 두 줄 설명). 배지·알약·오로라는 두지 않는다
  *   (2026-10-29 — 「사용 가능」배지·조회수 알약·광원 배경이 브로슈어처럼 보여 걷어냄.
  *    로고를 48px 아이콘으로 줄이는 안은 게시 도구 로고가 얼룩이 돼 철회).
+ *   예외: 관리자가 지정한 「출처+상태」 배지(본사·사내기준 등)만 로고 패널 왼쪽 위에 붙인다 (2026-11-05, cardBadge.ts).
  * 도구 목록은 features/home/tools.ts(TOOLS)를 원천으로 한다.
  * 카드는 섹션(시공 도구 · CAD 도구 …)별로 묶고, 카드가 없는 섹션은 제목까지 숨긴다.
  */
@@ -32,6 +33,19 @@ import { useHomeOrder, useMarketApps, useSaveHomeOrder } from "@/features/market
 import { SECTIONS, type SectionId } from "@/features/market/types";
 import { TOOLS, type ToolDef } from "./tools";
 import { applyHomeOrder, moveCardKey, stepCardKey } from "./homeOrder";
+import {
+  BADGE_ORIGIN_CLASS,
+  BADGE_ORIGIN_OPTIONS,
+  BADGE_STATUS_CLASS,
+  BADGE_STATUS_OPTIONS,
+  originLabel,
+  setCardBadge,
+  statusLabel,
+  type BadgeOrigin,
+  type BadgeStatus,
+  type CardBadge,
+  type CardBadgeMap,
+} from "./cardBadge";
 
 /** 게시 권한 role — 최종 판정은 서버(market.ts)가 하고, 여기선 버튼 노출 여부만 본다. */
 const PUBLISH_ROLES = new Set(["super_admin", "system_admin"]);
@@ -106,6 +120,8 @@ export default function HomePage() {
   const { data: homeOrder } = useHomeOrder();
   const saveOrder = useSaveHomeOrder();
   const [draftKeys, setDraftKeys] = useState<string[] | null>(null);
+  /** 편집 중 배지 초안 — null 이면 서버 저장본을 보여준다 */
+  const [draftBadges, setDraftBadges] = useState<CardBadgeMap | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [orderError, setOrderError] = useState<string | null>(null);
   const editing = draftKeys !== null;
@@ -159,6 +175,8 @@ export default function HomePage() {
     return draftKeys ? applyHomeOrder(ordered, draftKeys) : ordered;
   }, [defaultCards, savedKeys, draftKeys]);
 
+  const badges = draftBadges ?? homeOrder?.badges ?? {};
+
   const sectionByKey = useMemo(() => new Map(cards.map((c) => [c.key, c.section])), [cards]);
   const sectionOf = (key: string) => sectionByKey.get(key) ?? "";
 
@@ -166,17 +184,23 @@ export default function HomePage() {
     setQuery("");
     setOrderError(null);
     setDraftKeys(cards.map((c) => c.key));
+    setDraftBadges(homeOrder?.badges ?? {});
   };
   const cancelEdit = () => {
     setDraftKeys(null);
+    setDraftBadges(null);
     setDragKey(null);
     setOrderError(null);
   };
   const commitEdit = () => {
     if (!draftKeys) return;
     setOrderError(null);
-    saveOrder.mutate(draftKeys, {
-      onSuccess: () => setDraftKeys(null),
+    saveOrder.mutate({ keys: draftKeys, badges: draftBadges ?? undefined }, {
+      onSuccess: (data) => {
+        setDraftKeys(null);
+        setDraftBadges(null);
+        if (data.warning) window.alert(data.warning);
+      },
       onError: (err) => setOrderError(err instanceof Error ? err.message : "순서 저장에 실패했습니다."),
     });
   };
@@ -287,10 +311,10 @@ export default function HomePage() {
                 type="button"
                 onClick={startEdit}
                 className={btnOutline}
-                title="카드 순서를 바꿉니다 (모든 사용자에게 같은 순서로 보입니다)"
+                title="카드 순서와 상태 배지(본사·현장 / 사내기준·운영중·검증중)를 바꿉니다. 모든 사용자에게 같게 보입니다"
               >
                 <ArrowUpDown className="h-4 w-4" />
-                순서 편집
+                순서·배지 편집
               </button>
             )}
             {editing && (
@@ -301,7 +325,7 @@ export default function HomePage() {
                 </button>
                 <button type="button" onClick={commitEdit} disabled={saveOrder.isPending} className={btnPrimary}>
                   <Check className="h-4 w-4" />
-                  {saveOrder.isPending ? "저장 중…" : "순서 저장"}
+                  {saveOrder.isPending ? "저장 중…" : "저장"}
                 </button>
               </>
             )}
@@ -322,7 +346,7 @@ export default function HomePage() {
           <div className="mb-6 flex flex-wrap items-center gap-2 rounded-lg border border-[#004791]/20 bg-[#eaf2fb] px-4 py-3 text-[13px] text-[#0a4a8a]">
             <ArrowUpDown className="h-4 w-4 shrink-0" />
             <span>
-              카드를 끌어다 놓거나 ← → 버튼으로 순서를 바꾸세요. 같은 섹션 안에서만 옮길 수 있고, 저장하면 모든 사용자에게 같은 순서로 보입니다.
+              카드를 끌어다 놓거나 ← → 버튼으로 순서를 바꾸고, 카드 왼쪽 아래 칸에서 출처(본사·현장)와 상태(사내기준·운영중·검증중) 배지를 고르세요. 저장하면 모든 사용자에게 같게 보입니다.
             </span>
             {orderError && <span className="font-semibold text-red-600">{orderError}</span>}
           </div>
@@ -357,13 +381,18 @@ export default function HomePage() {
                       (dragKey === card.key ? "opacity-40 outline-[#004791]" : "outline-[#004791]/35")
                     }
                   >
-                    <AppCard card={card} onOpen={() => {}} />
-                    {/* 편집 중엔 카드 클릭(이동)을 막고 순서 조작만 받는다 */}
+                    <AppCard card={card} badge={badges[card.key]} onOpen={() => {}} />
+                    {/* 편집 중엔 카드 클릭(이동)을 막고 순서·배지 조작만 받는다 */}
                     <div className="absolute inset-0 rounded-xl">
-                      <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2 py-1 text-[11px] font-bold text-slate-600 shadow-sm ring-1 ring-slate-200">
+                      <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2 py-1 text-[11px] font-bold text-slate-600 shadow-sm ring-1 ring-slate-200">
                         <GripVertical className="h-3.5 w-3.5" />
                         {i + 1}
                       </span>
+                      <BadgeEditor
+                        cardName={card.name}
+                        badge={badges[card.key]}
+                        onChange={(patch) => setDraftBadges((prev) => setCardBadge(prev ?? {}, card.key, patch))}
+                      />
                       <div className="absolute bottom-3 right-3 flex gap-1">
                         <button
                           type="button"
@@ -390,6 +419,7 @@ export default function HomePage() {
                   <AppCard
                     key={card.key}
                     card={card}
+                    badge={badges[card.key]}
                     onOpen={() => card.href && navigate(card.href)}
                   />
                 ),
@@ -448,7 +478,7 @@ function SectionHeading({ title, count }: { title: string; count: number }) {
 }
 
 /** 카드 — 로고 패널 · 이름 · 태그 · 두 줄 설명 · 작성자 · 조회/좋아요 */
-function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
+function AppCard({ card, badge, onOpen }: { card: HomeCard; badge?: CardBadge; onOpen: () => void }) {
   const available = card.available;
 
   const cardCls =
@@ -459,7 +489,7 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
 
   const body = (
     <>
-      <LogoPanel card={card} />
+      <LogoPanel card={card} badge={badge} />
       <div className="flex flex-1 flex-col p-5">
         <div className="truncate text-[16px] font-bold tracking-tight text-slate-900">{card.name}</div>
         {/* 태그는 칩 대신 점으로 이어 붙인다 — 한 줄로 눌러 카드 높이를 맞춘다 */}
@@ -522,9 +552,10 @@ function AppCard({ card, onOpen }: { card: HomeCard; onOpen: () => void }) {
 
 /**
  * 로고 패널(16:9) — 게시 도구의 첫 스크린샷은 대개 도구 로고 아트라 잘라내지 않고 통째로 보여준다.
- * 배지·조회수 알약은 올리지 않는다(카드 본문에 있다). 이미지가 없으면 lucide 아이콘을 연한 바탕에.
+ * 조회수 알약은 올리지 않는다(카드 본문에 있다). 관리자가 지정한 출처+상태 배지만 왼쪽 위에 붙인다.
+ * 이미지가 없으면 lucide 아이콘을 연한 바탕에.
  */
-function LogoPanel({ card }: { card: HomeCard }) {
+function LogoPanel({ card, badge }: { card: HomeCard; badge?: CardBadge }) {
   const Icon = card.icon;
   const [imgOk, setImgOk] = useState(true);
   const src = card.available ? card.thumbnail ?? card.logo ?? null : null;
@@ -541,12 +572,77 @@ function LogoPanel({ card }: { card: HomeCard }) {
           draggable={false}
           onError={() => setImgOk(false)}
         />
+        <StatusBadge badge={badge} />
       </div>
     );
   }
   return (
     <div className={panel + " flex items-center justify-center"}>
       <Icon className={"h-12 w-12 " + (card.available ? "text-[#004791]/70" : "text-slate-300")} strokeWidth={1.4} />
+      <StatusBadge badge={badge} />
+    </div>
+  );
+}
+
+/** 출처+상태 배지 — 두 칸을 붙인 알약. 지정이 없으면 그리지 않는다 */
+function StatusBadge({ badge }: { badge?: CardBadge }) {
+  if (!badge?.origin && !badge?.status) return null;
+  const origin = badge.origin ? BADGE_ORIGIN_OPTIONS.find((o) => o.value === badge.origin) : undefined;
+  return (
+    <span
+      className="absolute left-3 top-3 inline-flex overflow-hidden rounded-md text-[11.5px] font-bold leading-none shadow-sm ring-1 ring-slate-300/80"
+      title={[origin?.title, statusLabel(badge.status)].filter(Boolean).join(" · ")}
+    >
+      {badge.origin && (
+        <span className={"px-2 py-[5px] " + BADGE_ORIGIN_CLASS[badge.origin]}>{originLabel(badge.origin)}</span>
+      )}
+      {badge.status && (
+        <span className={"px-2 py-[5px] " + BADGE_STATUS_CLASS[badge.status]}>{statusLabel(badge.status)}</span>
+      )}
+    </span>
+  );
+}
+
+/** 편집 모드 배지 선택 — 카드 왼쪽 아래(← → 버튼 맞은편)에 출처 · 상태 드롭다운 두 개 */
+function BadgeEditor({
+  cardName,
+  badge,
+  onChange,
+}: {
+  cardName: string;
+  badge?: CardBadge;
+  onChange: (patch: Partial<CardBadge>) => void;
+}) {
+  const sel =
+    "h-8 cursor-pointer rounded-lg bg-white px-2 text-[12px] font-semibold text-slate-700 shadow ring-1 ring-slate-200 outline-none hover:bg-slate-50 focus:ring-2 focus:ring-[#004791]/40";
+  return (
+    <div className="absolute bottom-3 left-3 flex gap-1" onDragStart={(e) => e.preventDefault()}>
+      <select
+        aria-label={`${cardName} 출처`}
+        value={badge?.origin ?? ""}
+        onChange={(e) => onChange({ origin: (e.target.value || undefined) as BadgeOrigin | undefined })}
+        className={sel}
+      >
+        <option value="">출처 없음</option>
+        {BADGE_ORIGIN_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.title}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label={`${cardName} 상태`}
+        value={badge?.status ?? ""}
+        onChange={(e) => onChange({ status: (e.target.value || undefined) as BadgeStatus | undefined })}
+        className={sel}
+      >
+        <option value="">상태 없음</option>
+        {BADGE_STATUS_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
