@@ -152,9 +152,12 @@ export default function HomePage() {
 
     // 같은 이름으로 실제 게시되면 "준비 중" 자리표시자는 감춘다 (줄눈컷팅 등 중복 방지).
     const publishedNames = new Set(published.map((c) => c.name.replace(/\s+/g, "")));
-    const builtIn = TOOLS.map(toolToCard).filter(
-      (c) => c.available || !publishedNames.has(c.name.replace(/\s+/g, "")),
-    );
+    // 내장 도구를 App Market 에 게시했으면(배포 URL = 그 도구 경로, 예: /tools/gantt) 내장 카드는 감추고 게시 카드만 —
+    // 게시 카드가 소개·수정·삭제를 맡는다 (2026-11-04). 게시를 지우면 내장 카드가 다시 나온다.
+    const publishedPaths = new Set(marketApps.map((a) => a.deploy_url).filter((u): u is string => !!u?.startsWith("/")));
+    const builtIn = TOOLS.filter((t) => !publishedPaths.has(t.path))
+      .map(toolToCard)
+      .filter((c) => c.available || !publishedNames.has(c.name.replace(/\s+/g, "")));
 
     // 사용 가능(내장 → 게시) 먼저, 준비 중 자리표시자는 뒤로.
     // sortLast 를 단 내장 도구는 게시 도구들보다 뒤에 놓는다(도구별로 자리를 지정할 수 있게).

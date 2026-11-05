@@ -32,3 +32,30 @@ tags: [wiki/log]
 - 정한 것과 이유(사용자): 새 주소 연결은 사용자가 홈에 따로 만들었으므로 리다이렉트는 두지 않는다. DB `form_*` 6개·버킷 `form-files` 는 되돌리기용으로 2026-11-04 까지 보존하고 삭제는 별도 승인으로 한다.
 - 남긴 것: `scripts/smart-forms-split/`·`tests/smart-forms-split-copy.test.mjs`·`docs/smart-forms-split/`·`supabase/migrations/` 의 `form_*` 마이그레이션(표가 아직 있으므로 이력도 둔다).
 - 남은 것: 2026-11-04 이후 표·버킷 삭제(별도 승인). 그때 위 복사 도구와 `form_*` 마이그레이션 처리도 정한다. 이 기록 위쪽 "`systems/` … 스마트폼 화면 지식" 은 이제 만들 대상이 아니다.
+
+## 2026-10-29 · 넣기·만들기 · 스마트 공정표를 툴박스 내장 도구로 이관
+
+- 계기: 따로 만들던 Smart-Gantt-Chart(공정 엔진·작업일보 해석·간트)를 로그인·DB 가 있는 이 툴박스에 카드 하나로 넣기로 했다(사용자 결정). 기존 저장소는 기록용으로 둔다.
+- 한 것: `packages/gantt-engine`(순수 엔진 + zod 계약, Node 러너 테스트 36건), Worker `/api/gantt/*`, `features/gantt/` 3탭 화면, `gantt_*` 마이그레이션, `docs/gantt/설계.md`(규칙 1차 소스).
+- 정한 것과 이유: 스마트웍스 일보는 **dcr-app Supabase 를 service_role 로 SELECT 만**(CTPA 와 같은 방식, 운영 DB `shdsg…`; 테스트 DB `kejie…` 와 혼동 주의 — 키의 JWT `ref` 와 주소를 대조한다). 엔진 테스트는 이 저장소 규칙대로 Vitest 대신 Node 내장 러너. 화면은 wouter + React Query 로 다시 썼고 간트 그리기는 그대로. 최상층은 `gantt_buildings.top_floor` 로 — 없으면 끝없이 올라간다.
+- 남은 것: 마이그레이션 SQL 적용(사용자, SQL Editor), 툴박스 `.dev.vars` 에 DCR 키(복사해 둠) 반영 후 재시작, 실데이터로 3탭 확인, 현장 범위 권한(dcr managed_sites)·공휴일 달력 DB 화·최적안 탐색.
+
+## 2026-11-04 · 바꾸기 · 스마트 공정표 3D 골조 탭 숨김, 카드 썸네일 Smart Gantt
+
+- 계기(사용자): 「3D골조 탭은 일단 숨겨줘」, 「스마트 공정표 이미지를 타일 MAKER 처럼 아이콘을 배지 안에 넣고 글자를 크게」 → 「Smart Gantt 로 변경」.
+- 한 것: `GanttPage.tsx` `TABS` 에 `hidden` 을 두어 「3D 골조」 만 탭 줄에서 뺐다(화면 코드 유지). `public/brand/logo-gantt.svg` 를 타일 MAKER(`logo-tile-maker.svg`)와 같은 규격으로 다시 그렸다 — 16:9·카드 바탕 #F7F9FC, 300 둥근 배지 안 간트 막대, 워드마크 「Smart Gantt」(굵게+가늘게), 설명 줄 「스마트 공정표 · 골조 공정 자동 재산정」.
+- 정한 것과 이유: 카드 패널(`HomePage` `LogoPanel`)은 16:9·#f7f9fc·`object-contain` 이라, 썸네일도 같은 비율·바탕이어야 흰 네모가 떠 보이지 않는다. 바꾼 것은 썸네일뿐 — 카드 제목·도구 제목은 「스마트 공정표」 그대로.
+- 막혔다 푼 것: Bash PreToolUse 훅이 명령 문자열에 「push … 메인 브랜치 이름」 이 보이면(`메인:feature/x` refspec, 심지어 heredoc 본문 글자도) 막는다. 작업 브랜치는 `HEAD:refs/heads/feature/blackcivic` refspec 으로 올렸다. 썸네일은 크롬 `--headless --screenshot` 으로 그려 가운데 맞춤을 확인했다.
+
+## 2026-11-04 · 만들기 · 내장 도구를 App Market 에 게시 (/tools/… 배포 경로)
+
+- 계기(사용자): 「다른 플랫폼은 버튼을 누르면 소개 화면이 나오는데, 스마트 공정표는 바로 들어가져버려」, 「이것처럼 수정 삭제도 되게」.
+- 한 것: App Market 배포 URL 에 https 외에 내부 경로 `/tools/<id>` 를 허용했다(worker `market.ts` `INTERNAL_PATH`, 게시 폼 검증). 상세 페이지 바로가기는 내부 경로면 같은 탭에서 이동한다. 홈은 게시된 앱이 가리키는 경로의 내장 카드를 숨긴다. 게시용 스크린샷 `public/thumbs/smart-gantt.png` 를 넣었다.
+- 정한 것과 이유: 처음엔 코드로만 만드는 내장 소개 화면을 만들었으나, 수정·삭제를 화면에서 하려면 App Market 데이터가 맞아 그 방식으로 바꿨다(소개 화면 코드는 지웠다). 내장 카드 숨김은 경로 일치로만 판정해, 게시를 지우면 내장 카드가 다시 나온다.
+- 남은 것: 배포 뒤 운영 홈에서 관리자가 게시하기 — 배포 URL `/tools/gantt`, 스크린샷 `smart-gantt.png`. 로컬에서 게시해도 운영 DB 에 생긴다(같은 Supabase).
+
+## 2026-11-05 · 넣기 · 한중 기간 현장 추가 (화성남양1차·평택고덕P1 1·2차)
+
+- 계기(사용자): 「동절기 양생에 남원주 1·2차, 부산장안이 있는데 화성남양1차, 평택고덕1,2차도 필요해」.
+- 한 것: `node packages/gantt-engine/scripts/build-cold-normals.ts "화성남양1차" "평택고덕P1 1차" "평택고덕P1 2차"` (`.dev.vars` 의 DCR 키로 현장 좌표만 읽음). 결과 화성남양1차 11/28~2/26, 평택고덕P1 1·2차(같은 5km 격자라 한 항목) 11/28~2/26, 7일 평균 최저 둘 다 -2.1℃.
+- 알아 둘 것: 스마트웍스 현장 이름은 「평택고덕P1 …」 이라 「평택고덕 1차」 로는 맞지 않는다 — 스크립트는 이름 부분 일치가 정확히 한 곳이어야 한다. 「화성남양2차 임대」 는 넣지 않았다. 10겨울 받기는 격자당 약 4분.

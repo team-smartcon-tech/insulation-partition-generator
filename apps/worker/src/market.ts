@@ -68,6 +68,9 @@ const adminOnly = (c: { get: (k: "user") => SessionUser | undefined }) =>
   isAdmin(c.get("user"));
 
 /** http(s) 주소만 허용 — javascript: 등 스킴 차단 */
+/** 툴박스 안 도구 경로 (웹앱 배포 URL 로 허용) */
+const INTERNAL_PATH = /^\/tools\/[a-z0-9-]+$/;
+
 function normalizeUrl(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const value = raw.trim();
@@ -125,14 +128,17 @@ function parseAppFields(form: FormData) {
     return { error: `알 수 없는 배포 방식입니다: ${distribution}` } as const;
   }
 
-  const deployUrl = normalizeUrl(form.get("deployUrl"));
+  // 웹앱은 툴박스 안 도구 경로(/tools/gantt)도 된다 — 내장 도구를 게시해 소개·수정·삭제를 쓰려고 (2026-11-04)
+  const rawDeploy = formText(form, "deployUrl");
+  const internal = distribution !== "download" && rawDeploy != null && INTERNAL_PATH.test(rawDeploy);
+  const deployUrl = internal ? rawDeploy : normalizeUrl(form.get("deployUrl"));
   if (distribution === "download") {
     // 사이트가 https 라 http 설치파일은 브라우저가 "안전하지 않은 다운로드"로 막는다.
     if (!deployUrl || !deployUrl.startsWith("https://")) {
       return { error: "설치파일 URL 은 https 주소여야 합니다." } as const;
     }
   } else if (!deployUrl) {
-    return { error: "배포 URL 은 http(s) 주소여야 합니다." } as const;
+    return { error: "배포 URL 은 http(s) 주소 또는 /tools/… 경로여야 합니다." } as const;
   }
   const repoUrlRaw = formText(form, "repoUrl");
   if (repoUrlRaw && !normalizeUrl(repoUrlRaw)) {

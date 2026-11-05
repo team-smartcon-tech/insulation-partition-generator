@@ -34,6 +34,7 @@ pnpm -r typecheck
   테이블 `market_apps`/`market_app_versions`/`market_app_likes`, 버킷 `market-shots`(비공개). 게시·삭제는 관리자(super_admin·system_admin)만.
   홈 섹션은 `market_apps.section`(시공 도구·CAD 도구 — `features/market/types.ts` `SECTIONS`), 카드 없는 섹션은 숨김.
   설치형(`distribution=download`)은 `deploy_url` 의 https 설치파일을 Worker `/api/market/apps/:id/download` 가 중계(원 URL 은 관리자에게만 응답).
+- 스마트 공정표 택트 인원 탭: `apps/web/src/features/gantt/takt/*` + worker `gantt.ts` `/api/gantt/takt/:siteId`, 계산 `packages/gantt-engine/src/takt/crew.ts`. 표 `gantt_takt_sites`/`gantt_takt_trades`, RPC `gantt_takt_save`.
 - 공용 타입: `packages/shared/src/index.ts`(`ElevState` 등) — web의 `features/elevation/types.ts`가 재수출
 
 **인프라**

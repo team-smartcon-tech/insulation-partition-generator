@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" role="img" aria-label="스마트 공정표 — Smart Gantt">
+  <title>스마트 공정표</title>
+  <!--
+    홈 카드 썸네일 (16:9, 카드 패널 배경 #f7f9fc). 2026-11-04 사용자: 타일 MAKER(logo-tile-maker.svg)처럼
+    아이콘을 배지 안에 넣고 글자를 크게 — 마크 크기·글자 크기·배치를 타일 MAKER 와 맞춘다.
+    워드마크는 영문 「Smart Gantt」(2026-11-04 사용자), 한글 이름은 아래 설명 줄에.
+  -->
+  <defs>
+    <linearGradient id="sg-navy" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B5BB0"/><stop offset="1" stop-color="#003A78"/>
+    </linearGradient>
+    <linearGradient id="sg-warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFA24A"/><stop offset="1" stop-color="#EC6A16"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="#F7F9FC"/>
+  <!-- 마크(300) + 사이 74 + 글자(약 740) 폭을 화면 가운데로, 카드에서 읽히게 1.15배 -->
+  <g transform="translate(800 450) scale(1.15) translate(-798 -450)">
+
+  <!-- ── 마크: 둥근 배지 안 간트 막대 (실적 흰색 → 예정 하늘색 → 다음 공정 주황), 오늘 점선 ── -->
+  <g transform="translate(236 300)">
+    <rect x="0" y="12" width="300" height="300" rx="72" fill="#003A78" opacity="0.12"/>
+    <rect width="300" height="300" rx="72" fill="url(#sg-navy)"/>
+    <!-- 줄 구분선 -->
+    <path d="M48 112H252M48 168H252M48 224H252" stroke="#FFFFFF" stroke-width="2" opacity="0.14" fill="none"/>
+    <rect x="52" y="66" width="118" height="36" rx="9" fill="#FFFFFF" opacity="0.95"/>
+    <rect x="92" y="122" width="132" height="36" rx="9" fill="#9FD0FF"/>
+    <rect x="150" y="178" width="98" height="36" rx="9" fill="url(#sg-warm)"/>
+    <rect x="72" y="234" width="64" height="24" rx="7" fill="#FFFFFF" opacity="0.35"/>
+    <!-- 오늘 -->
+    <path d="M186 44V262" stroke="#FFFFFF" stroke-width="3" stroke-dasharray="8 7" stroke-linecap="round" opacity="0.7" fill="none"/>
+  </g>
+
+  <!-- ── 워드마크 ── -->
+  <g font-family="'SUIT Variable','SUIT','Pretendard Variable','Pretendard','Malgun Gothic',sans-serif">
+    <text x="610" y="468" font-size="138" font-weight="800" fill="#0F2A4A" letter-spacing="-3">Smart<tspan dx="26" font-weight="300" fill="#004791" letter-spacing="4">Gantt</tspan></text>
+    <rect x="614" y="512" width="96" height="8" rx="4" fill="url(#sg-warm)"/>
+    <text x="614" y="580" font-size="30" font-weight="600" fill="#6B7C90" letter-spacing="2">스마트 공정표 · 골조 공정 자동 재산정</text>
+  </g>
+  </g>
+</svg>

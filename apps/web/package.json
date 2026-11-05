@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ipg/gantt-engine": "workspace:*",
     "@jakkelab-aec/rw-dxf-engine-ts": "file:../../vendor/jakkelab-aec-rw-dxf-engine-ts-0.1.5.tgz",
     "@radix-ui/react-slot": "^1.2.3",
     "@tanstack/react-query": "^5.62.0",
@@ -25,7 +26,8 @@
     "tailwind-merge": "^3.3.1",
     "three": "^0.184.0",
     "wouter": "^3.3.5",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@ipg/shared": "workspace:*",
