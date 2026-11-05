@@ -15,6 +15,7 @@ import {
   updateMarketApp,
 } from "./api";
 import type { MarketAppInput } from "./types";
+import type { CardBadgeMap } from "@/features/home/cardBadge";
 
 const keys = {
   all: ["market-apps"] as const,
@@ -108,7 +109,7 @@ export function useHomeOrder() {
 export function useSaveHomeOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (keys: string[]) => saveHomeOrder(keys),
+    mutationFn: (args: { keys: string[]; badges?: CardBadgeMap }) => saveHomeOrder(args.keys, args.badges),
     onSuccess: (data) => qc.setQueryData(homeOrderKey, data),
   });
 }
