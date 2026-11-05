@@ -194,7 +194,7 @@ export function simulate(input: SimulationInput): SimulationResult {
 
   const curingDay = (b: BuildingState): IsoDate | null => {
     if (!b.lastPourDate) return null
-    return getDayInfo(calendar, b.lastPourDate).curingDays === 1 ? addDays(b.lastPourDate, 1) : null
+    return getDayInfo(calendar, b.lastPourDate).curingDays >= 1 ? addDays(b.lastPourDate, 1) : null
   }
 
   // 이 동이 이 칸에서 다음 단계를 시작할 수 있는가 (용량 제외, 규칙만).
@@ -202,9 +202,12 @@ export function simulate(input: SimulationInput): SimulationResult {
   // §5 "반일 투입 가능 여부" 네 가지는 모두 **같은 동이 같은 날 오전 단계를 마치고 오후에 다음 단계로
   // 이어가도 되는가**(같은 날 연계)로 해석한다. 꺼져 있으면 다음 단계는 다음 날부터다.
   // - 갱폼: 먹매김 오전 완료 → 오후 갱폼 (gangformPMAfterMarking)
-  // - 벽철근: 갱폼 오전 완료 → 오후 벽철근 (wallRebarPM). 벽철근은 6h 라 그 외에는 오전 칸만 쓴다.
+  // - 벽철근: 오전·오후 칸 모두 항상 가능(갱폼 오전 완료 → 같은 날 오후 포함). 「갱폼 오전 완료 시 오후 벽철근」(wallRebarPM) 설정은
+  //   없앴다 — 이름과 달리 켜면 아무 날 오후나 허용했고, 끄면 슬래브철근 우선과 겹쳐 W철근이 오전을 못 잡고 며칠씩 밀렸다
+  //   (2026-11-05 사용자). 저장된 값은 읽지 않는다.
   // - 알폼: 벽 검측 오전 완료 → 오후 투입 (alformPMStart). 꺼지면 오전 시작만.
-  // - 슬래브철근: 알폼 오전 완료 → 오후 슬래브철근 (slabRebarPM). 슬래브는 4h 라 다른 날이면 오후도 쓴다
+  // - 슬래브철근: 알폼 오전 완료 → 같은 날 오후 슬래브철근 항상 가능. 「슬래브철근 오후 가능」(slabRebarPM) 설정은 없앴다 —
+  //   기본 알폼팀 1에서는 결과가 같았다 (2026-11-05 사용자). 저장된 값은 읽지 않는다. 슬래브는 4h 라 다른 날이면 오후도 쓴다
   //   ("철근팀 하루 = 벽 오전 + 슬래브 오후", §3).
   const stageAllowedAt = (b: BuildingState, slot: Slot): boolean => {
     if (slot.index < b.readySlot) return false
@@ -217,24 +220,20 @@ export function simulate(input: SimulationInput): SimulationResult {
 
     switch (b.stage) {
       case "MARK":
-        return true // 양생일과 같은 날 가능
+        // 한중 기간 타설(양생 2)은 먹매김도 타설일 +2일부터 — 타설 다음 날은 보온양생만 (2026-11-05 사용자)
+        if (b.lastPourDate && slot.date < addDays(b.lastPourDate, 2) && getDayInfo(calendar, b.lastPourDate).curingDays === 2) return false
+        return true // 그 외 동절기는 양생일과 같은 날 가능
       case "GANGFORM":
         if (!slot.day.craneAllowed) return false
-        // 동절기 보온양생 2일(소요강도 도달 후 2일간 0℃ 이상 유지): 갱폼인양은 타설일 +3일부터 (2026-11-02 사용자)
-        if (
-          settings.winterCuring2Days &&
-          b.lastPourDate &&
-          getDayInfo(calendar, b.lastPourDate).curingDays === 1 &&
-          slot.date < addDays(b.lastPourDate, 3)
-        )
-          return false
+        // 동절기 보온양생 2일(소요강도 도달 후 2일간 0℃ 이상 유지): 한중 기간 타설(양생 2)은 갱폼인양 타설일 +3일부터.
+        // 따로 켜던 「보온양생 2일」(winterCuring2Days) 은 한중 기간으로 합쳐 없앴다 — 저장된 값은 무시 (2026-11-05 사용자)
+        if (b.lastPourDate && slot.date < addDays(b.lastPourDate, 3) && getDayInfo(calendar, b.lastPourDate).curingDays === 2) return false
         // 동절기 양생일에는 갱폼인양 불가 (§8-1). 설정을 켜면 양생일 오후는 가능(오전 먹매김 뒤) — 2026-11-02 사용자
-        if (curingDay(b) === slot.date && !(h.curingDayGangformPM && slot.half === "PM")) return false
+        // 한중 기간을 켠 현장(winterCuringRange)은 이 설정을 쓰지 않는다 — 화면에서도 막는다 (2026-11-05 사용자)
+        if (curingDay(b) === slot.date && !(h.curingDayGangformPM && !calendar.winterCuringRange && slot.half === "PM")) return false
         if (sameDay && !h.gangformPMAfterMarking) return false
         return true
       case "WALL_REBAR":
-        if (sameDay && !h.wallRebarPM) return false
-        if (slot.half === "PM" && !h.wallRebarPM) return false
         if (span === 2 && slot.half !== "AM") return false
         return true
       case "WALL_MEP":
@@ -246,7 +245,6 @@ export function simulate(input: SimulationInput): SimulationResult {
         if (slot.half === "PM" && !h.alformPMStart) return false
         return true
       case "SLAB_REBAR":
-        if (sameDay && !h.slabRebarPM) return false
         if (span === 2 && slot.half !== "AM") return false
         return true
       case "POUR":
@@ -300,6 +298,14 @@ export function simulate(input: SimulationInput): SimulationResult {
       b.readyDate = addDays(slot.date, 1)
     }
     b.stage = nextStage(stage, b.topFloor != null && b.floor === b.topFloor)
+    // 오후 W철근이면 W기전을 같은 오후 칸에 함께 시공 (halfDay.wallMepWithPMRebar, 2026-11-05 사용자).
+    // 기전은 팀이 없어 칸 용량과 무관. 다음 단계(알폼)는 다음 칸부터
+    if (stage === "WALL_REBAR" && span === 1 && slot.half === "PM" && settings.halfDay.wallMepWithPMRebar && b.stage === "WALL_MEP") {
+      const a: Assignment = { slotIndex: slot.index, date: slot.date, half: slot.half, buildingId: b.id, stage: "WALL_MEP", floor }
+      assignments.push(a)
+      bySlot[slot.index].push(a)
+      b.stage = nextStage("WALL_MEP", b.topFloor != null && b.floor === b.topFloor)
+    }
     skipGangform(b)
     // 셋팅층 첫 사이클: 갱폼 설치 · 알폼 셋팅을 셋팅 기간만큼 막대로 (작업일마다 오전·오후) → 다음 단계
     const setup = (st: "GANGFORM" | "ALFORM", days: number) => {
@@ -324,10 +330,12 @@ export function simulate(input: SimulationInput): SimulationResult {
 
   for (const slot of slots) {
     // 타설에 가까운 동부터, 같으면 오래 기다린 동부터
-    // 오전 칸에서는 벽철근(6h, 오전 전용)을 슬래브철근보다 먼저 배정한다 — "철근팀 하루 = 벽 오전 + 슬래브 오후"(§3).
-    // 슬래브가 오전을 차지하면 벽이 하루를 통째로 밀리고, 그 동의 사이클 전체가 늦어진다.
+    // 철근팀(W철근·S철근)이 겹치면 (2026-11-05 사용자):
+    // - 「슬래브철근 우선 작업」(slabRebarFirst) 켬: 오전·오후 모두 S철근 먼저
+    // - 끔: 공종 구분 없이 먼저 준비된(오래 기다린) 동 먼저. 예전 「오전은 W철근 먼저」 는 현장과 맞지 않아 없앴다
+    const rebarRank = (s: Stage) => (settings.slabRebarFirst && s === "SLAB_REBAR" ? 1 : 0)
     const priority = (b: BuildingState) =>
-      slot.half === "AM" && b.stage === "WALL_REBAR" ? STAGES.length : stageOrder(b.stage)
+      b.stage === "WALL_REBAR" || b.stage === "SLAB_REBAR" ? stageOrder("SLAB_REBAR") + rebarRank(b.stage) / 2 : stageOrder(b.stage)
     const order = [...buildings].sort(
       (a, b) => priority(b) - priority(a) || a.readySlot - b.readySlot || a.id - b.id,
     )

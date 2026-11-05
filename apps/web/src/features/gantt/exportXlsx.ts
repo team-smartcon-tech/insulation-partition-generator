@@ -101,7 +101,13 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
 
   // 데이터 색인
   const plan = new Map<string, Assignment>();
-  for (const a of data.assignments) plan.set(`${a.date}|${a.half}|${a.buildingId}`, a);
+  // 한 칸에 둘(오후 W철근 + W기전 함께 시공, 2026-11-05)이면 둘째는 따로
+  const plan2 = new Map<string, Assignment>();
+  for (const a of data.assignments) {
+    const k = `${a.date}|${a.half}|${a.buildingId}`;
+    if (plan.has(k)) plan2.set(k, a);
+    else plan.set(k, a);
+  }
   const actualBy = new Map<string, ActualWork[]>();
   for (const w of data.actual ?? []) actualBy.set(`${w.date}|${w.buildingId}`, [...(actualBy.get(`${w.date}|${w.buildingId}`) ?? []), w]);
 
@@ -192,9 +198,13 @@ export async function buildGanttWorkbook(data: GanttData, siteName: string, mont
       }
       const am = plan.get(`${d.date}|AM|${id}`);
       const pm = plan.get(`${d.date}|PM|${id}`);
-      for (const [a, h] of [[am, "오전"], [pm, "오후"]] as const)
+      const pm2 = plan2.get(`${d.date}|PM|${id}`);
+      for (const [a, h] of [[am, "오전"], [pm, "오후"], [pm2, "오후"]] as const)
         if (a) list.push([d.date, WEEK[d.dayOfWeek], label(id), "예정", h, floorLabel(a), planTitle(a)]);
-      if (am && (!pm || pm.stage === am.stage) && (pm || isPour(am.stage))) {
+      if (pm && pm2) {
+        if (am) paint(row, c, c, { text: planText(am), group: STAGE_GROUP[am.stage], planned: true });
+        paint(row, c + 1, c + 1, { text: `${planText(pm)}·${planText(pm2)}`, group: STAGE_GROUP[pm.stage], planned: true });
+      } else if (am && (!pm || pm.stage === am.stage) && (pm || isPour(am.stage))) {
         paint(row, c, c + 1, { text: planText(am), group: STAGE_GROUP[am.stage], planned: true });
       } else {
         if (am) paint(row, c, c, { text: planText(am), group: STAGE_GROUP[am.stage], planned: true });

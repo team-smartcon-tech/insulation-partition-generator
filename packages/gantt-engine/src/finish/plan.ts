@@ -19,6 +19,11 @@
 // 겹쳐 이동(moveDays, 2026-11-01 사용자: PL창호 — 1코어 5일 중 하루 하고 2코어로, 4코어면 8일):
 //   팀이 한 곳을 시작하고 moveDays 뒤에 다음 곳을 시작할 수 있다(막대는 묶음당 작업일 그대로). 한 곳 안에서는 앞 묶음이 끝나야 다음 묶음.
 //   moveBy "core" = 곳이 동·코어(코어를 다 돌면 다음 동), "building" = 곳이 동(그 동 코어들의 다음 묶음을 같은 날 함께 시작).
+// 끝내고 이동(stayIn, 2026-11-05 사용자, 겹쳐 이동이 아닐 때). 없으면 묶음마다(어디든 가장 먼저 시작할 수 있는 곳).
+//   core: 팀마다 한 코어를 맡아 그 코어 남은 묶음을 다 할 때까지 머문다. 다만 선행·골조를 기다려야 해 다른 곳이 더 빨리
+//         시작할 수 있으면 그곳으로 옮긴다(기다리며 쉬지 않게). 새 곳은 다른 팀이 맡은 곳을 피한다(그것밖에 없으면 들어간다).
+//         택트 연동이면 인원 전체가 한 팀(finishSettingsWithTakt) → 코어를 차례로.
+//   building: 팀들이 한 동을 함께 맡아(코어들에 나뉘어 동시에) 그 동 남은 묶음을 다 하고 다 같이 다음 동으로 (기다려야 하면 옮기는 것은 같다).
 // 공종은 14개 고정(2026-10-31, FINISH_TRADES). 예전 키로 저장된 규칙·선행은 FINISH_RULE_ALIAS 로 지금 공종에 잇는다.
 import { addDays, dayOfWeek, type IsoDate } from "../calendar/date.ts"
 import type { FinishPlanSettings, FinishTradePlan } from "../contracts/index.ts"
@@ -223,26 +228,49 @@ export function planFinishSite(
       return ready
     }
     const move = rule.moveDays ?? null
+    const stay = move == null ? (rule.stayIn ?? null) : null
+    const homeOf = (q: (typeof queues)[number]) => (stay === "core" ? `${q.u.buildingNo}|${q.u.core ?? ""}` : `${q.u.buildingNo}`)
     const teamFree = Array.from({ length: Math.max(1, rule.teams ?? 1) }, () => finishWorkday(addDays(today, 1)))
+    /** 끝내고 이동: 팀마다 맡은 코어(core) / 팀들이 함께 맡은 동(building) */
+    const teamHome: (string | null)[] = teamFree.map(() => null)
+    let crewHome: string | null = null
     for (;;) {
       const free = [...teamFree].sort()[0]
       const team = teamFree.indexOf(free)
-      let best: { q: (typeof queues)[number]; start: IsoDate } | null = null
-      for (const q of queues) {
-        if (q.blocked || q.next >= q.batches.length) continue
-        const batch = q.batches[q.next]
-        const ready = readyOf(q, batch)
-        if (!ready) {
-          q.blocked = true
-          continue
+      const pickFrom = (cands: typeof queues) => {
+        let best: { q: (typeof queues)[number]; start: IsoDate } | null = null
+        for (const q of cands) {
+          if (q.blocked || q.next >= q.batches.length) continue
+          const batch = q.batches[q.next]
+          const ready = readyOf(q, batch)
+          if (!ready) {
+            q.blocked = true
+            continue
+          }
+          const start = finishWorkday(ready > free ? ready : free)
+          const better =
+            !best ||
+            start < best.start ||
+            (start === best.start && (batch[0] < best.q.batches[best.q.next][0] || (batch[0] === best.q.batches[best.q.next][0] && q.ui < best.q.ui)))
+          if (better) best = { q, start }
         }
-        const start = finishWorkday(ready > free ? ready : free)
-        const better =
-          !best ||
-          start < best.start ||
-          (start === best.start && (batch[0] < best.q.batches[best.q.next][0] || (batch[0] === best.q.batches[best.q.next][0] && q.ui < best.q.ui)))
-        if (better) best = { q, start }
+        return best
       }
+      let best: { q: (typeof queues)[number]; start: IsoDate } | null = null
+      // 맡은 곳에서 다른 곳보다 늦지 않게 시작할 수 있으면 머문다. 선행·골조를 기다려야 해 다른 곳이 더 빠르면 그곳으로 옮긴다
+      // (2026-11-05 사용자: 401동 다음 묶음이 골조를 기다리는 동안 팀이 쉬었다)
+      const stayOrMove = (home: string | null, elsewhere: typeof best) => {
+        const there = home ? pickFrom(queues.filter((q) => homeOf(q) === home)) : null
+        return there && (!elsewhere || there.start <= elsewhere.start) ? there : elsewhere
+      }
+      if (stay === "building") {
+        best = stayOrMove(crewHome, pickFrom(queues))
+        if (best) crewHome = homeOf(best.q)
+      } else if (stay) {
+        const others = new Set(teamHome.filter((h, i) => h && i !== team))
+        best = stayOrMove(teamHome[team], pickFrom(queues.filter((q) => !others.has(homeOf(q)))) ?? pickFrom(queues))
+        if (best) teamHome[team] = homeOf(best.q)
+      } else best = pickFrom(queues)
       if (!best || best.start > limit) break
       // 동마다 겹쳐 이동: 그 동의 다른 코어 다음 묶음도 같은 날(가장 늦게 풀리는 코어에 맞춰) 함께
       let group = [best.q]

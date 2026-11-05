@@ -91,12 +91,15 @@ export default function FinishPanel({
   const typeName = useMemo(() => new Map((d?.types ?? []).map((t) => [t.id, t.name])), [d]);
 
   const [saving, setSaving] = useState(false);
+  /** 간트 「이 달 작업 없는 공종 숨기기」 — 엑셀도 같은 값 (2026-11-05) */
+  const [hideIdle, setHideIdle] = useState(true);
   const onExcel = async () => {
     if (!d) return;
     setSaving(true);
     try {
+      // 간트만 (2026-11-05 사용자) — 보고 있는 달, 화면과 같은 줄·예정 규칙·숨기기 체크
       const { exportFinishXlsx } = await import("../exportFinishXlsx");
-      await exportFinishXlsx(d, siteName);
+      await exportFinishXlsx({ gantt: d.gantt, plans, month, asOf: d.asOf, framePours: frame?.pours, finishSettings, hideIdle }, siteName);
     } catch (e) {
       toast.error(`엑셀 저장 실패: ${(e as Error).message}`);
     } finally {
@@ -111,7 +114,7 @@ export default function FinishPanel({
   };
   const actions = (
     <>
-      <Button variant="outline" size="sm" onClick={onExcel} disabled={!d?.buildings.length || saving} title="마감 공정표 엑셀 저장 (동별 진척표 + 요약)">
+      <Button variant="outline" size="sm" onClick={onExcel} disabled={!d?.gantt.buildings.length || saving} title="마감 공정표 엑셀 저장 (보고 있는 달 간트)">
         <ExcelIcon className="size-4 text-emerald-700" /> {saving ? "저장 중…" : "엑셀"}
       </Button>
       <Button variant="outline" size="sm" onClick={onPrint} disabled={!b} title="지금 보는 동 인쇄 (A3 가로)">
@@ -191,6 +194,8 @@ export default function FinishPanel({
             topFloorOf={(no) => saved.data?.buildings.find((x) => x.buildingNo === no)?.topFloor ?? null}
             framePours={frame?.pours}
             finishSettings={finishSettings}
+            hideIdle={hideIdle}
+            onHideIdle={setHideIdle}
           />
         ) : (
           <p className="rounded-lg border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">

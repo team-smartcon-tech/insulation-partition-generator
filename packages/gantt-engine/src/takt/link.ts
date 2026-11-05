@@ -77,7 +77,9 @@ export function finishSettingsWithTakt(
     const rule = finishPlanOf(settings, key)
     // 겹쳐 이동 공종은 코어당 작업일·간격·팀을 직접 넣은 값 그대로 (2026-11-01 사용자: 인원은 표시만)
     if (rule.moveDays != null) continue
-    out[key] = { ...rule, daysPerBatch: linkedBatchDays(link, rule.floorsPerBatch), teams: Math.max(1, Math.min(5, cores)) }
+    // 코어 끝내고 이동(stayIn core, 2026-11-05 사용자)은 인원 전체가 한 팀으로 코어를 차례로 — 코어들에 나누지 않는다
+    const teams = rule.stayIn === "core" ? 1 : Math.max(1, Math.min(5, cores))
+    out[key] = { ...rule, daysPerBatch: linkedBatchDays(link, rule.floorsPerBatch), teams }
   }
   return out
 }

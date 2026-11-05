@@ -130,9 +130,10 @@ function toRawText(r: Pick<DcrReportRow, "work_summary" | "work_descriptions">):
   return [...new Set(lines)].join("\n");
 }
 
-function toDailyReport(row: DcrReportRow): DailyReport {
+function toDailyReport(row: DcrReportRow, buildingNos: readonly number[] = []): DailyReport {
   const rawText = toRawText(row);
-  const { entries, unmatched } = parseWorkText(rawText);
+  // 동 목록이 있으면 줄여 쓴 동 번호(「1동」 = 101동)를 풀어 읽는다. rawText(원문)는 그대로
+  const { entries, unmatched } = parseWorkText(rawText, { buildingNos });
   return {
     id: row.id,
     siteId: row.site_id,
@@ -180,18 +181,26 @@ async function listSites(env: Env): Promise<Site[]> {
 
 const MAX_RANGE_DAYS = 62;
 
-async function listReports(env: Env, q: { siteId: string; from: string; to: string }): Promise<DailyReport[]> {
+async function listReports(
+  env: Env,
+  q: { siteId: string; from: string; to: string },
+  /** 현장 동 목록 동 번호. 없으면 이 앱 DB 에서 읽는다 */
+  buildingNos?: readonly number[],
+): Promise<DailyReport[]> {
   if (q.to < q.from) throw new GanttError(400, "종료일이 시작일보다 앞입니다.", "BAD_REQUEST");
   if (dateRange(q.from, q.to).length > MAX_RANGE_DAYS) {
     throw new GanttError(400, `기간은 ${MAX_RANGE_DAYS}일 이하여야 합니다.`, "BAD_REQUEST");
   }
-  const res = await dcrRest(
+  const [res, nos] = await Promise.all([
+    dcrRest(
     env,
     `/daily_reports?select=id,site_id,report_date,aggregation_status,work_summary,work_descriptions,updated_at,created_at` +
       `&site_id=eq.${encodeURIComponent(q.siteId)}&report_date=gte.${q.from}&report_date=lte.${q.to}` +
       `&aggregation_status=in.(completed,aggregating,pending)&order=report_date.asc`,
-  );
-  return pickOnePerDate((await res.json()) as DcrReportRow[]).map(toDailyReport);
+    ),
+    buildingNos ?? loadBuildings(env, q.siteId).then((bs) => bs.map((b) => b.buildingNo)),
+  ]);
+  return pickOnePerDate((await res.json()) as DcrReportRow[]).map((r) => toDailyReport(r, nos));
 }
 
 // ─── 이 앱 DB: 현장 설정·동 목록 ──────────────────────────────────────────
@@ -313,10 +322,72 @@ const fail = (c: { json: (b: unknown, s: number) => Response }, err: unknown) =>
   return c.json({ error: `처리 실패: ${errMsg(err)}`, code: "INTERNAL_ERROR" }, 500);
 };
 
-/** GET /sites — 스마트웍스 현장 목록 (최근 일보 날짜순) */
+// ─── 현장 접근 (2026-11-05 사용자: 스마트웍스처럼 소속 현장만 보이게) ─────────────
+// 스마트웍스(dcr) 로그인·CTPA 와 같은 규칙: 본사(super_admin·system_admin)는 전체,
+// 그 외는 admins.managed_sites(비어 있으면 people.managed_sites) 에 든 현장만. 매 요청 스마트웍스에서 읽어
+// 소속이 바뀌면 다시 로그인하지 않아도 바로 반영된다.
+
+const HQ_ROLES = new Set(["super_admin", "system_admin"]);
+const siteCache = new WeakMap<Request, Promise<Set<string> | null>>();
+
+/** LIKE 특수문자(% _ \) 이스케이프 — 대소문자만 무시하는 정확 일치용 */
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
+
+async function readMemberSites(env: Env, user: SessionUser): Promise<Set<string> | null> {
+  if (HQ_ROLES.has(user.role)) return null;
+  const email = user.email.trim();
+  if (!email) return new Set();
+  const pRes = await dcrRest(env, `/people?select=id,managed_sites&email=ilike.${encodeURIComponent(escapeLike(email))}&limit=1`);
+  const person = ((await pRes.json()) as { id: string; managed_sites: unknown }[])[0];
+  if (!person) return new Set();
+  const aRes = await dcrRest(env, `/admins?select=managed_sites&person_id=eq.${encodeURIComponent(person.id)}&limit=1`);
+  const admin = ((await aRes.json()) as { managed_sites: unknown }[])[0];
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []);
+  const adminSites = list(admin?.managed_sites);
+  return new Set(adminSites.length ? adminSites : list(person.managed_sites));
+}
+
+/** 볼 수 있는 현장 id. null = 전체(본사). 한 요청 안에서는 한 번만 읽는다 */
+function memberSites(c: { env: Env; req: { raw: Request }; get: (k: "user") => SessionUser }): Promise<Set<string> | null> {
+  let p = siteCache.get(c.req.raw);
+  if (!p) {
+    p = readMemberSites(c.env, c.get("user"));
+    siteCache.set(c.req.raw, p);
+  }
+  return p;
+}
+
+async function assertSite(c: Parameters<typeof memberSites>[0], siteId: string): Promise<void> {
+  const allowed = await memberSites(c);
+  if (allowed && !allowed.has(siteId)) throw new GanttError(403, "소속 현장이 아닙니다.", "FORBIDDEN");
+}
+
+// /xxx/:siteId 라우트와 ?siteId= 조회는 모두 여기서 막는다 (POST /plan 은 본문의 siteId 라 라우트에서)
+gantt.use("/:route/:siteId", async (c, next) => {
+  try {
+    await assertSite(c, c.req.param("siteId"));
+  } catch (err) {
+    return fail(c, err);
+  }
+  return next();
+});
+gantt.use("*", async (c, next) => {
+  const siteId = c.req.query("siteId");
+  if (siteId) {
+    try {
+      await assertSite(c, siteId);
+    } catch (err) {
+      return fail(c, err);
+    }
+  }
+  return next();
+});
+
+/** GET /sites — 스마트웍스 현장 목록 (최근 일보 날짜순). 소속 현장만 */
 gantt.get("/sites", async (c) => {
   try {
-    return c.json({ sites: await listSites(c.env) });
+    const [sites, allowed] = await Promise.all([listSites(c.env), memberSites(c)]);
+    return c.json({ sites: allowed ? sites.filter((s) => allowed.has(s.id)) : sites });
   } catch (err) {
     return fail(c, err);
   }
@@ -464,7 +535,8 @@ gantt.get("/finish-reports/:siteId", async (c) => {
   const parsed = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).safeParse(c.req.query());
   if (!parsed.success) return c.json({ error: "기간(from, to)이 필요합니다.", code: "VALIDATION_FAILED" }, 400);
   try {
-    const [saved, reports] = await Promise.all([loadBuildings(c.env, siteId), listReports(c.env, { siteId, ...parsed.data })]);
+    const saved = await loadBuildings(c.env, siteId);
+    const reports = await listReports(c.env, { siteId, ...parsed.data }, saved.map((b) => b.buildingNo));
     const top = new Map(saved.map((b) => [b.buildingNo, b.topFloor]));
     const rows = buildFinishReportBars(
       reports.map((r) => ({ date: r.date, rawText: r.rawText })),
@@ -535,14 +607,17 @@ gantt.post("/plan", async (c) => {
   const req = parsed.data;
   if (req.to < req.from) return c.json({ error: "종료일이 시작일보다 앞입니다.", code: "BAD_REQUEST" }, 400);
   try {
+    await assertSite(c, req.siteId);
     const upTo = req.upTo ?? todayKst();
     const actualTo = upTo < req.to ? upTo : req.to;
     const lookback = addDays(actualTo, -REPORT_LOOKBACK_DAYS);
     const readFrom = lookback < req.from ? lookback : req.from;
-    const [reports, buildings] = await Promise.all([
-      listReports(c.env, { siteId: req.siteId, from: readFrom, to: actualTo }),
-      loadBuildings(c.env, req.siteId),
-    ]);
+    const buildings = await loadBuildings(c.env, req.siteId);
+    const reports = await listReports(
+      c.env,
+      { siteId: req.siteId, from: readFrom, to: actualTo },
+      buildings.map((b) => b.buildingNo),
+    );
     const topFloors = new Map(buildings.map((b) => [b.buildingNo, b.topFloor]));
     // 동 목록이 저장된 현장은 목록에 없는 동 번호(일보 오타 — 평택고덕 「3111동」 = 3611동)를 공정표에서 뺀다.
     // 작업일보 탭 원문에는 그대로 보인다 (2026-10-30)
