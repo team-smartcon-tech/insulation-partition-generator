@@ -99,7 +99,7 @@ const toolToCard = (tool: ToolDef): HomeCard => ({
   available: tool.status === "available",
   thumbnail: tool.thumbnail,
   logo: tool.logo,
-  meta: "우미 · 스마트 툴박스",
+  meta: tool.author ?? "우미 · 스마트 툴박스",
   href: tool.status === "available" ? tool.path : undefined,
 });
 
