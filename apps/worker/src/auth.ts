@@ -43,6 +43,12 @@ export interface Env {
   /** 스마트 공정표 — 스마트웍스(dcr-app) Supabase 읽기 전용. URL 은 wrangler vars, 키는 secret */
   DCR_SUPABASE_URL?: string;
   DCR_SUPABASE_SERVICE_ROLE_KEY?: string;
+  /**
+   * SSX(스마트웍스) → 단열 Layout 자동 로그인(SSO) 토큰 검증 시크릿. `GET /api/auth/sso` 전용.
+   * SSX Worker 의 `IPG_SSO_JWT_SECRET` 과 같은 값. IPG_JWT_SECRET·DCR JWT_SECRET 과 **다른 전용 값**.
+   * 미설정 시 SSO 는 꺼진다(항상 로그인 화면으로).
+   */
+  SSO_JWT_SECRET?: string;
 }
 
 export interface SessionUser {
@@ -202,6 +208,56 @@ export async function checkLoginRateLimit(env: Env, ip: string): Promise<boolean
 
 export function isAllowedRole(role: string): boolean {
   return ALLOWED_ROLES.has(role);
+}
+
+/** SSX → 단열 Layout SSO 토큰 계약 (SSX 발급측과 고정 — 바꾸면 양쪽을 같이 바꾼다) */
+const SSO_ISSUER = "smart-works";
+const SSO_AUDIENCE = AUD;
+const SSO_TOKEN_USE = "ipg_sso";
+/** 발급(exp 60초)과 이 Worker 사이 시계 오차 허용(초) */
+const SSO_CLOCK_TOLERANCE_SEC = 5;
+
+export type SsoVerifyResult =
+  | { ok: true; user: SessionUser }
+  | { ok: false; reason: "no_secret" | "invalid_token" | "bad_claims" | "role_not_allowed" };
+
+/**
+ * SSX 가 발급한 60초 SSO 토큰 검증(HS256, SSO_JWT_SECRET). 세션 발급은 호출측이 한다.
+ * 재사용 방지(jti)는 하지 않는다 — 60초 창 안에서는 재사용 가능(소음예측 SSO 와 동일, 사용자 결정).
+ * 실패 사유만 돌려준다(토큰 내용은 돌려주지 않음 → 호출측이 로그에 남기지 못하게).
+ */
+export async function verifySsoToken(env: Env, token: string): Promise<SsoVerifyResult> {
+  if (!env.SSO_JWT_SECRET) return { ok: false, reason: "no_secret" };
+  let payload: Record<string, unknown>;
+  try {
+    ({ payload } = await jwtVerify(token, new TextEncoder().encode(env.SSO_JWT_SECRET), {
+      algorithms: ["HS256"],
+      issuer: SSO_ISSUER,
+      audience: SSO_AUDIENCE,
+      clockTolerance: SSO_CLOCK_TOLERANCE_SEC,
+      requiredClaims: ["exp"],
+    }));
+  } catch {
+    return { ok: false, reason: "invalid_token" };
+  }
+  if (payload.token_use !== SSO_TOKEN_USE) return { ok: false, reason: "bad_claims" };
+  const id = typeof payload.id === "string" ? payload.id.trim() : "";
+  const sub = typeof payload.sub === "string" ? payload.sub.trim() : "";
+  // id 와 sub 는 같은 userId 여야 한다. 둘 다 있는데 다르면 거부(fail-closed).
+  if (id && sub && id !== sub) return { ok: false, reason: "bad_claims" };
+  const userId = id || sub;
+  if (!userId) return { ok: false, reason: "bad_claims" };
+  const role = typeof payload.role === "string" ? payload.role : "";
+  if (!isAllowedRole(role)) return { ok: false, reason: "role_not_allowed" };
+  return {
+    ok: true,
+    user: {
+      id: userId,
+      name: typeof payload.name === "string" ? payload.name : "",
+      email: typeof payload.email === "string" ? payload.email : "",
+      role,
+    },
+  };
 }
 
 /** /api/* 보호 미들웨어. /health 및 /api/auth/* 는 통과. */

@@ -62,6 +62,8 @@ SUPABASE_SERVICE_ROLE_KEY=<대시보드 service_role 키>           # 로그인�
 
 → `pnpm dev` 후 http://localhost:5173 에서 **DCR 계정(이메일·비밀번호, SSX 로그인과 동일)** 으로 로그인.
 
+SSX(스마트웍스)에서 넘어오는 자동 로그인은 `GET /api/auth/sso?token=…` 이 받는다. 시크릿 `SSO_JWT_SECRET`(SSX 의 `IPG_SSO_JWT_SECRET` 과 같은 값)이 없으면 SSO 만 꺼지고 위 로그인은 그대로 된다.
+
 ---
 
 ## 구조 (pnpm 모노레포)

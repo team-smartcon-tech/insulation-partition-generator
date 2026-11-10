@@ -21,6 +21,7 @@ import {
   callDcrLogin,
   checkLoginRateLimit,
   parseCookie,
+  verifySsoToken,
 } from "./auth";
 import market from "./market";
 import sites from "./sites";
@@ -178,6 +179,43 @@ app.get("/api/auth/me", async (c) => {
   const user = token ? await verifySession(c.env, token) : null;
   if (!user) return c.json({ error: "인증이 필요합니다." }, 401);
   return c.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+});
+
+/**
+ * GET /api/auth/sso?token=<JWT> — SSX(스마트웍스) → 단열 Layout 자동 로그인.
+ * SSX 가 60초 JWT(HS256, SSO_JWT_SECRET, iss smart-works / aud insulation-partition-generator,
+ * token_use ipg_sso)를 실어 302 로 보낸다. 검증되면 자체 세션 쿠키를 굽고 `/` 로 보낸다.
+ * 실패하면 쿠키 없이 `/`(로그인 화면). 이동 대상은 상수 — 쿼리로 받지 않는다(오픈 리다이렉트 방지).
+ */
+const SSO_REDIRECT_TO = "/";
+app.get("/api/auth/sso", async (c) => {
+  const headers: Record<string, string> = {
+    Location: SSO_REDIRECT_TO,
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+  };
+  const fail = () => new Response(null, { status: 302, headers });
+
+  const token = c.req.query("token") || "";
+  if (!token) return fail();
+  const r = await verifySsoToken(c.env, token);
+  if (!r.ok) {
+    // 토큰 내용은 남기지 않는다(사유만).
+    if (r.reason === "no_secret") console.warn("[auth/sso] SSO_JWT_SECRET 미설정 — SSO 비활성");
+    else console.warn("[auth/sso] 거부:", r.reason);
+    return fail();
+  }
+  let session: string;
+  try {
+    session = await signSession(c.env, r.user);
+  } catch (e) {
+    console.error("[auth/sso] 세션 발급 실패:", e instanceof Error ? e.message : String(e));
+    return fail();
+  }
+  return new Response(null, {
+    status: 302,
+    headers: { ...headers, "Set-Cookie": buildSessionCookie(c.env, session) },
+  });
 });
 
 // 이하 /api/* 는 로그인 필수 (/health, /api/auth/* 는 미들웨어 내부에서 통과)

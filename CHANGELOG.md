@@ -10,6 +10,13 @@ insulation-partition-generator(표시명 **단열 Layout** 런처)의 **제품**
 
 ## [Unreleased]
 
+### 추가 — SSX → 단열 Layout 자동 로그인 수신 `GET /api/auth/sso` (2026-11-10)
+
+- SSX(스마트웍스)가 60초 JWT(HS256, iss `smart-works`, aud `insulation-partition-generator`, `token_use: ipg_sso`, claims `sub`·`id`·`email`·`name`·`role`)를 `?token=` 으로 실어 302 하면, Worker 가 새 시크릿 `SSO_JWT_SECRET` 으로 검증하고 기존과 같은 `ipg_session` 쿠키(12h)를 구운 뒤 `/` 로 보낸다.
+- 실패(토큰 없음·서명/만료·클레임·허용 외 role·시크릿 미설정)는 쿠키 없이 `/`(로그인 화면). 이동 대상은 `/` 고정. 응답은 `Cache-Control: no-store`·`Referrer-Policy: no-referrer`.
+- jti 재사용 방지는 두지 않는다(60초 창, 소음예측 SSO 와 동일 — 사용자 결정). 기존 로그인·로그아웃·`/me`·미들웨어·프런트 변경 없음. DB 변경 없음.
+- 배포 전 `SSO_JWT_SECRET` 시크릿 등록 필요(미등록이면 SSO 만 꺼짐).
+
 ### 변경 — 홈 카드 작성자 줄 (2026-11-06)
 
 - 내장 도구 카드에 작성자 줄을 따로 둘 수 있게 했다(`ToolDef.author`, 없으면 「우미 · 스마트 툴박스」). 스마트 공정표·검측요청서 = 「김은상 · PI팀」.

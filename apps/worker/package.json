@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "wrangler dev --port 9887",
     "deploy:dry": "wrangler deploy --dry-run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --import ./tests/register.mjs --test \"tests/*.test.ts\""
   },
   "dependencies": {
     "@ipg/gantt-engine": "workspace:*",

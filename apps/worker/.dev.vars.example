@@ -11,6 +11,10 @@
 # 신규 앱 자체 세션 토큰 서명 시크릿 (DCR 것과 무관 — 로컬은 아무 랜덤 문자열이면 됨).
 IPG_JWT_SECRET=local-dev-secret-change-me
 
+# (선택) SSX → 단열 Layout 자동 로그인(/api/auth/sso) 토큰 검증 시크릿. SSX 의 IPG_SSO_JWT_SECRET 과 같은 값.
+# 비워두면 SSO 만 꺼지고 일반 로그인은 그대로 된다.
+SSO_JWT_SECRET=
+
 # 통합로그인 백엔드 = 배포된 dcr-app. 실제 회원 계정으로 로그인된다.
 #   운영 회원 DB(dcr-prod): https://dcr-app.jogh.workers.dev
 #   개발 회원 DB(dcr-dev)로 테스트: https://dcr-app-dev.jogh.workers.dev
