@@ -35,6 +35,8 @@
   // 주의: 비밀값(SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / IPG_JWT_SECRET)은
   // 이 파일이나 코드에 넣지 않는다. `wrangler secret put <NAME>` 또는 Cloudflare 대시보드에서 관리한다.
   //  - IPG_JWT_SECRET: 신규 앱 자체 세션 토큰용 시크릿(DCR 것과 별개, 강한 랜덤값). 필수.
+  //  - SSO_JWT_SECRET: SSX→단열 Layout 자동 로그인(/api/auth/sso) 토큰 검증용. SSX 의 IPG_SSO_JWT_SECRET 과 같은 값,
+  //      IPG_JWT_SECRET·DCR JWT_SECRET 과는 다른 전용 값. 없으면 SSO 만 꺼진다(선택).
   //  - (선택) RATE_LIMIT: 로그인 rate-limit용 KV 네임스페이스. 없으면 제한 생략.
   //      kv_namespaces 로 바인딩 후 사용: [{ "binding": "RATE_LIMIT", "id": "<kv-id>" }]
 }

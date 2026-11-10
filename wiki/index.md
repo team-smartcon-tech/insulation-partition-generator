@@ -1,6 +1,6 @@
 ---
 type: index
-updated: 2026-10-21
+updated: 2026-11-10
 tags: [wiki/index]
 ---
 
@@ -12,7 +12,11 @@ tags: [wiki/index]
 
 - 원본 25건 — 저장소 규칙 문서 24건 + 저장소 밖 자료 1건
 - 규칙 정리본 23개 (`rules/`)
-- 시스템 0 · 패턴 0 — `systems/`·`patterns/` 는 프로젝트에서 실제로 생겼을 때 만든다([README](README.md) "안에 든 것")
+- 시스템 1 · 패턴 0 — `systems/`·`patterns/` 는 프로젝트에서 실제로 생겼을 때 만든다([README](README.md) "안에 든 것")
+
+## 시스템
+
+- [로그인과 SSX 자동 로그인(SSO)](systems/auth-sso.md) — 직접 로그인·SSO 두 입구, 토큰 계약, role fail-open 교훈
 
 ## 규칙 — `.agents/*` 정리본
 

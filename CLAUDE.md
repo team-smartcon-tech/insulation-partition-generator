@@ -21,6 +21,7 @@ pnpm dev                     # worker(9887)+web(5473) 동시 기동. http://loca
 pnpm dev:web / pnpm dev:worker   # 개별 실행
 pnpm --filter web build      # 프로덕션 빌드(타입체크 포함)
 pnpm -r typecheck
+pnpm --filter worker test    # worker 회귀 테스트(SSO). Node ≥22.6 필요(--experimental-strip-types)
 ```
 
 **핵심 경로**
@@ -49,6 +50,7 @@ pnpm -r typecheck
 - 앱 전체 로그인 벽. `apps/web/src/features/auth/*`(AuthContext·AuthGate·LoginPage), worker `apps/worker/src/auth.ts` + `/api/auth/{login,logout,me}` + `app.use('/api/*', authMiddleware)`.
 - worker가 **배포 dcr-app 의 `/auth/login`**(이메일+비번, SSX 로그인과 동일)을 서버-투-서버 호출 → **자체 시크릿 `IPG_JWT_SECRET`** 으로 12h 세션 토큰 재발급(HttpOnly `ipg_session`). DCR JWT_SECRET 미공유. 허용 role: super_admin/system_admin/site_admin/member.
 - 백엔드 URL: `DCR_BASE_URL`(prod=`dcr-app.jogh.workers.dev`, dev=`dcr-app-dev.jogh.workers.dev`, 로컬은 `.dev.vars`). 시크릿 `IPG_JWT_SECRET` 필수.
+- SSX 자동 로그인(SSO): SSX 가 60초 JWT 를 실어 `302 → /api/auth/sso?token=…` → worker 가 `SSO_JWT_SECRET`(SSX `IPG_SSO_JWT_SECRET` 과 같은 전용 값, iss `smart-works`·aud `insulation-partition-generator`·`token_use: ipg_sso`)로 검증 후 같은 `ipg_session` 을 굽고 `/` 로. 실패·시크릿 미설정이면 쿠키 없이 `/`(로그인 화면). jti 재사용 방지 없음(소음예측 SSO 와 동일).
 
 **함정 (Gotchas)**
 
