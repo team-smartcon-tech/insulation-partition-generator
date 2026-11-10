@@ -9,7 +9,7 @@ DXF 도면에서 외벽을 트레이싱해 **세대 단열재 나누기도**(입
 SSX(`smart-schedule-X`)의 본사 "세대 단열재 나누기도" 기능을 **동작 그대로** 독립 저장소로 떼어낸 것으로,
 독립 Cloudflare Worker + 독립 Supabase 프로젝트에서 운영합니다. 원본 SSX는 읽기 전용 참조입니다.
 
-- **라이브**: https://insulation-partition-generator.jogh.workers.dev
+- **라이브**: https://tb.smartwoomi.com (스마트 툴박스 — 사용자가 쓰는 정식 주소. 같은 Worker 의 workers.dev 주소 https://insulation-partition-generator.jogh.workers.dev 도 열리지만 세션 쿠키는 호스트별이다)
 - **스택**: Vite + React 19 + wouter + TypeScript · Hono + Cloudflare Worker · Supabase · Tailwind v4 + shadcn/ui
 - **저장소**: `team-smartcon-tech/insulation-partition-generator` (기본 브랜치 `main`)
 

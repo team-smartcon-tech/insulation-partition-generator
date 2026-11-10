@@ -84,3 +84,9 @@ tags: [wiki/log]
 - 계기(사용자): 「머지가능성 보고 머지 한 뒤, egolite로 확인하고, 문제 없으면 운영 승격」.
 - 한 것: #84 머지(이 앱 운영 배포) → SSX #2191 dev 확인 → SSX 운영 승격 #2193(1.117.0) → 운영 SSX 바로가기로 이 앱 로그인 왕복 확인. 상세는 [systems/auth-sso](systems/auth-sso.md) 「배포·운영 확인」.
 - 알아 둘 것: 시크릿 값 일치는 `wrangler secret list` 로 볼 수 없다 — 실제 왕복이 유일한 확인 수단.
+
+## 2026-11-10 · 고치기 · SSO 를 실제 도메인 tb.smartwoomi.com 으로
+
+- 계기(사용자): 「tb.smartwoomi.com 말한거였는데..」, 「스마트 툴박스에 sso 연결을 하라는 소리였어」.
+- 한 것: SSX 쪽 이동 대상만 바꿨다(#2199 → 운영 1.117.1 `b8494e9`). 운영 SSX 「스마트 툴박스」 클릭 → tb 로그인 상태(/api/auth/me 200) 확인 — 시험 전 tb 세션 로그아웃(401). 이 Worker 는 변경 없음 — 같은 Worker 가 두 주소로 열리고 `/api/auth/sso` 는 상대경로 `/` 로 보내므로 호스트 무관.
+- 알아 둘 것: 세션 쿠키는 호스트별이다. README·CLAUDE.md 「라이브」를 tb 로 고쳤다. 상세 [systems/auth-sso](systems/auth-sso.md).
