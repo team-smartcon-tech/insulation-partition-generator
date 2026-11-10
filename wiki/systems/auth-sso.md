@@ -29,13 +29,20 @@ DB 없음. 세션은 서명 쿠키뿐(서버 저장 없음 → 폐기 불가, �
 - 단열 Layout 에 직접 접속했을 때 SSX 를 거쳐 자동 로그인 — 하지 않았다(바로가기 진입만, 사용자 결정).
 - 로그인 CSRF(공격자 토큰을 피해자가 60초 안에 열면 공격자 계정 세션) — 위험 수용(리뷰 F2, LOW).
 - 토큰이 URL 쿼리라 Workers Logs·방문 기록에 남을 수 있음 — 60초 만료로 수용(리뷰 F3, LOW).
-- 운영 SSX → 운영 단열 Layout 실제 브라우저 왕복은 배포·시크릿 등록 뒤에만 확인 가능.
 
 ## 검증 기록 (2026-11-10)
 
 - 단열 Layout worker `pnpm --filter worker test` 33/33 (Node ≥22.6), SSX vitest SSO+소음예측 27/27, role 수정은 되돌리면 1건 RED 확인.
 - 상호운용: SSX 실제 핸들러 발급 토큰 → 단열 Layout 실제 라우트, 같은 시크릿 통과 / 다른 시크릿 실패(9/9).
 - ego-browser 로컬(127.0.0.1:9887): 세션 없음→`/login`, 다른 시크릿 토큰→`/login`, 정상 토큰(+`next=` 외부 URL)→`/` 로그인 상태.
+
+## 배포·운영 확인 (2026-11-10)
+
+- 단열 Layout: PR #84 머지(`3db01b3`) → Workers Builds 약 75초 뒤 `/api/auth/sso` 302(`no-store`·`no-referrer`), 기존 `/api/auth/login` 401(가짜 계정) 유지.
+- SSX: #2191 → dev(`38af6e6`), 운영은 승격 PR #2193(deploy 기준 체리픽 + 1.117.0, `acab50a`) + backport #2194. 미승격 마이그레이션 0건(`pnpm check:drift`).
+- 시크릿: `SSO_JWT_SECRET`(이 Worker)·SSX `IPG_SSO_JWT_SECRET`(운영·`--env dev`) 등록을 `wrangler secret list` 이름으로 확인. **값 일치는 아래 왕복으로만 확인된다.**
+- 브라우저 왕복(ego-browser, 실계정): SSX dev 홈 「단열 Layout」 → 이 앱 운영이 로그인 상태(`/api/auth/me` 200, super_admin). 운영 SSX(1.117.0)도 같은 결과 — 시험 전 이 앱 세션을 로그아웃(401 확인)해 기존 세션 영향을 배제했다.
+- 덤으로 확인한 것: 배포 직후 열려 있던 SSX 탭은 `Failed to fetch dynamically imported module` — 옛 청크 해시. 캐시 무시 새로고침으로 해소, 결함 아님.
 
 | 역할 | 에이전트 | 지정 모델 | 보고된 실제 모델 | 담당 |
 | --- | --- | --- | --- | --- |
@@ -52,4 +59,5 @@ DB 없음. 세션은 서명 쿠키뿐(서버 저장 없음 → 폐기 불가, �
 
 - `apps/worker/src/auth.ts`, `apps/worker/src/index.ts`, `apps/worker/tests/sso.test.ts`
 - SSX `worker/lib/external/insulationLayoutSso.ts`, `noisePredictorSso.ts`, `client/src/components/dashboard/QuickNavWidget.tsx`
-- 커밋 `0bb254a`, `2a2c9bc`, 브랜치 `feature/ssx-sso-ipg`(양 저장소)
+- 커밋 `0bb254a`, `2a2c9bc`, PR #84(이 저장소), SSX PR #2191·#2193·#2194
+- SSX 쪽 정리: smart-schedule-X `llm-wiki/systems/외부앱-자동로그인-SSO.md`

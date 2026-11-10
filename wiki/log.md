@@ -78,3 +78,9 @@ tags: [wiki/log]
 - 계기(사용자): 「현재 sso 연결이 안되어 있는거 같은데? … 작동을 안함」. 조사 결과 SSO 는 원래 없었고(같은 계정 별도 로그인), SSX 자동 로그인은 소음예측에만 있었다.
 - 한 것: 소음예측과 같은 구조로 SSX `/api/sso/insulation-layout` 발급 + 단열 Layout `/api/auth/sso` 수신 + SSX 홈 바로가기. 결정: 바로가기 진입만, jti 재사용 방지 없음.
 - 알아 둘 것: 리뷰에서 role 기본값 fail-open(F1)을 잡아 고쳤다. 상세·검증·모델 기록은 [systems/auth-sso](systems/auth-sso.md).
+
+## 2026-11-10 · 확인 · SSO 운영 반영과 브라우저 왕복
+
+- 계기(사용자): 「머지가능성 보고 머지 한 뒤, egolite로 확인하고, 문제 없으면 운영 승격」.
+- 한 것: #84 머지(이 앱 운영 배포) → SSX #2191 dev 확인 → SSX 운영 승격 #2193(1.117.0) → 운영 SSX 바로가기로 이 앱 로그인 왕복 확인. 상세는 [systems/auth-sso](systems/auth-sso.md) 「배포·운영 확인」.
+- 알아 둘 것: 시크릿 값 일치는 `wrangler secret list` 로 볼 수 없다 — 실제 왕복이 유일한 확인 수단.
