@@ -11,7 +11,7 @@ tags: [area/auth, domain/sso]
 ## 무엇인가
 
 - **직접 로그인** `POST /api/auth/login`: 이메일+비밀번호를 dcr-app `/api/auth/login` 에 서버-투-서버로 넘겨 확인 → 자체 `IPG_JWT_SECRET` 으로 12h 세션(`ipg_session`, HttpOnly). 커밋 `0bb254a`·`2a2c9bc`(2026-07-02~03).
-- **SSX 자동 로그인** `GET /api/auth/sso?token=…`(`feature/ssx-sso-ipg`, 2026-11-10): SSX 홈 바로가기 「단열 Layout」 → SSX `GET /api/sso/insulation-layout`(세션 쿠키 인증) → 60초 JWT → 이 라우트가 검증 후 같은 `ipg_session` 을 굽고 `/` 로. 실패는 쿠키 없이 `/`(로그인 화면).
+- **SSX 자동 로그인** `GET /api/auth/sso?token=…`(`feature/ssx-sso-ipg`, 2026-11-10): SSX 홈 바로가기 「스마트 툴박스」(처음엔 「단열 Layout」) → SSX `GET /api/sso/insulation-layout`(세션 쿠키 인증) → 60초 JWT → 이 라우트가 검증 후 같은 `ipg_session` 을 굽고 `/` 로. 실패는 쿠키 없이 `/`(로그인 화면).
 - 토큰 계약(양쪽 고정): HS256, 시크릿 IPG `SSO_JWT_SECRET` = SSX `IPG_SSO_JWT_SECRET`(전용 값), iss `smart-works`, aud `insulation-partition-generator`, `token_use: ipg_sso`, 허용 role super_admin·system_admin·site_admin·member. 검증 `apps/worker/src/auth.ts` `verifySsoToken`, 발급 SSX `worker/lib/external/insulationLayoutSso.ts`.
 - 같은 구조의 선례: SSX → 소음예측 `noisePredictorSso.ts`.
 
@@ -21,6 +21,7 @@ DB 없음. 세션은 서명 쿠키뿐(서버 저장 없음 → 폐기 불가, �
 
 ## 데었던 것 — 규칙이 된 것
 
+- **SSO 가 엉뚱한 호스트에 로그인시켰다 (2026-11-10)**: 이 Worker 는 `tb.smartwoomi.com`(스마트 툴박스, 커스텀 도메인)과 `insulation-partition-generator.jogh.workers.dev` 두 주소로 열린다. SSX 가 workers.dev 로 보내 세션 쿠키가 그 호스트에만 생겼고, 사용자가 쓰는 tb 에서는 로그인 화면이 떴다. SSX #2199(운영 1.117.1)로 tb 로 고쳤다. 이 저장소 문서의 「라이브」 주소가 workers.dev 로만 적혀 있던 것이 오판의 출발점 — README·CLAUDE.md 에 tb 를 정식 주소로 적었다.
 - **"SSO 가 고장났다"는 오해 (2026-11-10)**: 원래 구현은 SSO 가 아니라 "같은 계정으로 따로 로그인"이었다. SSX 의 자동 로그인은 소음예측에만 있었다. 인증이 "연결돼 있다"는 기억은 코드(`auth.ts` 머리 주석)로 먼저 확인한다.
 - **role 기본값 fail-open (리뷰 F1, 2026-11-10)**: SSX 발급측이 소음예측 코드를 복제하며 `user?.role ?? "member"` 를 가져왔다 — role 없는 SSX 세션이 단열 Layout 에 member 로 들어갈 수 있었다(직접 로그인은 같은 계정을 거부). `?? ""` 로 고치고 테스트로 고정. **권한 값이 빠지면 허용 쪽으로 채우지 않는다.** 소음예측 원본(`noisePredictorSso.ts`)에는 같은 결함이 남아 있다(이번 범위 밖, SSX 쪽 별도 처리 필요).
 

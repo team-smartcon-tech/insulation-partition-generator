@@ -10,7 +10,7 @@ Claude Code 전용 보충 규칙. 공통 규칙의 1차 소스는 [`AGENTS.md`](
 
 > 상세는 [`README.md`](./README.md) / [`docs/2026-07-02-단열재나누기도-핸드오프.md`](./docs/2026-07-02-단열재나누기도-핸드오프.md).
 
-**무엇**: DXF 도면 → 단열재 나누기도 + 물량 산출서(DXF/SVG/CSV/XLSX/ZIP) 웹 앱. **표시명 "단열 Layout"** (코드 식별자는 `insulation`/`elev_*` 유지). SSX "세대 단열재 나누기도"를 독립 이관. **라이브**: https://insulation-partition-generator.jogh.workers.dev
+**무엇**: DXF 도면 → 단열재 나누기도 + 물량 산출서(DXF/SVG/CSV/XLSX/ZIP) 웹 앱. **표시명 "단열 Layout"** (코드 식별자는 `insulation`/`elev_*` 유지). SSX "세대 단열재 나누기도"를 독립 이관. **라이브**: https://tb.smartwoomi.com (스마트 툴박스 — 사용자가 쓰는 정식 주소. 같은 Worker 의 workers.dev 주소 https://insulation-partition-generator.jogh.workers.dev 도 열리지만 세션 쿠키는 호스트별이다)
 
 **명령 (pnpm 모노레포, Node 20+)**
 
