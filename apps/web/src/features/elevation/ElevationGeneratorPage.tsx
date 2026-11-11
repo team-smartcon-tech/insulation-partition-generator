@@ -66,6 +66,11 @@ import {
   type NormalizedEntity,
 } from "./utils/dxfEngine";
 import {
+  decodeDxfBytes,
+  extractWindowSchedule,
+  matchScheduleRow,
+} from "./utils/windowSchedule";
+import {
   deleteEntitiesFromDxf,
   translateEntityInDxf,
 } from "./utils/dxfEdit";
@@ -158,6 +163,16 @@ interface OpeningPreset {
   width: number;
   height: number;
   sill: number;
+  /** 창호일람표에서 가져온 프리셋이면 "schedule" — 일람표를 다시 불러오면 이것들만 교체된다 */
+  source?: "schedule";
+  /** 일람표 시트(타입·기본/확장형). 같은 치수가 시트마다 SILL 이 다를 수 있어 매칭 우선순위로 쓴다 */
+  sheet?: string;
+  /** 일람표 기호 (PW, WD …) */
+  symbol?: string;
+  /** 일람표 위치 (거실, 침실-1,2 …) */
+  location?: string;
+  /** SILL 기준선 — F.L(마감 바닥)/S.L(슬래브). 일람표 칸에 표기가 없으면 null */
+  sillRef?: "F.L" | "S.L" | null;
 }
 
 /** 외기 노출 타입 → 단열 두께가 달라진다 */
@@ -545,6 +560,39 @@ export default function ElevationGeneratorPage() {
     },
     []
   );
+  // 창호일람표 — 불러온 프리셋(source="schedule")과 시트 필터("" = 전체)
+  const [presetSheet, setPresetSheet] = useState<string>("");
+  const scheduleInputRef = useRef<HTMLInputElement>(null);
+  const schedulePresets = useMemo(
+    () => presets.filter(p => p.source === "schedule"),
+    [presets]
+  );
+  const scheduleSheets = useMemo(
+    () =>
+      Array.from(
+        new Set(schedulePresets.map(p => p.sheet).filter((x): x is string => !!x))
+      ),
+    [schedulePresets]
+  );
+  /** 시트 필터를 적용한 프리셋 목록 (기본 프리셋은 항상 보임) */
+  const visiblePresets = useMemo(
+    () =>
+      presetSheet
+        ? presets.filter(p => p.source !== "schedule" || p.sheet === presetSheet)
+        : presets,
+    [presets, presetSheet]
+  );
+  /**
+   * 평면 라벨(W×H) → 일람표 프리셋. 같은 치수 우선, ±100 안이면 근사(≈).
+   * 선택한 시트의 행을 먼저 본다 — 기본형/확장형에 같은 치수가 다른 SILL 로 있을 수 있다.
+   */
+  const matchPresetBySize = useCallback(
+    (width: number, height: number) =>
+      schedulePresets.length
+        ? matchScheduleRow(schedulePresets, width, height, presetSheet || null)
+        : null,
+    [schedulePresets, presetSheet]
+  );
   const [twoPointAnchor, setTwoPointAnchor] = useState<{
     wallId: string;
     s: number;
@@ -863,6 +911,8 @@ export default function ElevationGeneratorPage() {
       // 노출 프리셋(직접/간접외기 두께). 예전엔 항상 [] 로 저장해 새로고침·REV 로드마다
       // 기본값(90/50·50/50)으로 돌아갔다.
       presets: exposurePresets,
+      // 오프닝 프리셋(창호일람표에서 불러온 것 포함). 예전엔 저장하지 않아 새로고침마다 기본 5종으로 돌아갔다.
+      openingPresets: presets,
       walls,
       openings,
       buildings: [],
@@ -871,7 +921,7 @@ export default function ElevationGeneratorPage() {
     [
       fileName, boardLength, boardHeight, boardThickness, insulOn, placement,
       optimizeSP, discardWidth, constructMinW, minJointGap, minPieceWidth, plyInward, defaultFloorHeight,
-      defaultSill, autoExtract, hiddenLayers, walls, openings, typeMatrix, exposurePresets,
+      defaultSill, autoExtract, hiddenLayers, walls, openings, typeMatrix, exposurePresets, presets,
     ]
   );
 
@@ -933,6 +983,18 @@ export default function ElevationGeneratorPage() {
       }
     }
     setOpenings((st.openings as Opening[]) ?? []);
+    {
+      // 오프닝 프리셋 — 저장된 것이 있으면 그대로, 없으면(구 REV) 기본 프리셋
+      const savedPresets = ((st.openingPresets ?? []) as Partial<OpeningPreset>[]).filter(
+        p => p && typeof p.id === "string" && Number.isFinite(p.width) && Number.isFinite(p.height)
+      ) as OpeningPreset[];
+      const nextPresets = savedPresets.length ? savedPresets : DEFAULT_PRESETS;
+      setPresets(nextPresets);
+      setPresetSheet("");
+      setSelectedPresetId(prev =>
+        nextPresets.some(p => p.id === prev) ? prev : nextPresets[0].id
+      );
+    }
     setActiveWallId(null);
     setDraft([]);
     setSelectedOpeningId(null);
@@ -3216,6 +3278,125 @@ export default function ElevationGeneratorPage() {
     [parsed]
   );
 
+  /**
+   * 창호일람표 DXF → 오프닝 프리셋. 기호·규격·위치·명칭에 입면의 SILL 까지 읽는다.
+   * 한글이 깨지지 않게 코드페이지(EUC-KR) 를 감지해 디코딩한다(평면 업로드의 file.text() 와 다른 점).
+   */
+  const handleScheduleFile = useCallback(
+    async (file: File) => {
+      try {
+        const text = decodeDxfBytes(await file.arrayBuffer());
+        const sched = parseDxfText(text);
+        const { rows, sheets, warnings } = extractWindowSchedule(sched);
+        if (rows.length === 0) {
+          toast.error(`창호일람표를 읽지 못했습니다. ${warnings.join(" ")}`);
+          return;
+        }
+        const imported: OpeningPreset[] = rows.map(r => ({
+          id: `sch-${r.id}`,
+          label: `${r.location || r.name} ${r.symbol} ${r.width}×${r.height}`,
+          kind: r.kind,
+          width: r.width,
+          height: r.height,
+          // 입면에서 못 읽은 창은 기본 SILL — 경고 토스트로 알린다
+          sill: r.sill ?? (r.kind === "door" ? 0 : defaultSill),
+          source: "schedule",
+          sheet: r.sheet,
+          symbol: r.symbol,
+          location: r.location,
+          sillRef: r.sillRef,
+        }));
+        setPresets(prev => [...prev.filter(p => p.source !== "schedule"), ...imported]);
+        setPresetSheet(sheets.length > 1 ? sheets[0] : "");
+        setSelectedPresetId(imported[0].id);
+        toast.success(
+          `창호일람표 ${rows.length}종 불러옴${sheets.length ? ` · 시트 ${sheets.length}개` : ""}`
+        );
+        warnings.forEach(w => toast.warning(w));
+      } catch (err) {
+        toast.error(
+          `창호일람표 읽기 실패: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    },
+    [defaultSill]
+  );
+
+  const clearSchedulePresets = useCallback(() => {
+    setPresets(prev => prev.filter(p => p.source !== "schedule"));
+    setPresetSheet("");
+    setSelectedPresetId(DEFAULT_PRESETS[0].id);
+  }, []);
+
+  /**
+   * 라벨 일괄 배치 — 평면의 W×H 글자를 모두 찾아 가장 가까운 입면 벽에 한 번에 놓는다.
+   * 라벨 위치를 창 중심으로 본다(평면 라벨은 창 가운데 적는다). 일람표가 있으면 SILL·종류를 거기서 채운다.
+   * 벽에서 1.5m 넘게 떨어진 글자(다른 실의 라벨·문 라벨)는 제외하고, 이미 같은 자리에 있으면 건너뛴다.
+   */
+  const bulkPlaceFromLabels = useCallback(() => {
+    if (!parsed || walls.length === 0) return;
+    const TOL = 1500;
+    const added: Opening[] = [];
+    let far = 0;
+    let dup = 0;
+    let unmatched = 0;
+    for (const e of parsed.entities) {
+      if (e.kind !== "text" || hiddenLayers.has(e.layer)) continue;
+      const size = extractSizeFromText(e.text);
+      if (!size) continue;
+      const proj = projectOnAnyWall(e.pos);
+      if (!proj || proj.distance > TOL) {
+        far++;
+        continue;
+      }
+      const peri = wallMetricsById.get(proj.wallId)?.total ?? 0;
+      const s = clampS(proj.s, size.width, peri);
+      const exists = [...openings, ...added].some(
+        o =>
+          o.wallId === proj.wallId &&
+          Math.abs(o.sAlong - s) < Math.max(o.width, size.width) / 2
+      );
+      if (exists) {
+        dup++;
+        continue;
+      }
+      const m = matchPresetBySize(size.width, size.height);
+      if (!m && schedulePresets.length) unmatched++;
+      added.push({
+        id: uid(),
+        wallId: proj.wallId,
+        kind: m?.row.kind ?? "window",
+        sAlong: s,
+        width: size.width,
+        height: size.height,
+        sill: m ? m.row.sill : defaultSill,
+        label: `일괄(${e.text})${m ? ` · ${m.row.label}${m.exact ? "" : "≈"}` : ""}`,
+      });
+    }
+    if (added.length) {
+      setOpenings(prev => [...prev, ...added]);
+      setSelectedOpeningId(added[0].id);
+      setActiveWallId(added[0].wallId);
+    }
+    const parts = [
+      `라벨 ${added.length}개 배치`,
+      `벽에서 멀어 제외 ${far}`,
+      `이미 있음 ${dup}`,
+    ];
+    if (schedulePresets.length) parts.push(`일람표 미일치(기본 SILL) ${unmatched}`);
+    (added.length ? toast.success : toast.info)(parts.join(" · "));
+  }, [
+    parsed,
+    walls.length,
+    hiddenLayers,
+    projectOnAnyWall,
+    wallMetricsById,
+    openings,
+    matchPresetBySize,
+    schedulePresets.length,
+    defaultSill,
+  ]);
+
   /** draft 확정 → walls 에 추가 */
   const commitDraft = useCallback(
     (closed = false) => {
@@ -3290,16 +3471,20 @@ export default function ElevationGeneratorPage() {
         return;
       }
       const peri = wallMetricsById.get(projA.wallId)?.total ?? 0;
+      // 일람표가 있으면 같은 치수의 행에서 SILL·창/문 종류를 가져온다(없으면 기본 SILL)
+      const m = matchPresetBySize(auto.width, auto.height);
       // 클릭 지점을 창호의 "왼쪽 끝"으로 간주 — sAlong 은 중심이므로 width/2 만큼 우측으로 이동
       const op: Opening = {
         id: uid(),
         wallId: projA.wallId,
-        kind: "window",
+        kind: m?.row.kind ?? "window",
         sAlong: clampS(projA.s + auto.width / 2, auto.width, peri),
         width: auto.width,
         height: auto.height,
-        sill: defaultSill,
-        label: `자동(${auto.text})`,
+        sill: m ? m.row.sill : defaultSill,
+        label: m
+          ? `자동(${auto.text}) · ${m.row.label}${m.exact ? "" : "≈"}`
+          : `자동(${auto.text})`,
       };
       setOpenings(prev => [...prev, op]);
       setSelectedOpeningId(op.id);
@@ -3319,8 +3504,9 @@ export default function ElevationGeneratorPage() {
       const auto = autoSizeFromNearbyText(worldRaw);
       const width = auto?.width ?? preset.width;
       const height = auto?.height ?? preset.height;
-      // 자동 인식 성공 시 sill 은 "기본 sill" 입력값을 쓴다. 수동이면 프리셋 sill.
-      const sill = auto ? defaultSill : preset.sill;
+      // 자동 인식 성공 시 sill 은 일람표 매칭값 → 없으면 "기본 sill" 입력값. 수동이면 프리셋 sill.
+      const autoMatch = auto ? matchPresetBySize(width, height) : null;
+      const sill = auto ? (autoMatch ? autoMatch.row.sill : defaultSill) : preset.sill;
       const op: Opening = {
         id: uid(),
         wallId: proj.wallId,
@@ -4366,9 +4552,68 @@ export default function ElevationGeneratorPage() {
    */
   const renderPresetControl = (stacked = false) => (
             <div className={stacked ? "flex flex-col gap-2" : "flex items-start gap-2"}>
+              <div className="flex flex-col gap-1">
+              {/* 창호일람표 불러오기 · 시트 필터 · 라벨 일괄 배치 */}
+              <div className={cn("flex flex-wrap items-center gap-1", !stacked && "max-w-[248px]")}>
+                <input
+                  ref={scheduleInputRef}
+                  type="file"
+                  accept=".dxf"
+                  className="hidden"
+                  onChange={ev => {
+                    const f = ev.target.files?.[0];
+                    if (f) void handleScheduleFile(f);
+                    ev.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => scheduleInputRef.current?.click()}
+                  title="창호일람표 DXF 를 읽어 창 종류(기호·치수·SILL)를 자동 생성"
+                  className="flex items-center gap-1 whitespace-nowrap rounded border border-slate-300 bg-white px-1.5 py-[3px] text-[11.5px] text-slate-700 hover:bg-slate-100"
+                >
+                  <Upload className="h-3 w-3" />
+                  창호일람표
+                </button>
+                {scheduleSheets.length > 0 && (
+                  <select
+                    value={presetSheet}
+                    onChange={ev => setPresetSheet(ev.target.value)}
+                    title="일람표 시트(타입 · 기본/확장형) — 매칭 우선순위와 목록 필터"
+                    className="h-[22px] max-w-[150px] rounded border border-slate-300 bg-white px-1 text-[11.5px] text-slate-700"
+                  >
+                    <option value="">전체 시트</option>
+                    {scheduleSheets.map(sh => (
+                      <option key={sh} value={sh}>
+                        {sh}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {schedulePresets.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearSchedulePresets}
+                    title={`일람표 프리셋 ${schedulePresets.length}종 제거`}
+                    className="flex h-[22px] w-[22px] items-center justify-center rounded border border-slate-300 bg-white text-slate-500 hover:bg-slate-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={bulkPlaceFromLabels}
+                  disabled={!parsed || walls.length === 0}
+                  title="평면의 W×H 라벨을 모두 찾아 가장 가까운 입면 벽에 한 번에 배치 — 배치 후 목록에서 확인"
+                  className="flex items-center gap-1 whitespace-nowrap rounded border border-slate-300 bg-white px-1.5 py-[3px] text-[11.5px] text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+                >
+                  <Wand2 className="h-3 w-3" />
+                  라벨 일괄 배치
+                </button>
+              </div>
               {/* 프리셋 선택 — CAD 블록 갤러리 자리 */}
-              <div className={cn("flex flex-wrap gap-1", !stacked && "max-w-[248px]")}>
-                {presets.map(pr => {
+              <div className={cn("flex flex-wrap gap-1", !stacked && "max-w-[248px] max-h-[60px] overflow-y-auto")}>
+                {visiblePresets.map(pr => {
                   const on = pr.id === selectedPresetId;
                   return (
                     <button
@@ -4394,6 +4639,7 @@ export default function ElevationGeneratorPage() {
                     </button>
                   );
                 })}
+              </div>
               </div>
               {/* 선택 프리셋 치수 — 리본에서 바로 수정 */}
               {preset && (
@@ -5975,7 +6221,7 @@ export default function ElevationGeneratorPage() {
             {dlg === "preset" && (
             <>
             <div className="px-2 py-1.5 space-y-1">
-              {presets.map(p => {
+              {visiblePresets.map(p => {
                 const active = p.id === selectedPresetId;
                 return (
                   <div
@@ -6018,6 +6264,7 @@ export default function ElevationGeneratorPage() {
                       >
                         {p.width}×{p.height}
                         {p.sill ? ` ↑${p.sill}` : ""}
+                        {p.sillRef ? ` ${p.sillRef}` : ""}
                       </span>
                     </button>
                     {active && (

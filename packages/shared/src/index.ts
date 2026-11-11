@@ -77,6 +77,8 @@ export interface ElevState {
     hiddenLayers: string[];
   };
   presets: unknown[];
+  /** 오프닝(창·문) 프리셋 — 창호일람표에서 불러온 것 포함. 없으면(구 REV) 기본 프리셋. */
+  openingPresets?: unknown[];
   walls: unknown[];
   openings: unknown[];
   /** 동·코어/층 구성 (Phase 4). 없으면 빈 배열. */
