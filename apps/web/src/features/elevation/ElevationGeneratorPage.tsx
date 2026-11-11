@@ -70,6 +70,7 @@ import {
   extractWindowSchedule,
   matchScheduleRow,
 } from "./utils/windowSchedule";
+import { detectOpeningAtClick } from "./utils/openingDetect";
 import {
   deleteEntitiesFromDxf,
   translateEntityInDxf,
@@ -3259,23 +3260,26 @@ export default function ElevationGeneratorPage() {
    * 창호 블록을 클릭했을 때 라벨이 도면의 다른 위치에 있어도 찾아쓰기 위한 함수.
    */
   const findNearestSizeText = useCallback(
-    (world: Point2D): { width: number; height: number; text: string } | null => {
+    (
+      world: Point2D
+    ): { width: number; height: number; text: string; pos: Point2D } | null => {
       if (!parsed) return null;
       let best: {
         d: number;
         size: { width: number; height: number };
         text: string;
+        pos: Point2D;
       } | null = null;
       for (const e of parsed.entities) {
-        if (e.kind !== "text") continue;
+        if (e.kind !== "text" || hiddenLayers.has(e.layer)) continue;
         const size = extractSizeFromText(e.text);
         if (!size) continue;
         const d = dist(world, e.pos);
-        if (!best || d < best.d) best = { d, size, text: e.text };
+        if (!best || d < best.d) best = { d, size, text: e.text, pos: e.pos };
       }
-      return best ? { ...best.size, text: best.text } : null;
+      return best ? { ...best.size, text: best.text, pos: best.pos } : null;
     },
-    [parsed]
+    [parsed, hiddenLayers]
   );
 
   /**
@@ -3458,33 +3462,55 @@ export default function ElevationGeneratorPage() {
       return;
     }
 
-    // ── 창호 자동 인식 모드 ── 프리셋 무관, 클릭 위치를 벽에 투영 + 가장 가까운 W×H 라벨 사용
+    // ── 창호 자동 인식 모드 ── 프리셋 무관. 클릭을 벽에 투영한 뒤 도면 선으로 창 범위를 찾고
+    //    (창틀·유리선 = 창 폭), 그 범위 근처의 W×H 라벨에서 치수를 읽는다. 창 어디를 찍어도 같은 결과.
     if (mode === "auto") {
-      const projA = projectOnAnyWall(snapHit ?? worldRaw);
+      const clickPt = snapHit ?? worldRaw;
+      const projA = projectOnAnyWall(clickPt);
       if (!projA) return;
-      const auto = findNearestSizeText(snapHit ?? worldRaw);
-      if (!auto) {
-        // eslint-disable-next-line no-alert
-        alert(
-          "도면에서 폭×높이 형식의 텍스트(예: 18×11.8 또는 1800×1500)를 찾지 못했습니다."
-        );
-        return;
-      }
+      const wallA = walls.find(w => w.id === projA.wallId);
+      if (!wallA) return;
       const peri = wallMetricsById.get(projA.wallId)?.total ?? 0;
+      const det = parsed
+        ? detectOpeningAtClick(parsed.entities, hiddenLayers, wallA.points, wallA.closed, projA.s)
+        : null;
+      let width: number;
+      let height: number;
+      let center: number;
+      let text: string;
+      if (det && det.height > 0) {
+        width = det.width;
+        height = det.height;
+        center = (det.s0 + det.s1) / 2;
+        text = det.exact ? det.text! : `${det.text} · 도면폭 ${det.span}`;
+      } else {
+        // 폴백: 창 선을 못 찾음 — 클릭에서 3m 안의 가장 가까운 라벨, 클릭 지점을 창 중심으로
+        const near = findNearestSizeText(clickPt);
+        if (!near || dist(clickPt, near.pos) > 3000) {
+          // eslint-disable-next-line no-alert
+          alert(
+            "클릭한 자리에서 창 선이나 폭×높이 라벨(예: 2700x2000)을 찾지 못했습니다. 창 위를 찍어 주세요."
+          );
+          return;
+        }
+        width = det?.width ?? near.width;
+        height = near.height;
+        center = det ? (det.s0 + det.s1) / 2 : projA.s;
+        text = near.text;
+      }
       // 일람표가 있으면 같은 치수의 행에서 SILL·창/문 종류를 가져온다(없으면 기본 SILL)
-      const m = matchPresetBySize(auto.width, auto.height);
-      // 클릭 지점을 창호의 "왼쪽 끝"으로 간주 — sAlong 은 중심이므로 width/2 만큼 우측으로 이동
+      const m = matchPresetBySize(width, height);
       const op: Opening = {
         id: uid(),
         wallId: projA.wallId,
         kind: m?.row.kind ?? "window",
-        sAlong: clampS(projA.s + auto.width / 2, auto.width, peri),
-        width: auto.width,
-        height: auto.height,
+        sAlong: clampS(center, width, peri),
+        width,
+        height,
         sill: m ? m.row.sill : defaultSill,
         label: m
-          ? `자동(${auto.text}) · ${m.row.label}${m.exact ? "" : "≈"}`
-          : `자동(${auto.text})`,
+          ? `자동(${text}) · ${m.row.label}${m.exact ? "" : "≈"}`
+          : `자동(${text})`,
       };
       setOpenings(prev => [...prev, op]);
       setSelectedOpeningId(op.id);
