@@ -1,5 +1,5 @@
 /**
- * 한중 기간 (2026-11-02) — 동절기 양생을 11~3월 대신 「일평균기온 4℃ 이하 예상 기간」 으로.
+ * 한중 기간 (2026-11-02) — 「일평균기온 4℃ 이하 예상 기간」. 이 기간 타설은 보온양생 2일(갱폼 타설일+3일), 그 밖 11~3월은 양생일 +1 그대로 (2026-11-05).
  * 기간은 기준 지점(스마트웍스 날씨 API 의 기상청 5km 격자) 최근 10겨울 평균(엔진 kma-cold-normals, 자동 생성)에서 오고,
  * 현장마다 직접 고칠 수 있다(품질관리계획 「현장별 지정」). 지점 추천은 스마트웍스 현장 좌표 기준 가까운 순.
  */
@@ -18,6 +18,17 @@ import { useSites } from "../hooks";
 type ColdWeather = NonNullable<SiteSettings["coldWeather"]>;
 
 const MONTH_DAY = /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/** 스마트웍스 현장 주소 → 지역명 ("강원특별자치도 원주시 무실동 2002" → "원주시 무실동", "부산광역시 기장군 장안읍 …" → "부산 기장군 장안읍") */
+function regionOf(location: string | null | undefined): string | null {
+  const words = (location ?? "").split(/\s+/).filter((w) => w && !/\d/.test(w));
+  if (!words.length) return null;
+  const [head, ...rest] = words;
+  const city = head.match(/^(.+?)(광역시|특별시|특별자치시)$/);
+  if (city) return [city[1], ...rest.slice(0, 2)].join(" ");
+  if (/도$/.test(head) && rest.length) return rest.slice(0, 2).join(" ");
+  return words.slice(0, 2).join(" ");
+}
 
 /** 7월 상순부터 — 겨울이 가운데 오게 */
 const DEKAD_ORDER = Array.from({ length: 36 }, (_, i) => (i + 18) % 36);
@@ -50,8 +61,9 @@ function MonthDayInput({ label, value, onValue }: { label: string; value: string
   useEffect(() => setText(value), [value]);
   const bad = text !== "" && !MONTH_DAY.test(text);
   return (
-    <label className="flex items-center gap-1 text-xs">
-      <span className="text-muted-foreground">{label}</span>
+    // 부모 grid 의 「라벨 | 입력」 두 칸에 그대로 놓이게 contents (시작·끝 열맞춤)
+    <label className="contents text-xs">
+      <span className="text-xs text-muted-foreground">{label}</span>
       <input
         value={text}
         placeholder="MM-DD"
@@ -77,14 +89,20 @@ export default function ColdWeatherFields({
 }) {
   const sites = useSites();
   const site = sites.data?.sites.find((s) => s.id === siteId) ?? null;
-  const near = site?.latitude != null && site.longitude != null ? nearestColdStations(site.latitude, site.longitude) : [];
+  const near = site?.latitude != null && site.longitude != null ? nearestColdStations(site.latitude, site.longitude, 1) : [];
   const cw: ColdWeather = value ?? { enabled: false };
   const station = coldStation(cw.stationId);
   const range = coldRangeOf(cw);
   const hasData = COLD_STATIONS.length > 0;
+  const nearest = near[0] ?? null;
+
+  // 기준 지점은 고르지 않는다 (2026-11-05 사용자) — 현장 좌표에서 가장 가까운 지점으로 맞춘다
+  useEffect(() => {
+    if (cw.enabled && nearest && cw.stationId !== nearest.id) onChange({ ...cw, stationId: nearest.id });
+  }, [cw, nearest, onChange]);
 
   const toggle = (enabled: boolean) =>
-    onChange({ ...cw, enabled, stationId: cw.stationId ?? near[0]?.id ?? null });
+    onChange({ ...cw, enabled, stationId: nearest?.id ?? cw.stationId ?? null });
 
   return (
     <div className="space-y-2">
@@ -93,49 +111,28 @@ export default function ColdWeatherFields({
         <span>
           <span className="block">한중 기간으로 판정 (일평균 4℃ 이하)</span>
           <span className="block text-xs text-muted-foreground">
-            {cw.enabled ? (range ? `동절기 양생 ${monthDayLabel(range.start)} ~ ${monthDayLabel(range.end)}` : "기간을 정할 수 없어 11~3월로 계산") : "끄면 11~3월"}
+            {cw.enabled
+              ? range
+                ? `${monthDayLabel(range.start)} ~ ${monthDayLabel(range.end)} 타설은 보온양생 2일(갱폼 타설일+3일). 그 밖 11~3월은 양생일 +1 그대로`
+                : "기간을 정할 수 없어 보온양생 2일을 적용하지 않음"
+              : "소요강도 도달 후 2일간 0℃ 이상 유지"}
           </span>
         </span>
       </label>
       {cw.enabled ? (
         <div className="space-y-2 rounded-md border border-border bg-muted/30 p-2.5">
-          {hasData ? (
-            <label className="flex items-center justify-between gap-2 text-sm">
-              <span>기준 지점</span>
-              <select
-                value={cw.stationId ?? ""}
-                onChange={(e) => onChange({ ...cw, stationId: e.target.value ? Number(e.target.value) : null })}
-                className="h-8 w-44 rounded-md border border-input bg-card px-2 text-sm"
-              >
-                <option value="">고르세요</option>
-                {near.length ? (
-                  <optgroup label="현장 가까운 곳">
-                    {near.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} · {s.km}km
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-                <optgroup label="전체">
-                  {[...COLD_STATIONS]
-                    .sort((a, b) => a.name.localeCompare(b.name, "ko"))
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                </optgroup>
-              </select>
-            </label>
-          ) : (
-            <p className="text-xs text-amber-700">10년 평균 자료가 아직 없습니다. 기간을 직접 넣으세요.</p>
-          )}
-          {hasData && !near.length ? <p className="text-xs text-muted-foreground">스마트웍스에 현장 좌표가 없어 가까운 지점을 추천하지 못했습니다.</p> : null}
+          {!hasData ? <p className="text-xs text-amber-700">10년 평균 자료가 아직 없습니다. 기간을 직접 넣으세요.</p> : null}
+          {hasData && !nearest && !station ? (
+            <p className="text-xs text-muted-foreground">스마트웍스에 현장 좌표가 없어 기준 지역을 정하지 못했습니다. 기간을 직접 넣으세요.</p>
+          ) : null}
           {station ? (
             <>
+              <p className="text-sm">
+                <span className="text-muted-foreground">기준 지역</span> <b>{regionOf(site?.location) ?? station.name}</b>
+                {nearest && nearest.km >= 10 ? <span className="text-xs text-muted-foreground"> (가장 가까운 자료 {nearest.km}km)</span> : null}
+              </p>
               <p className="text-xs">
-                <b>{station.name}</b> {station.winters} 10겨울 평균 4℃ 이하:{" "}
+                {station.winters} 10겨울 평균 4℃ 이하:{" "}
                 {station.start && station.end ? (
                   <b>
                     {monthDayLabel(station.start)} ~ {monthDayLabel(station.end)}
@@ -148,15 +145,19 @@ export default function ColdWeatherFields({
               <DekadStrip station={station} />
             </>
           ) : null}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-[auto_auto_auto_1fr] items-center gap-x-2 gap-y-1">
             <span className="text-xs text-muted-foreground">현장 지정</span>
             <MonthDayInput label="시작" value={cw.range?.start ?? station?.start ?? ""} onValue={(v) => onChange({ ...cw, range: { start: v, end: cw.range?.end ?? station?.end ?? v } })} />
-            <MonthDayInput label="끝" value={cw.range?.end ?? station?.end ?? ""} onValue={(v) => onChange({ ...cw, range: { start: cw.range?.start ?? station?.start ?? v, end: v } })} />
+            <span />
+            <span />
+            <MonthDayInput label="종료" value={cw.range?.end ?? station?.end ?? ""} onValue={(v) => onChange({ ...cw, range: { start: cw.range?.start ?? station?.start ?? v, end: v } })} />
             {cw.range && station?.start ? (
-              <button type="button" className="text-xs text-primary underline-offset-2 hover:underline" onClick={() => onChange({ ...cw, range: null })}>
+              <button type="button" className="justify-self-start text-xs text-primary underline-offset-2 hover:underline" onClick={() => onChange({ ...cw, range: null })}>
                 10년 평균으로
               </button>
-            ) : null}
+            ) : (
+              <span />
+            )}
           </div>
           <p className="text-[11px] text-muted-foreground">
             스마트웍스 날씨(기상청 5km 격자)의 날짜별 (최저+최고)/2 를 10겨울 평균 내 7일 이동평균한 값입니다. 하루 24시간 평균보다 조금 높게 나와 기간이

@@ -23,6 +23,10 @@ export const workEntrySchema = z.object({
   floorLabel: z.string().optional(),
   text: z.string(), // "바닥 먹매김"
   stage: stageSchema.nullable(),
+  /** 전기·기계 설비·소방 구간에서 읽은 기전이면 그 공종 (골조 구간·번호 목록형 양식은 없음) */
+  trade: z.enum(["electric", "mechanical", "fire"]).optional(),
+  /** 층 없이 공종만 적힌 줄(「4동 갱폼인양」) — 층은 그 동의 앞 실적에서 잇고, 못 이으면 실적에서 뺀다 */
+  floorFromPrev: z.literal(true).optional(),
 })
 
 export const dailyReportSchema = z.object({

@@ -10,7 +10,7 @@ import type { ActualWork, Assignment, Stage, WorkEntry } from "@ipg/gantt-engine
 import { cn } from "@/lib/utils";
 import { koreanDate } from "../dates";
 import { useDailyReports } from "../hooks";
-import ReportMentionLines from "./ReportMentionLines";
+import ReportMentionLines, { FRAME_SECTION } from "./ReportMentionLines";
 
 const NAME: Record<Stage, string> = {
   MARK: "먹매김",
@@ -152,8 +152,8 @@ export default function CellReportDialog({ siteId, target, onClose }: { siteId: 
               </section>
 
               <section>
-                <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">작업일보 원문 ({target.label} 언급 줄)</h3>
-                <ReportMentionLines rawText={report.rawText} buildingNo={target.buildingId} label="이 동" />
+                <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">작업일보 원문 ({target.label} 언급 줄 · 골조·전기·기계설비·소방)</h3>
+                <ReportMentionLines rawText={report.rawText} buildingNo={target.buildingId} label="이 동" section={FRAME_SECTION} />
                 <p className="mt-1 text-xs text-muted-foreground">
                   스마트웍스 작업일보 · 상태 {report.status} · 읽기 전용
                 </p>

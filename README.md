@@ -9,7 +9,7 @@ DXF 도면에서 외벽을 트레이싱해 **세대 단열재 나누기도**(입
 SSX(`smart-schedule-X`)의 본사 "세대 단열재 나누기도" 기능을 **동작 그대로** 독립 저장소로 떼어낸 것으로,
 독립 Cloudflare Worker + 독립 Supabase 프로젝트에서 운영합니다. 원본 SSX는 읽기 전용 참조입니다.
 
-- **라이브**: https://insulation-partition-generator.jogh.workers.dev
+- **라이브**: https://tb.smartwoomi.com (스마트 툴박스 — 사용자가 쓰는 정식 주소. 같은 Worker 의 workers.dev 주소 https://insulation-partition-generator.jogh.workers.dev 도 열리지만 세션 쿠키는 호스트별이다)
 - **스택**: Vite + React 19 + wouter + TypeScript · Hono + Cloudflare Worker · Supabase · Tailwind v4 + shadcn/ui
 - **저장소**: `team-smartcon-tech/insulation-partition-generator` (기본 브랜치 `main`)
 
@@ -61,6 +61,8 @@ SUPABASE_SERVICE_ROLE_KEY=<대시보드 service_role 키>           # 로그인�
 ```
 
 → `pnpm dev` 후 http://localhost:5173 에서 **DCR 계정(이메일·비밀번호, SSX 로그인과 동일)** 으로 로그인.
+
+SSX(스마트웍스)에서 넘어오는 자동 로그인은 `GET /api/auth/sso?token=…` 이 받는다. 시크릿 `SSO_JWT_SECRET`(SSX 의 `IPG_SSO_JWT_SECRET` 과 같은 값)이 없으면 SSO 만 꺼지고 위 로그인은 그대로 된다.
 
 ---
 

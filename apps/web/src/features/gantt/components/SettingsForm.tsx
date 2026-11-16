@@ -2,7 +2,16 @@
  * 현장 설정 폼 (설계 §5): 자원 용량 · 반일 투입(같은 날 오전→오후 연계) · 팀 운영 제약.
  * 값은 부모가 들고(controlled) 저장은 부모가 한다 — 공정표 탭에서는 "저장 없이 바꿔 보기", 설정 탭에서는 저장.
  */
-import { DEFAULT_UNDERGROUND_SETTINGS, coldRangeOf, monthDayLabel, type SiteSettings, type UndergroundSettings } from "@ipg/gantt-engine";
+import {
+  DEFAULT_UNDERGROUND_SETTINGS,
+  coldRangeOf,
+  coldStation,
+  monthDayLabel,
+  nearestColdStations,
+  type SiteSettings,
+  type UndergroundSettings,
+} from "@ipg/gantt-engine";
+import { useSites } from "../hooks";
 import ColdWeatherFields from "./ColdWeatherFields";
 import { NumInput } from "./StepInput";
 
@@ -98,6 +107,17 @@ export default function SettingsForm({
 }) {
   const s = value;
   const cold = coldRangeOf(s.coldWeather);
+  // 한중 기간 타설은 보온양생 2일(엔진 curingDays 2), 그 밖 11~3월은 양생일 +1 (2026-11-05). 「보온양생 2일」 체크박스는 없앴다
+  const coldLabel = cold ? `${monthDayLabel(cold.start)}~${monthDayLabel(cold.end)}` : null;
+  // 묶음 제목 기간 (2026-11-05): 체크와 상관없이 기준 지점의 한중 기간 — 직접 고친 기간 > 고른 지점 > 현장 좌표 가까운 지점. 없으면 11~3월
+  const sites = useSites();
+  const site = sites.data?.sites.find((x) => x.id === siteId) ?? null;
+  const titleStation =
+    coldStation(s.coldWeather?.stationId) ??
+    (site?.latitude != null && site.longitude != null ? (nearestColdStations(site.latitude, site.longitude, 1)[0] ?? null) : null);
+  const titleRange = s.coldWeather?.range ?? (titleStation?.start && titleStation.end ? { start: titleStation.start, end: titleStation.end } : null);
+  const shortMd = (v: string) => v.split("-").map(Number).join("/");
+  const winterTitle = titleRange ? `${shortMd(titleRange.start)}~${shortMd(titleRange.end)}` : "11~3월";
   const set = (patch: Partial<SiteSettings>) => onChange({ ...s, ...patch });
   if (part === "underground") {
     const ug = s.underground ?? DEFAULT_UNDERGROUND_SETTINGS;
@@ -161,27 +181,45 @@ export default function SettingsForm({
         <Num label="갱폼인양 N" value={s.gangform.count} options={counts(3, "동")} onChange={(v) => set({ gangform: { ...s.gangform, count: Number(v) } })} />
         <Num label="1일 타설" value={s.pourPerDay} options={counts(3, "동")} onChange={(v) => set({ pourPerDay: Number(v) })} />
         <Toggle label="철근팀 벽 오전 + 슬래브 오후 병행" hint="끄면 벽·슬래브가 각 하루" checked={s.rebarWallAndSlabSameDay} onChange={(v) => set({ rebarWallAndSlabSameDay: v })} />
+        {/* 슬래브철근 우선 (2026-11-05 사용자). 병행을 끄면 벽·슬래브 작업조가 따로라 겹치지 않는다 */}
+        <Toggle
+          label="슬래브철근 우선 작업"
+          hint={s.rebarWallAndSlabSameDay ? "W철근·S철근이 같은 칸에 겹치면 S철근 먼저 (끄면 먼저 준비된 동 먼저)" : "병행을 끄면 벽·슬래브 작업조가 따로라 쓸 일이 없음"}
+          disabled={!s.rebarWallAndSlabSameDay}
+          checked={s.rebarWallAndSlabSameDay && (s.slabRebarFirst ?? false)}
+          onChange={(v) => set({ slabRebarFirst: v })}
+        />
       </Section>
       <Section title="반일 투입 (같은 날 오전→오후 연계)">
         <Toggle label="먹매김 오전 완료 시 오후 갱폼인양" checked={s.halfDay.gangformPMAfterMarking} onChange={(v) => set({ halfDay: { ...s.halfDay, gangformPMAfterMarking: v } })} />
-        <Toggle label="갱폼 오전 완료 시 오후 벽철근" checked={s.halfDay.wallRebarPM} onChange={(v) => set({ halfDay: { ...s.halfDay, wallRebarPM: v } })} />
+        {/* 2026-11-05 사용자 */}
+        <Toggle
+          label="오후 W철근이면 W기전 함께 시공"
+          hint="W철근 오후 칸에 W기전도 같이 (끄면 W기전은 다음 날 오전부터)"
+          checked={s.halfDay.wallMepWithPMRebar ?? false}
+          onChange={(v) => set({ halfDay: { ...s.halfDay, wallMepWithPMRebar: v } })}
+        />
         <Toggle label="알폼 오후 투입 (오후 + 다음날 오전)" checked={s.halfDay.alformPMStart} onChange={(v) => set({ halfDay: { ...s.halfDay, alformPMStart: v } })} />
-        <Toggle label="슬래브철근 오후 가능" hint="기전·검측이 다음날 오전으로 밀림" checked={s.halfDay.slabRebarPM} onChange={(v) => set({ halfDay: { ...s.halfDay, slabRebarPM: v } })} />
       </Section>
       {/* 동절기 양생 — 타설 다음 날은 양생일(먹매김만). 기간은 11~3월 또는 한중 기간. 2026-11-02 */}
-      <Section title={`동절기 양생 (${cold ? `${monthDayLabel(cold.start)}~${monthDayLabel(cold.end)}` : "11~3월"})`}>
-        <ColdWeatherFields siteId={siteId} value={s.coldWeather} onChange={(coldWeather) => set({ coldWeather })} />
-        <Toggle
-          label="보온양생 2일 (갱폼인양 타설일+3일)"
-          hint="소요강도 도달 후 2일간 0℃ 이상 유지"
-          checked={s.winterCuring2Days ?? false}
-          onChange={(v) => set({ winterCuring2Days: v })}
+      <Section title={`동절기 양생 (${winterTitle})`}>
+        {/* 한중 기간을 켜면 「양생일 오후 갱폼」 은 끄고 막는다 (2026-11-05 사용자) — 엔진도 한중 기간이 있으면 이 값을 무시 */}
+        <ColdWeatherFields
+          siteId={siteId}
+          value={s.coldWeather}
+          onChange={(coldWeather) =>
+            set(coldWeather?.enabled ? { coldWeather, halfDay: { ...s.halfDay, curingDayGangformPM: false } } : { coldWeather })
+          }
         />
         <Toggle
           label="양생일에도 오후 갱폼인양"
-          hint={s.winterCuring2Days ? "보온양생 2일이 켜져 있어 적용되지 않음" : "타설 다음 날 오전 먹매김 → 오후 갱폼. 끄면 타설 이틀 뒤"}
-          checked={s.halfDay.curingDayGangformPM ?? false}
-          disabled={s.winterCuring2Days ?? false}
+          hint={
+            s.coldWeather?.enabled
+              ? "한중 기간을 켜면 쓸 수 없음"
+              : `타설 다음 날 오전 먹매김 → 오후 갱폼. 끄면 타설 이틀 뒤${coldLabel ? ` (한중 기간 ${coldLabel} 타설은 적용 안 됨)` : ""}`
+          }
+          disabled={!!s.coldWeather?.enabled}
+          checked={!s.coldWeather?.enabled && (s.halfDay.curingDayGangformPM ?? false)}
           onChange={(v) => set({ halfDay: { ...s.halfDay, curingDayGangformPM: v } })}
         />
       </Section>

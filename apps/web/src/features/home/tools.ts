@@ -35,6 +35,8 @@ export interface ToolDef {
   sortLast?: boolean;
   /** 홈 섹션 (market/types.ts SECTIONS). 없으면 시공 도구 */
   section?: SectionId;
+  /** 카드 아래 작성자 줄 (예: "김은상 · PI팀"). 없으면 "우미 · 스마트 툴박스" */
+  author?: string;
 }
 
 export const TOOLS: ToolDef[] = [
@@ -74,6 +76,7 @@ export const TOOLS: ToolDef[] = [
     thumbnail: "/brand/logo-gantt.svg",
     logo: "/brand/mark-gantt.svg",
     sortLast: true,
+    author: "김은상 · PI팀",
   },
   {
     // 별도 서비스(wm-pi/Inspection-Request). /tools/inspection 은 검측요청 주소로 이동만 한다.
@@ -88,6 +91,7 @@ export const TOOLS: ToolDef[] = [
     thumbnail: "/brand/logo-inspection.svg",
     logo: "/brand/mark-inspection.svg",
     sortLast: true,
+    author: "김은상 · PI팀",
   },
   // 빈 자리표시자 카드는 두지 않는다 — 홈은 "준비 중" 섹션에 컴팩트 타일로만 노출한다.
 ];

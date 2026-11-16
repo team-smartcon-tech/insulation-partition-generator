@@ -1,5 +1,8 @@
 // 설계 문서 §8 — 2026년 10월 5개 동 검증. 9월 1일부터 예열 후 10월만 집계. ±1 허용.
 // 메모와 어긋나는 3건은 현재 엔진 값으로 고정해 퇴보를 잡는다 (Smart-Gantt-Chart 저장소 결정, 2026-10-29).
+// 2026-11-05: 철근팀 W·S 겹침을 「먼저 준비된 동 먼저」 로 바꿔(예전 「오전은 W철근 먼저」 폐지, 사용자 결정) 반일 4행을 새 엔진 값으로 다시 고정.
+//   예전 값: 반일 전부 끔 18/2/9, 갱폼 하루 1동 20/0/4, 갱폼 반일 1동 20/0/3, 오후 단독투입 불가 20/0/6
+// 2026-11-05: 「갱폼 오전 완료 시 오후 벽철근」(wallRebarPM) 설정을 없애 W철근 오후가 항상 가능 — 반일 전부 끔 17/3/10 → 20/0/7 (사용자 결정)
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import {
@@ -21,10 +24,10 @@ function october(settings: SiteSettings) {
 const rows: [string, SiteSettings, number, number, number | null][] = [
   ["철근 2팀(참고)", SCENARIO_2026_10.rebarTwoTeams, 20, 0, null],
   ["철근 1팀, 벽·슬래브 각 하루 (메모 17/3/10)", SCENARIO_2026_10.rebarOnePerDay, 15, 5, 12],
-  ["반일 옵션 전부 끔", SCENARIO_2026_10.halfDayOff, 18, 2, 9],
-  ["반일 전부 켬, 갱폼 하루 1동 (메모 유휴 6)", SCENARIO_2026_10.halfDayOnGangformPerDay, 20, 0, 4],
-  ["반일 전부 켬, 갱폼 반일 1동", SCENARIO_2026_10.halfDayOnGangformPerSlot, 20, 0, 3],
-  ["+ 오후 단독투입 불가", SCENARIO_2026_10.halfDayOnNoPMOnlyStart, 20, 0, 6],
+  ["반일 옵션 전부 끔", SCENARIO_2026_10.halfDayOff, 20, 0, 7],
+  ["반일 전부 켬, 갱폼 하루 1동 (메모 유휴 6)", SCENARIO_2026_10.halfDayOnGangformPerDay, 20, 0, 2],
+  ["반일 전부 켬, 갱폼 반일 1동", SCENARIO_2026_10.halfDayOnGangformPerSlot, 20, 0, 2],
+  ["+ 오후 단독투입 불가", SCENARIO_2026_10.halfDayOnNoPMOnlyStart, 18, 2, 9],
 ]
 
 describe("§8 2026년 10월", () => {

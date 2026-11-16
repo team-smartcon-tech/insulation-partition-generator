@@ -66,8 +66,24 @@ const planTitle = (a: Assignment) => (isRoofForm(a) ? "거푸집(옥탑)" : STAG
  * 예정 하루 → 상자. 오전·오후가 같은 작업(알폼·단열재·옥탑 등)이면 하루 상자 하나, 아니면 반일 상자 둘.
  * 철근 오전 + 기전 오후도 합치지 않는다 — W철근 → 기전 → 알폼 → S철근 → 기전 순서가 보여야 한다.
  */
-function dayBoxes(date: string, label: string, am: Assignment | undefined, pm: Assignment | undefined, cont: (a: Assignment) => boolean): Box[] {
+function dayBoxes(
+  date: string,
+  label: string,
+  am: Assignment | undefined,
+  pm: Assignment | undefined,
+  cont: (a: Assignment) => boolean,
+  /** 오후 칸에 함께 시공하는 둘째 작업 (오후 W철근 + W기전, 2026-11-05) — 오후 칸을 반씩 나눠 그린다 */
+  pm2?: Assignment,
+): Box[] {
   const t = (a: Assignment, half: string) => `${date} ${half} · ${label} ${floorLabel(a)} · ${planTitle(a)}`;
+  if (pm && pm2) {
+    const amBox: Box[] = am ? [{ span: "AM", group: STAGE_GROUP[am.stage], title: t(am, "오전"), text: planText(am, cont(am)) }] : [];
+    return [
+      ...amBox,
+      { span: "DAY", group: STAGE_GROUP[pm.stage], title: t(pm, "오후(함께)"), text: planText(pm, cont(pm)), seg: { i: 2, n: 4 } },
+      { span: "DAY", group: STAGE_GROUP[pm2.stage], title: t(pm2, "오후(함께)"), text: planText(pm2, cont(pm2)), seg: { i: 3, n: 4 } },
+    ];
+  }
   if (am && pm) {
     if (am.stage === pm.stage) {
       return [{ span: "DAY", group: STAGE_GROUP[am.stage], title: `${t(am, "오전·오후")}`, text: planText(am, cont(am)) }];
@@ -163,7 +179,13 @@ export default function GanttChart({
   // 칸을 누르면 그날 그 동의 작업일보 팝업
   const [target, setTarget] = useState<CellTarget | null>(null);
   const byCell = new Map<string, Assignment>();
-  for (const a of data.assignments) byCell.set(`${a.date}|${a.half}|${a.buildingId}`, a);
+  // 한 칸에 둘(오후 W철근 + W기전 함께 시공)이면 둘째는 따로 둔다
+  const byCell2 = new Map<string, Assignment>();
+  for (const a of data.assignments) {
+    const k = `${a.date}|${a.half}|${a.buildingId}`;
+    if (byCell.has(k)) byCell2.set(k, a);
+    else byCell.set(k, a);
+  }
   const get = (date: string, half: "AM" | "PM", id: number) => byCell.get(`${date}|${half}|${id}`);
 
   const labelOf = new Map((data.buildings ?? []).map((b) => [b.id, b.label]));
@@ -307,7 +329,7 @@ export default function GanttChart({
                 const am = get(d.date, "AM", id);
                 const pm = get(d.date, "PM", id);
                 const planned = !isActualDay(d.date);
-                const boxes = isActualDay(d.date) && actual ? actualBoxes(d.date, label(id), actual, (w) => contActual.has(w)) : planned ? dayBoxes(d.date, label(id), am, pm, (a) => contPlan.has(a)) : [];
+                const boxes = isActualDay(d.date) && actual ? actualBoxes(d.date, label(id), actual, (w) => contActual.has(w)) : planned ? dayBoxes(d.date, label(id), am, pm, (a) => contPlan.has(a), byCell2.get(`${d.date}|PM|${id}`)) : [];
                 // 사이클 시작(먹매김) 칸에 층 라벨 (옥탑은 PH1·PH2)
                 const markPlan = am?.stage === "MARK" ? am : pm?.stage === "MARK" ? pm : planStoryStart.get(`${d.date}|${id}`);
                 const startFloor = actual

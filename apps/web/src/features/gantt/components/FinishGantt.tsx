@@ -20,7 +20,7 @@ import type { FramePour, FramePours } from "../framePours";
 type Gantt = FinishResponse["gantt"];
 
 /** 공종 묶음 색 — 골조 간트 GROUP_STYLE 과 같은 단계(바탕 -100, 테두리 -500) */
-const GROUP_TONE: Record<string, string> = {
+export const GROUP_TONE: Record<string, string> = {
   내장: "bg-violet-100 border-violet-500",
   PL창호: "bg-emerald-100 border-emerald-500",
   유리: "bg-cyan-100 border-cyan-500",
@@ -31,12 +31,12 @@ const GROUP_TONE: Record<string, string> = {
   도배: "bg-lime-200 border-lime-600",
   마루: "bg-stone-100 border-stone-400",
 };
-const toneOf = (group: string) => GROUP_TONE[group] ?? GROUP_TONE["마루"];
+export const toneOf = (group: string) => GROUP_TONE[group] ?? GROUP_TONE["마루"];
 /** 코어로 나뉜 동의 공종명 칸 너비 (나머지는 코어·% 칸) */
 const TRADE_W = "4.75rem";
 
 /** 기간이 겹치는 막대를 칸(줄 안의 단)에 나눈다 — 시작 순으로, 비어 있는 가장 위 칸. laneOf 는 넘긴 순서 그대로 */
-function stackLanes(bars: { start: string; end: string }[]): { laneOf: number[]; count: number } {
+export function stackLanes(bars: { start: string; end: string }[]): { laneOf: number[]; count: number } {
   const ends: string[] = [];
   const laneOf = new Array<number>(bars.length);
   const order = bars.map((_, i) => i).sort((x, y) => bars[x].start.localeCompare(bars[y].start));
@@ -115,6 +115,48 @@ function mergeDone(bars: FinishBarT[], maxDays: number): (FinishBarT & { parts: 
 }
 
 /**
+ * 동 하나의 공정표 줄 (화면·엑셀 공용, 2026-11-05).
+ * 줄: 스마트웍스 공종, 화면 순서(FINISH_TRADES)대로 × 코어. ✓ 세대 완료나 예정이 있는 줄만 — 둘 다 달과 상관없어
+ * 어느 달을 봐도 공종 구분이 같다 (2026-10-30 사용자: 10월 이전도 11월과 같게) — 다만 hideIdle 이면 그 달 작업 없는 공종을 숨긴다(2026-11-05).
+ * 예정 규칙이 없는 공종(창짝설치·유리·몰딩·주방가구·일반가구)은 줄도 그리지 않는다 (2026-10-30 사용자: 공정표에서도 뺀다).
+ * done = 지난 작업 막대(mergeDone), 달 걸침은 자르지 않은 그대로.
+ */
+export function finishRowsOf(
+  b: Gantt["buildings"][number],
+  plans: Map<number, FinishPlanRow[]>,
+  finishSettings: FinishPlanSettings | undefined,
+  month: { from: string; to: string },
+  hideIdle: boolean,
+) {
+  const keyOf = (trade: string, core: number | null) => `${trade}|${core ?? ""}`;
+  const planOf = new Map((plans.get(b.buildingNo) ?? []).map((p) => [keyOf(p.trade, p.core), p.bars]));
+  const swOf = new Map(b.rows.map((r) => [keyOf(r.trade, r.core), r]));
+  const coreList: (number | null)[] = b.cores.length ? b.cores.map((c) => c.core) : [null];
+  const inMonth = (x: { start: string; end: string }) => !(x.end < month.from || x.start > month.to);
+  let rows = FINISH_TRADES.filter((t) => hasFinishPlan(t.key))
+    .filter((t) => b.rows.some((r) => r.trade === t.key))
+    .flatMap((t) =>
+      coreList.map((core) => {
+        const sw = swOf.get(keyOf(t.key, core));
+        return {
+          key: keyOf(t.key, core),
+          trade: t,
+          core,
+          sw,
+          plan: planOf.get(keyOf(t.key, core)) ?? [],
+          done: mergeDone(sw?.actual ?? [], Math.max(1, finishPlanOf(finishSettings, t.key).daysPerBatch * 2)),
+        };
+      }),
+    )
+    .filter((r) => r.sw?.actual.length || r.plan.length);
+  // 이 달 작업이 있는 공종 — 코어로 나뉘면 한 코어라도 있으면 그 공종의 코어 줄은 다 둔다
+  const busy = new Set(rows.filter((r) => r.plan.some(inMonth) || r.done.some(inMonth)).map((r) => r.trade.key));
+  const allRows = rows.length;
+  if (hideIdle) rows = rows.filter((r) => busy.has(r.trade.key));
+  return { rows, allRows, cored: rows.some((r) => r.core != null) };
+}
+
+/**
  * 동마다 맨 위 「골조 S타설」 줄 (2026-10-31, 사용자: 마감공정표에 동별로 골조 한 줄) — 그 달 슬래브 타설한 날에 층 상자.
  * 작업일보 실적은 진하게, 골조 공정표 예정은 흐리게. 창틀(골조 N개 층 선행)이 골조를 얼마나 따라붙는지 본다.
  */
@@ -186,6 +228,8 @@ export default function FinishGantt({
   topFloorOf,
   framePours,
   finishSettings,
+  hideIdle,
+  onHideIdle,
 }: {
   gantt: Gantt;
   /** 동 → 공종별 예정 막대 (planFinishSite: 선행·층 묶음·현장 전체 팀 규칙) */
@@ -199,6 +243,9 @@ export default function FinishGantt({
   framePours?: FramePours;
   /** 마감 예정 규칙 — 지난 작업 막대의 추정 시작을 그 공종 묶음당 작업일 × 2 까지로 */
   finishSettings?: FinishPlanSettings;
+  /** 이 달에 막대(✓ 완료·예정)가 없는 공종 줄은 숨긴다 (2026-11-05 사용자). 끄면 예전처럼 달과 상관없이 같은 줄. 엑셀도 같은 값 */
+  hideIdle: boolean;
+  onHideIdle: (v: boolean) => void;
 }) {
   const [target, setTarget] = useState<FinishCellTarget | null>(null);
   /** 마우스가 올라간 칸 (줄 key + 날짜 칸 번호) — 그 칸만 칠한다 */
@@ -227,6 +274,10 @@ export default function FinishGantt({
 
   return (
     <div className="space-y-2">
+      <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-muted-foreground print:hidden">
+        <input type="checkbox" checked={hideIdle} onChange={(e) => onHideIdle(e.target.checked)} className="size-3.5 accent-primary" />
+        이 달 작업 없는 공종 숨기기
+      </label>
       <div className="overflow-x-auto rounded-lg border border-border bg-card p-3 print:overflow-visible">
         <div className="min-w-[960px] text-xs">
           <div className="grid" style={gridCols}>
@@ -254,29 +305,10 @@ export default function FinishGantt({
           </div>
 
           {gantt.buildings.map((b) => {
-            const keyOf = (trade: string, core: number | null) => `${trade}|${core ?? ""}`;
-            const planOf = new Map((plans.get(b.buildingNo) ?? []).map((p) => [keyOf(p.trade, p.core), p.bars]));
-            const swOf = new Map(b.rows.map((r) => [keyOf(r.trade, r.core), r]));
-            const coreList: (number | null)[] = b.cores.length ? b.cores.map((c) => c.core) : [null];
             const linesOf = new Map(b.cores.map((c) => [c.core, c]));
-            // 줄: 스마트웍스 공종, 화면 순서(FINISH_TRADES)대로 × 코어. ✓ 세대 완료나 예정이 있는 줄만 — 둘 다 달과 상관없어
-            // 어느 달을 봐도 공종 구분이 같다 (2026-10-30 사용자: 10월 이전도 11월과 같게).
-            // 예정 규칙이 없는 공종(창짝설치·유리·몰딩·주방가구·일반가구)은 줄도 그리지 않는다 (2026-10-30 사용자: 공정표에서도 뺀다)
-            const rows = FINISH_TRADES.filter((t) => hasFinishPlan(t.key))
-              .filter((t) => b.rows.some((r) => r.trade === t.key))
-              .flatMap((t) =>
-                coreList.map((core) => ({
-                  key: keyOf(t.key, core),
-                  trade: t,
-                  core,
-                  sw: swOf.get(keyOf(t.key, core)),
-                  plan: planOf.get(keyOf(t.key, core)) ?? [],
-                })),
-              )
-              .filter((r) => r.sw?.actual.length || r.plan.length);
+            const { rows, allRows, cored } = finishRowsOf(b, plans, finishSettings, { from, to }, hideIdle);
             // 코어로 나뉜 동: 공종명은 그 공종의 코어 줄들을 세로로 합친 칸 하나(가운데), 옆 칸에 「N코어 %」.
             // 두 칸 너비 합 = 9rem 이라 날짜 칸은 다른 동과 같은 자리.
-            const cored = rows.some((r) => r.core != null);
             const groups: (typeof rows)[] = [];
             for (const r of rows) {
               const last = groups[groups.length - 1];
@@ -293,10 +325,12 @@ export default function FinishGantt({
                 </div>
                 {framePours ? <FrameRow pours={framePours.get(b.buildingNo)} days={days} from={from} to={to} gridCols={gridCols} dayCell={dayCell} /> : null}
                 {rows.length === 0 ? (
-                  <div className="px-1 py-2 text-[11px] text-muted-foreground">이 동은 아직 해당 공종 마감 기록이 없습니다.</div>
+                  <div className="px-1 py-2 text-[11px] text-muted-foreground">
+                    {allRows ? "이 달에는 이 동의 마감 작업이 없습니다." : "이 동은 아직 해당 공종 마감 기록이 없습니다."}
+                  </div>
                 ) : (
                   groups.map((group) => {
-                    const renderRow = ({ key, trade: t, core, sw, plan }: (typeof rows)[number], gi: number) => {
+                    const renderRow = ({ key, trade: t, core, sw, plan, done }: (typeof rows)[number], gi: number) => {
                     const coreInfo = core != null ? linesOf.get(core) : undefined;
                     const tone = toneOf(t.group);
                     const pct = sw?.total ? Math.round((sw.done / sw.total) * 100) : null;
@@ -370,7 +404,7 @@ export default function FinishGantt({
                             />
                           ) : null}
                           {/* 세대 완료 기록(스마트웍스) + 예정 */}
-                          {mergeDone(sw?.actual ?? [], Math.max(1, finishPlanOf(finishSettings, t.key).daysPerBatch * 2)).map((bar, i) => {
+                          {done.map((bar, i) => {
                             const p = place(bar);
                             if (!p) return null;
                             const fu = bar.floorUnits ?? [];

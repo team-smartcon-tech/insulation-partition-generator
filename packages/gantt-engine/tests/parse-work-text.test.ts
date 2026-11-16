@@ -40,6 +40,8 @@ describe("작업 문구 → 단계", () => {
     ["벽체 철근배관", "WALL_REBAR"],
     ["바닥 철근배근", "SLAB_REBAR"],
     ["기둥 벽체철근 조립", "WALL_REBAR"],
+    ["B2F 수직 철근 배근", "WALL_REBAR"],
+    ["B2F 외부", null],
     ["지하주차장 데크 해체", null],
   ]
   for (const [text, stage] of cases) {
