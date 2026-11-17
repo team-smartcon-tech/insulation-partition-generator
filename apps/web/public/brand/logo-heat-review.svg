@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000" role="img" aria-label="동절기 열원검토 — Cold Weather Concrete Heating Review">
+  <title>동절기 열원검토</title>
+  <!-- 카드 썸네일 규격: 16:10 (1600x1000) 흰 바탕에 로고를 가운데 두고 여백을 준다 (logo-tc-rental.svg 와 같은 규격) -->
+  <defs>
+    <linearGradient id="hr-warm" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#EC6A16"/><stop offset="1" stop-color="#F9A23B"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="#FFFFFF"/>
+  <g transform="translate(211.6 268.6) scale(1.74)">
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <!-- 청사진 바탕 (아주 옅게) -->
+      <g stroke="#004791" opacity="0.09" stroke-width="1">
+        <path d="M60 36V232M100 36V232M140 36V232M180 36V232M220 36V232"/>
+        <path d="M40 52H244M40 92H244M40 132H244M40 172H244M40 212H244"/>
+      </g>
+      <!-- 보양 천막(상옥) + 양생실 -->
+      <path d="M60 204V112l82-62 82 62v92" stroke="#004791" stroke-width="5"/>
+      <path d="M60 146h164" stroke="#004791" stroke-width="2.5" stroke-dasharray="6 6" opacity="0.6"/>
+      <path d="M44 204h196" stroke="#004791" stroke-width="5"/>
+      <!-- 눈 결정 (외기) -->
+      <g stroke="#7CA8D8" stroke-width="2.5">
+        <path d="M228 58v24M217.6 64l20.8 12M217.6 76l20.8-12"/>
+        <path d="M52 78v18M44.2 82.5l15.6 9M44.2 91.5l15.6-9"/>
+      </g>
+    </g>
+    <!-- 불꽃 (열원) -->
+    <path d="M142 118c5 20 29 31 29 58a29 29 0 0 1-58 0c0-12 6-20 12-26 1 11 6 16 11 17-4-17-1-35 6-49z" fill="url(#hr-warm)"/>
+    <!-- 열량 막대 -->
+    <g>
+      <rect x="60" y="216" width="70" height="8" rx="4" fill="#004791" opacity="0.28"/>
+      <rect x="136" y="216" width="88" height="8" rx="4" fill="url(#hr-warm)"/>
+    </g>
+    <g font-family="'SUIT Variable','SUIT','Pretendard Variable','Pretendard',-apple-system,'Segoe UI',sans-serif">
+      <text x="292" y="106" font-size="62" font-weight="800" fill="#0F2A4A" letter-spacing="-1.5">동절기</text>
+      <text x="292" y="176" font-size="60" font-weight="500" fill="#0F2A4A" letter-spacing="-1.5">열원검토</text>
+      <rect x="294" y="196" width="80" height="4" rx="2" fill="url(#hr-warm)"/>
+      <text x="294" y="228" font-size="17" font-weight="500" fill="#5C6E82" letter-spacing="1.5">Cold Weather Heating Review</text>
+    </g>
+  </g>
+</svg>

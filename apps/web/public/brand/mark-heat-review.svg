@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="동절기 열원검토 심볼">
+  <title>동절기 열원검토 — 심볼</title>
+  <defs>
+    <linearGradient id="hm-warm" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#EC6A16"/><stop offset="1" stop-color="#FFB347"/>
+    </linearGradient>
+  </defs>
+  <!-- 32px 에서도 읽히게 '보양 천막(집 모양) + 불꽃' 만 남긴다 -->
+  <rect width="512" height="512" rx="112" fill="#0D1B2A"/>
+  <path d="M112 392V224L256 112l144 112v168" fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M96 392h320" stroke="#7CC0FF" stroke-width="22" stroke-linecap="round" opacity="0.55"/>
+  <path d="M256 196c10 40 58 62 58 116a58 58 0 0 1-116 0c0-24 12-40 24-52 2 22 12 32 22 34-8-34-2-70 12-98z" fill="url(#hm-warm)"/>
+</svg>

@@ -83,6 +83,7 @@ import {
   loadDraftDxf,
   clearDraft,
   draftHasWork,
+  type DraftStateRecord,
 } from "./draftStore";
 import {
   buildElevationDxfMulti,
@@ -822,6 +823,8 @@ export default function ElevationGeneratorPage() {
 
   // ── refs ──
   const planCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** 선택한 변을 깜빡이는 불빛으로 그리는 얇은 캔버스(평면 오버레이 위) */
+  const segGlowCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const planContainerRef = useRef<HTMLDivElement | null>(null);
   const elevCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const elevContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1007,35 +1010,28 @@ export default function ElevationGeneratorPage() {
   // 저장 원천은 Supabase REV 이고, 이 초안은 저장 전 작업을 지키는 로컬 안전망이다.
   /** 초안 복원이 끝나기 전에는 자동 저장하지 않는다(빈 상태로 초안을 덮어쓰는 것 방지) */
   const draftReadyRef = useRef(false);
-  const [draftRestoredAt, setDraftRestoredAt] = useState<string | null>(null);
 
-  // (a) 마운트 시 1회 복원
+  /**
+   * 저장하지 않고 남아 있던 초안 — **자동으로 화면에 깔지 않는다.**
+   * 예전엔 들어오자마자 복원해서, 새 현장을 하려던 사람이 직전 현장의 동·타입·입면 위에서
+   * 시작하게 됐다(2026-11-17). 이제는 [이어서 하기] 를 눌렀을 때만 복원한다.
+   */
+  const [pendingDraft, setPendingDraftState] = useState<DraftStateRecord | null>(null);
+  const pendingDraftRef = useRef<DraftStateRecord | null>(null);
+  const setPendingDraft = useCallback((rec: DraftStateRecord | null) => {
+    pendingDraftRef.current = rec;
+    setPendingDraftState(rec);
+  }, []);
+
+  // (a) 마운트 시 1회 — 초안이 있으면 알려만 주고, 시작은 항상 현장 카드 화면
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const rec = await loadDraftState();
         if (!alive) return;
-        if (draftHasWork(rec) && rec) {
-          applyElevState(rec.state);
-          if (rec.projectId) setActiveProjectId(rec.projectId);
-          const dxf = await loadDraftDxf();
-          if (!alive) return;
-          if (dxf?.text) {
-            setFileName(dxf.name);
-            setParsed(parseDxfText(dxf.text));
-            setRawDxfText(dxf.text);
-            // 이후 REV 저장 시 원본이 첨부되도록 File 재구성
-            setLastDxfFile(
-              new File([dxf.text], dxf.name, { type: "application/dxf" })
-            );
-            setLoadedDxfMeta(null);
-          }
-          setDraftRestoredAt(rec.savedAt);
-        }
-        // 이어서 할 프로젝트도, 복원할 작업도 없을 때만 현장 카드 화면을 먼저 띄운다.
-        // (복원된 미저장 작업이 있으면 그 위를 덮지 않는다 — 앱의 시작점만 프로젝트 선택으로 옮긴 것)
-        if (alive && !rec?.projectId && !draftHasWork(rec)) setBrowserOpen(true);
+        if (draftHasWork(rec) && rec) setPendingDraft(rec);
+        setBrowserOpen(true);
       } finally {
         if (alive) draftReadyRef.current = true;
       }
@@ -1043,8 +1039,94 @@ export default function ElevationGeneratorPage() {
     return () => {
       alive = false;
     };
-    // applyElevState 는 useCallback([]) 로 고정 — 마운트 1회만 실행
-  }, [applyElevState]);
+  }, [setPendingDraft]);
+
+  /** 남아 있던 초안을 화면에 되살린다 */
+  const resumeDraft = useCallback(async () => {
+    const rec = pendingDraftRef.current;
+    if (!rec) return;
+    // 먼저 대기 상태를 푼다 — 아래 setter 들이 자동 저장을 깨워도 같은 내용을 다시 쓸 뿐이다
+    setPendingDraft(null);
+    applyElevState(rec.state);
+    setActiveProjectId(rec.projectId ?? null);
+    const dxf = await loadDraftDxf();
+    if (dxf?.text) {
+      setFileName(dxf.name);
+      setParsed(parseDxfText(dxf.text));
+      setRawDxfText(dxf.text);
+      // 이후 REV 저장 시 원본이 첨부되도록 File 재구성
+      setLastDxfFile(new File([dxf.text], dxf.name, { type: "application/dxf" }));
+      setLoadedDxfMeta(null);
+    }
+    setBrowserOpen(false);
+    toast.success("저장하지 않은 작업을 이어서 엽니다.");
+  }, [applyElevState, setPendingDraft]);
+
+  /** 남아 있던 초안을 버린다 */
+  const dropPendingDraft = useCallback(async () => {
+    setPendingDraft(null);
+    await clearDraft();
+    toast.success("저장하지 않은 작업을 버렸습니다.");
+  }, [setPendingDraft]);
+
+  /** 남은 초안 안내 — 어느 현장·프로젝트의 언제 작업인지 밝히고 고르게 한다 */
+  const pendingDraftNotice = useMemo(() => {
+    if (!pendingDraft) return null;
+    const proj = elevProjects.find(p => p.id === pendingDraft.projectId);
+    const site = proj?.site_id ? elevSites.find(s => s.id === proj.site_id) : null;
+    const owner = proj
+      ? `${site ? `${site.name} · ` : ""}${proj.name}`
+      : pendingDraft.state.fileName || "프로젝트 미지정";
+    const when = new Date(pendingDraft.savedAt).toLocaleString("ko-KR", {
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return (
+      <div className="mx-2 mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+        <Info className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+        <span>
+          저장하지 않은 작업이 남아 있습니다 — <b>{owner}</b>
+          <span className="ml-1 tabular-nums text-amber-700/80">({when})</span>
+        </span>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => void resumeDraft()}
+            className="rounded bg-amber-600 px-2.5 py-[3px] font-semibold text-white hover:bg-amber-700"
+          >
+            이어서 하기
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm("저장하지 않은 작업을 버릴까요? 되돌릴 수 없습니다.")) void dropPendingDraft();
+            }}
+            className="rounded border border-amber-300 bg-white px-2 py-[3px] font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            버리기
+          </button>
+        </div>
+      </div>
+    );
+  }, [pendingDraft, elevProjects, elevSites, resumeDraft, dropPendingDraft]);
+
+  /**
+   * 초안 저장. 이어서 할지 아직 안 정한 초안이 있으면, 화면이 빈 동안에는 쓰지 않는다
+   * (빈 상태로 덮어써서 초안을 날리는 것 방지). 새 작업이 생기면 그때 옛 초안을 대체한다.
+   */
+  const persistDraft = useCallback(
+    (state: ElevState, projectId: string | null) => {
+      if (!draftReadyRef.current) return;
+      if (pendingDraftRef.current) {
+        if (!draftHasWork({ state, projectId, savedAt: "" })) return;
+        setPendingDraft(null);
+      }
+      void saveDraftState(state, projectId);
+    },
+    [setPendingDraft]
+  );
 
   // (b) 상태 변경 시 디바운스 저장(1.2s). DXF 텍스트는 (c) 에서 따로 저장.
   //     buildElevState 는 실제 상태 deps 로 메모돼 있으므로, 무관한 리렌더로는
@@ -1052,34 +1134,41 @@ export default function ElevationGeneratorPage() {
   useEffect(() => {
     if (!draftReadyRef.current) return;
     const t = setTimeout(() => {
-      void saveDraftState(buildElevState(), activeProjectId);
+      persistDraft(buildElevState(), activeProjectId);
     }, 1200);
     return () => clearTimeout(t);
-  }, [buildElevState, activeProjectId]);
+  }, [buildElevState, activeProjectId, persistDraft]);
 
   // (c) 원본 DXF 는 열거나 편집(엔티티 삭제 등)했을 때만 저장 — 매 입력마다 쓰면 무겁다
   useEffect(() => {
     if (!draftReadyRef.current || !rawDxfText) return;
-    void saveDraftDxf(fileName || "drawing.dxf", rawDxfText);
-  }, [rawDxfText, fileName]);
+    void (async () => {
+      // 도면을 새로 열었다 = 다른 작업을 시작했다. 옛 초안의 설정에 새 도면이 섞이지 않게 통째로 비운다
+      if (pendingDraftRef.current) {
+        setPendingDraft(null);
+        await clearDraft();
+      }
+      await saveDraftDxf(fileName || "drawing.dxf", rawDxfText);
+    })();
+  }, [rawDxfText, fileName, setPendingDraft]);
 
   // (d) 디바운스 대기 중 새로고침/닫기로 마지막 변경이 유실되지 않도록 즉시 저장
   useEffect(() => {
     const onLeave = () => {
-      if (draftReadyRef.current)
-        void saveDraftState(buildElevState(), activeProjectId);
+      persistDraft(buildElevState(), activeProjectId);
     };
     window.addEventListener("beforeunload", onLeave);
     return () => {
       window.removeEventListener("beforeunload", onLeave);
       onLeave(); // 다른 화면으로 이동(언마운트) 할 때도 저장
     };
-  }, [buildElevState, activeProjectId]);
+  }, [buildElevState, activeProjectId, persistDraft]);
 
-  /** 복원본을 버리고 빈 화면에서 새로 시작 */
-  const discardDraft = useCallback(async () => {
-    await clearDraft();
-    setDraftRestoredAt(null);
+  /** 화면의 작업(도면·입면·오프닝·동타입)을 비운다. 보드 규격·정책 같은 설정은 그대로 둔다 */
+  const clearWorkspace = useCallback(async () => {
+    // 이어서 할지 안 정한 초안은 남의 작업일 수 있으니 여기서 지우지 않는다
+    if (!pendingDraftRef.current) await clearDraft();
+    setLoadedDxfMeta(null);
     setWalls([]);
     setOpenings([]);
     setTypeMatrix(EMPTY_MATRIX);
@@ -1091,8 +1180,14 @@ export default function ElevationGeneratorPage() {
     setLastDxfFile(null);
     setFileName("");
     setMode("view");
-    toast.success("초안을 비우고 새로 시작합니다.");
   }, []);
+
+
+  /** 지금 화면의 작업이 어느 프로젝트 것인지 — 프로젝트를 바꿀 때 남의 작업이 딸려가지 않게 하는 데 쓴다 */
+  const activeProjectIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
 
   const handleSaveRev = useCallback(async () => {
     if (!activeProjectId) {
@@ -1168,11 +1263,14 @@ export default function ElevationGeneratorPage() {
 
   /**
    * 카드 화면에서 세부 프로젝트 열기.
-   * revId 가 없으면 최신 REV 를 연다. REV 가 하나도 없으면 프로젝트만 활성화하고
-   * 현재 캔버스를 유지한다(저장하면 REV 1 이 된다).
+   * revId 가 없으면 최신 REV 를 연다. REV 가 하나도 없으면 프로젝트만 활성화한다.
+   * 이때 화면의 작업이 프로젝트 없이 하던 것이면 그대로 두고(저장하면 REV 1 이 된다),
+   * **다른 프로젝트의 작업이면 비운다** — 안 비우면 직전 현장의 동·타입·입면이
+   * 새 프로젝트에 그대로 딸려 와서, 저장하는 순간 남의 현장 데이터가 REV 1 로 굳는다.
    */
   const handleOpenProject = useCallback(
     async (projectId: string, revId: string | null) => {
+      const prevProjectId = activeProjectIdRef.current;
       setActiveProjectId(projectId);
       let target = revId;
       if (!target) {
@@ -1186,11 +1284,12 @@ export default function ElevationGeneratorPage() {
       if (target) {
         await loadRevision(projectId, target);
       } else {
+        if (prevProjectId && prevProjectId !== projectId) await clearWorkspace();
         toast.info("저장된 REV가 없습니다. 도면을 올리고 저장하면 REV 1로 기록됩니다.");
       }
       setBrowserOpen(false);
     },
-    [loadRevision]
+    [loadRevision, clearWorkspace]
   );
 
   // ── 체인별 측정값 ──
@@ -1672,6 +1771,112 @@ export default function ElevationGeneratorPage() {
         ? (parsed.entities.find(e => e.id === selectedEntityId) ?? null)
         : null,
     [selectedEntityId, parsed]
+  );
+
+  // ─── 선택한 변 깜빡임 ───
+  // 목록의 S# 가 도면의 어느 변인지 한눈에 찾도록, 그 변만 불빛처럼 켜졌다 꺼지게 한다.
+  // 평면 오버레이(입면·창호 전부)를 매 프레임 다시 그리지 않도록 따로 둔 캔버스에 선 하나만 그린다.
+  useEffect(() => {
+    const canvas = segGlowCanvasRef.current;
+    const container = planContainerRef.current;
+    if (!canvas || !container) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    canvas.width = Math.floor(cw * dpr);
+    canvas.height = Math.floor(ch * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+    const w = selectedSeg ? walls.find(x => x.id === selectedSeg.wallId) : null;
+    if (!w || !selectedSeg || canvasTab !== "plan") return;
+    const p0 = w.points[selectedSeg.edge];
+    const p1 = w.points[(selectedSeg.edge + 1) % w.points.length];
+    if (!p0 || !p1) return;
+    const a = toPx(p0);
+    const b = toPx(p1);
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const label = `S${selectedSeg.edge + 1}`;
+    // 움직임을 줄이도록 설정한 사용자에게는 깜빡임 없이 켜진 채로 보여준다
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    let raf = 0;
+    const draw = (now: number) => {
+      const wave = 0.5 + 0.5 * Math.sin((now / 1000) * 5.2); // 약 1.2초 주기
+      const on = still ? 1 : wave * wave * (3 - 2 * wave);
+      ctx.clearRect(0, 0, cw, ch);
+      ctx.lineCap = "round";
+      // 번지는 빛
+      ctx.save();
+      ctx.shadowColor = "#f3d77a";
+      ctx.shadowBlur = 5 + 9 * on;
+      ctx.strokeStyle = `rgba(250,220,120,${0.12 + 0.33 * on})`;
+      ctx.lineWidth = 5 + 3 * on;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
+      // 심지 — 꺼졌을 때도 자리는 보이게
+      ctx.strokeStyle = `rgba(255,255,255,${0.45 + 0.55 * on})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      // 양 끝점
+      for (const q of [a, b]) {
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, 3.5 + 1 * on, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(250,220,120,${0.4 + 0.4 * on})`;
+        ctx.fill();
+      }
+      // 큰 이름표
+      ctx.font = "bold 13px 'Noto Sans KR', sans-serif";
+      const tw = ctx.measureText(label).width;
+      ctx.save();
+      ctx.shadowColor = "#f3d77a";
+      ctx.shadowBlur = 3 + 5 * on;
+      ctx.fillStyle = "#f3d77a";
+      ctx.beginPath();
+      ctx.roundRect(mx - tw / 2 - 7, my - 11, tw + 14, 22, 6);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = "#0f172a";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, mx, my + 0.5);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      if (!still) raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [selectedSeg, walls, toPx, canvasTab]);
+
+  /**
+   * 목록에서 변을 골랐을 때 — 그 입면을 활성화하고(S# 배지가 보이게) 평면 탭으로 돌리며,
+   * 변이 화면 밖이면 가운데로 옮긴다(배율은 그대로).
+   */
+  const focusSeg = useCallback(
+    (w: WallChain, edge: number) => {
+      setSelectedSeg(prev => (prev?.wallId === w.id && prev.edge === edge ? prev : { wallId: w.id, edge }));
+      setActiveWallId(w.id);
+      setCanvasTab("plan");
+      const container = planContainerRef.current;
+      const p0 = w.points[edge];
+      const p1 = w.points[(edge + 1) % w.points.length];
+      if (!container || !p0 || !p1) return;
+      const m = toPx({ x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 });
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      const pad = 60;
+      if (m.x < pad || m.y < pad || m.x > cw - pad || m.y > ch - pad) {
+        setOffset(o => ({ x: o.x + cw / 2 - m.x, y: o.y + ch / 2 - m.y }));
+      }
+    },
+    [toPx]
   );
 
   // ─── 평면 오버레이 렌더 (체인/트레이싱/개구부/스냅 — DXF 는 PlanDxfCanvas 가 그림) ───
@@ -4721,6 +4926,203 @@ export default function ElevationGeneratorPage() {
             </div>
   );
 
+  /**
+   * 노출 프리셋 두께 변경. 변(세그먼트)은 지정할 때의 두께를 따로 들고 있어서, 프리셋만 고치면
+   * 이미 그 노출로 지정된 변은 옛 두께로 남는다 — 같은 노출을 쓰는 변도 함께 맞춘다(커스텀·배치 안함 제외).
+   */
+  const setPresetPly = (exposure: ExposureType, key: "ply1" | "ply2", v: number) => {
+    setExposurePresets(ps => ps.map(x => (x.exposure === exposure ? { ...x, [key]: v } : x)));
+    setWalls(ws =>
+      ws.map(w =>
+        w.segInsul?.some(sg => sg.exposure === exposure && !sg.skip)
+          ? { ...w, segInsul: w.segInsul.map(sg => (sg.exposure === exposure && !sg.skip ? { ...sg, [key]: v } : sg)) }
+          : w
+      )
+    );
+  };
+
+  /** ④ 타입 패널 — 입면마다 타입·동을 지정한다 */
+  const wallTypeAssign = (
+    <div className="space-y-1">
+      <span className="ipg-label">입면별 타입 지정</span>
+      {walls.length === 0 ? (
+        <p className="text-[11.5px] text-slate-500">아직 그린 입면이 없습니다.</p>
+      ) : typeMatrix.types.length === 0 ? (
+        <p className="text-[11.5px] text-amber-600">위에서 <b>+ 타입</b>으로 타입을 만들면 입면에 지정할 수 있습니다.</p>
+      ) : (
+        <div className="rounded border border-slate-200 divide-y divide-slate-200">
+          {walls.map((w, idx) => (
+            <div key={w.id} className="flex items-center gap-1 px-1.5 py-1 text-[12px]">
+              <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: chainColor(idx) }} />
+              <button
+                type="button"
+                onClick={() => setActiveWallId(w.id)}
+                className={cn(
+                  "min-w-0 flex-1 truncate text-left",
+                  w.id === activeWallId ? "font-bold text-[#004791]" : "text-slate-700"
+                )}
+                title="도면에서 이 입면 강조"
+              >
+                {w.name}
+              </button>
+              <select
+                value={w.typeId ?? ""}
+                onChange={ev => updateChain(w.id, { typeId: ev.target.value || undefined })}
+                className={cn(
+                  "w-[7.5rem] shrink-0 border rounded px-1 h-6 bg-white text-slate-800",
+                  w.typeId ? "border-slate-300" : "border-amber-400"
+                )}
+                title="이 입면이 어느 타입의 것인지 (산출서)"
+              >
+                <option value="">— 타입 선택 —</option>
+                {typeMatrix.types.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={w.buildingId ?? ""}
+                onChange={ev => updateChain(w.id, { buildingId: ev.target.value || undefined })}
+                className="w-[6.5rem] shrink-0 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800"
+                title="특정 동에만 쓰는 입면이면 그 동을 고른다(그 동의 대표 입면을 덮어씀)"
+              >
+                <option value="">대표 (동 공용)</option>
+                {typeMatrix.buildings.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="text-[11px] text-slate-500">
+        입면 하나가 한 타입의 1세대분입니다. 동을 고르면 그 동에서만 쓰는 입면이 됩니다.
+      </p>
+    </div>
+  );
+
+  /** ⑤ 나누기 패널 — 입면의 변(S#)마다 직접/간접외기·두께를 정한다. 바로 위에 노출 프리셋이 있다 */
+  const segInsulFor = (w: WallChain) => {
+    const segs = resolveSegInsul(w);
+    // select 변경 — "skip"(배치 안함) 또는 노출 프리셋/커스텀
+    const setSegMode = (edge: number, value: string) => {
+      const next = segs.map((s, i) => {
+        if (i !== edge) return s;
+        if (value === "skip") return { ...s, skip: true };
+        if (value === "custom") return { ...s, exposure: "custom" as const, skip: false };
+        const p = exposurePresets.find(pp => pp.exposure === value);
+        return {
+          ply1: p?.ply1 ?? s.ply1,
+          ply2: p?.ply2 ?? s.ply2,
+          exposure: value as ExposureType,
+          skip: false,
+        };
+      });
+      updateChain(w.id, { segInsul: next });
+    };
+    const setPly = (edge: number, key: "ply1" | "ply2", v: number) => {
+      const next = segs.map((s, i) => (i === edge ? { ...s, [key]: v, exposure: "custom" as const } : s));
+      updateChain(w.id, { segInsul: next });
+    };
+    return (
+      <div className="rounded border border-slate-200 divide-y divide-slate-200">
+        {segs.map((s, i) => (
+          <div
+            key={i}
+            // 줄 어디를 건드려도(드롭다운·두께 칸 포함) 도면에서 그 변이 깜빡인다
+            onFocusCapture={() => focusSeg(w, i)}
+            className={cn(
+              "flex items-center gap-1 px-1.5 py-1 text-[12px]",
+              selectedSeg?.wallId === w.id && selectedSeg?.edge === i && "bg-yellow-200/10"
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                // 이미 켜진 변의 S# 를 다시 누르면 끈다
+                if (selectedSeg?.wallId === w.id && selectedSeg?.edge === i) setSelectedSeg(null);
+                else focusSeg(w, i);
+              }}
+              className={cn(
+                "w-7 shrink-0 text-left font-mono",
+                selectedSeg?.wallId === w.id && selectedSeg?.edge === i
+                  ? "text-[#004791] font-bold"
+                  : "text-slate-400"
+              )}
+              title="도면에서 이 변 깜빡이기 (다시 누르면 끔)"
+            >
+              S{i + 1}
+            </button>
+            <span
+              className="w-2 h-2 rounded-sm shrink-0"
+              style={{ backgroundColor: s.skip ? "#64748b" : EXPOSURE_COLOR[s.exposure] }}
+            />
+            <select
+              value={s.skip ? "skip" : s.exposure}
+              onChange={e => setSegMode(i, e.target.value)}
+              className="flex-1 min-w-0 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800"
+            >
+              {exposurePresets.map(p => (
+                <option key={p.exposure} value={p.exposure}>
+                  {presetLabel(p)}
+                </option>
+              ))}
+              <option value="custom">커스텀</option>
+              <option value="skip">배치 안함 (선만 이음)</option>
+            </select>
+            <input
+              type="number"
+              value={s.ply1}
+              disabled={s.skip}
+              onChange={e => setPly(i, "ply1", Number(e.target.value) || 0)}
+              className="w-10 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums disabled:opacity-40"
+              title="1P 두께(mm)"
+            />
+            <input
+              type="number"
+              value={s.ply2}
+              disabled={s.skip}
+              onChange={e => setPly(i, "ply2", Number(e.target.value) || 0)}
+              className="w-10 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums disabled:opacity-40"
+              title="2P 두께(mm)"
+            />
+          </div>
+        ))}
+      </div>
+    );
+  };
+  const segInsulAll = (
+    <div className="col-span-2 flex flex-col gap-1.5 rounded-md border border-slate-200 p-1.5">
+      <span className="ipg-label">변별 노출 (직접 / 간접외기)</span>
+      {walls.length === 0 ? (
+        <p className="text-[11.5px] text-slate-500">아직 그린 입면이 없습니다.</p>
+      ) : (
+        walls.map((w, idx) => (
+          <div key={w.id} className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveWallId(w.id)}
+              className={cn(
+                "flex items-center gap-1.5 text-left text-[12px]",
+                w.id === activeWallId ? "font-bold text-[#004791]" : "font-semibold text-slate-700"
+              )}
+            >
+              <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: chainColor(idx) }} />
+              {w.name}
+            </button>
+            {segInsulFor(w)}
+          </div>
+        ))
+      )}
+      <span className="text-[11px] text-slate-500">
+        줄을 누르면 도면에서 그 변이 깜빡입니다 · 우측 두 칸 = 1P/2P 두께(mm). 위 프리셋 두께를 고치면 그 노출을 쓰는 변에 반영되고, 커스텀은 직접 입력합니다.
+      </span>
+    </div>
+  );
+
   return (
     <>
       {/* 전체화면 스튜디오 오버레이 — 사이드바/상단 네비를 덮고 몰입형으로 (AutoCAD 스타일) */}
@@ -4868,41 +5270,9 @@ export default function ElevationGeneratorPage() {
           </div>
         )}
 
-        {/* 초안 복원 안내 — 새로고침/화면 이동으로 잃었던 작업을 되살렸을 때만 */}
-        {draftRestoredAt && (
-          <div className="mx-2 mt-1 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[13px] text-amber-900">
-            <Info className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-            <span>
-              직전 작업을 복원했습니다
-              <span className="ml-1 tabular-nums text-amber-700/80">
-                ({new Date(draftRestoredAt).toLocaleString("ko-KR", {
-                  month: "numeric",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}{" "}
-                자동 저장분)
-              </span>
-            </span>
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => void discardDraft()}
-                className="rounded border border-amber-300 bg-white px-2 py-[3px] font-semibold text-amber-800 hover:bg-amber-100"
-              >
-                새로 시작
-              </button>
-              <button
-                type="button"
-                onClick={() => setDraftRestoredAt(null)}
-                className="rounded p-1 text-amber-500 hover:bg-amber-100 hover:text-amber-800"
-                title="안내 닫기"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
+        {/* 저장 안 된 작업이 남아 있는데 아직 안 골랐을 때 — 카드 화면을 닫고 들어와도 계속 보인다 */}
+        {pendingDraft && !browserOpen && pendingDraftNotice}
+
 
         {/* 본문 — 전폭 캔버스(탭) + 얇은 인스펙터 패널 */}
         {/* ── 본문 — 좌측 작업 단계 레일 + 캔버스 ──
@@ -5006,6 +5376,8 @@ export default function ElevationGeneratorPage() {
                   cursorClass
                 )}
               />
+              {/* 선택한 변 깜빡임 — 클릭은 아래 캔버스로 통과 */}
+              <canvas ref={segGlowCanvasRef} className="pointer-events-none absolute inset-0 block h-full w-full" />
               {!parsed && !isParsing && !parseError && (
                 // 안내 카드만 클릭을 받고, 나머지 영역은 캔버스 조작을 그대로 통과시킨다
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
@@ -5368,38 +5740,23 @@ export default function ElevationGeneratorPage() {
                           type="number"
                           value={p.ply1}
                           title="1P 두께"
-                          onChange={e =>
-                            setExposurePresets(ps =>
-                              ps.map((x, i) =>
-                                i === pi
-                                  ? { ...x, ply1: Number(e.target.value) || 0 }
-                                  : x
-                              )
-                            )
-                          }
+                          onChange={e => setPresetPly(p.exposure, "ply1", Number(e.target.value) || 0)}
                           className="w-11 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums"
                         />
                         <input
                           type="number"
                           value={p.ply2}
                           title="2P 두께"
-                          onChange={e =>
-                            setExposurePresets(ps =>
-                              ps.map((x, i) =>
-                                i === pi
-                                  ? { ...x, ply2: Number(e.target.value) || 0 }
-                                  : x
-                              )
-                            )
-                          }
+                          onChange={e => setPresetPly(p.exposure, "ply2", Number(e.target.value) || 0)}
                           className="w-11 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums"
                         />
                       </div>
                     ))}
                   </div>
+                  {segInsulAll}
                   <p className="col-span-2 text-[11.5px] text-slate-400 leading-relaxed">
                     <b>구조선 1개</b>만 트레이싱하면 <b>1P·2P가 자동 생성</b>됩니다.
-                    입면 목록에서 <b>변(S#)별 노출타입</b>(직접/간접외기)을 지정하면
+                    위 <b>변(S#)별 노출</b>(직접/간접외기)을 지정하면
                     두께(예 140T=1P90/2P50, 100T=1P50/2P50)가 반영됩니다. V(▽)=꺾임.
                     <b>최적배치</b>=SP 자동 최소물량. 2P 조인트가 1P와 {minJointGap}mm
                     미달로 엇갈리면 <b className="text-red-600">빨강</b>(결로위험).
@@ -5518,6 +5875,9 @@ export default function ElevationGeneratorPage() {
                     )}
                   </div>
                 </div>
+
+                {/* 입면별 타입 지정 — 예전엔 ② 외벽의 입면 목록에 있었다 */}
+                {wallTypeAssign}
 
                 {/* 동별 타입 배분 + 세대수 매트릭스 */}
                 {typeMatrix.buildings.length > 0 &&
@@ -5757,53 +6117,19 @@ export default function ElevationGeneratorPage() {
                         />
                       }
                     />
-                    <LabelInput
-                      label="타입 (산출서)"
-                      control={
-                        <select
-                          value={w.typeId ?? ""}
-                          onChange={ev =>
-                            updateChain(w.id, {
-                              typeId: ev.target.value || undefined,
-                            })
-                          }
-                          className="text-[12.5px] border border-slate-300 rounded px-1 w-full h-6 bg-white text-slate-800"
-                        >
-                          <option value="">— 타입 선택 —</option>
-                          {typeMatrix.types.map(t => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      }
-                    />
-                    <LabelInput
-                      label="동 (선택 · 덮어쓰기)"
-                      control={
-                        <select
-                          value={w.buildingId ?? ""}
-                          onChange={ev =>
-                            updateChain(w.id, {
-                              buildingId: ev.target.value || undefined,
-                            })
-                          }
-                          className="text-[12.5px] border border-slate-300 rounded px-1 w-full h-6 bg-white text-slate-800"
-                        >
-                          <option value="">대표 (동 공용)</option>
-                          {typeMatrix.buildings.map(b => (
-                            <option key={b.id} value={b.id}>
-                              {b.name}
-                            </option>
-                          ))}
-                        </select>
-                      }
-                    />
-                    {typeMatrix.types.length === 0 && (
-                      <p className="col-span-2 text-[11px] text-amber-600">
-                        먼저 <b>동·타입 설정</b>에서 타입을 만들면 여기서 선택할 수 있습니다.
-                      </p>
-                    )}
+                    {/* 타입·동 지정과 변별 직접/간접외기는 각 단계 패널로 옮겼다 — 여기(② 외벽)에 있으면
+                        아직 타입도 안 만들었는데 고르라고 해서 순서가 헷갈린다 */}
+                    <p className="col-span-2 text-[11.5px] leading-relaxed text-slate-500">
+                      타입·동 지정은{" "}
+                      <button type="button" onClick={() => setDlg("types")} className="font-semibold text-[#004791] underline underline-offset-2">
+                        ④ 타입
+                      </button>
+                      , 변별 직접/간접외기는{" "}
+                      <button type="button" onClick={() => setDlg("insul")} className="font-semibold text-[#004791] underline underline-offset-2">
+                        ⑤ 나누기
+                      </button>{" "}
+                      단계에서 합니다.
+                    </p>
                     {/* 층고는 '층 그룹'이 원천 — 그룹 층고를 쓰면 입면별 입력을 숨기고
                         적용값만 읽기 전용으로 보여준다(어느 값이 적용되는지 헷갈리지 않게). */}
                     {hasGroupHeights ? (
@@ -5872,124 +6198,6 @@ export default function ElevationGeneratorPage() {
                         )}
                       </div>
                     )}
-                    {insulOn &&
-                      (() => {
-                        const segs = resolveSegInsul(w);
-                        // select 변경 — "skip"(배치 안함) 또는 노출 프리셋/커스텀
-                        const setSegMode = (edge: number, value: string) => {
-                          const next = segs.map((s, i) => {
-                            if (i !== edge) return s;
-                            if (value === "skip")
-                              return { ...s, skip: true };
-                            if (value === "custom")
-                              return { ...s, exposure: "custom" as const, skip: false };
-                            const p = exposurePresets.find(
-                              pp => pp.exposure === value
-                            );
-                            return {
-                              ply1: p?.ply1 ?? s.ply1,
-                              ply2: p?.ply2 ?? s.ply2,
-                              exposure: value as ExposureType,
-                              skip: false,
-                            };
-                          });
-                          updateChain(w.id, { segInsul: next });
-                        };
-                        const setPly = (
-                          edge: number,
-                          key: "ply1" | "ply2",
-                          v: number
-                        ) => {
-                          const next = segs.map((s, i) =>
-                            i === edge
-                              ? { ...s, [key]: v, exposure: "custom" as const }
-                              : s
-                          );
-                          updateChain(w.id, { segInsul: next });
-                        };
-                        return (
-                          <div className="col-span-2 flex flex-col gap-1">
-                            <span className="text-[11px] text-slate-400 font-semibold tracking-wide uppercase">
-                              세그먼트별 단열 (변마다 노출/두께 · 1P·2P 자동)
-                            </span>
-                            <div className="max-h-40 overflow-auto rounded border border-slate-200 divide-y divide-slate-200">
-                              {segs.map((s, i) => (
-                                <div
-                                  key={i}
-                                  className="flex items-center gap-1 px-1.5 py-1 text-[12px]"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const same =
-                                        selectedSeg?.wallId === w.id &&
-                                        selectedSeg?.edge === i;
-                                      setSelectedSeg(
-                                        same ? null : { wallId: w.id, edge: i }
-                                      );
-                                      if (!same) setCanvasTab("plan");
-                                    }}
-                                    className={cn(
-                                      "w-7 shrink-0 text-left font-mono",
-                                      selectedSeg?.wallId === w.id &&
-                                        selectedSeg?.edge === i
-                                        ? "text-[#004791] font-bold"
-                                        : "text-slate-400"
-                                    )}
-                                    title="평면에서 이 변 강조"
-                                  >
-                                    S{i + 1}
-                                  </button>
-                                  <span
-                                    className="w-2 h-2 rounded-sm shrink-0"
-                                    style={{
-                                      backgroundColor: s.skip
-                                        ? "#64748b"
-                                        : EXPOSURE_COLOR[s.exposure],
-                                    }}
-                                  />
-                                  <select
-                                    value={s.skip ? "skip" : s.exposure}
-                                    onChange={e => setSegMode(i, e.target.value)}
-                                    className="flex-1 min-w-0 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800"
-                                  >
-                                    {exposurePresets.map(p => (
-                                      <option key={p.exposure} value={p.exposure}>
-                                        {presetLabel(p)}
-                                      </option>
-                                    ))}
-                                    <option value="custom">커스텀</option>
-                                    <option value="skip">배치 안함 (선만 이음)</option>
-                                  </select>
-                                  <input
-                                    type="number"
-                                    value={s.ply1}
-                                    disabled={s.skip}
-                                    onChange={e =>
-                                      setPly(i, "ply1", Number(e.target.value) || 0)
-                                    }
-                                    className="w-10 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums disabled:opacity-40"
-                                    title="1P 두께(mm)"
-                                  />
-                                  <input
-                                    type="number"
-                                    value={s.ply2}
-                                    disabled={s.skip}
-                                    onChange={e =>
-                                      setPly(i, "ply2", Number(e.target.value) || 0)
-                                    }
-                                    className="w-10 border border-slate-300 rounded px-1 h-6 bg-white text-slate-800 tabular-nums disabled:opacity-40"
-                                    title="2P 두께(mm)"
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                            <span className="text-[13px] text-slate-500">
-                              S# = 변 · 우측 두 칸 = 1P/2P 두께(mm). 커스텀은 직접 입력.
-                            </span>
-                          </div>
-                        );
-                      })()}
                     <button
                       type="button"
                       onClick={() => handleExportDxfFor(w.id)}
@@ -6906,6 +7114,7 @@ export default function ElevationGeneratorPage() {
           onClose={() => setBrowserOpen(false)}
           activeProjectId={activeProjectId}
           onOpenProject={handleOpenProject}
+          notice={pendingDraft ? pendingDraftNotice : null}
         />
       </div>
     </>
