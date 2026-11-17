@@ -11,7 +11,7 @@
  * 데이터: 현장 목록은 useElevSites, 세부 프로젝트는 기존 useElevProjects 를 site_id 로 묶어 쓴다
  *        (프로젝트 목록 API 를 그대로 재사용 — 서버 왕복 추가 없음).
  */
-import { useMemo, useRef, useState, type ComponentType } from "react";
+import { useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   ArrowLeft,
   Building2,
@@ -54,6 +54,8 @@ export interface ProjectBrowserProps {
    * 실제 로드는 페이지가 담당하고, 성공하면 이 화면은 닫힌다.
    */
   onOpenProject: (projectId: string, revId: string | null) => void | Promise<void>;
+  /** 목록 위에 띄울 안내(저장 안 된 작업 이어서 하기 등) — 페이지가 내용을 만든다 */
+  notice?: ReactNode;
 }
 
 /** 카드 상단 요약 — "세부 3 · REV 21" */
@@ -78,6 +80,7 @@ export default function ProjectBrowser({
   onClose,
   activeProjectId,
   onOpenProject,
+  notice,
 }: ProjectBrowserProps) {
   const { data: sites = [], isLoading: sitesLoading, error: sitesError } = useElevSites();
   const { data: projects = [], isLoading: projectsLoading } = useElevProjects();
@@ -286,6 +289,8 @@ export default function ProjectBrowser({
 
         {/* ── 본문 ── */}
         <div className="ipg-scroll flex-1 overflow-auto px-6 py-5" style={{ background: "var(--ipg-panel-sub)" }}>
+          {notice && <div className="mb-4">{notice}</div>}
+
           {/* 현장 목록을 못 읽는 상황(마이그레이션 전 등) — 기존 프로젝트는 미분류로 계속 열 수 있다 */}
           {sitesError && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13.5px] text-amber-800">

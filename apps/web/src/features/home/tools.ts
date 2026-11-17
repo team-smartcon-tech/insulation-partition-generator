@@ -7,7 +7,14 @@
  *   3) App.tsx 에 <Route path="/tools/xxx"> 연결
  * → 홈(HomePage)은 이 배열을 읽어 카드를 자동으로 그린다.
  */
-import { CalendarRange, ClipboardCheck, Square, TowerControl, type LucideIcon } from "lucide-react";
+import {
+  CalendarRange,
+  ClipboardCheck,
+  Flame,
+  Square,
+  TowerControl,
+  type LucideIcon,
+} from "lucide-react";
 import type { SectionId } from "@/features/market/types";
 
 export type ToolStatus = "available" | "comingSoon";
@@ -62,6 +69,19 @@ export const TOOLS: ToolDef[] = [
     tags: ["타워크레인", "호이스트", "발주의뢰서"],
     thumbnail: "/brand/logo-tc-rental.svg",
     logo: "/brand/mark-tc-rental.svg",
+    sortLast: true,
+  },
+  {
+    id: "heat-review",
+    name: "동절기 열원검토",
+    description:
+      "도면 위에 보양 구역(CJ·세대)을 그려 손실열량과 열풍기·펠릿난로 필요 대수를 산정하고, 열원별 동절기 투입 금액을 비교합니다.",
+    path: "/tools/heat-review",
+    icon: Flame,
+    status: "available",
+    tags: ["한중콘크리트", "열풍기", "보양"],
+    thumbnail: "/brand/logo-heat-review.svg",
+    logo: "/brand/mark-heat-review.svg",
     sortLast: true,
   },
   {

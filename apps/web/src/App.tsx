@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import ElevationGeneratorPage from "@/features/elevation/ElevationGeneratorPage";
 import TcRentalPage from "@/features/tcRental/TcRentalPage";
 import GanttPage from "@/features/gantt/GanttPage";
+import HeatReviewPage from "@/features/heatReview/HeatReviewPage";
 import InspectionLaunchPage from "@/features/inspection/InspectionLaunchPage";
 import LoginPage from "@/features/auth/LoginPage";
 import AuthGate from "@/features/auth/AuthGate";
@@ -31,6 +32,12 @@ export default function App() {
         <Route path="/tools/tc-rental">
           <AuthGate>
             <TcRentalPage />
+          </AuthGate>
+        </Route>
+        {/* 도구: 동절기 열원검토 */}
+        <Route path="/tools/heat-review">
+          <AuthGate>
+            <HeatReviewPage />
           </AuthGate>
         </Route>
         {/* 도구: 스마트 공정표 */}
