@@ -14,6 +14,7 @@
 import type ExcelJS from "exceljs";
 import { appliedHeater, uniformHeaterId, ZONE_KIND_LABEL, zoneColor, zoneSheet } from "./defaults";
 import {
+  edgeLossShare,
   heaterNeed,
   heaterOutput,
   summarize,
@@ -22,7 +23,16 @@ import {
   type ZoneLoss,
 } from "./engine/calc";
 import type { LiteDxf } from "./engine/dxfLite";
-import { labelPoint, placeHeaters, polygonBounds } from "./engine/geometry";
+import {
+  EDGE_BAND_M,
+  EDGE_INSET_M,
+  EDGE_SPACING_M,
+  labelPoint,
+  offsetPolygon,
+  placeHeaters,
+  placeHeatersEdge,
+  polygonBounds,
+} from "./engine/geometry";
 import { loadDrawing } from "./store";
 import type { Heater, HeatProject, Zone, ZoneKind } from "./types";
 
@@ -592,7 +602,24 @@ function renderLayout(dxf: LiteDxf | null, zones: Zone[], project: HeatProject):
     const heater = appliedHeater(project, z);
     const need = heaterNeed(zoneLoss(z, project.conditions), heater, z);
     const rr = Math.max(7, fontPx * 0.42);
-    for (const m of placeHeaters(poly, Math.min(need.applied, 120))) {
+    // 화면 배치도와 같은 규칙 — 지하주차장은 외곽 띠를 따라, 나머지는 고르게
+    const uf = (project.drawings[zoneSheet(z)]?.unit ?? "mm") === "mm" ? 0.001 : 1;
+    // 외곽 여유(옵셋)를 줬으면 옵셋 구간 한가운데에 놓는다
+    const off = (z.geometry.offset ?? 0) > 0 ? z.geometry.offset! / uf : 0;
+    const marks =
+      z.kind === "parking"
+        ? placeHeatersEdge(
+            off ? offsetPolygon(poly, off) : poly,
+            Math.min(need.applied, 120),
+            off ? off / 2 : EDGE_INSET_M / uf,
+            EDGE_SPACING_M / uf,
+          )
+        : placeHeaters(poly, Math.min(need.applied, 120), undefined, {
+            poly,
+            share: edgeLossShare(zoneLoss(z, project.conditions)),
+            band: EDGE_BAND_M / uf,
+          });
+    for (const m of marks) {
       ctx.beginPath();
       ctx.arc(X(m.x), Y(m.y), rr, 0, Math.PI * 2);
       ctx.fillStyle = heater.color;

@@ -53,6 +53,21 @@ export interface ZoneGeometry {
    * 외곽선 길이 대신 세대 내부 벽까지 넣고 싶을 때 쓴다.
    */
   perimeterLocked?: boolean;
+  /**
+   * 외곽 여유 m — 딴 선에서 **바깥으로** 이만큼 띄운 선이 실제 보양 범위다(천막을 외벽 밖에 친다).
+   * area·perimeter 는 이 값을 반영한 수치다. 없으면 0.
+   */
+  offset?: number;
+}
+
+/** 동 외곽 안에서 찾아낸 세대·코어 하나 */
+export interface ZonePart {
+  /** 어느 타입·코어 구역의 모양인가 (Zone.id) */
+  templateId: string;
+  /** 놓인 자리(도면 좌표) — 원본을 돌리거나 뒤집은 것 */
+  polygon: Pt[];
+  /** 모양을 맞춰 찾은 게 아니라, 외곽에서 세대를 빼고 남은 자리를 코어로 본 것 */
+  rest?: boolean;
 }
 
 export interface Zone {
@@ -74,6 +89,24 @@ export interface Zone {
   rentalMonths: number;
   /** 열원별 적용 대수(사용자 지정). 없으면 산정 대수 */
   applied: Record<string, number>;
+  /**
+   * 동 외곽 — 한 층 전체를 크게 그린 구역. 안에 든 세대 타입·코어를 찾아 세대수를 세고 열원을 세대마다 놓는
+   * **틀**로 쓴다. 찾은 게 있으면 이 구역 자체는 계산하지 않는다(안의 타입·코어가 대신 계산된다).
+   * 찾은 게 없으면 보통 구역처럼 전체를 한 덩어리로 계산한다.
+   */
+  container?: boolean;
+  /**
+   * 계산에서 뺀다 — 열원 비교·엑셀 보고서·합계에 들어가지 않는다(목록의 체크를 끈 구역).
+   * 구역 자체와 도면의 그림은 그대로 남는다.
+   */
+  excluded?: boolean;
+  /**
+   * 동 외곽에서 세대를 빼고 남은 자리를 맡기려고 도구가 만든 코어 구역.
+   * 면적·둘레는 남은 자리들의 평균으로 맞춰진다(개수를 곱하면 남은 자리 전체 넓이가 된다).
+   */
+  autoCore?: boolean;
+  /** 동 외곽 안에서 찾은 세대·코어 (engine/recognize.ts) */
+  parts?: ZonePart[];
   memo: string;
   createdAt: string;
   updatedAt: string;
@@ -185,6 +218,16 @@ export interface HeatProject {
   appliedHeaters: Record<ZoneKind, string>;
   /** 종류별 도면. 도면 본체(선분)는 IndexedDB 에 있고 여기는 파일명·단위만 */
   drawings: Record<ZoneKind, DrawingMeta | null>;
+  /**
+   * 서버(현장 → 세부 프로젝트)에 연결된 검토서면 있다. 이때 id 가 곧 세부 프로젝트 id 다.
+   * 없으면 이 브라우저에만 있는 검토서.
+   */
+  remote?: {
+    /** 지금 화면이 바탕으로 삼은 REV 번호. 아직 저장한 적 없으면 0 */
+    revNo: number;
+    /** 그 REV 뒤로 고친 게 있다(서버에 저장 안 됨) */
+    dirty: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 }
