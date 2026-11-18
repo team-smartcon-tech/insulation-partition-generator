@@ -104,6 +104,32 @@ export interface PlyDevelopment {
    * 창 윤곽을 그릴 때 이 좌표를 쓰면 2P 짧아진 시트에서도 창이 제 위치에 온다.
    */
   openingRects: { x0: number; x1: number; y0: number; y1: number }[];
+  /**
+   * 면(세그먼트)별 정렬 정보 — 이 겹의 전개 x 를 구조선(벽) 기준 위치로 옮길 때 쓴다.
+   * 겹마다 코너에서 길이가 달라져(2P 오프셋·볼록 감김) 전개 x 가 서로 어긋나므로,
+   * 1P·2P 조인트를 비교하거나 포개 그릴 때는 반드시 `toStructX` 로 맞춘 뒤에 한다.
+   *  · x0~x1 : 이 면이 차지하는 전개 구간
+   *  · lo    : 면 본체가 시작하는 전개 x (볼록 감김분 뒤)
+   *  · structLo : 그 지점의 구조선 누적 위치(mm)
+   */
+  faceAlign: { x0: number; x1: number; lo: number; structLo: number }[];
+}
+
+/**
+ * 겹 전개 x → 구조선(벽) 누적 위치. 면 안에서는 1:1(벽 방향 거리 그대로)로 옮긴다.
+ * 서로 다른 겹의 조인트가 실제 벽에서 얼마나 떨어져 있는지는 이 값끼리 비교해야 맞다.
+ */
+export function toStructX(dev: PlyDevelopment, x: number): number {
+  const fa = dev.faceAlign;
+  if (!fa || fa.length === 0) return x;
+  let f = fa[fa.length - 1];
+  for (const cand of fa) {
+    if (x <= cand.x1 + 1e-6) {
+      f = cand;
+      break;
+    }
+  }
+  return f.structLo + (x - f.lo);
 }
 
 export interface DevelopPlyParams {
@@ -138,6 +164,14 @@ export interface DevelopPlyParams {
    * (물량 최소 모드 2P 에서 사용).
    */
   segStartOffsets?: number[];
+  /**
+   * 피해야 할 다른 겹의 조인트(구조선 기준 위치 sx, 높이 구간). 주면 이 겹(2P)의 판을 깔다가
+   * 조인트가 그 조인트의 avoidGap 안쪽에 떨어질 때 판을 잘라(짧게, 안 되면 길게) 밖으로 민다.
+   * 그 뒤 판들은 잘린 자리에서 이어 깔린다. 결로 방지용 '잘라서 맞추기'.
+   */
+  avoidJoints?: { sx: number; y0: number; y1: number }[];
+  /** avoidJoints 와 띄워야 하는 최소 거리(mm) */
+  avoidGap?: number;
   /**
    * 최소 조각 폭(mm) — 이보다 좁은 절단 슬리버는 옆 보드와 합쳐 균등 분할한다
    * (둘 다 시공 가능한 크기로). 코너/오프닝 경계는 넘지 않음. 기본 0(off).
@@ -253,6 +287,57 @@ function tileRow(
       cells.push({ x: a, w: b - a, remainder: b - a < L - 1e-6 });
     }
     cur += L;
+  }
+  return cells;
+}
+
+/**
+ * tileRow 와 같되, 조인트가 forb(피할 위치, 이 행 기준 mm)의 gap 안쪽에 떨어지면 판을 잘라 밖으로 민다.
+ *  · 먼저 짧게 자른다(피할 위치 − gap). 그러면 조각이 minW 보다 작아질 때는 길게(피할 위치 + gap, 한 장 길이 안에서) 본다.
+ *  · 둘 다 안 되면 원래 조인트를 그대로 둔다(경고로 남는다).
+ * 자른 뒤의 판들은 그 조인트에서 다시 L 간격으로 이어진다.
+ */
+function tileRowAvoid(
+  total: number,
+  L: number,
+  shift: number,
+  forb: number[],
+  gap: number,
+  minW: number
+): { x: number; w: number; remainder: boolean }[] {
+  if (forb.length === 0) return tileRow(total, L, shift);
+  const cells: { x: number; w: number; remainder: boolean }[] = [];
+  if (total <= 1e-6 || L <= 1e-6) return cells;
+  const eps = 1e-6;
+  const clear = (j: number) => !forb.some(f => Math.abs(f - j) < gap - eps);
+  let pos = 0;
+  let nextEnd = shift - Math.ceil(shift / L) * L + L; // 첫 조인트 (0, L]
+  if (nextEnd <= eps) nextEnd += L;
+  let guardRow = 0;
+  while (pos < total - eps && guardRow++ < 10000) {
+    let end = Math.min(total, nextEnd);
+    if (end < total - eps && !clear(end)) {
+      // ① 짧게: 걸리는 위치 바로 앞으로
+      let j = end;
+      for (let k = 0; k < 30 && !clear(j); k++) {
+        const hit = forb.filter(f => Math.abs(f - j) < gap - eps).sort((a, b) => a - b)[0];
+        j = hit - gap;
+      }
+      if (clear(j) && j - pos >= minW - eps) {
+        end = j;
+      } else {
+        // ② 길게: 걸리는 위치 바로 뒤로 (한 장 길이를 넘지 않는 범위)
+        let j2 = end;
+        for (let k = 0; k < 30 && !clear(j2); k++) {
+          const hits = forb.filter(f => Math.abs(f - j2) < gap - eps).sort((a, b) => a - b);
+          j2 = hits[hits.length - 1] + gap;
+        }
+        if (clear(j2) && j2 - pos <= L + eps && j2 < total - eps) end = j2;
+      }
+    }
+    if (end - pos > eps) cells.push({ x: pos, w: end - pos, remainder: end - pos < L - eps });
+    pos = end;
+    nextEnd = pos + L;
   }
   return cells;
 }
@@ -507,6 +592,9 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
   // 오프셋 방향과 항상 일치해 뒤집히지 않는다. exteriorSide 로 안/밖 방향을 맞춘다.
   // offsetPolylineInward 는 꼭짓점 수를 유지하므로 가짜 코너가 생기지 않는다.
   let segLengths = rawSegLengths.slice();
+  // 면별 시작 물러남(mm) — 이 겹의 면이 구조선 면 시작점에서 벽 방향으로 얼마나 들어가 시작하는지.
+  // 1P 는 0. 2P 는 안쪽 오프셋 폴리라인의 꼭짓점을 원래 면 방향에 투영해 구한다(toStructX 정렬용).
+  const faceStartInset = new Array<number>(segCount).fill(0);
   if (ply >= 2) {
     const dists = Array.from({ length: segCount }, (_, i) =>
       segThk && segThk[i] ? segThk[i].ply1 : board.thickness
@@ -527,6 +615,15 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
       const b = offPts[(i + 1) % offPts.length];
       return a && b ? Math.max(0, dist(a, b)) : 0;
     });
+    for (let i = 0; i < segCount; i++) {
+      const p0 = pts[i];
+      const p1 = pts[(i + 1) % pts.length];
+      const o0 = offPts[i];
+      const len = rawSegLengths[i];
+      if (!p0 || !p1 || !o0 || len <= 1e-6) continue;
+      faceStartInset[i] =
+        ((o0.x - p0.x) * (p1.x - p0.x) + (o0.y - p0.y) * (p1.y - p0.y)) / len;
+    }
   }
 
   // ── 코너 처리 배정 (볼록 = 감아 돌아 길어짐 / 오목 = 물러나 짧아짐) ──
@@ -614,6 +711,17 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     const mapX = (x: number): number => {
       for (let i = 0; i < segCount; i++) {
         if (x <= structCum[i + 1] + 1e-6) {
+          if (ply >= 2) {
+            // 2P: 창은 벽에 박혀 있으므로 벽 방향 거리 그대로(1:1) 옮긴다 — 면 시작 물러남만 뺀다.
+            // (예전에는 면 길이 비율로 옮겨서, 2P 의 창 따냄 자리가 실제 창보다 수십 mm 어긋났고
+            //  1P·2P 를 포개면 창 옆에서 두 겹이 거의 같은 선에서 끊겼다.)
+            const d = x - structCum[i] - faceStartInset[i];
+            return (
+              cumAtVertex[i] +
+              wrapStart[i] +
+              Math.min(baseSegLengths[i], Math.max(0, d))
+            );
+          }
           const sf = Math.max(1e-6, rawSegLengths[i]);
           const frac = Math.min(1, Math.max(0, (x - structCum[i]) / sf));
           return cumAtVertex[i] + wrapStart[i] + frac * baseSegLengths[i];
@@ -685,6 +793,29 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     // ── 물량 최소(러닝본드) 배치 ──
     // 보드는 코너를 못 넘음 + 겹침 70 은 옆 면 차지 → 세그먼트별 [tileLo,tileHi] 만 타일링.
     const plyShift = (ply - 1) * plyStagger; // 겹 간 엇갈림
+    // 잘라서 맞추기 — 피할 조인트(구조선 기준)를 면별로 '이 면 타일링 시작점 기준 mm' 로 옮겨 둔다
+    const avoidGap = params.avoidGap ?? 0;
+    const avoidByFace: { x: number; y0: number; y1: number }[][] = [];
+    if (params.avoidJoints && params.avoidJoints.length > 0 && avoidGap > 0) {
+      let structCumAt = 0;
+      for (let si = 0; si < segCount; si++) {
+        const faceLo = cumAtVertex[si] + wrapStart[si];
+        const structLo = structCumAt + faceStartInset[si];
+        const lo = tileLo[si];
+        const segLen = tileHi[si] - lo;
+        const list: { x: number; y0: number; y1: number }[] = [];
+        if (segLen > 1e-6) {
+          for (const a of params.avoidJoints) {
+            const rel = faceLo + (a.sx - structLo) - lo;
+            if (rel > -avoidGap && rel < segLen + avoidGap)
+              list.push({ x: rel, y0: a.y0, y1: a.y1 });
+          }
+        }
+        avoidByFace.push(list);
+        structCumAt += Math.max(0, rawSegLengths[si]);
+      }
+    }
+    const avoidMinW = Math.max(100, constructMinPieceWidth || 0, minPieceWidth || 0);
     let r = 0;
     for (let y = 0; y < wallHeight - 1e-6; y += H, r++) {
       const h = Math.min(H, wallHeight - y);
@@ -696,7 +827,14 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
         const segLen = tileHi[si] - lo;
         if (segLen <= 1e-6) continue;
         const faceShift = params.segStartOffsets?.[si] ?? startOffset;
-        for (const seg of tileRow(segLen, L, rowBase + faceShift)) {
+        const forb = (avoidByFace[si] ?? [])
+          .filter(a => Math.min(a.y1, y + h) - Math.max(a.y0, y) > 1e-6)
+          .map(a => a.x);
+        const rowSegs =
+          forb.length > 0
+            ? tileRowAvoid(segLen, L, rowBase + faceShift, forb, avoidGap, avoidMinW)
+            : tileRow(segLen, L, rowBase + faceShift);
+        for (const seg of rowSegs) {
           cells.push({
             row: r,
             x: lo + seg.x,
@@ -827,6 +965,21 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     cells = mergeSlivers(cells, L, minPieceWidth, cornerXs);
   }
 
+  // ── 면별 정렬 정보 (toStructX) ──
+  const faceAlign: PlyDevelopment["faceAlign"] = [];
+  {
+    let structCumAt = 0;
+    for (let i = 0; i < segCount; i++) {
+      faceAlign.push({
+        x0: cumAtVertex[i],
+        x1: cumAtVertex[i + 1],
+        lo: cumAtVertex[i] + wrapStart[i],
+        structLo: structCumAt + faceStartInset[i],
+      });
+      structCumAt += Math.max(0, rawSegLengths[i]);
+    }
+  }
+
   return {
     ply,
     refOffset,
@@ -838,6 +991,7 @@ export function developPly(params: DevelopPlyParams): PlyDevelopment {
     cornerXs,
     cornerLaps,
     openingRects: ops,
+    faceAlign,
   };
 }
 
