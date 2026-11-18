@@ -49,6 +49,7 @@ import {
 import {
   type BoardCell,
   developPly,
+  toStructX,
   developPlyMinBoards,
   summarizeBoards,
   numberBoards,
@@ -287,6 +288,38 @@ const isMeasureMode = (m: Mode) =>
 
 /** 수직 조인트 1개 — x 위치 + 높이 구간(관통 판정용) */
 type JointSeg = { x: number; y0: number; y1: number };
+
+/**
+ * 2P 배치 선택 방식. 기본 = 새 방식(2026-11-18 사용자 승인):
+ *   결로 판정을 실제 벽 위치 기준으로 세고, 면마다 25mm 간격으로 시작 위치를 고른다.
+ * 3개 현장 전·후 비교(주문 판수 / 면적 / 화면 경고 조인트 수):
+ *   부산장안 REV10 542→539 / −0.32% / 144→17 · REV16 414→417 / +0.72% / 29→0
+ *   남원주1차 REV35 375→376 / −0.15% / 33→4 · REV5 173→165 / −1.43% / 94→25
+ *   세종2차 임대 REV19 275→274 / −0.25% / 14→1
+ * 예전 방식(전개 x 를 그대로 비교, 벽 전체 50mm)으로 되돌려 비교하려면 브라우저 콘솔에서
+ *   localStorage.setItem("ipg.plySelect", "legacy")  (지우면 다시 새 방식)
+ */
+/**
+ * 2P '잘라서 맞추기'. 기본 켜짐(2026-11-18 사용자 승인, 로컬 확인 단계).
+ * 2P 를 깔 때 조인트가 1P 조인트(창 테두리 제외)의 결로방지 최소 이격 안쪽에 떨어지는 판을 잘라
+ * 밖으로 민다(insulation.ts tileRowAvoid). 끄고 비교하려면 브라우저 콘솔에서
+ *   localStorage.setItem("ipg.plyCut", "off")  (지우면 다시 켜짐)
+ * 전·후 물량 수치는 CHANGELOG.md(2026-11-18 "1P·2P 겹침 검토 시트") 참고.
+ */
+const PLY_CUT = (() => {
+  try {
+    return localStorage.getItem("ipg.plyCut") !== "off";
+  } catch {
+    return true;
+  }
+})();
+const PLY_SELECT_NEW = (() => {
+  try {
+    return localStorage.getItem("ipg.plySelect") !== "legacy";
+  } catch {
+    return true;
+  }
+})();
 
 // ────────────────────── 동·타입 매트릭스 헬퍼 ──────────────────────
 const EMPTY_MATRIX: ElevTypeMatrix = { buildings: [], types: [], cells: {} };
@@ -813,6 +846,8 @@ export default function ElevationGeneratorPage() {
   const [previewGroup, setPreviewGroup] = useState<ElevFloorGroup>("base");
   /** 전개 입면에 층 그룹을 전부 쌓아 표시(비교용). 끄면 선택한 그룹 1개만 */
   const [showAllGroups, setShowAllGroups] = useState(false);
+  // 1P·2P 를 한 장에 포개 그려 조인트 엇갈림(결로 방지)을 한눈에 보는 '겹침 검토' 시트 표시
+  const [showPlyOverlap, setShowPlyOverlap] = useState(true);
   // 세그먼트 두께 지정 모드에서 선택된 변
   const [selectedSeg, setSelectedSeg] = useState<{
     wallId: string;
@@ -1467,31 +1502,71 @@ export default function ElevationGeneratorPage() {
     };
   };
   // 보드 수직 조인트 — 셀 좌우 모서리 x + 높이 구간(관통 판정용)
-  const jointSegsOf = (dev: PlyDevelopment): JointSeg[] => {
-    const segs: JointSeg[] = [];
-    for (const c of dev.cells) {
-      segs.push({ x: c.x, y0: c.y, y1: c.y + c.h });
-      segs.push({ x: c.x + c.w, y0: c.y, y1: c.y + c.h });
-    }
-    return segs;
+  // 면 끝(코너·코너 랩 경계·벽 양 끝)의 x 위치들. 보드는 코너를 못 넘으므로 1P·2P 모두
+  // 여기서 끝날 수밖에 없다 → 이 자리끼리 붙은 것은 엇갈릴 수 없는 조인트라 결로 경고에서 뺀다.
+  const faceEndXsOf = (dev: PlyDevelopment): number[] => [
+    0,
+    dev.baselineLength,
+    ...dev.cornerXs,
+    ...dev.cornerLaps.flatMap(l => [l.x0, l.x1]),
+  ];
+  const isFaceEnd = (ends: number[], x: number) =>
+    ends.some(e => Math.abs(e - x) < 1);
+  /**
+   * 겹 사이 비교용 조인트.
+   *  · sx    : 구조선(벽) 기준 위치 — 겹마다 전개 x 가 코너에서 어긋나므로 반드시 이 값끼리 비교한다
+   *  · fixed : 면 끝(코너·벽 끝)의 조인트 — 보드가 코너를 못 넘어 옮길 수 없다
+   *  · win   : 창 테두리 — 창 좌·우 선 중 **창 높이 구간**만. 거기는 단열재가 창틀에서 끝나는 자리라
+   *            엇갈림 대상이 아니다. 같은 선이라도 창 위·아래로 이어지는 부분은 판과 판이 만나는
+   *            진짜 조인트이므로 win 이 아니다(1P·2P 가 창 옆선에서 같이 끊기면 관통 조인트가 된다).
+   */
+  type JointX = JointSeg & { sx: number; fixed: boolean; win: boolean };
+  /** 보드 셀의 구조선 기준 시작 위치 (셀이 속한 면의 정렬 정보로 1:1 이동) */
+  const cellStructX = (dev: PlyDevelopment, c: BoardCell): number => {
+    const f = c.seg !== undefined ? dev.faceAlign[c.seg] : undefined;
+    return f ? f.structLo + (c.x - f.lo) : toStructX(dev, c.x);
   };
-  // 결로(관통) 충돌: 2P 조인트가 1P 조인트와 x<minGap AND 높이 겹침 일 때만.
-  // 반환: 충돌하는 2P 조인트 구간(2P 좌표) — 빨강 표시용.
-  const conflictSegsOf = (
-    j1: JointSeg[],
-    d1: number,
-    j2: JointSeg[],
-    d2: number,
-    gap: number
-  ): JointSeg[] => {
+  const jointsXOf = (dev: PlyDevelopment): JointX[] => {
+    const endXs = faceEndXsOf(dev);
+    const out: JointX[] = [];
+    // 조인트 한 줄을 '창 높이 구간(win)'과 그 밖(일반)으로 쪼개 넣는다
+    const pushEdge = (x: number, sx: number, y0: number, y1: number) => {
+      const fixed = isFaceEnd(endXs, x);
+      // 이 x 가 좌·우 선인 창들의 높이 구간
+      const spans = dev.openingRects
+        .filter(r => Math.abs(r.x0 - x) < 1 || Math.abs(r.x1 - x) < 1)
+        .map(r => [Math.max(y0, Math.min(r.y0, r.y1)), Math.min(y1, Math.max(r.y0, r.y1))] as const)
+        .filter(([a, b]) => b - a > 1e-6)
+        .sort((a, b) => a[0] - b[0]);
+      let cur = y0;
+      for (const [a, b] of spans) {
+        if (a - cur > 1e-6) out.push({ x, y0: cur, y1: a, sx, fixed, win: false });
+        if (b - Math.max(a, cur) > 1e-6)
+          out.push({ x, y0: Math.max(a, cur), y1: b, sx, fixed, win: true });
+        cur = Math.max(cur, b);
+      }
+      if (y1 - cur > 1e-6) out.push({ x, y0: cur, y1, sx, fixed, win: false });
+    };
+    for (const c of dev.cells) {
+      const sx = cellStructX(dev, c);
+      pushEdge(c.x, sx, c.y, c.y + c.h);
+      pushEdge(c.x + c.w, sx + c.w, c.y, c.y + c.h);
+    }
+    return out;
+  };
+  // 결로(관통) 충돌: 2P 조인트가 1P 조인트와 실제 벽 위치로 minGap 안쪽 AND 높이 겹침 일 때만.
+  // 제외: ① 두 조인트가 모두 면 끝(코너·벽 끝)  ② 어느 한쪽이라도 창 테두리(창 높이 구간)인 경우.
+  // 반환: 충돌하는 2P 조인트 구간(2P 전개 좌표) — 빨강 표시용.
+  const conflictSegsOf = (j1: JointX[], j2: JointX[], gap: number): JointSeg[] => {
     const out: JointSeg[] = [];
     for (const s2 of j2) {
-      const rel2 = s2.x - d2;
       for (const s1 of j1) {
-        if (Math.abs(s1.x - d1 - rel2) >= gap - 1e-6) continue; // x 멀면 skip
+        if (Math.abs(s1.sx - s2.sx) >= gap - 1e-6) continue; // 벽 위치가 멀면 skip
+        if (s1.fixed && s2.fixed) continue; // 코너끼리 — 엇갈릴 수 없는 자리
+        if (s1.win || s2.win) continue; // 창 테두리 선 — 경고 대상 아님
         // 높이 겹침이 있어야 관통(결로) 충돌
         if (Math.min(s1.y1, s2.y1) - Math.max(s1.y0, s2.y0) > 1e-6) {
-          out.push(s2);
+          out.push({ x: s2.x, y0: s2.y0, y1: s2.y1 });
           break;
         }
       }
@@ -1522,8 +1597,10 @@ export default function ElevationGeneratorPage() {
       y0: o.sill,
       y1: o.sill + o.height,
     }));
-    if (placement !== "min-waste") return computePlyDev(w, floorHeight, opsStruct);
+    if (placement !== "min-waste" && !PLY_SELECT_NEW && !PLY_CUT)
+      return computePlyDev(w, floorHeight, opsStruct);
     const key = JSON.stringify([
+      PLY_SELECT_NEW, PLY_CUT, placement,
       w.points, w.closed, resolveSegInsul(w), exteriorSideOf(w), opsStruct,
       floorHeight, boardLength, boardHeight, boardThickness, optimizeSP,
       discardWidth, constructMinW, minPieceWidth, minJointGap, plyInward,
@@ -1563,14 +1640,42 @@ export default function ElevationGeneratorPage() {
     //   창은 1P와 같은 위치(코너 사이)에 남는다.
     // 2P 구분은 straddle(창 물림) + 조인트 엇갈림(아래 startOffset 스윕) + 2P 두께로 표현.
     // (파란 점선 w.points2P 는 평면에서 2P 시각 가이드로만 사용)
-    const p2 = makeParams(w, w.points, true, opsStruct, floorHeight);
+    const p2base = makeParams(w, w.points, true, opsStruct, floorHeight);
 
-    const j1 = jointSegsOf(dev1);
+    const j1 = jointsXOf(dev1);
+    // 잘라서 맞추기: 1P 조인트(창 테두리 선 제외)를 피할 위치로 넘긴다
+    const p2: DevelopPlyParams = PLY_CUT
+      ? {
+          ...p2base,
+          avoidJoints: j1.filter(j => !j.win).map(j => ({ sx: j.sx, y0: j.y0, y1: j.y1 })),
+          avoidGap: minJointGap,
+        }
+      : p2base;
     const L = boardLength;
-    type Cand = { dev: PlyDevelopment; segs: JointSeg[]; boards: number };
+    // 예전 방식(PLY_SELECT_NEW=false)의 점수 — 전개 x 를 그대로 비교한 경고 수. 비교·되돌림용으로만 남긴다.
+    const legacyCount = (dev: PlyDevelopment): number => {
+      let n = 0;
+      for (const c2 of dev.cells) {
+        for (const x2 of [c2.x, c2.x + c2.w]) {
+          for (const s1 of j1) {
+            if (Math.abs(s1.x - x2) >= minJointGap - 1e-6) continue;
+            if (Math.min(s1.y1, c2.y + c2.h) - Math.max(s1.y0, c2.y) > 1e-6) {
+              n++;
+              break;
+            }
+          }
+        }
+      }
+      return n;
+    };
+    type Cand = { dev: PlyDevelopment; segs: { length: number }; boards: number };
     const evalDev = (dev: PlyDevelopment): Cand => ({
       dev,
-      segs: conflictSegsOf(j1, 0, jointSegsOf(dev), 0, minJointGap),
+      segs: {
+        length: PLY_SELECT_NEW
+          ? conflictSegsOf(j1, jointsXOf(dev), minJointGap).length
+          : legacyCount(dev),
+      },
       boards: summarizeBoards(dev.cells, L, boardHeight, minWaste ? MIN_WASTE_PACK : {})
         .orderBoardCount,
     });
@@ -1600,10 +1705,11 @@ export default function ElevationGeneratorPage() {
     // ② 물량 최소: 면마다 시작 위치를 따로 골라 본다(①의 위치에서 출발, 한 바퀴).
     //    판은 코너를 못 넘어 면마다 새로 깔리는데, 위치 하나를 벽 전체에 쓰면
     //    어떤 면은 양 끝이 다 잘린다. 판수가 같아도 결로 경고가 줄어드는 쪽을 택한다.
-    if (minWaste) {
+    if (minWaste || PLY_SELECT_NEW) {
+      const faceStep = PLY_SELECT_NEW ? 25 : 50;
       const offs = new Array<number>(best.dev.segLengths.length).fill(bestOff);
       for (let f = 0; f < offs.length; f++) {
-        for (let off = 0; off < L; off += 50) {
+        for (let off = 0; off < L; off += faceStep) {
           if (off === offs[f]) continue;
           const trial = offs.slice();
           trial[f] = off;
@@ -1615,7 +1721,11 @@ export default function ElevationGeneratorPage() {
         }
       }
     }
-    return { dev1, dev2: best.dev, conflictSegs: best.segs };
+    return {
+      dev1,
+      dev2: best.dev,
+      conflictSegs: conflictSegsOf(j1, jointsXOf(best.dev), minJointGap),
+    };
   };
 
   // ─── 업로드 ───
@@ -2407,6 +2517,20 @@ export default function ElevationGeneratorPage() {
           idx: number;
           conflictSegs: JointSeg[];
           groupLabel?: string;
+        }
+      | {
+          /** 1P·2P 를 한 장에 포갠 겹침 검토 시트 (물량·클릭 대상 아님, 보기 전용) */
+          kind: "overlap";
+          chain: WallChain;
+          baseLen: number;
+          fh: number;
+          dev1: ReturnType<typeof developPly>;
+          dev2: ReturnType<typeof developPly>;
+          /** 구조선 기준으로 옮긴 두 겹의 왼쪽 끝(mm) — 볼록 코너 감김으로 0 보다 작을 수 있다 */
+          x0: number;
+          idx: number;
+          conflictSegs: JointSeg[];
+          groupLabel?: string;
         };
 
     const sheets: Sheet[] = [];
@@ -2448,6 +2572,29 @@ export default function ElevationGeneratorPage() {
               conflictSegs, // 결로 빨강은 2P
               groupLabel,
             });
+            if (showPlyOverlap) {
+              // 두 겹을 구조선(벽) 기준 위치로 옮겼을 때의 좌우 범위
+              let lo = 0;
+              let hi = c.perimeter;
+              for (const d of [dev1, dev2])
+                for (const cell of d.cells) {
+                  const sx = cellStructX(d, cell);
+                  lo = Math.min(lo, sx);
+                  hi = Math.max(hi, sx + cell.w);
+                }
+              sheets.push({
+                kind: "overlap",
+                chain: c.chain,
+                baseLen: hi - lo,
+                fh,
+                dev1,
+                dev2,
+                x0: lo,
+                idx,
+                conflictSegs,
+                groupLabel,
+              });
+            }
           }
         } else {
           sheets.push({
@@ -2463,6 +2610,64 @@ export default function ElevationGeneratorPage() {
       }
     });
 
+    // 검증용 — 지금 화면에 그린 2P 시트들의 결로 경고 조인트 수(전·후 비교 스크립트가 읽는다)
+    (window as unknown as { __ipgPlyStats?: unknown }).__ipgPlyStats = {
+      mode: PLY_SELECT_NEW ? "new" : "legacy",
+      conflictSegs: sheets.reduce(
+        (a, sh) => a + (sh.kind === "ply" && sh.ply === 2 ? sh.conflictSegs.length : 0),
+        0
+      ),
+      sheets2P: sheets.filter(sh => sh.kind === "ply" && sh.ply === 2).length,
+      // 디버그(localStorage ipg.debug=1 일 때만): 겹침 시트별 판 좌표(구조선 기준)·창 위치
+      debug:
+        (() => {
+          try {
+            return localStorage.getItem("ipg.debug") === "1";
+          } catch {
+            return false;
+          }
+        })()
+          ? sheets
+              .filter(sh => sh.kind === "overlap")
+              .map(sh =>
+                sh.kind !== "overlap"
+                  ? null
+                  : {
+                      name: sh.chain.name,
+                      group: sh.groupLabel,
+                      ops: openings
+                        .filter(o => o.wallId === sh.chain.id)
+                        .map(o => [Math.round(o.sAlong - o.width / 2), Math.round(o.sAlong + o.width / 2), o.sill, o.sill + o.height]),
+                      p1: sh.dev1.cells.map(c => [Math.round(cellStructX(sh.dev1, c)), Math.round(c.w), Math.round(c.y), Math.round(c.h), c.seg ?? -1]),
+                      p2: sh.dev2.cells.map(c => [Math.round(cellStructX(sh.dev2, c)), Math.round(c.w), Math.round(c.y), Math.round(c.h), c.seg ?? -1, c.notches ? c.notches.length : 0]),
+                      ops2: sh.dev2.openingRects.map(r => [Math.round(r.x0), Math.round(r.x1)]),
+                      fa2: sh.dev2.faceAlign.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(f.lo), Math.round(f.structLo)]),
+                      fa1: sh.dev1.faceAlign.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(f.lo), Math.round(f.structLo)]),
+                    }
+              )
+          : undefined,
+      // 겹별 셀 면적(㎡): 전체 / 버림(discarded) / 조각 수 — 물량 변동 원인 추적용
+      plyArea: [1, 2].map(k => {
+        let all = 0;
+        let disc = 0;
+        let n = 0;
+        let nDisc = 0;
+        for (const sh of sheets) {
+          if (sh.kind !== "ply" || sh.ply !== k) continue;
+          for (const c of sh.dev.cells) {
+            const m2 = (c.w * c.h) / 1e6;
+            all += m2;
+            n++;
+            if (c.discarded) {
+              disc += m2;
+              nDisc++;
+            }
+          }
+        }
+        return { ply: k, all: +all.toFixed(2), discarded: +disc.toFixed(2), cells: n, discardedCells: nDisc };
+      }),
+    };
+
     const padX = 60;
     // 시트가 많으면(입면 × 겹 × 층 그룹) 고정 여백이 화면 높이를 다 먹어
     // 도면이 납작해지고 글자만 남아 겹친다 → 장수가 많을수록 여백을 줄인다.
@@ -2474,6 +2679,10 @@ export default function ElevationGeneratorPage() {
     const padBottom = 24;
     const maxBaseLen = Math.max(1, ...sheets.map(sh => sh.baseLen));
     const sumHeights = sheets.reduce((a, sh) => a + sh.fh, 0);
+    // 겹침 검토 시트는 제목과 도면 사이에 '판정 레인'(이격 라벨)이 한 줄 더 들어간다
+    const OVERLAP_LANE = 30;
+    const overlapExtra =
+      OVERLAP_LANE * sheets.filter(sh => sh.kind === "overlap").length;
 
     // 공통 스케일 — 가로는 maxBaseLen, 세로는 합산 floorHeight + 간격
     const availW = cw - padX * 2;
@@ -2481,6 +2690,7 @@ export default function ElevationGeneratorPage() {
       ch -
       padTopHeader * sheets.length -
       padBetween * Math.max(0, sheets.length - 1) -
+      overlapExtra -
       padBottom;
     const sx = availW / maxBaseLen;
     const sy = availH / Math.max(1, sumHeights);
@@ -2495,6 +2705,7 @@ export default function ElevationGeneratorPage() {
       sheets.reduce((a, sh) => a + sh.fh * s, 0) +
       padTopHeader * sheets.length +
       padBetween * Math.max(0, sheets.length - 1) +
+      overlapExtra +
       padBottom;
     const overflows = contentH > ch + 1;
 
@@ -2505,7 +2716,10 @@ export default function ElevationGeneratorPage() {
       const widthPx = baseLen * s;
       const heightPx = fh * s;
       const offX = (cw - widthPx) / 2;
+      if (sheet.kind === "overlap") cursorY += OVERLAP_LANE;
       const offY = cursorY;
+      // 제목 줄 기준선 — 겹침 시트는 판정 레인 위로 올린다
+      const headY = sheet.kind === "overlap" ? offY - OVERLAP_LANE + 2 : offY - 4;
 
       const ex = (x: number) => offX + x * s;
       const ey = (y: number) => offY + (fh - y) * s;
@@ -2524,7 +2738,8 @@ export default function ElevationGeneratorPage() {
       const xStep = [1000, 2000, 5000, 10000].find(v => v * s >= 26) ?? 10000;
 
       // 헤더
-      ctx.fillStyle = sheet.kind === "ply" ? "#0284c7" : col;
+      ctx.fillStyle =
+        sheet.kind === "ply" ? "#0284c7" : sheet.kind === "overlap" ? "#7c3aed" : col;
       ctx.font = `bold ${headerFont}px 'Noto Sans KR', sans-serif`;
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
@@ -2535,8 +2750,10 @@ export default function ElevationGeneratorPage() {
       const header =
         sheet.kind === "ply"
           ? `${nameWithGroup} · ${sheet.ply === 2 ? "2P(외측)" : "1P(내측)"} · 전개 ${(baseLen / 1000).toFixed(2)}m · 보드 ${boardLength}×${boardHeight} · 층고 ${fh}mm`
-          : `${nameWithGroup}  ·  둘레 ${(baseLen / 1000).toFixed(2)}m  ·  층고 ${fh}mm`;
-      ctx.fillText(header, offX, offY - 4);
+          : sheet.kind === "overlap"
+            ? `${nameWithGroup} · 1P+2P 겹침 검토 · 조인트 엇갈림 ${minJointGap}mm 이상`
+            : `${nameWithGroup}  ·  둘레 ${(baseLen / 1000).toFixed(2)}m  ·  층고 ${fh}mm`;
+      ctx.fillText(header, offX, headY);
       const headerW = ctx.measureText(header).width; // 우측 요약과 겹치는지 판정용
 
       // 가로 그리드 500mm
@@ -2629,6 +2846,233 @@ export default function ElevationGeneratorPage() {
               top - 2
             );
           }
+        }
+      } else if (sheet.kind === "overlap") {
+        // ── 1P+2P 겹침 검토 — 두 겹을 한 장에 포개 조인트가 어긋나는지 한눈에 본다 ──
+        // 가시성 원칙: 바탕은 희게, 정상 조인트는 가늘고 옅게, 위험 자리만 진하게.
+        //             이격 숫자는 도면 위가 아니라 도면 위쪽 '판정 레인'에 적는다.
+        const C1 = "#2563eb"; // 1P(내측) 파랑 실선
+        const C2 = "#f97316"; // 2P(외측) 주황 점선
+        // 겹마다 전개 x 가 코너에서 어긋나므로, 둘 다 구조선(벽) 기준 위치로 옮겨서 그린다
+        const sxOf = (v: number) => ex(v - sheet.x0);
+        const live1 = sheet.dev1.cells
+          .filter(c => !c.discarded)
+          .map(c => ({ ...c, x: cellStructX(sheet.dev1, c) - sheet.x0 }));
+        const live2 = sheet.dev2.cells
+          .filter(c => !c.discarded)
+          .map(c => ({ ...c, x: cellStructX(sheet.dev2, c) - sheet.x0 }));
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(ex(0), ey(fh), widthPx, heightPx);
+        // 창(개구부) — 회색 빗금으로 '단열재 없는 자리'임을 분명히
+        {
+          const ovOps = openings.filter(o => o.wallId === sheet.chain.id);
+          ovOps.forEach(op => {
+            // 창은 구조선 기준 위치 그대로
+            const left = sxOf(op.sAlong - op.width / 2);
+            const wpx = sxOf(op.sAlong + op.width / 2) - left;
+            const top = ey(op.sill + op.height);
+            const hpx = ey(op.sill) - top;
+            if (wpx < 1 || hpx < 1) return;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(left, top, wpx, hpx);
+            ctx.clip();
+            ctx.fillStyle = "#f1f5f9";
+            ctx.fillRect(left, top, wpx, hpx);
+            ctx.strokeStyle = "#cbd5e1";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let d = -hpx; d < wpx + hpx; d += 6) {
+              ctx.moveTo(left + d, top + hpx);
+              ctx.lineTo(left + d + hpx, top);
+            }
+            ctx.stroke();
+            ctx.restore();
+            ctx.strokeStyle = "#94a3b8";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(left, top, wpx, hpx);
+          });
+        }
+        // 확대해도 선이 뭉개지지 않게, 선 굵기·점선 간격은 화면 픽셀 기준으로 고정한다
+        const zk = Math.max(1, elevView.zoom);
+        const px = (v: number) => v / zk;
+        // 결로 위험: 1P·2P 조인트가 같은 높이에서 minJointGap 안쪽으로 붙은 자리
+        const j1 = jointsXOf(sheet.dev1);
+        const j2 = jointsXOf(sheet.dev2);
+        const spots: { xa: number; xb: number; y0: number; y1: number; gap: number }[] = [];
+        for (const seg of sheet.conflictSegs) {
+          // 충돌로 잡힌 2P 조인트(전개 좌표)를 구조선 기준 조인트로 되찾는다
+          const s2 = j2.find(
+            j => Math.abs(j.x - seg.x) < 1e-6 && Math.abs(j.y0 - seg.y0) < 1e-6 && Math.abs(j.y1 - seg.y1) < 1e-6
+          );
+          if (!s2) continue;
+          let best: (typeof spots)[number] | null = null;
+          for (const s1 of j1) {
+            const gap = Math.abs(s1.sx - s2.sx);
+            if (gap >= minJointGap - 1e-6) continue;
+            if (s1.fixed && s2.fixed) continue; // 코너끼리는 판정에서 제외
+            if (s1.win || s2.win) continue; // 창 테두리 선은 판정에서 제외
+            const y0 = Math.max(s1.y0, s2.y0);
+            const y1 = Math.min(s1.y1, s2.y1);
+            if (y1 - y0 <= 1e-6) continue;
+            if (!best || gap < best.gap)
+              best = {
+                xa: Math.min(s1.sx, s2.sx) - sheet.x0,
+                xb: Math.max(s1.sx, s2.sx) - sheet.x0,
+                y0,
+                y1,
+                gap,
+              };
+          }
+          // 같은 자리(인접 보드가 같은 조인트를 공유)를 두 번 그리지 않는다
+          if (
+            best &&
+            !spots.some(
+              p =>
+                Math.abs(p.xa - best!.xa) < 1 &&
+                Math.abs(p.xb - best!.xb) < 1 &&
+                Math.abs(p.y0 - best!.y0) < 1 &&
+                Math.abs(p.y1 - best!.y1) < 1
+            )
+          )
+            spots.push(best);
+        }
+        // 위험 자리 — 두 조인트 사이를 옅은 빨강으로만 칠한다(선은 덮지 않는다).
+        // 1P·2P 선은 이 위에 제 색(파랑·주황)으로 그려, 어느 겹의 조인트끼리 붙었는지 보이게 한다.
+        for (const p of spots) {
+          const xa = ex(p.xa);
+          const xb = ex(p.xb);
+          const by = ey(p.y1);
+          const bh = ey(p.y0) - by;
+          const pad = px(5);
+          ctx.fillStyle = "rgba(239,68,68,0.30)";
+          ctx.fillRect(xa - pad, by, xb - xa + pad * 2, bh);
+        }
+        // 1P 조인트 — 파랑 실선
+        ctx.save();
+        ctx.strokeStyle = C1;
+        ctx.lineWidth = px(1.4);
+        ctx.beginPath();
+        for (const c of live1) ctx.rect(ex(c.x), ey(c.y + c.h), c.w * s, c.h * s);
+        ctx.stroke();
+        // 2P 조인트 — 주황 점선. 1P 와 완전히 겹친 자리는 파랑·주황이 번갈아 보인다
+        ctx.strokeStyle = C2;
+        ctx.lineWidth = px(2);
+        ctx.setLineDash([px(6), px(5)]);
+        ctx.beginPath();
+        for (const c of live2) ctx.rect(ex(c.x), ey(c.y + c.h), c.w * s, c.h * s);
+        ctx.stroke();
+        ctx.restore();
+        // ── 판정 레인(도면 바로 위) — 초록 = 엇갈림 확보, 빨강 알약 = 위험 자리의 실제 이격 ──
+        const laneH = 14;
+        const laneY = ey(fh) - laneH - 5;
+        ctx.fillStyle = "#dcfce7";
+        ctx.fillRect(ex(0), laneY, widthPx, laneH);
+        ctx.fillStyle = "#16a34a";
+        ctx.fillRect(ex(0), laneY + laneH - 2, widthPx, 2);
+        // 같은 x 에 여러 높이로 잡힌 자리는 가장 좁은 이격 하나로 묶는다
+        const cols: { x0: number; x1: number; gap: number }[] = [];
+        for (const p of [...spots].sort((a, b) => a.xa - b.xa)) {
+          const last = cols[cols.length - 1];
+          if (last && ex(p.xa) - ex(last.x1) < 6) {
+            last.x1 = Math.max(last.x1, p.xb);
+            last.gap = Math.min(last.gap, p.gap);
+          } else cols.push({ x0: p.xa, x1: p.xb, gap: p.gap });
+        }
+        ctx.font = `bold 9.5px 'Noto Sans KR', sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        let lastPillEnd = -Infinity;
+        for (const c of cols) {
+          const cx0 = ex(c.x0);
+          const cx1 = ex(c.x1);
+          const mid = (cx0 + cx1) / 2;
+          // 레인의 빨강 구간 + 도면까지 내려가는 지시선
+          ctx.fillStyle = "#dc2626";
+          ctx.fillRect(cx0 - 2, laneY + laneH - 3, Math.max(4, cx1 - cx0 + 4), 3);
+          ctx.fillRect(mid - 0.75, laneY + laneH, 1.5, 5);
+          const text = `${Math.round(c.gap)}`;
+          const tw = Math.max(18, ctx.measureText(text).width + 9);
+          if (mid - tw / 2 < lastPillEnd + 2) continue; // 옆 알약과 겹치면 숫자는 생략(빨강 구간은 남는다)
+          const py = laneY - 1;
+          const ph = laneH - 2;
+          ctx.beginPath();
+          ctx.roundRect(mid - tw / 2, py, tw, ph, ph / 2);
+          ctx.fillStyle = "#dc2626";
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(text, mid, py + ph / 2 + 0.5);
+          lastPillEnd = mid + tw / 2;
+        }
+        // 제목 줄 우측 판정
+        ctx.font = `bold ${metaFont}px 'Noto Sans KR', sans-serif`;
+        ctx.textAlign = "right";
+        ctx.textBaseline = "bottom";
+        ctx.fillStyle = cols.length > 0 ? "#dc2626" : "#16a34a";
+        const verdict =
+          cols.length > 0
+            ? `⚠ 결로위험 ${cols.length}곳 (숫자 = 1P·2P 조인트 이격 mm)`
+            : "✓ 전 구간 조인트 엇갈림 확보";
+        ctx.fillText(verdict, ex(baseLen), headY);
+        const verdictW = ctx.measureText(verdict).width;
+        // 범례 — 제목 줄의 제목과 판정 사이(아래쪽은 다음 입면 제목과 겹친다). 자리가 모자라면 생략
+        ctx.font = `${metaFont}px 'Noto Sans KR', sans-serif`;
+        if (offX + headerW + 24 + 420 < ex(baseLen) - verdictW - 16) {
+          const lgY = headY - metaFont - 2;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+          let lgX = offX + headerW + 24;
+          const legend = (draw: (x: number, y: number) => void, label: string) => {
+            draw(lgX, lgY + metaFont / 2);
+            ctx.fillStyle = "#475569";
+            ctx.fillText(label, lgX + 26, lgY);
+            lgX += 26 + ctx.measureText(label).width + 16;
+          };
+          legend((x, y) => {
+            ctx.strokeStyle = C1;
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + 20, y);
+            ctx.stroke();
+          }, "1P(내측) 조인트");
+          legend((x, y) => {
+            ctx.save();
+            ctx.strokeStyle = C2;
+            ctx.lineWidth = 1.6;
+            ctx.setLineDash([7, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + 20, y);
+            ctx.stroke();
+            ctx.restore();
+          }, "2P(외측) 조인트");
+          legend((x, y) => {
+            ctx.fillStyle = "rgba(239,68,68,0.30)";
+            ctx.fillRect(x, y - 5, 20, 10);
+            ctx.strokeStyle = C1;
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.moveTo(x + 7, y - 5);
+            ctx.lineTo(x + 7, y + 5);
+            ctx.stroke();
+            ctx.save();
+            ctx.strokeStyle = C2;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 2]);
+            ctx.beginPath();
+            ctx.moveTo(x + 13, y - 5);
+            ctx.lineTo(x + 13, y + 5);
+            ctx.stroke();
+            ctx.restore();
+          }, `결로위험(이격 ${minJointGap}mm 미만)`);
+          legend((x, y) => {
+            ctx.fillStyle = "#f1f5f9";
+            ctx.fillRect(x, y - 4, 20, 8);
+            ctx.strokeStyle = "#94a3b8";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x, y - 4, 20, 8);
+          }, "창");
         }
       } else {
         // ── ply 단열재 나누기도 ──
@@ -2972,6 +3416,7 @@ export default function ElevationGeneratorPage() {
     // 층 그룹 층고 변경/전환·전부 표시 토글 시 전개도를 다시 그린다
     previewGroup,
     showAllGroups,
+    showPlyOverlap,
     hasGroupHeights,
     activeGroupsFor,
     floorHeightFor,
@@ -4773,6 +5218,18 @@ export default function ElevationGeneratorPage() {
                   />
                   전부 표시
                 </label>
+                <label
+                  className="flex cursor-pointer items-center gap-1 whitespace-nowrap text-[11.5px] text-slate-600"
+                  title="2P 가 있는 입면 아래에 1P·2P 를 포개 그린 시트를 추가합니다. 조인트가 결로방지 최소 이격 안쪽으로 붙은 자리는 빨간 띠와 이격(mm)으로 표시됩니다."
+                >
+                  <input
+                    type="checkbox"
+                    checked={showPlyOverlap}
+                    onChange={e => setShowPlyOverlap(e.target.checked)}
+                    className="accent-[#004791]"
+                  />
+                  1P·2P 겹침
+                </label>
               </div>
             </div>
   );
@@ -5285,6 +5742,8 @@ export default function ElevationGeneratorPage() {
             openingCount={openings.length}
             typeCount={typeMatrix.types.length}
             insulOn={insulOn}
+            showPlyOverlap={showPlyOverlap}
+            onTogglePlyOverlap={setShowPlyOverlap}
             canExport={canExport}
             onUploadDxf={handleFile}
             onOpenBrowser={() => setBrowserOpen(true)}

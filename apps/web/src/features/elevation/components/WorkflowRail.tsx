@@ -54,6 +54,9 @@ export interface WorkflowRailProps {
   openingCount: number;
   typeCount: number;
   insulOn: boolean;
+  /** 전개 입면에 1P·2P 겹침 검토 시트를 함께 그릴지 */
+  showPlyOverlap: boolean;
+  onTogglePlyOverlap: (on: boolean) => void;
   canExport: boolean;
 
   // ── ① 도면 ──
@@ -597,6 +600,32 @@ function StepInsul({ p }: { p: WorkflowRailProps }) {
         />
         {p.insulOn ? "나누기 계산 켜짐" : "아직 꺼져 있습니다"}
       </div>
+      {/* 1P·2P 겹침 검토 시트 — 2P 가 있는 입면 아래에 두 겹을 포개 그린다 */}
+      <label
+        className="flex cursor-pointer items-start gap-2 rounded-[var(--ipg-r-md)] px-3 py-2.5"
+        style={{
+          fontSize: "var(--ipg-t-md)",
+          border: "1px solid var(--ipg-d-line)",
+          color: "var(--ipg-d-ink)",
+        }}
+        title="1P·2P 조인트가 결로방지 최소 이격 안쪽으로 붙은 자리를 빨간 띠와 이격(mm)으로 표시합니다."
+      >
+        <input
+          type="checkbox"
+          className="mt-0.5 accent-[#1478d6]"
+          checked={p.showPlyOverlap}
+          onChange={e => p.onTogglePlyOverlap(e.target.checked)}
+        />
+        <span>
+          <span className="font-semibold">1P·2P 겹쳐 보기</span>
+          <span
+            className="mt-0.5 block leading-relaxed"
+            style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-2)" }}
+          >
+            두 겹을 한 장에 포개, 조인트가 붙어 결로 위험이 있는 자리를 빨갛게 보여 줍니다.
+          </span>
+        </span>
+      </label>
       <p
         className="leading-relaxed"
         style={{ fontSize: "var(--ipg-t-sm)", color: "var(--ipg-d-ink-2)" }}
