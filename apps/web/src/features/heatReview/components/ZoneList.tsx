@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { ZONE_KIND_LABEL, zoneColor } from "../defaults";
 import type { HeaterNeed, ZoneLoss } from "../engine/calc";
 import { polygonBounds } from "../engine/geometry";
+import type { PartView } from "./ZoneCanvas";
 import type { Heater, Zone, ZoneKind } from "../types";
 import { dec, int, Verdict } from "./ui";
 
@@ -19,6 +20,8 @@ const KIND_ORDER: ZoneKind[] = ["unit", "core", "parking"];
 
 export default function ZoneList({
   zones,
+  autoQty,
+  frameParts,
   losses,
   needs,
   heaterOf,
@@ -27,8 +30,14 @@ export default function ZoneList({
   onAddManual,
   onDuplicate,
   onDelete,
+  onToggleInclude,
+  onIncludeAll,
 }: {
   zones: Zone[];
+  /** 동 외곽이 세어 준 타입·코어 개수 (zones 의 qty 에는 이미 반영돼 있다) */
+  autoQty: Map<string, number>;
+  /** 동 외곽 id → 안에서 찾은 세대·코어. 여기 있는 구역은 계산하지 않는 틀이다 */
+  frameParts: Map<string, PartView[]>;
   losses: Map<string, ZoneLoss>;
   needs: Map<string, HeaterNeed>;
   /** 구역에 적용하는 열원 (종류별로 다를 수 있다) */
@@ -38,23 +47,50 @@ export default function ZoneList({
   onAddManual: (kind: ZoneKind) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
+  /** 이 구역을 계산(열원 비교·엑셀 보고서)에 넣을지 뒤집는다 */
+  onToggleInclude: (id: string) => void;
+  /** 전부 넣기 / 전부 빼기 */
+  onIncludeAll: (on: boolean) => void;
 }) {
+  const includedCount = zones.filter((z) => !z.excluded || autoQty.has(z.id)).length;
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_24px_-18px_rgba(15,42,74,0.25)]">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
         <div>
           <h3 className="text-[14px] font-bold tracking-tight text-slate-800">보양 구역</h3>
           <p className="text-[11.5px] text-slate-400">
-            {zones.length > 0 ? `${zones.length}개 구역 · 자동 저장` : "도면에 그리거나 치수로 추가"}
+            {zones.length > 0
+              ? includedCount === zones.length
+                ? `${zones.length}개 구역 · 자동 저장`
+                : `${zones.length}개 중 ${includedCount}개만 계산`
+              : "도면에 그리거나 치수로 추가"}
           </p>
         </div>
+        {zones.length > 0 && (
+          <label
+            className="flex cursor-pointer items-center gap-1.5 text-[11.5px] font-semibold text-slate-500"
+            title="체크한 구역만 열원 비교와 엑셀 보고서에 들어갑니다"
+          >
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-[#0a63b8]"
+              checked={includedCount === zones.length}
+              ref={(el) => {
+                if (el) el.indeterminate = includedCount > 0 && includedCount < zones.length;
+              }}
+              onChange={(e) => onIncludeAll(e.target.checked)}
+            />
+            전체
+          </label>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
         {KIND_ORDER.map((kind) => {
           const list = zones.filter((z) => z.kind === kind);
           const Icon = KIND_ICON[kind];
-          const area = list.reduce((s, z) => s + z.geometry.area * z.qty, 0);
+          // 틀(세대를 인식한 동 외곽)은 안의 타입·코어가 대신 계산되므로 합계에서 뺀다
+          const area = list.reduce((s, z) => s + (frameParts.has(z.id) ? 0 : z.geometry.area * z.qty), 0);
           return (
             <div key={kind}>
               <div className="mb-1.5 flex items-center justify-between px-1">
@@ -90,6 +126,15 @@ export default function ZoneList({
                     const heater = heaterOf(z);
                     const selected = z.id === selectedId;
                     const color = zoneColor(z.color);
+                    const parts = frameParts.get(z.id);
+                    // 타입별 개수 — "84A ×2 · 59A ×2"
+                    const partSummary = parts
+                      ? Array.from(
+                          parts.reduce((m, p) => m.set(p.name, (m.get(p.name) ?? 0) + 1), new Map<string, number>()),
+                        )
+                          .map(([name, n]) => `${name} ×${n}`)
+                          .join(" · ")
+                      : "";
                     return (
                       <li key={z.id}>
                         <div
@@ -104,16 +149,45 @@ export default function ZoneList({
                             selected
                               ? "border-[#0a63b8]/50 bg-blue-50/60 shadow-sm ring-1 ring-[#0a63b8]/20"
                               : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/70",
+                            z.excluded && !autoQty.has(z.id) && "opacity-55",
                           )}
                         >
                           <span className="absolute inset-y-0 left-0 w-1" style={{ background: color }} />
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[#0a63b8]"
+                            // 동 외곽이 세어 주는 타입·코어는 따로 켜고 끄지 않는다 — 그 동 외곽의 체크를 따른다
+                            checked={autoQty.has(z.id) ? true : !z.excluded}
+                            disabled={autoQty.has(z.id)}
+                            title={
+                              autoQty.has(z.id)
+                                ? "동 외곽이 세는 구역입니다 — 넣고 빼기는 동 외곽의 체크로 합니다"
+                                : z.excluded
+                                  ? "계산에서 뺀 구역 — 체크하면 열원 비교·엑셀 보고서에 들어갑니다"
+                                  : "체크를 끄면 열원 비교·엑셀 보고서에서 빠집니다"
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => onToggleInclude(z.id)}
+                          />
                           <ZoneThumb zone={z} color={color} />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
                               <span className="truncate text-[13.5px] font-bold text-slate-800">{z.name}</span>
-                              {z.qty > 1 && (
-                                <span className="shrink-0 rounded bg-slate-100 px-1 text-[10.5px] font-bold text-slate-500">
+                              {z.container && (
+                                <span className="shrink-0 rounded bg-indigo-50 px-1 text-[10.5px] font-bold text-indigo-600 ring-1 ring-indigo-200">
+                                  동 외곽
+                                </span>
+                              )}
+                              {(z.qty > 1 || autoQty.has(z.id)) && (
+                                <span
+                                  className={cn(
+                                    "shrink-0 rounded px-1 text-[10.5px] font-bold",
+                                    autoQty.has(z.id) ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-500",
+                                  )}
+                                  title={autoQty.has(z.id) ? "동 외곽에서 자동으로 센 개수" : undefined}
+                                >
                                   ×{z.qty}
+                                  {autoQty.has(z.id) ? " 자동" : ""}
                                 </span>
                               )}
                             </div>
@@ -123,7 +197,23 @@ export default function ZoneList({
                                 {z.geometry.source === "cad" ? "도면" : "치수"}
                               </span>
                             </div>
-                            {loss?.issue ? (
+                            {parts ? (
+                              <>
+                                <div className="mt-1 text-[11.5px] font-semibold leading-snug text-indigo-600">
+                                  {partSummary}
+                                </div>
+                                {/* 동 합계 — 안에 든 세대·코어의 손실열량·대수 합 */}
+                                <div className="mt-1 flex items-center gap-1.5">
+                                  <span className="text-[12px] font-bold tabular-nums text-slate-700">
+                                    {int(parts.reduce((s, p) => s + p.loss, 0))}
+                                    <span className="ml-0.5 text-[10.5px] font-medium text-slate-400">kcal/h</span>
+                                  </span>
+                                  <span className="whitespace-nowrap rounded-md bg-indigo-600 px-1.5 py-0.5 text-[10.5px] font-extrabold text-white">
+                                    동 합계 {parts.reduce((n, p) => n + p.count, 0)}대
+                                  </span>
+                                </div>
+                              </>
+                            ) : loss?.issue ? (
                               <div className="mt-1 text-[11.5px] font-semibold text-amber-600">{loss.issue}</div>
                             ) : (
                               <div className="mt-1 flex items-center gap-1.5">

@@ -236,6 +236,7 @@ apps/worker/src/
   market.ts          # /api/market/*
   sites.ts           # /api/sites (= /api/elevation-sites 별칭)
   tcRental.ts        # /api/tc-rental-projects*
+  heatReview.ts      # /api/heat-review-projects* (동절기 열원검토 — tcRental.ts 와 같은 구조)
   supabaseClient.ts  # Supabase REST/Storage fetch 헬퍼(index.ts 안에도 같은 헬퍼가 남아 있다)
 ```
 

@@ -4,10 +4,11 @@
 import { Flame, MousePointerClick, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { KIND_DEFAULTS, METHOD_LABEL, ZONE_KIND_LABEL, newId, zoneColor } from "../defaults";
-import { heaterNeed, type ZoneLoss } from "../engine/calc";
+import { edgeLossShare, heaterNeed, type ZoneLoss } from "../engine/calc";
 import { round } from "../engine/geometry";
 import type { CalcMethod, Heater, Zone, ZoneKind } from "../types";
 import { dec, Field, int, NumField, Segmented, TextField, Verdict } from "./ui";
+import type { PartView } from "./ZoneCanvas";
 
 export default function ZoneInspector({
   zone,
@@ -15,6 +16,11 @@ export default function ZoneInspector({
   heaters,
   selectedHeaterId,
   measuredPerimeter,
+  autoQty,
+  parts,
+  insideFrame,
+  misses,
+  onOffset,
   onChange,
   onDelete,
 }: {
@@ -24,6 +30,16 @@ export default function ZoneInspector({
   selectedHeaterId: string;
   /** 도면 다각형의 외곽선 길이(m). 치수 구역이면 null */
   measuredPerimeter: number | null;
+  /** 동 외곽이 세어 준 개수. 없으면 null (직접 입력) */
+  autoQty: number | null;
+  /** 이 구역이 동 외곽이고 안에서 세대·코어를 찾았으면 그 목록 */
+  parts: PartView[] | null;
+  /** 이 구역이 어느 동 외곽 안에 그려져 있으면 그 동 외곽 이름 — 이런 구역은 동 외곽이 될 수 없다 */
+  insideFrame: string | null;
+  /** 이 동 외곽 안에서 한 곳도 못 찾은 타입·코어 — 꼭짓점이 몇 개까지 맞았는지 */
+  misses: { name: string; matched: number; total: number }[];
+  /** 외곽 여유(m) 변경 — 면적·둘레를 다시 내야 해서 페이지가 처리한다 */
+  onOffset: (offset: number) => void;
   onChange: (patch: Partial<Zone>) => void;
   onDelete: () => void;
 }) {
@@ -46,7 +62,33 @@ export default function ZoneInspector({
   const g = zone.geometry;
   const manual = g.source === "manual";
   const setGeom = (patch: Partial<Zone["geometry"]>) => onChange({ geometry: { ...g, ...patch } });
+  /** 가로×세로 치수 → 면적·둘레. 외곽 여유만큼 사방으로 넓힌 크기로 낸다 */
+  const dimGeom = (l: number, w: number) => {
+    const o = g.offset ?? 0;
+    return {
+      dims: { l, w },
+      area: round((l + 2 * o) * (w + 2 * o), 3),
+      perimeter: round(2 * (l + w + 4 * o), 3),
+    };
+  };
   const groups = Array.from(new Set(loss.items.map((i) => i.group)));
+  // 세대·코어를 찾은 동 외곽 — 외곽 전체를 한 방으로 본 값이 아니라 안에 든 세대·코어의 합계를 보여 준다
+  const frame = zone.container && parts && parts.length > 0 ? parts : null;
+  const frameRows = frame
+    ? Array.from(
+        frame
+          .reduce((m, p) => {
+            const r = m.get(p.templateId) ?? { name: p.name, n: 0, loss: 0, count: 0 };
+            r.n += 1;
+            r.loss += p.loss;
+            r.count += p.count;
+            return m.set(p.templateId, r);
+          }, new Map<string, { name: string; n: number; loss: number; count: number }>())
+          .values(),
+      )
+    : [];
+  const frameLoss = frameRows.reduce((s, r) => s + r.loss, 0);
+  const frameCount = frameRows.reduce((s, r) => s + r.count, 0);
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_24px_-18px_rgba(15,42,74,0.25)]">
@@ -73,10 +115,23 @@ export default function ZoneInspector({
         {/* 결과 요약 */}
         <div className="rounded-xl bg-gradient-to-br from-[#0f2a4a] to-[#0a4f99] p-4 text-white">
           <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-blue-200">
-            <Flame className="h-3.5 w-3.5" />총 손실열량
+            <Flame className="h-3.5 w-3.5" />
+            {frame ? "동 합계 손실열량" : "총 손실열량"}
             {loss.safetyPct > 0 && <span className="text-blue-300/80">(여유율 {loss.safetyPct}% 포함)</span>}
           </div>
-          {loss.issue ? (
+          {frame ? (
+            <>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="text-[28px] font-extrabold tabular-nums tracking-tight">{int(frameLoss)}</span>
+                <span className="text-[12px] font-medium text-blue-200">kcal/h</span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/15 pt-3 text-[11px] text-blue-200">
+                <Mini label="세대·코어" value={`${frame.length}곳`} />
+                <Mini label="열원 합계" value={`${frameCount}대`} />
+                <Mini label="외곽 면적" value={`${dec(loss.area, 1)}㎡`} />
+              </div>
+            </>
+          ) : loss.issue ? (
             <div className="mt-1.5 text-[14px] font-bold text-amber-300">{loss.issue}</div>
           ) : (
             <div className="mt-1 flex items-baseline gap-1.5">
@@ -84,12 +139,40 @@ export default function ZoneInspector({
               <span className="text-[12px] font-medium text-blue-200">kcal/h</span>
             </div>
           )}
-          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/15 pt-3 text-[11px] text-blue-200">
-            <Mini label="바닥면적" value={`${dec(loss.area, 1)}㎡`} />
-            <Mini label="둘레" value={`${dec(loss.perimeter, 1)}m`} />
-            <Mini label="체적" value={`${dec(loss.volume, 0)}㎥`} />
-          </div>
+          {!frame && (
+            <div className="mt-3 grid grid-cols-3 gap-2 border-t border-white/15 pt-3 text-[11px] text-blue-200">
+              <Mini label="바닥면적" value={`${dec(loss.area, 1)}㎡`} />
+              <Mini label="둘레" value={`${dec(loss.perimeter, 1)}m`} />
+              <Mini label="체적" value={`${dec(loss.volume, 0)}㎥`} />
+            </div>
+          )}
         </div>
+
+        {/* 동 합계 내역 — 타입·코어별 세대수 × 손실열량 · 대수 */}
+        {frame && (
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            {frameRows.map((r) => (
+              <div
+                key={r.name}
+                className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-[12px]"
+              >
+                <span className="font-bold text-slate-700">
+                  {r.name} <span className="font-medium text-slate-400">×{r.n}</span>
+                </span>
+                <span className="tabular-nums text-slate-600">
+                  {int(r.loss)} <span className="text-[10.5px] text-slate-400">kcal/h</span>
+                  <span className="ml-2 font-bold text-slate-800">{r.count}대</span>
+                </span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between bg-slate-50 px-3 py-2">
+              <span className="text-[12px] font-bold text-slate-600">동 합계</span>
+              <span className="text-[13.5px] font-extrabold tabular-nums text-[#0a4f99]">
+                {int(frameLoss)} · {frameCount}대
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* 종류·방식 */}
         <div className="space-y-3">
@@ -107,6 +190,66 @@ export default function ZoneInspector({
               }
             />
           </Field>
+          {zone.kind === "unit" && !manual && insideFrame && (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-[11.5px] leading-relaxed text-slate-500">
+              동 외곽 <b className="text-slate-700">「{insideFrame}」</b> 안에 그린 <b className="text-slate-700">세대 타입</b>
+              입니다. 같은 모양의 세대를 그 동에서 찾아 세대수를 셉니다.
+            </p>
+          )}
+          {zone.kind === "unit" && !manual && !insideFrame && (
+            <Field label="그린 범위" hint={zone.container ? "한 층 전체" : "세대 하나"}>
+              <Segmented<"type" | "frame">
+                className="flex w-full"
+                value={zone.container ? "frame" : "type"}
+                options={[
+                  { value: "type", label: "세대 타입" },
+                  { value: "frame", label: "동 외곽" },
+                ]}
+                onChange={(v) => onChange(v === "frame" ? { container: true } : { container: false, parts: [] })}
+              />
+            </Field>
+          )}
+          {zone.container && (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2.5 text-[12px] leading-relaxed text-indigo-900">
+              {parts && parts.length > 0 ? (
+                <>
+                  <b>안에서 세대·코어 {parts.length}곳을 찾았습니다.</b>
+                  <div className="mt-1 font-semibold">
+                    {Array.from(
+                      parts.reduce((m, p) => m.set(p.name, (m.get(p.name) ?? 0) + 1), new Map<string, number>()),
+                    )
+                      .map(([name, n]) => `${name} ×${n}`)
+                      .join(" · ")}
+                  </div>
+                  <div className="mt-1 text-indigo-700/90">
+                    이 구역은 세대수를 세는 틀입니다. 손실열량·대수는 각 타입·코어 구역에서 계산하고, 열원은 세대마다
+                    따로 놓습니다. 빠진 세대가 있으면 그 타입을 한 번 그려 주세요.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <b>안에서 찾은 세대가 없습니다.</b> 지금은 이 외곽 전체를 한 구역으로 계산합니다. 세대 타입(예:
+                  84A, 59A)과 코어를 이 도면에 한 번씩 그리면, 뒤집힌 것까지 찾아 세대수를 세고 세대마다 열원을
+                  놓습니다.
+                </>
+              )}
+              {misses.length > 0 && (
+                <div className="mt-2 border-t border-indigo-200 pt-2 text-amber-800">
+                  <b>이 동에서 못 찾은 타입</b>
+                  <ul className="mt-0.5 space-y-0.5">
+                    {misses.map((m) => (
+                      <li key={m.name}>
+                        {m.name} — 가장 비슷한 자리에서 꼭짓점 {m.total}개 중 {m.matched}개만 벽선에 맞음
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-1 text-amber-700/90">
+                    크기나 모양이 다른 세대는 다른 타입입니다. 이 동 안에 그 세대를 한 번 그리면 그 타입으로 잡힙니다.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <Field
             label="산정 방식"
             hint={zone.method === "enclosure" ? "한중콘크리트 적용지침" : "표면적 × 평균 열관류율"}
@@ -139,7 +282,7 @@ export default function ZoneInspector({
                   if (v === "direct") setGeom({ dims: null });
                   else {
                     const side = round(Math.sqrt(Math.max(g.area, 0)) || 10, 2);
-                    setGeom({ dims: { l: side, w: side }, area: round(side * side, 3), perimeter: round(side * 4, 3) });
+                    setGeom(dimGeom(side, side));
                   }
                 }}
               />
@@ -157,9 +300,7 @@ export default function ZoneInspector({
                   value={g.dims.l}
                   unit="m"
                   min={0}
-                  onChange={(l) =>
-                    setGeom({ dims: { l, w: g.dims!.w }, area: round(l * g.dims!.w, 3), perimeter: round(2 * (l + g.dims!.w), 3) })
-                  }
+                  onChange={(l) => setGeom(dimGeom(l, g.dims!.w))}
                 />
               </Field>
               <Field label="세로 (W)">
@@ -167,9 +308,7 @@ export default function ZoneInspector({
                   value={g.dims.w}
                   unit="m"
                   min={0}
-                  onChange={(w) =>
-                    setGeom({ dims: { l: g.dims!.l, w }, area: round(g.dims!.l * w, 3), perimeter: round(2 * (g.dims!.l + w), 3) })
-                  }
+                  onChange={(w) => setGeom(dimGeom(g.dims!.l, w))}
                 />
               </Field>
             </div>
@@ -214,14 +353,30 @@ export default function ZoneInspector({
             <Field label="층고">
               <NumField value={zone.height} unit="m" min={0} step={0.05} onChange={(height) => onChange({ height })} />
             </Field>
-            <Field label="같은 구역 수" hint="1회 타설 기준">
+            <Field label="같은 구역 수" hint={autoQty != null ? "동 외곽에서 자동" : "1회 타설 기준"}>
               <NumField
-                value={zone.qty}
+                value={autoQty ?? zone.qty}
                 unit="개"
                 min={1}
+                disabled={autoQty != null}
                 onChange={(qty) => onChange({ qty: Math.max(1, Math.round(qty)) })}
               />
             </Field>
+            <Field label="외곽 여유 (옵셋)" hint="딴 선에서 바깥으로">
+              <NumField
+                value={g.offset ?? 0}
+                unit="m"
+                min={0}
+                step={0.1}
+                disabled={manual && !g.dims}
+                onChange={onOffset}
+              />
+            </Field>
+            {(g.offset ?? 0) > 0 && (
+              <p className="col-span-2 -mt-1 text-[11px] leading-relaxed text-slate-400">
+                면적·둘레는 바깥으로 {dec(g.offset ?? 0, 2)}m 띄운 선 기준입니다(도면의 점선이 딴 선).
+              </p>
+            )}
             {!manual && (
               <p className="col-span-2 -mt-1 text-[11px] leading-relaxed text-slate-400">
                 둘레는 그린 외곽선 길이입니다. 세대 내부 벽까지 넣는 기준이면 값을 직접 고치세요(면적은 도면값 유지).
@@ -316,7 +471,7 @@ export default function ZoneInspector({
         )}
 
         {/* 손실열량 내역 */}
-        {!loss.issue && (
+        {!loss.issue && !frame && (
           <Section title="손실열량 내역" badge={<span className="text-[10.5px] text-slate-400">kcal/h</span>}>
             <div className="overflow-hidden rounded-xl border border-slate-200">
               {groups.map((grp) => (
@@ -349,7 +504,19 @@ export default function ZoneInspector({
         )}
 
         {/* 열원별 필요 대수 */}
-        {!loss.issue && (
+        {/* 배치 근거 — 손실이 어디서 나는지에 따라 열원을 둔다 */}
+        {!loss.issue && !frame && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-600">
+            <b className="text-slate-700">열원 배치 근거</b> — 손실열량의{" "}
+            <b className="tabular-nums text-[#0a4f99]">{Math.round(edgeLossShare(loss) * 100)}%</b>가 외벽 쪽(벽체·개구부·천막
+            벽)에서, 나머지가 바닥·천장·환기로 바닥 전체에서 빠져나갑니다.{" "}
+            {zone.kind === "parking"
+              ? "지하주차장은 외기에 닿는 가장자리를 따라 같은 간격으로 놓습니다."
+              : "이 비율만큼 열원을 외벽 쪽으로 당겨, 각 열원이 맡는 손실열량이 비슷해지게 놓습니다."}
+          </div>
+        )}
+
+        {!loss.issue && !frame && (
           <Section title="열원별 필요 대수" badge={<span className="text-[10.5px] text-slate-400">구역 1개 기준</span>}>
             <div className="space-y-2">
               {heaters.map((h) => {

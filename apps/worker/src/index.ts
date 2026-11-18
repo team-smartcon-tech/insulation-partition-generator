@@ -26,6 +26,7 @@ import {
 import market from "./market";
 import sites from "./sites";
 import tcRental from "./tcRental";
+import heatReview from "./heatReview";
 import gantt from "./gantt";
 
 export type { Env };
@@ -233,6 +234,9 @@ app.route("/api/sites", sites);
 
 // TC 임대계획 — /api/tc-rental-projects* . 현장은 위 /api/sites 를 함께 쓴다.
 app.route("/api/tc-rental-projects", tcRental);
+
+// 동절기 열원검토 — 현장(elev_sites 공유) → 세부 프로젝트 → REV
+app.route("/api/heat-review-projects", heatReview);
 
 // 스마트 공정표 — /api/gantt* . 스마트웍스(dcr) 작업일보 읽기 전용 + 공정 엔진 + 현장 설정(gantt_*).
 app.route("/api/gantt", gantt);

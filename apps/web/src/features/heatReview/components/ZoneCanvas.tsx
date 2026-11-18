@@ -18,6 +18,7 @@ import {
   MousePointer2,
   Pentagon,
   ScanLine,
+  Scan,
   Square,
   Trash2,
   Upload,
@@ -25,33 +26,64 @@ import {
 import { cn } from "@/lib/utils";
 import { zoneColor } from "../defaults";
 import type { LiteDxf } from "../engine/dxfLite";
+import { detectOutline } from "../engine/outline";
 import {
   labelPoint,
   measurePolygon,
+  offsetPolygon,
   placeHeaters,
+  placeHeatersEdge,
+  EDGE_BAND_M,
+  mapBetween,
+  EDGE_INSET_M,
+  EDGE_SPACING_M,
   pointInPolygon,
   polygonArea,
   polygonBounds,
   rectPolygon,
+  unitFactor,
+  wallClearance,
 } from "../engine/geometry";
 import type { DrawingMeta, Pt, Zone } from "../types";
 import LiteDxfCanvas from "./LiteDxfCanvas";
 import { dec } from "./ui";
 
-type Tool = "select" | "polygon" | "rect" | "pick";
+type Tool = "select" | "polygon" | "rect" | "pick" | "outline";
 
 const TOOLS: { id: Tool; label: string; hint: string; icon: typeof Square }[] = [
   { id: "select", label: "선택", hint: "구역을 눌러 선택 · 꼭짓점을 끌어 수정 · 끌면 화면 이동", icon: MousePointer2 },
   { id: "polygon", label: "다각형", hint: "꼭짓점을 차례로 클릭 · 첫 점 클릭/Enter/더블클릭으로 닫기 · Shift 수평·수직 · Backspace 한 점 취소", icon: Pentagon },
   { id: "rect", label: "사각형", hint: "대각선 두 점을 클릭", icon: Square },
   { id: "pick", label: "닫힌 선 따기", hint: "도면의 닫힌 폴리라인 안쪽을 클릭하면 그 선이 구역이 됩니다", icon: ScanLine },
+  { id: "outline", label: "동 외곽 자동", hint: "건물 안쪽 아무 데나 한 번 누르면 그 건물의 바깥 테두리를 자동으로 땁니다", icon: Scan },
 ];
 
 const SNAP_PX = 11;
 const HANDLE_PX = 8;
 
 /** zoneId → 그 구역에 적용한 열원의 대수(구역 1개당)와 색 */
-export type HeaterOverlay = Map<string, { count: number; color: string }>;
+export type HeaterOverlay = Map<string, { count: number; color: string; edgeShare?: number }>;
+
+/** 동 외곽 안에서 찾은 세대·코어 하나 — 그릴 때 필요한 것만 */
+export interface PartView {
+  templateId: string;
+  polygon: Pt[];
+  name: string;
+  /** 타입 구역의 팔레트 인덱스 */
+  color: number;
+  /** 이 세대에 놓을 열원 대수 */
+  count: number;
+  heaterColor: string;
+  /** 이 세대 하나의 손실열량 kcal/h (타입 구역 1개 기준) — 동 합계를 낼 때 쓴다 */
+  loss: number;
+  /** 손실 중 외벽 쪽 몫 0~1 — 열원을 외벽 쪽으로 당기는 정도 */
+  edgeShare: number;
+  /** 타입을 그려 둔 원본 모양 — 기준 배치를 여기서 정해 이 세대 자리로 옮긴다 */
+  templatePolygon: Pt[] | null;
+}
+
+/** 열원을 벽선에서 띄우는 거리 m */
+const WALL_CLEAR_M = 0.45;
 
 export default function ZoneCanvas({
   sheetLabel,
@@ -61,6 +93,7 @@ export default function ZoneCanvas({
   zones,
   selectedId,
   heaterOverlay,
+  frameParts,
   onSelect,
   onCreate,
   onUpdatePolygon,
@@ -76,8 +109,11 @@ export default function ZoneCanvas({
   zones: Zone[];
   selectedId: string | null;
   heaterOverlay: HeaterOverlay | null;
+  /** 동 외곽 id → 그 안에서 찾은 세대·코어 */
+  frameParts: Map<string, PartView[]> | null;
   onSelect: (id: string | null) => void;
-  onCreate: (polygon: Pt[]) => void;
+  /** frame: 동 외곽으로 넣는다(「동 외곽 자동」으로 딴 것) */
+  onCreate: (polygon: Pt[], opts?: { frame?: boolean }) => void;
   onUpdatePolygon: (zoneId: string, polygon: Pt[]) => void;
   onLoadFile: (file: File) => void;
   onUnitChange: (unit: "mm" | "m") => void;
@@ -95,6 +131,8 @@ export default function ZoneCanvas({
   const [dragOver, setDragOver] = useState(false);
   /** 닫힌 선 따기에서 빈 곳을 눌렀을 때 잠깐 띄우는 안내 */
   const [pickMiss, setPickMiss] = useState(false);
+  /** 동 외곽 자동이 테두리를 못 땄을 때 잠깐 띄우는 안내 */
+  const [outlineMiss, setOutlineMiss] = useState(false);
   /** 꼭짓점을 끄는 동안의 임시 다각형 — 놓을 때 한 번만 문서에 쓴다 */
   const [editing, setEditing] = useState<{ zoneId: string; polygon: Pt[] } | null>(null);
 
@@ -107,6 +145,19 @@ export default function ZoneCanvas({
     [zones],
   );
   const hasCanvasContent = !!parsed || cadZones.length > 0;
+  /** 동 외곽 안에 원본 자리 그대로 세대로 잡힌 타입·코어 구역 */
+  const coveredByFrame = useMemo(() => {
+    const out = new Set<string>();
+    if (!frameParts) return out;
+    const firstOf = new Map(cadZones.map((z) => [z.id, z.geometry.polygon![0]]));
+    for (const parts of frameParts.values()) {
+      for (const part of parts) {
+        const p0 = firstOf.get(part.templateId);
+        if (p0 && part.polygon[0] && p0.x === part.polygon[0].x && p0.y === part.polygon[0].y) out.add(part.templateId);
+      }
+    }
+    return out;
+  }, [frameParts, cadZones]);
 
   // ── 크기 감시 ──
   useEffect(() => {
@@ -377,6 +428,18 @@ export default function ZoneCanvas({
       onSelect(zoneAt(toWorld(px, py))?.id ?? null);
       return;
     }
+    if (tool === "outline") {
+      const w = toWorld(px, py);
+      const poly = parsed ? detectOutline(parsed.segs, w, { meter: 1 / unitFactor(unit) }) : null;
+      if (poly) {
+        onCreate(poly, { frame: true });
+        setTool("select");
+      } else {
+        setOutlineMiss(true);
+        window.setTimeout(() => setOutlineMiss(false), 3200);
+      }
+      return;
+    }
     if (tool === "pick") {
       const w = toWorld(px, py);
       // 누른 점을 품은 닫힌 선 중 가장 작은 것 — 큰 외곽선 안의 구획을 고를 수 있게
@@ -425,15 +488,78 @@ export default function ZoneCanvas({
   };
 
   // ── 열원 배치점 (구역·대수가 바뀔 때만 다시 계산) ──
+  // 벽선 위에 놓이지 않게 도면 선에서 띄운다. 동 외곽은 통째로 놓지 않고 안의 세대·코어마다 따로 놓는다.
   const heaterMarks = useMemo(() => {
-    const out = new Map<string, Pt[]>();
+    const out = new Map<string, { pts: Pt[]; color: string; label: Pt }[]>();
     if (!heaterOverlay || !showHeaters) return out;
+    const clear = WALL_CLEAR_M / unitFactor(unit);
+    // 손실열량 분포로 가중 — outer 는 외기에 닿는 경계(동 안의 세대면 동 외곽)
+    const place = (poly: Pt[], n: number, share: number, outer: Pt[]) =>
+      placeHeaters(poly, Math.min(n, 80), wallClearance(poly, parsed?.segs ?? null, clear), {
+        poly: outer,
+        share,
+        band: EDGE_BAND_M / unitFactor(unit),
+      });
+    // 지하주차장은 외기에 닿는 가장자리부터 — 외곽 띠를 따라 놓는다
+    // 외곽 여유(옵셋)를 줬으면 딴 선과 띄운 선 사이, 곧 옵셋 구간 한가운데에 놓는다
+    const placeEdge = (drawn: Pt[], n: number, offsetM: number) => {
+      const off = offsetM > 0 ? offsetM / unitFactor(unit) : 0;
+      const poly = off ? offsetPolygon(drawn, off) : drawn;
+      return placeHeatersEdge(
+        poly,
+        Math.min(n, 80),
+        off ? off / 2 : EDGE_INSET_M / unitFactor(unit),
+        EDGE_SPACING_M / unitFactor(unit),
+        wallClearance(poly, parsed?.segs ?? null, clear),
+      );
+    };
+    // ── 타입별 기준 배치 ──
+    // 같은 타입이면 어느 동·어느 자리에 있든 **같은 배치**여야 한다. 그래서 배치는 타입을 그려 둔 원본 자리에서
+    // 한 번만 정하고(기준 배치), 다른 세대에는 그 세대가 놓인 자세(회전·뒤집기)대로 옮겨 찍는다.
+    const frames = cadZones.filter((z) => frameParts?.has(z.id)).map((z) => z.geometry.polygon!);
+    const canonCache = new Map<string, Pt[]>();
+    const canon = (templateId: string, tpoly: Pt[], n: number, share: number) => {
+      const key = `${templateId}:${n}`;
+      let pts = canonCache.get(key);
+      if (!pts) {
+        // 원본이 동 안에 있으면 그 동 외곽이 외기 경계다(세대 사이 벽은 외기가 아니다)
+        const c = labelPoint(tpoly);
+        pts = place(tpoly, n, share, frames.find((f) => pointInPolygon(c, f)) ?? tpoly);
+        canonCache.set(key, pts);
+      }
+      return pts;
+    };
     for (const z of cadZones) {
-      const n = Math.min(heaterOverlay.get(z.id)?.count ?? 0, 80);
-      if (n > 0) out.set(z.id, placeHeaters(z.geometry.polygon!, n));
+      const groups: { pts: Pt[]; color: string; label: Pt }[] = [];
+      const o = heaterOverlay.get(z.id);
+      if (o && o.count > 0) {
+        const poly = z.geometry.polygon!;
+        groups.push({
+          pts:
+            z.kind === "parking"
+              ? placeEdge(poly, o.count, z.geometry.offset ?? 0)
+              : canon(z.id, poly, o.count, o.edgeShare ?? 0),
+          color: o.color,
+          label: labelPoint(poly),
+        });
+      }
+      for (const part of frameParts?.get(z.id) ?? []) {
+        if (part.count > 0) {
+          const move = part.templatePolygon ? mapBetween(part.templatePolygon, part.polygon) : null;
+          groups.push({
+            pts: move
+              ? canon(part.templateId, part.templatePolygon!, part.count, part.edgeShare).map(move)
+              : // 모양을 맞춰 찾은 게 아닌 자리(남은 자리를 코어로 본 것)는 그 자리에서 따로 놓는다
+                place(part.polygon, part.count, part.edgeShare, z.geometry.polygon!),
+            color: part.heaterColor,
+            label: labelPoint(part.polygon),
+          });
+        }
+      }
+      if (groups.length > 0) out.set(z.id, groups);
     }
     return out;
-  }, [cadZones, heaterOverlay, showHeaters]);
+  }, [cadZones, heaterOverlay, frameParts, showHeaters, parsed, unit]);
 
   // ── 오버레이 그리기 ──
   useEffect(() => {
@@ -503,24 +629,80 @@ export default function ZoneCanvas({
       const poly = editing?.zoneId === z.id ? editing.polygon : z.geometry.polygon!;
       const color = zoneColor(z.color);
       const selected = z.id === selectedId;
-      path(poly);
-      ctx.fillStyle = hexA(color, selected ? 0.3 : 0.16);
+      const parts = editing?.zoneId === z.id ? [] : (frameParts?.get(z.id) ?? []);
+      const isFrame = !!z.container;
+      // 외곽 여유가 있으면 바깥으로 띄운 선이 실제 보양 범위 — 그 선까지 칠하고, 딴 선은 가늘게 남긴다
+      const off = z.geometry.offset ? z.geometry.offset / unitFactor(unit) : 0;
+      const outer = off > 0 ? offsetPolygon(poly, off) : poly;
+      path(outer);
+      // 동 외곽은 틀이라 옅게 — 안의 세대가 색으로 보여야 한다
+      ctx.fillStyle = hexA(color, isFrame ? (selected ? 0.12 : 0.05) : selected ? 0.3 : 0.16);
       ctx.fill();
       ctx.lineWidth = selected ? 2.5 : 1.5;
       ctx.strokeStyle = color;
+      if (isFrame) ctx.setLineDash([10, 5]);
       ctx.stroke();
+      ctx.setLineDash([]);
+      if (off > 0) {
+        path(poly);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 4]);
+        ctx.strokeStyle = hexA(color, 0.75);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // 동 외곽 안에서 찾은 세대·코어
+      for (const part of parts) {
+        const pc = zoneColor(part.color);
+        path(part.polygon);
+        ctx.fillStyle = hexA(pc, 0.2);
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = pc;
+        ctx.stroke();
+        const pb = polygonBounds(part.polygon);
+        const tag = part.count > 0 && showHeaters ? `${part.name} · ${part.count}대` : part.name;
+        ctx.font = "700 11.5px 'SUIT Variable', Pretendard, system-ui, sans-serif";
+        const tw = ctx.measureText(tag).width + 14;
+        if ((pb.maxX - pb.minX) * view.scale > tw + 6 && (pb.maxY - pb.minY) * view.scale > 30) {
+          const c = toPx(labelPoint(part.polygon), view);
+          ctx.fillStyle = "rgba(8,15,30,0.82)";
+          roundRect(ctx, c.x - tw / 2, c.y - 11, tw, 22, 6);
+          ctx.fill();
+          ctx.strokeStyle = hexA(pc, 0.9);
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(tag, c.x, c.y + 0.5);
+        }
+      }
 
       // 라벨: 이름 + 면적
       const m = editing?.zoneId === z.id ? measurePolygon(poly, unit) : z.geometry;
-      const lp = toPx(labelPoint(poly), view);
-      const count = heaterOverlay?.get(z.id)?.count;
+      const partTotal = parts.reduce((n, p) => n + p.count, 0);
+      const lp =
+        parts.length > 0
+          ? // 안의 세대 이름표와 겹치지 않게 외곽 맨 위 가운데 바깥에 단다
+            (() => {
+              const bb = polygonBounds(outer);
+              const q = toPx({ x: (bb.minX + bb.maxX) / 2, y: bb.maxY }, view);
+              return { x: q.x, y: q.y - 28 };
+            })()
+          : toPx(labelPoint(poly), view);
+      const count = parts.length > 0 ? partTotal : heaterOverlay?.get(z.id)?.count;
       const line1 = z.qty > 1 ? `${z.name} ×${z.qty}` : z.name;
-      const line2 = `${dec(m.area, 1)}㎡${count && showHeaters ? ` · ${count}대` : ""}`;
+      const line2 =
+        parts.length > 0
+          ? `세대·코어 ${parts.length}곳${showHeaters ? ` · ${count}대` : ""}`
+          : `${dec(m.area, 1)}㎡${count && showHeaters ? ` · ${count}대` : ""}`;
       const w = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width) + 18;
       const b = polygonBounds(poly);
       // 구역이 화면에서 라벨보다 작으면 라벨이 도면을 가린다 → 이름만 작게
-      const roomy = (b.maxX - b.minX) * view.scale > w + 6 && (b.maxY - b.minY) * view.scale > 46;
-      if (roomy) {
+      const roomy =
+        parts.length > 0 || ((b.maxX - b.minX) * view.scale > w + 6 && (b.maxY - b.minY) * view.scale > 46);
+      // 동 외곽이 이 자리(원본)를 세대로 그려 이름표를 달았으면, 타입 구역 이름표는 겹치므로 생략한다
+      if (roomy && !coveredByFrame.has(z.id)) {
         ctx.fillStyle = "rgba(8,15,30,0.82)";
         roundRect(ctx, lp.x - w / 2, lp.y - 21, w, 42, 8);
         ctx.fill();
@@ -611,7 +793,7 @@ export default function ZoneCanvas({
         ctx.stroke();
       }
     }
-  }, [size, view, parsed, cadZones, selectedId, draft, cursor, tool, editing, heaterOverlay, showHeaters, unit]);
+  }, [size, view, parsed, cadZones, selectedId, draft, cursor, tool, editing, heaterOverlay, frameParts, showHeaters, unit]);
 
   // ── 열원 배치점 (반짝임) ──
   // 구역·글자 캔버스와 따로(그 위에) 둔다: 매 프레임 다시 그리는 건 점 몇십 개뿐이라 도면이 커도 가볍다.
@@ -622,17 +804,10 @@ export default function ZoneCanvas({
     const list: { pts: Pt[]; color: string; label: Pt }[] = [];
     for (const z of cadZones) {
       if (editing?.zoneId === z.id) continue; // 꼭짓점을 끄는 동안은 자리가 바뀌는 중이라 숨긴다
-      const pts = heaterMarks.get(z.id);
-      if (pts && pts.length > 0) {
-        list.push({
-          pts,
-          color: heaterOverlay?.get(z.id)?.color ?? "#e2622b",
-          label: labelPoint(z.geometry.polygon!),
-        });
-      }
+      for (const g of heaterMarks.get(z.id) ?? []) if (g.pts.length > 0) list.push(g);
     }
     marksDataRef.current = list;
-  }, [cadZones, heaterMarks, heaterOverlay, editing]);
+  }, [cadZones, heaterMarks, editing]);
 
   const hasMarks = heaterMarks.size > 0;
   useEffect(() => {
@@ -865,7 +1040,9 @@ export default function ZoneCanvas({
         <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end justify-between gap-3">
           <div className="max-w-[70%] rounded-lg border border-white/10 bg-[#111b30]/85 px-3 py-1.5 text-[11.5px] leading-relaxed text-slate-300 backdrop-blur">
             <b className="mr-1.5 text-white">{activeTool.label}</b>
-            {pickMiss
+            {outlineMiss
+              ? "건물 테두리를 따지 못했습니다. 건물 안쪽(방 안)을 눌렀는지 확인하고, 안 되면 「다각형」으로 그려 주세요."
+              : pickMiss
               ? "여기에는 닫힌 선이 없습니다. 「다각형」으로 꼭짓점을 찍어 그려 주세요."
               : !parsed && tool === "select"
                 ? "저장된 구역만 표시 중입니다. 새 구역을 그리려면 도면을 불러오세요."

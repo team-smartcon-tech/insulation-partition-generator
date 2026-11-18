@@ -197,6 +197,26 @@ export function zoneLoss(zone: Zone, c: Conditions): ZoneLoss {
   };
 }
 
+/**
+ * 손실열량 중 **외벽 쪽(둘레)에서 빠져나가는 몫** 0~1 — 열원 배치에 쓴다.
+ * 벽체·벽 개구부·천막 벽체는 둘레를 따라 생기고, 바닥·천장·천막 천장·환기는 바닥 전체에 고르게 생긴다.
+ * 열은 빠져나가는 자리 가까이에서 채워야 온도가 고르므로, 이 몫이 클수록 열원을 외벽 쪽에 더 둔다.
+ */
+export function edgeLossShare(loss: ZoneLoss): number {
+  if (loss.issue) return 0;
+  const sum = loss.conduction + loss.ventilation;
+  if (!(sum > 0)) return 0;
+  let edge = 0;
+  if (loss.method === "simple") {
+    // 간이식은 표면적 한 덩어리 — 벽면이 차지하는 비율만큼을 둘레 몫으로 본다
+    const surface = loss.area * 2 + loss.perimeter * loss.height;
+    edge = surface > 0 ? loss.conduction * ((loss.perimeter * loss.height) / surface) : 0;
+  } else {
+    for (const it of loss.items) if (it.key === "wall" || it.key === "open" || it.key === "tentWall") edge += it.value;
+  }
+  return Math.min(1, Math.max(0, edge / sum));
+}
+
 function fmt(n: number): string {
   return (Math.round(n * 100) / 100).toLocaleString("ko-KR");
 }
