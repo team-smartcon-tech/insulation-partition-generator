@@ -13,8 +13,7 @@ import {
   Flame,
   Square,
   TowerControl,
-  type LucideIcon,
-} from "lucide-react";
+  type LucideIcon, LayoutGrid } from "lucide-react";
 import type { SectionId } from "@/features/market/types";
 
 export type ToolStatus = "available" | "comingSoon";
@@ -44,6 +43,18 @@ export interface ToolDef {
   section?: SectionId;
   /** 카드 아래 작성자 줄 (예: "김은상 · PI팀"). 없으면 "우미 · 스마트 툴박스" */
   author?: string;
+  /**
+   * 이 이메일(스마트웍스 로그인 계정)로 들어온 사람에게만 보인다. 없으면 모두에게 보인다.
+   * 시범 운영용 — 홈 카드와 화면 진입(App.tsx ToolGate)을 가리는 것이지 보안 경계가 아니다.
+   */
+  allowedEmails?: string[];
+}
+
+/** 이 사용자가 도구를 볼 수 있는가 — 명단이 없으면 모두 허용, 있으면 이메일이 명단에 있어야 한다 */
+export function canSeeTool(tool: ToolDef, email: string | null | undefined): boolean {
+  if (!tool.allowedEmails) return true;
+  const e = (email ?? "").trim().toLowerCase();
+  return e !== "" && tool.allowedEmails.some((a) => a.toLowerCase() === e);
 }
 
 export const TOOLS: ToolDef[] = [
@@ -83,6 +94,21 @@ export const TOOLS: ToolDef[] = [
     thumbnail: "/brand/logo-heat-review.svg",
     logo: "/brand/mark-heat-review.svg",
     sortLast: true,
+  },
+  {
+    id: "slab-zone",
+    name: "슬래브 구분도",
+    description:
+      "구조평면도(DXF)의 슬래브 기호를 읽어 데크·PC·RC 영역을 색으로 나누고, 종류별 면적과 비율을 계산합니다.",
+    path: "/tools/slab-zone",
+    icon: LayoutGrid,
+    status: "available",
+    tags: ["구조평면도", "데크·PC·RC", "면적 비율"],
+    thumbnail: "/brand/logo-slab-zone.svg",
+    logo: "/brand/mark-slab-zone.svg",
+    sortLast: true,
+    // 시범 운영 — 차승호 · 김진욱 · 양형직만 (2026-11-19)
+    allowedEmails: ["chash@wm.co.kr", "ukuk1212@wm.co.kr", "hjyang@wm.co.kr"],
   },
   {
     id: "gantt",

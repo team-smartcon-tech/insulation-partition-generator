@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="800" height="450" role="img" aria-label="슬래브 구분도">
+  <title>슬래브 구분도</title>
+  <rect width="800" height="450" fill="#0D1B2A"/>
+  <g transform="translate(160 75)" stroke="#0D1B2A" stroke-width="5" stroke-linejoin="round">
+    <path d="M0 60L130 20l350 10 0 190-150 80H40z" fill="#FFFFFF"/>
+    <path d="M0 60L130 20v280H40z" fill="#565CE2"/>
+    <path d="M130 20l110 3v277H130z" fill="#565CE2"/>
+    <path d="M240 90h170v150H240z" fill="#F6BAB4"/>
+    <path d="M240 140h170M240 190h170M130 110H18M130 200H30M185 22v278" fill="none"/>
+  </g>
+</svg>
