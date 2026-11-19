@@ -107,8 +107,8 @@ export const TOOLS: ToolDef[] = [
     thumbnail: "/brand/logo-slab-zone.svg",
     logo: "/brand/mark-slab-zone.svg",
     sortLast: true,
-    // 시범 운영 — 차승호 · 김진욱만 (2026-11-19)
-    allowedEmails: ["chash@wm.co.kr", "ukuk1212@wm.co.kr"],
+    // 시범 운영 — 차승호 · 김진욱 · 양형직만 (2026-11-19)
+    allowedEmails: ["chash@wm.co.kr", "ukuk1212@wm.co.kr", "hjyang@wm.co.kr"],
   },
   {
     id: "gantt",
