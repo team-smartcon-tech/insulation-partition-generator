@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="슬래브 구분도 심볼">
+  <title>슬래브 구분도 — 심볼</title>
+  <!-- 평면을 세 종류(데크·PC·RC)로 나눠 칠한 모습 -->
+  <rect width="512" height="512" rx="112" fill="#0D1B2A"/>
+  <path d="M112 136h288v240H112z" fill="#FFFFFF"/>
+  <path d="M112 136h120v240H112z" fill="#565CE2"/>
+  <path d="M232 216h168v160H232z" fill="#F6BAB4"/>
+  <path d="M112 136h288v240H112zM232 136v240M232 216h168M112 256h120" fill="none" stroke="#0D1B2A" stroke-width="14" stroke-linejoin="round"/>
+</svg>

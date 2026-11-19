@@ -31,7 +31,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import BrandWordmark from "@/components/brand/BrandWordmark";
 import { useHomeOrder, useMarketApps, useSaveHomeOrder } from "@/features/market/hooks";
 import { SECTIONS, type SectionId } from "@/features/market/types";
-import { TOOLS, type ToolDef } from "./tools";
+import { TOOLS, canSeeTool, type ToolDef } from "./tools";
 import { applyHomeOrder, moveCardKey, stepCardKey } from "./homeOrder";
 import {
   BADGE_ORIGIN_CLASS,
@@ -155,7 +155,7 @@ export default function HomePage() {
     // 내장 도구를 App Market 에 게시했으면(배포 URL = 그 도구 경로, 예: /tools/gantt) 내장 카드는 감추고 게시 카드만 —
     // 게시 카드가 소개·수정·삭제를 맡는다 (2026-11-04). 게시를 지우면 내장 카드가 다시 나온다.
     const publishedPaths = new Set(marketApps.map((a) => a.deploy_url).filter((u): u is string => !!u?.startsWith("/")));
-    const builtIn = TOOLS.filter((t) => !publishedPaths.has(t.path))
+    const builtIn = TOOLS.filter((t) => !publishedPaths.has(t.path) && canSeeTool(t, user?.email))
       .map(toolToCard)
       .filter((c) => c.available || !publishedNames.has(c.name.replace(/\s+/g, "")));
 
@@ -170,7 +170,7 @@ export default function HomePage() {
       ...availableBuiltIn.filter(isLast),
       ...builtIn.filter((c) => !c.available),
     ];
-  }, [marketApps]);
+  }, [marketApps, user?.email]);
 
   const savedKeys = homeOrder?.keys;
   const cards = useMemo(() => {

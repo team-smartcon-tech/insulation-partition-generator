@@ -41,6 +41,12 @@ export interface LiteDxf {
   /** 화면 맞춤용 경계 — 멀리 떨어진 부스러기를 뺀 범위 */
   fit: Box;
   warnings: string[];
+  /** 도면층 이름표 — `layerIndex` 옵션을 켰을 때만 채운다(슬래브 구분도가 쓴다) */
+  layerNames?: string[];
+  /** 선분별 도면층 번호(layerNames 의 인덱스) */
+  segLayer?: Uint16Array;
+  /** 글자별 도면층 번호 */
+  textLayer?: Uint16Array;
   stats: { segments: number; loops: number; texts: number; blocks: number; truncated: boolean };
 }
 
@@ -148,7 +154,12 @@ function displayRgb(rgb: number): number {
   return (r << 16) | (g << 8) | b;
 }
 
-export function parseDxfLite(buf: Uint8Array): LiteDxf {
+export interface ParseOptions {
+  /** 선분·글자마다 도면층 번호를 함께 낸다. 기본은 끔 — 선 하나에 2바이트가 더 든다 */
+  layerIndex?: boolean;
+}
+
+export function parseDxfLite(buf: Uint8Array, opts: ParseOptions = {}): LiteDxf {
   const len = buf.length;
   let pos = 0;
   let code = 0;
@@ -622,6 +633,22 @@ export function parseDxfLite(buf: Uint8Array): LiteDxf {
   let n = 0;
   let truncated = false;
 
+  // 도면층 번호(옵션) — 블록 안 "0" 층은 삽입한 쪽 층으로 풀린 뒤의 이름을 쓴다
+  let segLayer: Uint16Array | null = opts.layerIndex ? new Uint16Array(cap) : null;
+  const layerNames: string[] = [];
+  const layerIdx = new Map<string, number>();
+  const textLayer: number[] = [];
+  let curLayer = 0;
+  const layerIndexOf = (name: string): number => {
+    let i = layerIdx.get(name);
+    if (i === undefined) {
+      i = Math.min(layerNames.length, 65535);
+      if (i === layerNames.length) layerNames.push(name);
+      layerIdx.set(name, i);
+    }
+    return i;
+  };
+
   const seg = (ax: number, ay: number, bx: number, by: number, rgb: number) => {
     if (n >= MAX_SEGS) {
       truncated = true;
@@ -636,7 +663,13 @@ export function parseDxfLite(buf: Uint8Array): LiteDxf {
       const c2 = new Uint8Array(cap * 3);
       c2.set(colors);
       colors = c2;
+      if (segLayer) {
+        const g2 = new Uint16Array(cap);
+        g2.set(segLayer);
+        segLayer = g2;
+      }
     }
+    if (segLayer) segLayer[n] = curLayer;
     const i = n * 4;
     segs[i] = ax;
     segs[i + 1] = ay;
@@ -748,6 +781,7 @@ export function parseDxfLite(buf: Uint8Array): LiteDxf {
       }
 
       if (li?.off) continue;
+      if (segLayer) curLayer = layerIndexOf(layerName);
       const rgb = displayRgb(raw);
       const mm = e.mirror ? mul(m, MIRROR) : m;
 
@@ -838,6 +872,7 @@ export function parseDxfLite(buf: Uint8Array): LiteDxf {
           const dyv = mm[1] * Math.cos(rad) + mm[3] * Math.sin(rad);
           textPos.push(x, y, e.h * scale, Math.atan2(dyv, dxv), e.align);
           textStr.push(e.s);
+          if (segLayer) textLayer.push(curLayer);
           break;
         }
       }
@@ -883,6 +918,9 @@ export function parseDxfLite(buf: Uint8Array): LiteDxf {
     bounds,
     fit: n > 0 ? robustBounds(segs, n, bounds) : bounds,
     warnings,
+    ...(segLayer
+      ? { layerNames, segLayer: segLayer.slice(0, n), textLayer: Uint16Array.from(textLayer) }
+      : {}),
     stats: { segments: n, loops: loopOff.length - 1, texts: textStr.length, blocks: blocks.size, truncated },
   };
 }
