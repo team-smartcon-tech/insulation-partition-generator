@@ -332,9 +332,13 @@ const NON_BARRIER =
   /\$|^(A|AA|I|L|E|M|X)-|DIM|CEN|TXT|TEXT|FORM|TITLE|NOTE|MARK|SYM|HAT|DEF|DEPOINT|\bNO\b|NO-\d|EDIT|^[-_]?\d{6}|계획선|치수|범위|검토|수정|적용|배근|레벨|출력|조경|기호|덧살/i;
 /** 외곽선이 없는 평면에서 「구조 선·슬래브 기호에서 이만큼 안쪽」까지만 평면으로 본다 (주차장 거더 간격 8m 의 절반 + 여유) */
 const NEAR_STRUCT_MM = 6_000;
-/** 「사방이 구조 선으로 둘러싸였나」를 볼 거리와, 8방향 중 벽이 있어야 하는 최소 방향 수 */
+/**
+ * 「사방이 구조 선으로 둘러싸였나」를 볼 거리와, 상하좌우 4방향 중 벽이 있어야 하는 최소 방향 수.
+ * 대각선까지 8방향으로 세면 벽 끝점 위치에 따라 판정이 깜빡여 경계가 톱니(45°)로 나왔다 — 축 방향만 센다.
+ * 3방향: 둘레 벽 바깥 띠는 건물 쪽 1~2방향뿐이고, 한쪽이 트인 판(보 없는 슬래브 끝)은 3방향이다.
+ */
 const ENCLOSE_MM = 12_000;
-const ENCLOSE_MIN_DIRS = 6;
+const ENCLOSE_MIN_DIRS = 3;
 /**
  * 이름에 구조 부재가 적힌 도면층(「AA-XXXX-GIR」「AA-XXXX-BEAM」「AA-WAXM-CONC」…)은 접두사가 A-/AA- 라도 벽이다.
  * 울산 Drawing3 은 구조 도면인데 모든 층이 AA- 로 시작해 NON_BARRIER 에 걸려 벽이 0개가 됐고,
@@ -587,16 +591,15 @@ export function analyzeSheet(
         q[tail++] = p + W;
       }
     }
-    // 둘레 벽 바깥의 띠(벽에서 r 안쪽이지만 평면 밖)도 걸러낸다: 판 안쪽은 8방향 모두 가까이에 보·거더가
-    // 있지만, 바깥 띠는 건물 쪽 몇 방향에만 있다. 방향마다 가장 가까운 벽까지의 거리를 한 번씩 훑어(O(8N))
-    // ENCLOSE_MM 안에 벽이 있는 방향 수를 세고, 6방향 미만이면 평면 밖으로 본다. 기호 바로 곁(3m)은 남긴다.
+    // 둘레 벽 바깥의 띠(벽에서 r 안쪽이지만 평면 밖)도 걸러낸다: 판 안쪽은 상하좌우 모두 가까이에 보·거더가
+    // 있지만, 바깥 띠는 건물 쪽 한두 방향에만 있다. 방향마다 가장 가까운 벽까지의 거리를 한 번씩 훑어(O(4N))
+    // ENCLOSE_MM 안에 벽이 있는 방향 수를 세고, ENCLOSE_MIN_DIRS 미만이면 평면 밖으로 본다.
     const reach = Math.round(ENCLOSE_MM / mm / res);
+    // 방향별 비트: 1=왼쪽에 벽, 2=오른쪽, 4=위, 8=아래
     const hits = new Uint8Array(N);
-    const scan = (dx: number, dy: number) => {
+    const scan = (dx: number, dy: number, bit: number) => {
       // (dx,dy) 방향으로 진행하며 「지나온 벽까지의 거리」를 이어 간다 → 각 칸에서 (-dx,-dy) 쪽 가장 가까운 벽
       const stepP = dy * W + dx;
-      const startX = dx > 0 ? 0 : W - 1;
-      const startY = dy > 0 ? 0 : H - 1;
       const line = (x0: number, y0: number) => {
         let p = y0 * W + x0;
         let x = x0;
@@ -605,22 +608,26 @@ export function analyzeSheet(
         while (x >= 0 && x < W && y >= 0 && y < H) {
           if (wall[p]) since = 0;
           else if (since !== 0xffff) since++;
-          if (since <= reach) hits[p]++;
+          if (since <= reach) hits[p] |= bit;
           x += dx;
           y += dy;
           p += stepP;
         }
       };
-      if (dx === 0) for (let x = 0; x < W; x++) line(x, startY);
-      else if (dy === 0) for (let y = 0; y < H; y++) line(startX, y);
-      else {
-        // 대각선: 시작 변의 모든 칸에서 출발
-        for (let x = 0; x < W; x++) line(x, startY);
-        for (let y = 0; y < H; y++) if (y !== startY) line(startX, y);
-      }
+      if (dx === 0) for (let x = 0; x < W; x++) line(x, dy > 0 ? 0 : H - 1);
+      else for (let y = 0; y < H; y++) line(dx > 0 ? 0 : W - 1, y);
     };
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]] as const) scan(dx, dy);
-    for (let p = 0; p < N; p++) inside[p] = d[p] <= r && hits[p] >= ENCLOSE_MIN_DIRS ? 1 : 0;
+    scan(1, 0, 1);
+    scan(-1, 0, 2);
+    scan(0, 1, 4);
+    scan(0, -1, 8);
+    // 둘러싸임 = 3방향 이상, 또는 마주보는 두 방향(좌·우 / 위·아래) 모두 벽.
+    // 긴 베이(평행 거더 사이, 가로보가 12m 안에 없음)는 좌·우만 있고, 둘레 바깥 띠는 한쪽에만 있다.
+    const enclosed = (h: number) => {
+      const n = (h & 1) + ((h >> 1) & 1) + ((h >> 2) & 1) + ((h >> 3) & 1);
+      return n >= ENCLOSE_MIN_DIRS || (h & 3) === 3 || (h & 12) === 12;
+    };
+    for (let p = 0; p < N; p++) inside[p] = d[p] <= r && enclosed(hits[p]) ? 1 : 0;
     // 둘러싸이지 않은 자리의 기호는 평면 밖 범례(슬래브 일람표)의 글자다 — 씨앗에서 뺀다
     // (Drawing3: 평면 좌우에 7m 간격으로 늘어선 DS… 목록이 마름모 모양 데크로 찍혔다)
     const before = slabMarks.length;
@@ -1155,7 +1162,27 @@ export function analyzeSheet(
           }
         }
       }
-      if (tail <= limit && (touch === 0 || touchOpen < touch * 0.3)) for (let i = 0; i < tail; i++) fillable[queue[i]] = 1;
+      if (tail > limit || (touch > 0 && touchOpen >= touch * 0.3)) continue;
+      // 둘레 종류 중 가장 많이 닿은 하나로 칸 전체를 칠한다. 예전처럼 사방에서 동시에 번져 들어오게 두면
+      // 위에서 PC, 옆에서 RC 가 만나 45° 삼각형이 생겼다(Drawing3 둘레 작은 판). 벽 너머(두께 최대 4칸)의 종류를 센다.
+      const vote = [0, 0, 0, 0];
+      for (let i = 0; i < tail; i++) {
+        const c = queue[i];
+        const cx = c % W;
+        for (const step of [cx > 0 ? -1 : 0, cx < W - 1 ? 1 : 0, -W, W]) {
+          if (!step) continue;
+          let q = c + step;
+          if (q < 0 || q >= N || !wall[q]) continue;
+          for (let k = 0; k < 4 && q >= 0 && q < N && wall[q]; k++) q += step;
+          if (q < 0 || q >= N) continue;
+          const l = label[q];
+          if (l >= L_DECK && l <= L_RC) vote[l]++;
+        }
+      }
+      let best = 0;
+      for (let l = L_DECK; l <= L_RC; l++) if (vote[l] > vote[best]) best = l;
+      if (best) for (let i = 0; i < tail; i++) label[queue[i]] = best;
+      else for (let i = 0; i < tail; i++) fillable[queue[i]] = 1;
     }
   }
 
