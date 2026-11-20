@@ -9,7 +9,7 @@
  *   - 블록을 펼친 결과를 **선분 배열 하나**(Float64Array)로 낸다.
  * 렌더러(LiteDxfCanvas)는 그 배열을 한 번의 드로우콜로 그린다.
  *
- * 다루는 엔티티: LINE · LWPOLYLINE · POLYLINE · CIRCLE · ARC · ELLIPSE · SPLINE(꺾은선 근사)
+ * 다루는 엔티티: LINE · LWPOLYLINE · POLYLINE · MLINE(중심선) · CIRCLE · ARC · ELLIPSE · SPLINE(꺾은선 근사)
  *               · INSERT(배열·대칭 포함) · DIMENSION(익명 블록) · TEXT · MTEXT · ATTRIB
  * 버리는 것: HATCH · SOLID · WIPEOUT · POINT · 종이공간 · 동결/꺼진 도면층
  */
@@ -325,6 +325,9 @@ export function parseDxfLite(buf: Uint8Array, opts: ParseOptions = {}): LiteDxf 
 
     const isPoly = type === "LWPOLYLINE";
     const isSpline = type === "SPLINE";
+    // MLINE(다중선): 꼭짓점은 11/21 쌍의 나열. 구조평면도의 보·거더가 이것으로 그려진 도면이 있다
+    // (울산 Drawing3: 보·거더 379개 전부 MLINE) — 버리면 벽이 하나도 없어 슬래브 영역이 한없이 번진다.
+    const isMline = type === "MLINE";
     const wantsText = type === "TEXT" || type === "MTEXT" || type === "ATTRIB";
 
     while ((more = next())) {
@@ -373,11 +376,14 @@ export function parseDxfLite(buf: Uint8Array, opts: ParseOptions = {}): LiteDxf 
           break;
         case 11:
           if (isSpline) (fit ??= []).push(num(), 0, 0);
+          else if (isMline) (pts ??= []).push(num(), 0, 0);
           else x2 = num();
           break;
         case 21:
           if (isSpline) {
             if (fit && fit.length >= 3) fit[fit.length - 2] = num();
+          } else if (isMline) {
+            if (pts && pts.length >= 3) pts[pts.length - 2] = num();
           } else y2 = num();
           break;
         case 42:
@@ -437,6 +443,10 @@ export function parseDxfLite(buf: Uint8Array, opts: ParseOptions = {}): LiteDxf 
         break;
       case "LWPOLYLINE":
         if (pts && pts.length >= 6) into.push({ ...base, k: "poly", pts, closed: (f70 & 1) === 1 });
+        break;
+      case "MLINE":
+        // 중심선만 쓴다(폭·요소 오프셋은 무시) — 벽으로 쓰기엔 중심선으로 충분하다. 닫힘 플래그는 71 의 2 비트
+        if (pts && pts.length >= 6) into.push({ ...base, k: "poly", pts, closed: (f71 & 2) === 2 });
         break;
       case "SPLINE": {
         // 맞춤점이 있으면 그 점을, 없으면 조정점을 잇는다 (곡선의 근사)
