@@ -83,6 +83,8 @@ interface HomeCard {
   download?: boolean;
   /** downloads 는 설치형에만 */
   stats?: { views: number; likes: number; downloads?: number };
+  /** 게시일(게시 도구만) — 개요의 「새로 올라온 도구」 타일에 쓴다 */
+  createdAt?: string;
 }
 
 /** DB 값이 모르는 섹션이면(구버전·오타) 첫 섹션으로 — 카드가 홈에서 사라지지 않게 한다 */
@@ -115,6 +117,8 @@ export default function HomePage() {
   const canPublish = PUBLISH_ROLES.has(user?.role ?? "");
 
   const [query, setQuery] = useState("");
+  /** 섹션 탭 — "all" 이면 전부, 아니면 그 섹션만 */
+  const [activeSec, setActiveSec] = useState<SectionId | "all">("all");
 
   // ── 카드 순서: 관리자가 저장한 순서(DB)를 기본 정렬 위에 덮는다. 편집 중엔 초안 순서로 그린다 ──
   const { data: homeOrder } = useHomeOrder();
@@ -142,6 +146,7 @@ export default function HomePage() {
         href: `/market/${app.id}`,
         section: toSection(app.section),
         download,
+        createdAt: app.created_at,
         stats: {
           views: app.view_count,
           likes: app.like_count,
@@ -228,7 +233,44 @@ export default function HomePage() {
     [filtered],
   );
 
-  const availableCount = useMemo(() => cards.filter((c) => c.available).length, [cards]);
+  // 탭으로 고른 섹션만 — 편집 중이거나 고른 섹션이 검색으로 사라졌으면 전부
+  const visibleSections =
+    editing || activeSec === "all" || !sections.some((sec) => sec.id === activeSec)
+      ? sections
+      : sections.filter((sec) => sec.id === activeSec);
+
+  /** 개요 타일 — 섹션별 등록 수(카드 있는 섹션만) */
+  const sectionCounts = useMemo(
+    () =>
+      SECTIONS.map((sec) => ({ ...sec, count: cards.filter((c) => c.section === sec.id).length })).filter(
+        (sec) => sec.count > 0,
+      ),
+    [cards],
+  );
+  /** 개요 타일 — 가장 최근에 게시된 도구(게시 도구가 없으면 타일을 그리지 않는다) */
+  const newestTool = useMemo(
+    () =>
+      cards
+        .filter((c) => c.available && c.href && c.createdAt)
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))[0] ?? null,
+    [cards],
+  );
+  /** 개요 — 누적 조회·좋아요 */
+  const totals = useMemo(
+    () => cards.reduce((acc, c) => ({ views: acc.views + (c.stats?.views ?? 0), likes: acc.likes + (c.stats?.likes ?? 0) }), { views: 0, likes: 0 }),
+    [cards],
+  );
+  /** 개요 타일 — 많이 쓰는 도구 3개(조회 많은 순, 같으면 홈 순서). 조회 기록이 없으면 앞에서 3개 */
+  const topTools = useMemo(
+    () =>
+      cards
+        .filter((c) => c.available && c.href)
+        .map((c, i) => ({ c, i }))
+        .sort((a, b) => (b.c.stats?.views ?? 0) - (a.c.stats?.views ?? 0) || a.i - b.i)
+        .slice(0, 3)
+        .map((x) => x.c),
+    [cards],
+  );
 
   // 툴바 버튼 — 흰 바탕 위 외곽선형 / 채움형 두 가지만 쓴다
   const btnBase =
@@ -239,18 +281,30 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-[#f4f6fa] text-slate-800">
-      {/* ── 상단 헤더 ── */}
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
-        <div className="flex h-16 w-full items-center justify-between px-8">
+      {/* ── 상단 헤더 — 로고 · 검색(가운데) · 사용자. 검색은 어디서나 닿도록 헤더에 둔다 ── */}
+      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="flex h-16 w-full items-center gap-6 px-8">
           {/* 좌: 우미 로고 + 워드마크 */}
-          <div className="flex items-center gap-4">
+          <div className="flex shrink-0 items-center gap-4">
             <WoomiLogo />
             <div className="h-6 w-px bg-slate-200" />
             <BrandWordmark />
           </div>
 
+          {/* 가운데: 검색 */}
+          <div className="relative mx-auto hidden w-full max-w-[560px] md:block">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={query}
+              disabled={editing}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="도구명 · 설명 · 태그 검색"
+              className="h-10 w-full rounded-full border border-transparent bg-slate-100 pl-11 pr-4 text-[14px] text-slate-800 outline-none transition-colors placeholder:text-slate-400 hover:bg-slate-200/60 focus:border-[#004791]/40 focus:bg-white focus:ring-4 focus:ring-[#004791]/10 disabled:opacity-60"
+            />
+          </div>
+
           {/* 우: 사용자 + 로그아웃 */}
-          <div className="flex items-center gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-3 md:ml-0">
             {user && (
               <div className="hidden text-right leading-tight sm:block">
                 <div className="text-[13.5px] font-bold text-slate-800">{user.name} 님</div>
@@ -272,76 +326,215 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* ── 개요 띠 — 브랜드 네이비 단색. 소제목 · 제목 · 요약 수치. 헤더 워드마크와 겹치지 않게 이름은 다시 쓰지 않는다 ── */}
-      <section className="bg-[#00254f]">
-        <div className="mx-auto flex w-full max-w-[2100px] flex-wrap items-end justify-between gap-x-10 gap-y-5 px-8 pb-7 pt-8">
+      {/* ── 개요 — 밝은 바탕. 왼쪽 큰 제목, 오른쪽 타일 두 장(등록 현황 · 많이 쓰는 도구).
+            (2026-11-23 재디자인) 남색 띠 + 검색 띠 구성을 버렸다 — "있는 틀을 고치지 말고 다시 디자인" 요청.
+            광원·장식 배지는 2026-10-29 에 걷어낸 것이라 쓰지 않는다. ── */}
+      <section className="relative isolate overflow-hidden border-b border-slate-200 bg-white">
+        {/* 바탕 — 오른쪽으로 옅은 하늘빛, 왼쪽 아래 점 무늬, 기울인 둥근 사각 윤곽. 흰 면이 밋밋하지 않게만 */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={{ background: "linear-gradient(100deg, #ffffff 0%, #ffffff 30%, #eaf2fb 100%)" }} />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 -z-10 w-[55%]"
+          style={{
+            backgroundImage: "radial-gradient(rgba(0,71,145,0.16) 1.2px, transparent 1.2px)",
+            backgroundSize: "20px 20px",
+            maskImage: "linear-gradient(60deg, #000 0%, transparent 46%)",
+            WebkitMaskImage: "linear-gradient(60deg, #000 0%, transparent 46%)",
+          }}
+        />
+        <div aria-hidden className="pointer-events-none absolute -top-28 left-[34%] -z-10 h-72 w-72 rotate-[22deg] rounded-[56px] border-2 border-[#004791]/[0.07]" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-40 left-[44%] -z-10 h-80 w-80 rotate-[22deg] rounded-[64px] bg-[#1478d6]/[0.06]" />
+        <div className="mx-auto grid w-full max-w-[2100px] items-center gap-x-14 gap-y-8 px-8 py-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,700px)] 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1060px)]">
           <div className="min-w-0">
-            <div className="flex items-center gap-2.5">
-              <span className="h-px w-6 bg-[#5cc8ff]" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8fd4ff]">Tool Directory</span>
-            </div>
-            <h1 className="mt-2.5 text-[26px] font-bold leading-tight tracking-tight text-white">현장 시공 자동화 도구</h1>
-            <p className="mt-2 text-[13.5px] text-white/60">
+            <p className="text-[14px] font-semibold text-[#1478d6]">
+              {user?.name ? `${user.name} 님, 안녕하세요` : "Smart Site Tools"}
+            </p>
+            <h1 className="mt-2 text-[42px] font-extrabold leading-[1.12] tracking-[-0.03em] text-slate-900">
+              현장 시공
+              <br />
+              <span className="bg-gradient-to-r from-[#004791] to-[#1e9bff] bg-clip-text text-transparent">자동화</span> 도구
+            </h1>
+            <p className="mt-3 max-w-[30rem] text-[15px] leading-relaxed text-slate-500">
               현장에서 바로 쓰는 도구를 한곳에서 찾고, 직접 만든 도구를 공유합니다.
             </p>
+            {/* 누적 수치 — 아이콘 동그라미 + 숫자 */}
+            <dl className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2">
+              <HeroFact icon={Eye} tone="bg-emerald-50 text-emerald-600" label="누적 조회" value={totals.views} />
+              <HeroFact icon={Heart} tone="bg-rose-50 text-rose-500" label="좋아요" value={totals.likes} />
+            </dl>
+            {canPublish && (
+              <div className="mt-5 flex flex-wrap items-center gap-2">
+                {!editing && (
+                  <button type="button" onClick={() => navigate("/market/new")} className={btnPrimary}>
+                    <Plus className="h-4 w-4" />
+                    도구 게시하기
+                  </button>
+                )}
+                {!editing && (
+                  <button
+                    type="button"
+                    onClick={startEdit}
+                    className={btnOutline}
+                    title="카드 순서와 상태 배지(본사·현장 / 사내기준·운영중·검증중)를 바꿉니다. 모든 사용자에게 같게 보입니다"
+                  >
+                    <ArrowUpDown className="h-4 w-4" />
+                    순서·배지 편집
+                  </button>
+                )}
+                {editing && (
+                  <>
+                    <button type="button" onClick={commitEdit} disabled={saveOrder.isPending} className={btnPrimary}>
+                      <Check className="h-4 w-4" />
+                      {saveOrder.isPending ? "저장 중…" : "저장"}
+                    </button>
+                    <button type="button" onClick={cancelEdit} disabled={saveOrder.isPending} className={btnOutline}>
+                      <X className="h-4 w-4" />
+                      취소
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
-          <dl className="hidden divide-x divide-white/15 sm:flex">
-            <OverviewStat label="등록 도구" value={cards.length} />
-            <OverviewStat label="사용 가능" value={availableCount} />
-            <OverviewStat label="섹션" value={SECTIONS.filter((s) => cards.some((c) => c.section === s.id)).length} />
-          </dl>
+
+          <div className={"grid gap-3 sm:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]" + (newestTool ? " 2xl:grid-cols-[minmax(0,4fr)_minmax(0,5fr)_minmax(0,6fr)]" : "")}>
+            {/* 타일 1 — 등록 현황: 큰 숫자 + 섹션별 비율 막대 */}
+            <div
+              className="relative isolate flex min-h-[212px] flex-col justify-between overflow-hidden rounded-3xl p-6 text-white shadow-[0_14px_30px_-14px_rgba(0,55,120,0.55)]"
+              style={{ background: "linear-gradient(140deg, #00254f 0%, #003a7d 58%, #0b5cc0 100%)" }}
+            >
+              <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 -z-10 h-56 w-56 rotate-[22deg] rounded-[44px] bg-white/[0.08]" />
+              <div aria-hidden className="pointer-events-none absolute -bottom-24 -left-16 -z-10 h-48 w-48 rotate-[22deg] rounded-[40px] border border-white/10" />
+              <span className="absolute right-5 top-5 flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15">
+                <LayoutGrid className="h-5 w-5 text-[#8fd4ff]" />
+              </span>
+              <div>
+                <div className="text-[13px] font-semibold text-white/65">등록 도구</div>
+                <div className="mt-1 text-[60px] font-extrabold leading-none tracking-[-0.04em] tabular-nums">{cards.length}</div>
+              </div>
+              <ul className="space-y-2.5">
+                {sectionCounts.map((sec) => (
+                  <li key={sec.id}>
+                    <div className="flex items-baseline justify-between text-[12.5px]">
+                      <span className="font-medium text-white/75">{sec.label}</span>
+                      <span className="font-bold tabular-nums">{sec.count}</span>
+                    </div>
+                    <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/15">
+                      <div className="h-full rounded-full bg-[#5cc8ff]" style={{ width: `${cards.length ? (sec.count / cards.length) * 100 : 0}%` }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* 타일 — 새로 올라온 도구: 가장 최근 게시 1건을 로고째 크게. 넓은 화면(2xl)에서만 */}
+            {newestTool && (
+              <button
+                type="button"
+                disabled={editing}
+                onClick={() => newestTool.href && navigate(newestTool.href)}
+                className="group hidden min-h-[212px] flex-col overflow-hidden rounded-3xl bg-white text-left ring-1 ring-slate-200 transition hover:ring-[#004791]/40 hover:shadow-[0_14px_30px_-16px_rgba(0,37,79,0.4)] disabled:pointer-events-none 2xl:flex"
+              >
+                <div className="relative flex-1 bg-[#f7f9fc]">
+                  <MiniLogo card={newestTool} bare className="absolute inset-0 h-full w-full p-5 transition-transform duration-300 group-hover:scale-[1.04]" />
+                  <span className="absolute left-4 top-4 inline-flex items-center gap-1.5 text-[12px] font-bold text-[#1478d6]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#1478d6]" />
+                    새로 올라온 도구
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 border-t border-slate-100 px-5 py-3.5">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14.5px] font-bold text-slate-900">{newestTool.name}</span>
+                    <span className="block truncate text-[12px] text-slate-400">{newestTool.description || newestTool.tags.join(" · ")}</span>
+                  </span>
+                  <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-[#004791]" />
+                </div>
+              </button>
+            )}
+
+            {/* 타일 2 — 많이 쓰는 도구: 조회 많은 순 3개 바로가기 */}
+            <div className="flex min-h-[212px] flex-col rounded-3xl bg-white/70 p-5 ring-1 ring-slate-200 backdrop-blur">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[13px] font-bold text-slate-700">많이 쓰는 도구</span>
+                <span className="text-[11.5px] font-medium text-slate-400">조회순</span>
+              </div>
+              <ol className="mt-3 flex flex-1 flex-col justify-between gap-1.5">
+                {topTools.map((card, i) => (
+                  <li key={card.key}>
+                    <button
+                      type="button"
+                      disabled={editing}
+                      onClick={() => card.href && navigate(card.href)}
+                      className="group flex w-full items-center gap-3 rounded-2xl bg-white px-3.5 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-slate-900/[0.04] transition hover:ring-[#004791]/30 disabled:pointer-events-none"
+                    >
+                      <span className="relative shrink-0">
+                        <MiniLogo card={card} className="h-11 w-[72px]" />
+                        <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#004791] text-[11px] font-extrabold tabular-nums text-white ring-2 ring-white">
+                          {i + 1}
+                        </span>
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-bold text-slate-900">{card.name}</span>
+                        <span className="block truncate text-[12px] text-slate-400">{card.tags.slice(0, 3).join(" · ") || card.meta}</span>
+                      </span>
+                      {card.stats && card.stats.views > 0 && (
+                        <span className="hidden shrink-0 items-center gap-1 text-[12px] font-medium tabular-nums text-slate-400 sm:flex">
+                          <Eye className="h-3.5 w-3.5" />
+                          {card.stats.views.toLocaleString()}
+                        </span>
+                      )}
+                      <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-[#004791]" />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
         </div>
-        <span className="block h-[3px] w-full bg-[#1478d6]" />
       </section>
 
-      {/* ── 툴바 — 검색 · 관리자 버튼. 헤더(h-16) 아래 붙는다 ── */}
-      <section className="sticky top-16 z-10 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex w-full max-w-[2100px] flex-wrap items-center justify-between gap-3 px-8 py-3">
-          <div className="relative w-full sm:w-80">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      {/* ── 섹션 탭 줄 — 스크롤하면 헤더(h-16) 아래에 붙는다. 좁은 화면에선 검색이 여기로 내려온다 ── */}
+      <div className="sticky top-16 z-10 border-b border-slate-200/70 bg-[#f4f6fa]/90 backdrop-blur-md">
+        <div className="mx-auto flex w-full max-w-[2100px] flex-wrap items-center justify-between gap-3 px-8 py-2.5">
+          <div role="tablist" aria-label="섹션" className="flex items-center gap-1">
+            {[{ id: "all" as const, label: "전체", count: filtered.length }, ...sections.map((sec) => ({ id: sec.id, label: sec.label, count: sec.cards.length }))].map((tab) => {
+              const active = !editing && activeSec === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  disabled={editing}
+                  onClick={() => setActiveSec(tab.id)}
+                  className={
+                    "inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-[13.5px] font-semibold transition-colors " +
+                    (active ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-200/70 hover:text-slate-800")
+                  }
+                >
+                  {tab.label}
+                  <span className={"text-[12px] font-medium tabular-nums " + (active ? "text-white/60" : "text-slate-400")}>{tab.count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="relative w-full md:hidden">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               value={query}
               disabled={editing}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="도구명 · 설명 · 태그 검색"
-              className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-[13.5px] text-slate-800 outline-none transition-colors placeholder:text-slate-400 focus:border-[#004791] focus:ring-2 focus:ring-[#004791]/15 disabled:bg-slate-50"
+              className="h-10 w-full rounded-full border border-slate-200 bg-white pl-10 pr-4 text-[14px] outline-none focus:border-[#004791]"
             />
           </div>
-          <div className="flex items-center gap-2">
-            {/* 순서 편집 — 관리자만. 편집 중엔 저장/취소로 바뀐다 */}
-            {canPublish && !editing && (
-              <button
-                type="button"
-                onClick={startEdit}
-                className={btnOutline}
-                title="카드 순서와 상태 배지(본사·현장 / 사내기준·운영중·검증중)를 바꿉니다. 모든 사용자에게 같게 보입니다"
-              >
-                <ArrowUpDown className="h-4 w-4" />
-                순서·배지 편집
-              </button>
-            )}
-            {editing && (
-              <>
-                <button type="button" onClick={cancelEdit} disabled={saveOrder.isPending} className={btnOutline}>
-                  <X className="h-4 w-4" />
-                  취소
-                </button>
-                <button type="button" onClick={commitEdit} disabled={saveOrder.isPending} className={btnPrimary}>
-                  <Check className="h-4 w-4" />
-                  {saveOrder.isPending ? "저장 중…" : "저장"}
-                </button>
-              </>
-            )}
-            {/* 게시하기 — 관리자만 노출 */}
-            {canPublish && !editing && (
-              <button type="button" onClick={() => navigate("/market/new")} className={btnPrimary}>
-                <Plus className="h-4 w-4" />
-                게시하기
-              </button>
-            )}
-          </div>
+          {query.trim() && !editing && (
+            <span className="hidden text-[13px] text-slate-500 md:block">
+              “{query.trim()}” 검색 결과 <strong className="font-bold text-slate-800">{filtered.length}</strong>개
+            </span>
+          )}
         </div>
-      </section>
+      </div>
 
       {/* ── 본문 (App Market) ── */}
       <main className="mx-auto w-full max-w-[2100px] px-8 pb-14 pt-8">
@@ -354,7 +547,7 @@ export default function HomePage() {
             {orderError && <span className="font-semibold text-red-600">{orderError}</span>}
           </div>
         )}
-        {sections.map((sec, idx) => (
+        {visibleSections.map((sec, idx) => (
           <section key={sec.id} className={idx > 0 ? "mt-10" : undefined}>
             {/* 섹션 헤더 */}
             <SectionHeading title={sec.label} count={sec.cards.length} />
@@ -460,13 +653,43 @@ function WoomiLogo() {
   );
 }
 
-/** 개요 띠의 요약 수치 한 칸 — 숫자를 세우고 라벨은 아래에 작게 */
-function OverviewStat({ label, value }: { label: string; value: number }) {
+/** 개요의 누적 수치 한 칸 — 색 동그라미 아이콘 + 숫자 + 라벨 */
+function HeroFact({ icon: Icon, tone, label, value }: { icon: LucideIcon; tone: string; label: string; value: number }) {
   return (
-    <div className="px-7 first:pl-0 last:pr-0">
-      <dt className="text-[11.5px] font-medium text-white/55">{label}</dt>
-      <dd className="mt-1 text-[26px] font-bold leading-none tabular-nums text-white">{value}</dd>
+    <div className="flex items-center gap-2.5">
+      <span className={"flex h-9 w-9 items-center justify-center rounded-full " + tone}>
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="leading-tight">
+        <dd className="text-[17px] font-extrabold tabular-nums text-slate-900">{value.toLocaleString()}</dd>
+        <dt className="text-[11.5px] font-medium text-slate-400">{label}</dt>
+      </div>
     </div>
+  );
+}
+
+/** 도구 로고 작은 판 — 카드 로고 패널과 같은 이미지(썸네일 → 로고 → 아이콘). bare 면 테두리·바탕 없이 이미지만 */
+function MiniLogo({ card, className, bare }: { card: HomeCard; className?: string; bare?: boolean }) {
+  const Icon = card.icon;
+  const [imgOk, setImgOk] = useState(true);
+  const src = card.thumbnail ?? card.logo ?? null;
+  const frame = bare ? "" : "overflow-hidden rounded-lg bg-[#f7f9fc] ring-1 ring-slate-200 ";
+  if (src && imgOk) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className={frame + "object-contain " + (bare ? "" : "p-1 ") + (className ?? "")}
+        loading="lazy"
+        draggable={false}
+        onError={() => setImgOk(false)}
+      />
+    );
+  }
+  return (
+    <span className={frame + "flex items-center justify-center " + (className ?? "")}>
+      <Icon className={bare ? "h-12 w-12 text-[#004791]/60" : "h-5 w-5 text-[#004791]/70"} strokeWidth={1.5} />
+    </span>
   );
 }
 
