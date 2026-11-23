@@ -32,6 +32,8 @@ interface SheetSettings {
   barrier: Set<number>;
   /** 판 경계로 쓰는 중심선(열) 도면층 */
   grid: Set<number>;
+  /** 구간 표시 도면층(「-PC구간」 등) — 도면층 번호 → 그 안쪽을 칠할 종류 */
+  zone: Record<number, SlabKind>;
   overrides: Record<string, KindOrSkip>;
   seeds: Seed[];
   /** 사람이 그은 판 경계선 */
@@ -72,6 +74,7 @@ export default function SlabZonePage() {
         next[d.sheet.id] = old ?? {
           barrier: new Set(d.layers.filter((l) => l.barrier).map((l) => l.index)),
           grid: new Set(d.layers.filter((l) => l.grid).map((l) => l.index)),
+          zone: Object.fromEntries(d.layers.filter((l) => l.zone).map((l) => [l.index, l.zone as SlabKind])),
           overrides: {},
           seeds: [],
           walls: [],
@@ -129,6 +132,7 @@ export default function SlabZonePage() {
         .analyze(detail.sheet.id, {
           barrierLayers: [...cur.barrier],
           gridLayers: [...cur.grid],
+          zoneLayers: Object.entries(cur.zone).map(([i, kind]) => ({ index: Number(i), kind })),
           beamWalls,
           overrides: cur.overrides,
           seeds: cur.seeds,
@@ -280,6 +284,15 @@ export default function SlabZonePage() {
                       PC 중 {num(result.pcInferredArea)}㎡ 는 슬래브 기호 없이 PC 거더·보 기호로 추정한 구간입니다.
                     </p>
                   )}
+                  {(["pc", "deck"] as const).map(
+                    (k) =>
+                      result.zoneArea[k] >= 1 && (
+                        <p key={k} className="text-[11.5px] leading-snug text-slate-500">
+                          {KIND_LABEL[k]} 중 {num(result.zoneArea[k])}㎡ 는 기호가 아니라 도면의 「{KIND_LABEL[k]} 구간」 표시(빗금
+                          테두리)로 칠한 구간입니다.
+                        </p>
+                      ),
+                  )}
                   {result.warnings.map((w) => (
                     <p key={w} className="rounded-md bg-amber-50 px-2 py-1.5 text-[11.5px] leading-snug text-amber-800">
                       {w}
@@ -376,22 +389,36 @@ export default function SlabZonePage() {
                       <span className="min-w-0 flex-1 truncate text-slate-700">{l.name}</span>
                       <span className="tabular-nums text-slate-400">{l.segments.toLocaleString("ko-KR")}</span>
                       <select
-                        value={cur.barrier.has(l.index) ? "wall" : cur.grid.has(l.index) ? "grid" : "off"}
+                        value={
+                          cur.zone[l.index]
+                            ? `zone-${cur.zone[l.index]}`
+                            : cur.barrier.has(l.index)
+                              ? "wall"
+                              : cur.grid.has(l.index)
+                                ? "grid"
+                                : "off"
+                        }
                         onChange={(e) =>
                           patch((s) => {
                             const b = new Set(s.barrier);
                             const g = new Set(s.grid);
+                            const z = { ...s.zone };
                             b.delete(l.index);
                             g.delete(l.index);
+                            delete z[l.index];
                             if (e.target.value === "wall") b.add(l.index);
                             if (e.target.value === "grid") g.add(l.index);
-                            return { ...s, barrier: b, grid: g };
+                            if (e.target.value === "zone-pc") z[l.index] = "pc";
+                            if (e.target.value === "zone-deck") z[l.index] = "deck";
+                            return { ...s, barrier: b, grid: g, zone: z };
                           })
                         }
                         className="rounded border border-slate-200 bg-white px-0.5 py-0.5 text-[11.5px]"
                       >
                         <option value="wall">벽</option>
                         <option value="grid">판 경계</option>
+                        <option value="zone-pc">PC 구간</option>
+                        <option value="zone-deck">데크 구간</option>
                         <option value="off">안 씀</option>
                       </select>
                     </label>
