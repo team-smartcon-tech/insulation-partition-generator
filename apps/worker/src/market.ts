@@ -273,6 +273,37 @@ async function likedIdsFor(env: Env, userId: string, appIds: string[]): Promise<
   return new Set(rows.map((r) => r.app_id));
 }
 
+// ─── 이용 기록 ──────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 이용 기록 종류 — DB check 제약(tool_usage_events.event)과 같은 값 */
+type UsageEvent = "open" | "view" | "launch" | "download";
+
+/**
+ * 이용 기록 1건 추가 (tool_usage_events). 연말 이용 빈도 집계의 원천이다.
+ * 부가 기록이라 실패해도(테이블이 아직 없을 때 포함) 던지지 않고 로그만 남긴다.
+ */
+async function logUsage(
+  env: Env,
+  user: SessionUser | undefined,
+  cardKey: string,
+  event: UsageEvent,
+): Promise<void> {
+  try {
+    const res = await supabaseRest(
+      env,
+      "POST",
+      "/tool_usage_events",
+      { card_key: cardKey, event, user_id: user?.id ?? null },
+      "return=minimal",
+    );
+    if (!res.ok) console.error("[market/usage log]", cardKey, event, await res.text());
+  } catch (err) {
+    console.error("[market/usage log]", cardKey, event, errMsg(err));
+  }
+}
+
 // ─── 목록 ───────────────────────────────────────────────────
 
 /** GET /api/market/apps — 게시된 도구 목록 (홈 카드용) */
@@ -431,6 +462,7 @@ market.post("/apps/:appId/view", async (c) => {
   const appId = c.req.param("appId");
   try {
     await supabaseRpc(c.env, "market_app_bump_view", { p_app_id: appId });
+    if (UUID_RE.test(appId)) await logUsage(c.env, c.get("user"), `market:${appId}`, "view");
     return c.json({ ok: true });
   } catch (err) {
     // 조회수는 부가 정보 — 실패해도 화면을 막지 않는다.
@@ -481,6 +513,9 @@ market.get("/apps/:appId/download", async (c) => {
           console.error("[market/download count]", errMsg(err)),
         ),
       );
+      if (UUID_RE.test(appId)) {
+        c.executionCtx.waitUntil(logUsage(c.env, c.get("user"), `market:${appId}`, "download"));
+      }
     }
 
     const fileName = downloadFileName(upstream, row.title);
@@ -847,6 +882,146 @@ market.put("/home-order", async (c) => {
   } catch (err) {
     console.error("[market/home-order PUT]", errMsg(err));
     return c.json({ error: `순서 저장 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+// ─── 내장 도구 카드 조회·좋아요 + 이용 현황 ─────────────────
+
+/** 내장 도구 카드 키 — "tool:{id}" */
+const TOOL_KEY_RE = /^tool:[a-z0-9-]{1,60}$/;
+
+/**
+ * GET /api/market/tool-stats — 내장 도구 카드의 조회·좋아요 수 (로그인 사용자 전체)
+ * 테이블이 아직 없거나 조회가 실패하면 빈 값 → 홈은 숫자 0 으로 그대로 뜬다.
+ */
+market.get("/tool-stats", async (c) => {
+  try {
+    const user = c.get("user");
+    const [statsRes, likesRes] = await Promise.all([
+      supabaseRest(c.env, "GET", "/tool_card_stats?select=*"),
+      supabaseRest(
+        c.env,
+        "GET",
+        `/tool_card_likes?user_id=eq.${encodeURIComponent(user?.id ?? "")}&select=card_key`,
+      ),
+    ]);
+    if (!statsRes.ok) {
+      console.error("[market/tool-stats GET]", await statsRes.text());
+      return c.json({ stats: {} });
+    }
+    const rows = (await statsRes.json()) as { card_key: string; view_count?: number; like_count?: number }[];
+    const liked = new Set(
+      likesRes.ok ? ((await likesRes.json()) as { card_key: string }[]).map((r) => r.card_key) : [],
+    );
+    const stats: Record<string, { views: number; likes: number; liked: boolean }> = {};
+    for (const row of rows) {
+      stats[row.card_key] = {
+        views: Number(row.view_count) || 0,
+        likes: Number(row.like_count) || 0,
+        liked: liked.has(row.card_key),
+      };
+    }
+    // 좋아요만 있고 집계 행이 없는 경우는 없다(sync 함수가 행을 만든다)
+    return c.json({ stats });
+  } catch (err) {
+    console.error("[market/tool-stats GET]", errMsg(err));
+    return c.json({ stats: {} });
+  }
+});
+
+/**
+ * POST /api/market/usage — 이용 기록 1건 (로그인 사용자)
+ * body: { key, event }
+ *   - { key: "tool:{id}", event: "open" }      내장 도구 화면 진입 — 카드 조회수도 +1
+ *   - { key: "market:{uuid}", event: "launch" } 게시 도구 「바로가기」 누름
+ * 게시 도구의 상세 조회(view)·다운로드(download)는 각 라우트가 직접 남긴다.
+ */
+market.post("/usage", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { key?: unknown; event?: unknown } | null;
+  const key = typeof body?.key === "string" ? body.key : "";
+  const event = body?.event;
+  try {
+    if (event === "open" && TOOL_KEY_RE.test(key)) {
+      const res = await supabaseRpc(c.env, "tool_card_bump_view", { p_card_key: key });
+      if (!res.ok) console.error("[market/usage bump]", await res.text());
+      await logUsage(c.env, c.get("user"), key, "open");
+      return c.json({ ok: true });
+    }
+    if (event === "launch" && key.startsWith("market:") && UUID_RE.test(key.slice(7))) {
+      await logUsage(c.env, c.get("user"), key, "launch");
+      return c.json({ ok: true });
+    }
+    return c.json({ error: "잘못된 이용 기록 요청입니다." }, 400);
+  } catch (err) {
+    // 이용 기록은 부가 정보 — 실패해도 화면을 막지 않는다.
+    console.error("[market/usage]", errMsg(err));
+    return c.json({ ok: false });
+  }
+});
+
+/** POST /api/market/tool-like — 내장 도구 좋아요 토글. body: { key: "tool:{id}" } */
+market.post("/tool-like", async (c) => {
+  const user = c.get("user");
+  if (!user?.id) return c.json({ error: "인증이 필요합니다." }, 401);
+  const body = (await c.req.json().catch(() => null)) as { key?: unknown } | null;
+  const key = typeof body?.key === "string" ? body.key : "";
+  if (!TOOL_KEY_RE.test(key)) return c.json({ error: "잘못된 카드 키입니다." }, 400);
+  try {
+    const filter = `card_key=eq.${encodeURIComponent(key)}&user_id=eq.${encodeURIComponent(user.id)}`;
+    const existing = await supabaseRest(c.env, "GET", `/tool_card_likes?${filter}&select=user_id&limit=1`);
+    if (!existing.ok) {
+      const errText = await existing.text();
+      console.error("[market/tool-like]", errText);
+      return c.json({ error: "좋아요 저장 준비가 안 됐습니다(DB 마이그레이션 전)." }, 503);
+    }
+    const has = ((await existing.json()) as unknown[]).length > 0;
+
+    const write = has
+      ? await supabaseRest(c.env, "DELETE", `/tool_card_likes?${filter}`, undefined, "return=minimal")
+      : await supabaseRest(
+          c.env,
+          "POST",
+          // 같은 사용자의 연속 클릭이 겹쳐도 PK 충돌로 실패하지 않게 한다
+          "/tool_card_likes?on_conflict=card_key,user_id",
+          { card_key: key, user_id: user.id },
+          "resolution=ignore-duplicates,return=minimal",
+        );
+    if (!write.ok) {
+      const errText = await write.text();
+      console.error("[market/tool-like write]", errText);
+      return c.json({ error: `좋아요 처리 실패: ${errText}` }, 500);
+    }
+
+    const syncRes = await supabaseRpc(c.env, "tool_card_sync_like_count", { p_card_key: key });
+    const likeCount = syncRes.ok ? Number(await syncRes.json()) || 0 : 0;
+    return c.json({ liked: !has, likeCount });
+  } catch (err) {
+    console.error("[market/tool-like]", errMsg(err));
+    return c.json({ error: `좋아요 처리 실패: ${errMsg(err)}` }, 500);
+  }
+});
+
+/**
+ * GET /api/market/usage-summary?year=2026 — 연간 도구 이용 집계 (관리자 전용)
+ * rows: { card_key, event, month, cnt, users } — month=null 은 도구별 연간, card_key=null 은 전체.
+ */
+market.get("/usage-summary", async (c) => {
+  if (!adminOnly(c)) return c.json({ error: "이용 현황을 볼 권한이 없습니다." }, 403);
+  const year = Number(c.req.query("year"));
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    return c.json({ error: "연도가 올바르지 않습니다." }, 400);
+  }
+  try {
+    const res = await supabaseRpc(c.env, "tool_usage_summary", { p_year: year });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("[market/usage-summary]", errText);
+      return c.json({ error: `이용 현황 조회 실패: ${errText}` }, res.status as 500);
+    }
+    return c.json({ year, rows: await res.json() });
+  } catch (err) {
+    console.error("[market/usage-summary]", errMsg(err));
+    return c.json({ error: `이용 현황 조회 실패: ${errMsg(err)}` }, 500);
   }
 });
 

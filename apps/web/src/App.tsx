@@ -14,6 +14,14 @@ import AuthGate from "@/features/auth/AuthGate";
 import HomePage from "@/features/home/HomePage";
 import MarketPublishPage from "@/features/market/MarketPublishPage";
 import MarketAppDetailPage from "@/features/market/MarketAppDetailPage";
+import MarketUsagePage from "@/features/market/MarketUsagePage";
+import { useLogToolOpen } from "@/features/market/hooks";
+
+/** 내장 도구 화면에 들어오면 이용 기록 1건을 남긴다(홈 카드 조회수 · 연간 이용 현황의 원천). 로그인된 뒤에만 그려진다 */
+function ToolOpen({ toolId }: { toolId: string }) {
+  useLogToolOpen(toolId);
+  return null;
+}
 
 /** 명단이 걸린 도구는 명단에 있는 사람만 들어간다(홈 카드도 같은 기준으로 가린다 — tools.ts canSeeTool) */
 function ToolGate({ toolId, children }: { toolId: string; children: ReactNode }) {
@@ -47,18 +55,21 @@ export default function App() {
         {/* 도구: 단열재 나누기도 */}
         <Route path="/tools/insulation">
           <AuthGate>
+            <ToolOpen toolId="insulation" />
             <ElevationGeneratorPage />
           </AuthGate>
         </Route>
         {/* 도구: TC 임대계획 */}
         <Route path="/tools/tc-rental">
           <AuthGate>
+            <ToolOpen toolId="tc-rental" />
             <TcRentalPage />
           </AuthGate>
         </Route>
         {/* 도구: 동절기 열원검토 */}
         <Route path="/tools/heat-review">
           <AuthGate>
+            <ToolOpen toolId="heat-review" />
             <HeatReviewPage />
           </AuthGate>
         </Route>
@@ -66,6 +77,7 @@ export default function App() {
         <Route path="/tools/slab-zone">
           <AuthGate>
             <ToolGate toolId="slab-zone">
+              <ToolOpen toolId="slab-zone" />
               <SlabZonePage />
             </ToolGate>
           </AuthGate>
@@ -73,12 +85,14 @@ export default function App() {
         {/* 도구: 스마트 공정표 */}
         <Route path="/tools/gantt">
           <AuthGate>
+            <ToolOpen toolId="gantt" />
             <GanttPage />
           </AuthGate>
         </Route>
         {/* 도구: 검측요청 (별도 서비스로 로그인 넘겨 이동) */}
         <Route path="/tools/inspection">
           <AuthGate>
+            <ToolOpen toolId="inspection" />
             <InspectionLaunchPage />
           </AuthGate>
         </Route>
@@ -86,6 +100,12 @@ export default function App() {
         <Route path="/market/new">
           <AuthGate>
             <MarketPublishPage />
+          </AuthGate>
+        </Route>
+        {/* 이용 현황 (관리자) */}
+        <Route path="/market/usage">
+          <AuthGate>
+            <MarketUsagePage />
           </AuthGate>
         </Route>
         <Route path="/market/:appId/edit">

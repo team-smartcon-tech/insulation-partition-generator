@@ -151,6 +151,54 @@ export function deleteMarketApp(appId: string) {
   });
 }
 
+// ─── 내장 도구 카드 조회·좋아요 + 이용 현황 ─────────────────
+
+/** 내장 도구 카드 1장의 누적 수 (키는 "tool:{id}") */
+export interface ToolCardStat {
+  views: number;
+  likes: number;
+  liked: boolean;
+}
+
+/** 내장 도구 카드의 조회·좋아요 수 — 서버 준비 전(마이그레이션 전)이면 빈 값 */
+export function getToolStats() {
+  return marketFetch<{ stats: Record<string, ToolCardStat> }>("/tool-stats");
+}
+
+/**
+ * 이용 기록 1건 — 내장 도구 진입(open) / 게시 도구 바로가기(launch).
+ * 기록 직후 다른 사이트로 넘어가는 경우(검측요청서·새 탭)에도 요청이 끊기지 않게 keepalive 로 보낸다.
+ */
+export function logToolUsage(key: string, event: "open" | "launch") {
+  return marketFetch<{ ok: boolean }>("/usage", {
+    method: "POST",
+    body: JSON.stringify({ key, event }),
+    keepalive: true,
+  });
+}
+
+/** 내장 도구 좋아요 토글 */
+export function toggleToolLike(key: string) {
+  return marketFetch<{ liked: boolean; likeCount: number }>("/tool-like", {
+    method: "POST",
+    body: JSON.stringify({ key }),
+  });
+}
+
+/** 연간 이용 집계 1행 — month=null 은 도구별 연간, card_key=null 은 전체 */
+export interface UsageSummaryRow {
+  card_key: string | null;
+  event: "open" | "view" | "launch" | "download" | null;
+  month: number | null;
+  cnt: number;
+  users: number;
+}
+
+/** 연간 도구 이용 집계 (관리자) */
+export function getUsageSummary(year: number) {
+  return marketFetch<{ year: number; rows: UsageSummaryRow[] }>(`/usage-summary?year=${year}`);
+}
+
 /** 홈 카드 순서 — 카드 키("tool:id" / "market:uuid") 배열 */
 /** 홈 카드 순서·상태 배지 응답 (badges 는 구버전 서버면 없을 수 있다) */
 export interface HomeOrderResponse {

@@ -6,6 +6,8 @@
  *    로고를 48px 아이콘으로 줄이는 안은 게시 도구 로고가 얼룩이 돼 철회).
  *   예외: 관리자가 지정한 「출처+상태」 배지(본사·사내기준 등)만 로고 패널 왼쪽 위에 붙인다 (2026-11-05, cardBadge.ts).
  * 도구 목록은 features/home/tools.ts(TOOLS)를 원천으로 한다.
+ * 조회·좋아요 숫자는 모든 카드에 보인다 — 게시 도구는 market_apps, 내장 도구는 tool_card_stats (2026-11-26).
+ *   하트는 카드에서 바로 누른다(내장 도구는 상세 화면이 없어 누를 곳이 없었다).
  * 카드는 섹션(시공 도구 · CAD 도구 …)별로 묶고, 카드가 없는 섹션은 제목까지 숨긴다.
  */
 import { useMemo, useState } from "react";
@@ -20,6 +22,7 @@ import {
   Heart,
   Download,
   ArrowUpDown,
+  BarChart3,
   GripVertical,
   ChevronLeft,
   ChevronRight,
@@ -29,7 +32,13 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
 import BrandWordmark from "@/components/brand/BrandWordmark";
-import { useHomeOrder, useMarketApps, useSaveHomeOrder } from "@/features/market/hooks";
+import {
+  useHomeOrder,
+  useMarketApps,
+  useSaveHomeOrder,
+  useToggleCardLike,
+  useToolStats,
+} from "@/features/market/hooks";
 import { SECTIONS, type SectionId } from "@/features/market/types";
 import { TOOLS, canSeeTool, type ToolDef } from "./tools";
 import { applyHomeOrder, moveCardKey, stepCardKey } from "./homeOrder";
@@ -81,8 +90,8 @@ interface HomeCard {
   section: SectionId;
   /** 설치형(다운로드) 도구 — 카드 우하단 화살표가 다운로드 아이콘이 된다 */
   download?: boolean;
-  /** downloads 는 설치형에만 */
-  stats?: { views: number; likes: number; downloads?: number };
+  /** downloads 는 설치형에만. liked = 내가 좋아요를 눌렀는지 */
+  stats?: { views: number; likes: number; downloads?: number; liked?: boolean };
   /** 게시일(게시 도구만) — 개요의 「새로 올라온 도구」 타일에 쓴다 */
   createdAt?: string;
 }
@@ -113,6 +122,10 @@ export default function HomePage() {
 
   const { data: market } = useMarketApps();
   const marketApps = market?.apps ?? [];
+  // 내장 도구(코드에 박힌 TOOLS)의 조회·좋아요 — 게시 도구와 달리 따로 센다(tool_card_stats)
+  const { data: toolStatsData } = useToolStats();
+  const toolStats = toolStatsData?.stats;
+  const toggleLike = useToggleCardLike();
   // 목록 API가 실패해도(마이그레이션 전 등) 관리자에겐 버튼이 보여야 한다 → 세션 role 기준.
   const canPublish = PUBLISH_ROLES.has(user?.role ?? "");
 
@@ -151,6 +164,7 @@ export default function HomePage() {
           views: app.view_count,
           likes: app.like_count,
           downloads: download ? app.download_count ?? 0 : undefined,
+          liked: app.liked,
         },
       };
     });
@@ -162,6 +176,12 @@ export default function HomePage() {
     const publishedPaths = new Set(marketApps.map((a) => a.deploy_url).filter((u): u is string => !!u?.startsWith("/")));
     const builtIn = TOOLS.filter((t) => !publishedPaths.has(t.path) && canSeeTool(t, user?.email))
       .map(toolToCard)
+      // 쓸 수 있는 내장 도구에도 조회·좋아요를 붙인다(기록이 아직 없으면 0). 준비 중 카드에는 붙이지 않는다
+      .map((c) => {
+        if (!c.available) return c;
+        const st = toolStats?.[c.key];
+        return { ...c, stats: { views: st?.views ?? 0, likes: st?.likes ?? 0, liked: st?.liked ?? false } };
+      })
       .filter((c) => c.available || !publishedNames.has(c.name.replace(/\s+/g, "")));
 
     // 사용 가능(내장 → 게시) 먼저, 준비 중 자리표시자는 뒤로.
@@ -175,7 +195,7 @@ export default function HomePage() {
       ...availableBuiltIn.filter(isLast),
       ...builtIn.filter((c) => !c.available),
     ];
-  }, [marketApps, user?.email]);
+  }, [marketApps, toolStats, user?.email]);
 
   const savedKeys = homeOrder?.keys;
   const cards = useMemo(() => {
@@ -379,6 +399,17 @@ export default function HomePage() {
                   >
                     <ArrowUpDown className="h-4 w-4" />
                     순서·배지 편집
+                  </button>
+                )}
+                {!editing && (
+                  <button
+                    type="button"
+                    onClick={() => navigate("/market/usage")}
+                    className={btnOutline}
+                    title="도구별 연간 이용 횟수·이용자 수를 봅니다"
+                  >
+                    <BarChart3 className="h-4 w-4" />
+                    이용 현황
                   </button>
                 )}
                 {editing && (
@@ -617,6 +648,8 @@ export default function HomePage() {
                     card={card}
                     badge={badges[card.key]}
                     onOpen={() => card.href && navigate(card.href)}
+                    onLike={() => toggleLike.mutate(card.key)}
+                    likePending={toggleLike.isPending && toggleLike.variables === card.key}
                   />
                 ),
               )}
@@ -704,13 +737,28 @@ function SectionHeading({ title, count }: { title: string; count: number }) {
 }
 
 /** 카드 — 로고 패널 · 이름 · 태그 · 두 줄 설명 · 작성자 · 조회/좋아요 */
-function AppCard({ card, badge, onOpen }: { card: HomeCard; badge?: CardBadge; onOpen: () => void }) {
+function AppCard({
+  card,
+  badge,
+  onOpen,
+  onLike,
+  likePending,
+}: {
+  card: HomeCard;
+  badge?: CardBadge;
+  onOpen: () => void;
+  /** 하트를 눌렀을 때 — 없으면(편집 모드) 하트는 숫자 표시만 한다 */
+  onLike?: () => void;
+  likePending?: boolean;
+}) {
   const available = card.available;
+  const liked = !!card.stats?.liked;
+  const heartCls = "h-3.5 w-3.5" + (liked ? " fill-rose-500 text-rose-500" : "");
 
   const cardCls =
     "group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white text-left transition-all duration-200" +
     (available
-      ? " hover:border-[#004791]/50 hover:shadow-[0_8px_24px_-12px_rgba(0,37,79,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#004791]/40"
+      ? " cursor-pointer hover:border-[#004791]/50 hover:shadow-[0_8px_24px_-12px_rgba(0,37,79,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#004791]/40"
       : " opacity-70");
 
   const body = (
@@ -735,9 +783,9 @@ function AppCard({ card, badge, onOpen }: { card: HomeCard; badge?: CardBadge; o
         <span className="flex shrink-0 items-center gap-2.5 text-[12px] text-slate-400">
           {card.stats && (
             <>
-              <span className="inline-flex items-center gap-1">
+              <span className="inline-flex items-center gap-1" title="조회수">
                 <Eye className="h-3.5 w-3.5" />
-                {card.stats.views}
+                {card.stats.views.toLocaleString()}
               </span>
               {card.stats.downloads !== undefined && (
                 <span className="inline-flex items-center gap-1">
@@ -745,10 +793,33 @@ function AppCard({ card, badge, onOpen }: { card: HomeCard; badge?: CardBadge; o
                   {card.stats.downloads}
                 </span>
               )}
-              <span className="inline-flex items-center gap-1">
-                <Heart className="h-3.5 w-3.5" />
-                {card.stats.likes}
-              </span>
+              {onLike ? (
+                // 카드 전체가 누르는 영역이라 하트 클릭이 카드 이동으로 번지지 않게 막는다
+                <button
+                  type="button"
+                  disabled={likePending}
+                  aria-pressed={liked}
+                  aria-label={`${card.name} 좋아요${liked ? " 취소" : ""} (현재 ${card.stats.likes})`}
+                  title={liked ? "좋아요 취소" : "좋아요"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onLike();
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  className={
+                    "-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-rose-50 hover:text-rose-500 disabled:opacity-60 " +
+                    (liked ? "text-rose-500" : "")
+                  }
+                >
+                  <Heart className={heartCls} />
+                  {card.stats.likes}
+                </button>
+              ) : (
+                <span className={"inline-flex items-center gap-1 " + (liked ? "text-rose-500" : "")}>
+                  <Heart className={heartCls} />
+                  {card.stats.likes}
+                </span>
+              )}
             </>
           )}
           {available ? (
@@ -767,10 +838,22 @@ function AppCard({ card, badge, onOpen }: { card: HomeCard; badge?: CardBadge; o
   );
 
   if (available) {
+    // 안에 하트 버튼이 들어가므로 <button> 대신 div(role="button") — 버튼 안에 버튼을 넣을 수 없다
     return (
-      <button type="button" onClick={onOpen} className={cardCls}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
+        className={cardCls}
+      >
         {body}
-      </button>
+      </div>
     );
   }
   return <div className={cardCls}>{body}</div>;
