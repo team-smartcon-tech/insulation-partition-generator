@@ -31,6 +31,7 @@ import {
   useAddMarketAppVersion,
   useDeleteMarketApp,
   useMarketApp,
+  sendToolUsage,
   useRefreshAfterDownload,
   useToggleMarketAppLike,
 } from "./hooks";
@@ -219,6 +220,9 @@ export default function MarketAppDetailPage() {
               href={app.deploy_url}
               target="_blank"
               rel="noopener noreferrer"
+              // 외부 사이트로 나가는 순간이 실제 "이용" — 연간 이용 현황에 1건 남긴다
+              // (툴박스 안 도구는 그 화면에 들어갈 때, 설치형은 다운로드 때 서버가 남긴다)
+              onClick={() => sendToolUsage(`market:${app.id}`, "launch")}
               className={primaryActionCls}
             >
               <ExternalLink className="h-4 w-4" />
